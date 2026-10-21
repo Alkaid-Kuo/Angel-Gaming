@@ -15,6 +15,13 @@ export interface Hotspot {
 
 /** 熱點分群的格網大小（格） */
 const CELL_TILES = 10;
+/**
+ * 交戰強度門檻（每 tick 攻擊次數的移動平均）：達到即算一次交戰。
+ * 0.5 約為 6 隻長槍兵持續攻擊；速攻的第一波（5～8 隻）也要算進來。
+ */
+export const FIGHT_LEVEL = 0.5;
+/** 低於此強度且持續一段時間才算平靜 */
+export const QUIET_LEVEL = 0.3;
 
 /**
  * 上一個 tick（state.tick - 1）發生的攻擊，依區域分群後由強到弱排序。
@@ -69,12 +76,12 @@ export class CombatMeter {
 
   /** 平靜（精華模式可快轉） */
   get quiet(): boolean {
-    return this.level < 0.3 && this.quietTicks > 30;
+    return this.level < QUIET_LEVEL && this.quietTicks > 30;
   }
 
   /** 是否進入一場交戰（跳到下一次交戰的停止條件） */
   get fighting(): boolean {
-    return this.level >= 0.8;
+    return this.level >= FIGHT_LEVEL;
   }
 
   reset(): void {

@@ -1,7 +1,7 @@
 // 觀戰呈現（M3）：自動導播、跟隨選手、事件字幕、戰力曲線、精華模式與快轉。
 import type { GameEvent } from '../api/types.ts';
 import { TILE_SIZE } from '../config/index.ts';
-import type { Hotspot } from '../view/broadcast.ts';
+import { FIGHT_LEVEL, type Hotspot } from '../view/broadcast.ts';
 import type { FrameView } from '../view/snapshot.ts';
 import { BUILDING_NAME } from './labels.ts';
 import type { FromWorker, MatchMeta, ToWorker } from './protocol.ts';
@@ -102,12 +102,12 @@ export class Broadcast {
     if (last === undefined || f.tick - last.tick >= GRAPH_SAMPLE_TICKS) this.history.push({ tick: f.tick, army: f.players.map((p) => p.army) });
     this.drawGraph();
     for (const { to, ev } of msg.events) this.captionFor(to, ev);
-    const fighting = this.level >= 1.5;
-    if (fighting && !this.wasFighting && this.hotspots.length > 0) {
+    // 交戰開始字幕：強度降到門檻的一半以下才重新計算，避免在門檻附近反覆觸發
+    if (this.level >= FIGHT_LEVEL && !this.wasFighting && this.hotspots.length > 0) {
       const ps = this.hotspots[0].players;
       if (ps.length >= 2) this.pushCaption(`交戰！${ps.map((p) => this.name(p)).join(' vs ')}`, teamColor(ps[0]));
     }
-    this.wasFighting = this.level >= 0.8;
+    this.wasFighting = this.level >= FIGHT_LEVEL / 2 && (this.wasFighting || this.level >= FIGHT_LEVEL);
   }
 
   private captionFor(to: number, ev: GameEvent): void {
