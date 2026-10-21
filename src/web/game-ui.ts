@@ -6,6 +6,7 @@ import type { ReplayFile } from '../replay/index.ts';
 import { GOD_VIEW, type BuildingFrame, type FrameView, type UnitFrame } from '../view/snapshot.ts';
 import { BUILD_KEYS, BUILDING_NAME, eventText, formatTime, ORDER_NAME, STANCE_NAME, TRAIN_KEYS, UNIT_NAME } from './labels.ts';
 import type { FromWorker, MatchMeta, ToWorker } from './protocol.ts';
+import { Broadcast } from './broadcast-ui.ts';
 import { Renderer, teamColor, type ViewModel } from './renderer.ts';
 
 const LIVE_SPEEDS = [0.5, 1, 2, 3, 4];
@@ -44,6 +45,7 @@ export class GameScreen {
   private readonly logEl: HTMLElement;
   private readonly dialog: HTMLElement;
   private readonly replaybar: HTMLElement | null = null;
+  private readonly broadcast: Broadcast | null = null;
   private slider: HTMLInputElement | null = null;
   private sliderDragging = false;
   private readonly keys = new Set<string>();
@@ -105,11 +107,27 @@ export class GameScreen {
       ghost: null,
       mode: 'normal',
       alerts: [],
+      hotspots: [],
       human,
     };
     this.renderer.resize();
     if (start !== null) this.centerOn((start.startTileX + 1.5) * TILE_SIZE, (start.startTileY + 1.5) * TILE_SIZE);
     else this.centerOn(meta.map.width * 500, meta.map.height * 500);
+    if (human === null) {
+      this.broadcast = new Broadcast(
+        root,
+        meta,
+        (m) => this.post(m),
+        {
+          center: () => {
+            const s = this.renderer.scale(this.vm.camera);
+            return { x: this.vm.camera.x + this.canvas.clientWidth / 2 / s, y: this.vm.camera.y + this.canvas.clientHeight / 2 / s };
+          },
+          moveTo: (x, y) => this.centerOn(x, y),
+        },
+        (id) => this.playerName(id),
+      );
+    }
     this.buildTopbar();
     this.buildReplaybar();
     this.bindInput(minimap);
@@ -155,7 +173,12 @@ export class GameScreen {
       this.speed = msg.speed;
       this.paused = msg.paused;
       this.desyncTick = msg.desyncTick;
-      this.ingestEvents(msg.events, msg.frame);
+      this.broadcast?.onFrame(msg);
+      this.vm.hotspots = msg.combat.hotspots;
+      this.ingestEvents(
+        msg.events.map((e) => e.ev),
+        msg.frame,
+      );
       this.pruneSelection();
       this.updateHud();
     } else if (msg.type === 'end') {
@@ -198,6 +221,7 @@ export class GameScreen {
     const dt = Math.min(0.05, (t - this.lastPanAt) / 1000);
     this.lastPanAt = t;
     this.pan(dt);
+    this.broadcast?.update(t, dt);
     this.updateGhost();
     this.renderer.draw(this.vm, performance.now());
     this.raf = requestAnimationFrame((tt) => this.tick(tt));
@@ -218,6 +242,7 @@ export class GameScreen {
       if (this.mouse.y >= this.canvas.clientHeight - EDGE_PX) dy += 1;
     }
     if (dx === 0 && dy === 0) return;
+    this.broadcast?.userMovedCamera();
     const s = this.renderer.scale(this.vm.camera);
     this.vm.camera.x += (dx * PAN_PX_PER_SEC * dt) / s;
     this.vm.camera.y += (dy * PAN_PX_PER_SEC * dt) / s;
@@ -325,6 +350,7 @@ export class GameScreen {
       this.mouse.y = e.offsetY;
       this.mouse.inside = true;
       if (this.middleDrag !== null) {
+        this.broadcast?.userMovedCamera();
         const s = this.renderer.scale(this.vm.camera);
         this.vm.camera.x -= (e.offsetX - this.middleDrag.x) / s;
         this.vm.camera.y -= (e.offsetY - this.middleDrag.y) / s;
@@ -371,6 +397,7 @@ export class GameScreen {
     minimap.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
         miniDrag = true;
+        this.broadcast?.userMovedCamera();
         minimapMove(e);
       } else if (e.button === 2) {
         const w = this.renderer.minimapToWorld(e.offsetX, e.offsetY);

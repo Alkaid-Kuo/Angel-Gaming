@@ -3,6 +3,7 @@ import type { Command, GameEvent } from '../api/types.ts';
 import type { MatchMode } from '../config/index.ts';
 import type { MatchResult } from '../core/match.ts';
 import type { ReplayFile } from '../replay/index.ts';
+import type { Hotspot } from '../view/broadcast.ts';
 import type { FrameView, StaticMapView } from '../view/snapshot.ts';
 
 export type OpponentKind = 'baseline' | 'random';
@@ -26,6 +27,10 @@ export type ToWorker =
   | { readonly type: 'pause'; readonly paused: boolean }
   | { readonly type: 'seek'; readonly tick: number }
   | { readonly type: 'viewer'; readonly viewer: number }
+  /** 精華模式：沒有交戰時自動快轉 */
+  | { readonly type: 'highlight'; readonly on: boolean }
+  /** 快轉到下一次交戰／直接看結果 */
+  | { readonly type: 'skip'; readonly to: 'fight' | 'end' }
   | { readonly type: 'getReplay' };
 
 export interface MatchMeta {
@@ -39,7 +44,18 @@ export interface MatchMeta {
 
 export type FromWorker =
   | { readonly type: 'ready'; readonly meta: MatchMeta }
-  | { readonly type: 'frame'; readonly frame: FrameView; readonly events: GameEvent[]; readonly speed: number; readonly paused: boolean; readonly desyncTick: number | null }
+  | {
+      readonly type: 'frame';
+      readonly frame: FrameView;
+      /** 事件與收到該事件的選手 */
+      readonly events: { readonly to: number; readonly ev: GameEvent }[];
+      readonly speed: number;
+      readonly paused: boolean;
+      readonly desyncTick: number | null;
+      readonly combat: { readonly level: number; readonly hotspots: readonly Hotspot[] };
+      readonly highlight: boolean;
+      readonly skipping: 'fight' | 'end' | null;
+    }
   | { readonly type: 'end'; readonly result: MatchResult }
   | { readonly type: 'replay'; readonly file: ReplayFile }
   | { readonly type: 'error'; readonly message: string };

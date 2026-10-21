@@ -55,3 +55,9 @@ select { background: #11161c; color: var(--text); border: 1px solid var(--border
 .dialog h2 { margin: 0 0 10px; }
 .dialog ol { padding-left: 20px; }
 .dialog .row { justify-content: flex-end; }
+
+/* M3 觀戰 */
+.caption { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); background: rgba(17,21,27,0.92); border: 2px solid #e5e7eb; border-radius: 10px; padding: 8px 18px; font-size: 18px; font-weight: bold; pointer-events: none; white-space: nowrap; }
+.armygraph { position: absolute; top: 44px; right: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.bcast { position: absolute; top: 146px; right: 8px; display: flex; flex-direction: column; gap: 4px; width: 260px; }
+.bcast button, .bcast select { width: 100%; }

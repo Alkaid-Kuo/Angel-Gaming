@@ -33,6 +33,8 @@ export interface ViewModel {
   mode: 'normal' | 'attackMove' | 'place';
   /** 受攻擊提示（小地圖閃爍） */
   alerts: { x: number; y: number; until: number }[];
+  /** 交戰熱點（觀戰時於小地圖標示） */
+  hotspots: readonly { readonly x: number; readonly y: number; readonly hits: number }[];
   /** 人類玩家 id（觀戰／回放為 null） */
   human: number | null;
 }
@@ -441,6 +443,13 @@ export class Renderer {
       m.lineWidth = 2;
       m.beginPath();
       m.arc((a.x / TILE_SIZE) * k, (a.y / TILE_SIZE) * k, 6, 0, Math.PI * 2);
+      m.stroke();
+    }
+    for (const h of vm.hotspots) {
+      m.strokeStyle = 'rgba(250,204,21,0.9)';
+      m.lineWidth = 1.5;
+      m.beginPath();
+      m.arc((h.x / TILE_SIZE) * k, (h.y / TILE_SIZE) * k, 4 + Math.min(6, h.hits), 0, Math.PI * 2);
       m.stroke();
     }
     const cam = vm.camera;
