@@ -61,6 +61,10 @@ export interface Unit {
   arrived: boolean;
   /** 移動受阻連續 tick 數 */
   stuckTicks: number;
+  /** 抵達容許：目前目的地（pathKey）下離路徑終點的最近距離（-1 為未記錄）與沒有進展的 tick 數 */
+  moveKey: number;
+  moveBest: number;
+  moveStall: number;
 
   // ── 戰鬥 ──
   /** 自動交戰的目標（0 為無） */

@@ -19,6 +19,13 @@ import {
 } from './world.ts';
 
 const INTERACT_SQ = RULES.economy.interactRange * RULES.economy.interactRange;
+const QUEUE_SQ = RULES.economy.queueRange * RULES.economy.queueRange;
+const CROWD_DELIVER_SQ = RULES.economy.crowdDeliverRange * RULES.economy.crowdDeliverRange;
+
+/** 移動中被擠住（連續 crowdStallTicks 沒有進展） */
+function crowded(u: Unit): boolean {
+  return u.moveStall >= RULES.movement.crowdStallTicks;
+}
 
 // ───────── 步驟 3：生產 ─────────
 
@@ -165,7 +172,8 @@ function gatherTick(state: MatchState, u: Unit): void {
       stopMoving(u);
       return;
     }
-    if (distSqToBuilding(u.x, u.y, depot) <= INTERACT_SQ) {
+    const dd = distSqToBuilding(u.x, u.y, depot);
+    if (dd <= INTERACT_SQ || (crowded(u) && dd <= CROWD_DELIVER_SQ)) {
       stopMoving(u);
       p.minerals += u.carry;
       p.stats.gathered += u.carry;
@@ -206,7 +214,18 @@ function gatherTick(state: MatchState, u: Unit): void {
     return;
   }
   // toNode／waiting
-  if (!inRangeOfNode(u, node)) {
+  const d2 = distSqToTileRect(u.x, u.y, node.tileX, node.tileY, 1);
+  // v0.4 擁擠容許：被擠住時，在排隊距離內即視為抵達礦點
+  if (!inRangeOfNode(u, node) && !(crowded(u) && d2 <= QUEUE_SQ)) {
+    // v0.4：礦點被佔用或有人排隊時，在附近排隊等候，不再往前擠；輪到自己且礦點空出才走近
+    const busy = node.minerId !== 0 || node.queue.some((q) => q !== u.id);
+    if (d2 <= QUEUE_SQ && busy) {
+      if (!node.queue.includes(u.id)) node.queue.push(u.id);
+      u.gatherPhase = GATHER.waiting;
+      if (node.minerId === 0 && node.queue[0] === u.id) moveToRect(u, node.tileX, node.tileY, 1, state.width);
+      else stopMoving(u);
+      return;
+    }
     moveToRect(u, node.tileX, node.tileY, 1, state.width);
     return;
   }
@@ -218,7 +237,7 @@ function gatherTick(state: MatchState, u: Unit): void {
   for (const qid of node.queue) {
     if (qid === u.id) break;
     const ahead = state.unitById.get(qid)!;
-    if (inRangeOfNode(ahead, node)) return;
+    if (inRangeOfNode(ahead, node) || (crowded(ahead) && distSqToTileRect(ahead.x, ahead.y, node.tileX, node.tileY, 1) <= QUEUE_SQ)) return;
   }
   node.queue.splice(node.queue.indexOf(u.id), 1);
   node.minerId = u.id;

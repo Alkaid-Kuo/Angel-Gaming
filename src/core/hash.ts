@@ -49,7 +49,7 @@ export function hashState(state: MatchState): string {
     h.int(u.guardX).int(u.guardY).int(u.targetId).int(u.chaseX).int(u.chaseY).bool(u.returning);
     h.int(u.nextAttackTick).int(u.lastHitTarget).int(u.lastHitTick);
     h.int(u.carry).int(u.carryRich).int(u.gatherNodeId).int(u.gatherPhase).int(u.mineEndTick);
-    h.int(u.path === null ? -1 : u.path.length).int(u.pathIdx).int(u.stuckTicks);
+    h.int(u.path === null ? -1 : u.path.length).int(u.pathIdx).int(u.stuckTicks).int(u.moveKey).int(u.moveBest).int(u.moveStall);
   }
   h.int(state.buildings.length);
   for (const b of state.buildings) {

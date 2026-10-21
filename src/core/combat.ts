@@ -11,7 +11,7 @@ import {
   type UnitType,
 } from '../config/index.ts';
 import { applyPercent } from '../shared/intmath.ts';
-import { chasePoint, isPathTo, moveToPoint, moveToRect, stopMoving } from './movement.ts';
+import { chasePoint, moveToPoint, moveToRect, reachedPoint, stopMoving } from './movement.ts';
 import type { Building, MatchState, Player, Unit } from './state.ts';
 import { emitTowerChanged } from './tower.ts';
 import {
@@ -221,7 +221,7 @@ function autoEngage(state: MatchState, u: Unit): boolean {
   if (u.returning) {
     const dx = u.x - u.chaseX;
     const dy = u.y - u.chaseY;
-    if (dx * dx + dy * dy > RETURN_EPS_SQ && !(u.arrived && isPathTo(u, u.chaseX, u.chaseY))) {
+    if (dx * dx + dy * dy > RETURN_EPS_SQ && !reachedPoint(u, u.chaseX, u.chaseY)) {
       moveToPoint(u, u.chaseX, u.chaseY);
       return true;
     }
@@ -282,7 +282,7 @@ export function stepUnitAI(state: MatchState): void {
         if (!autoEngage(state, u)) stopMoving(u);
         break;
       case 'move':
-        if (u.arrived && isPathTo(u, order.x, order.y)) {
+        if (reachedPoint(u, order.x, order.y)) {
           setIdle(u);
           stopMoving(u);
         } else {
@@ -291,7 +291,7 @@ export function stepUnitAI(state: MatchState): void {
         break;
       case 'attackMove':
         if (autoEngage(state, u)) break;
-        if (u.arrived && isPathTo(u, order.x, order.y)) {
+        if (reachedPoint(u, order.x, order.y)) {
           setIdle(u);
           stopMoving(u);
         } else {

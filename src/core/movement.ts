@@ -9,6 +9,8 @@ const KEY_POINT_SCALE = 131072;
 /** 追擊時直接朝目標移動的路徑鍵值 */
 const KEY_DIRECT = -2;
 const STUCK_REPATH_TICKS = 10;
+/** 視為有進展的最小距離改善（單位） */
+const PROGRESS_EPS = 50;
 const MAX_RADIUS = Math.max(...Object.values(UNIT_STATS).map((s) => s.radius));
 
 /** 要求單位本 tick 朝某點移動；目的地改變時重算路徑 */
@@ -156,7 +158,9 @@ export function moveUnits(state: MatchState): void {
       if (pathStillClear(state, u)) u.pathBlockVersion = state.blockVersion;
       else u.path = null;
     }
-    if (u.path === null || u.stuckTicks >= STUCK_REPATH_TICKS) computePath(state, u);
+    // 受阻或連續沒有進展（例如被推離原本的直線路徑）時重算路徑；追擊的直線路徑每 tick 由單位 AI 更新，不在此重算
+    const stalled = u.pathKey !== KEY_DIRECT && u.moveStall > 0 && u.moveStall % STUCK_REPATH_TICKS === 0;
+    if (u.path === null || u.stuckTicks >= STUCK_REPATH_TICKS || stalled) computePath(state, u);
     const path = u.path!;
     let remaining = unitSpeed(state, u);
     while (remaining > 0 && u.pathIdx < path.length) {
@@ -192,7 +196,39 @@ export function moveUnits(state: MatchState): void {
       }
     }
     if (u.pathIdx >= path.length) u.arrived = true;
+    trackProgress(u);
   }
+}
+
+/** 抵達容許用：記錄離路徑終點的最近距離與沒有進展的 tick 數（目的地改變即重設） */
+function trackProgress(u: Unit): void {
+  const path = u.path!;
+  const ex = path[path.length - 2];
+  const ey = path[path.length - 1];
+  const d = isqrt((u.x - ex) * (u.x - ex) + (u.y - ey) * (u.y - ey));
+  if (u.moveKey !== u.pathKey || u.moveBest < 0) {
+    u.moveKey = u.pathKey;
+    u.moveBest = d;
+    u.moveStall = 0;
+  } else if (d + PROGRESS_EPS < u.moveBest) {
+    u.moveBest = d;
+    u.moveStall = 0;
+  } else {
+    u.moveStall += 1;
+  }
+}
+
+/**
+ * 移動指令是否已抵達（v0.4 抵達容許）：走完路徑、離目的地 arriveRadius 內，
+ * 或在 crowdArriveRadius 內被擠住（連續 crowdStallTicks 沒有進展）。
+ */
+export function reachedPoint(u: Unit, x: number, y: number): boolean {
+  if (u.arrived && isPathTo(u, x, y)) return true;
+  const d2 = (u.x - x) * (u.x - x) + (u.y - y) * (u.y - y);
+  const near = RULES.movement.arriveRadius;
+  if (d2 <= near * near) return true;
+  const crowd = RULES.movement.crowdArriveRadius;
+  return isPathTo(u, x, y) && u.moveStall >= RULES.movement.crowdStallTicks && d2 <= crowd * crowd;
 }
 
 function immovable(state: MatchState, u: Unit): boolean {

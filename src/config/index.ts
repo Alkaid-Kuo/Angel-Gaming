@@ -116,6 +116,10 @@ export const RULES = {
     richNodeReserve: 1200,
     /** 工人與礦點／卸貨點／建築互動的距離（中心到邊緣，單位） */
     interactRange: 200,
+    /** 礦點被佔用時，工人在此距離內（中心到礦點邊緣）排隊等候，不再往前擠（v0.4） */
+    queueRange: 700,
+    /** 擁擠容許（v0.4）：交礦時被擠住（連續 crowdStallTicks 沒有進展）則在此距離內即可交付 */
+    crowdDeliverRange: 1000,
   },
   supply: {
     hardCap: 50,
@@ -131,6 +135,11 @@ export const RULES = {
     forestSpeedPercent: 60,
     /** 追擊移動中目標時，重算 A* 的最小間隔（tick） */
     chaseRepathTicks: 5,
+    /** 移動抵達容許（v0.4）：離目的地此距離內即算抵達 */
+    arriveRadius: 500,
+    /** 移動抵達容許（v0.4）：離目的地此距離內且連續 crowdStallTicks 沒有進展（被擠住）即算抵達 */
+    crowdArriveRadius: 3000,
+    crowdStallTicks: 20,
   },
   vision: {
     /** 樹林格只有觀察者距離 ≤ 此格數時可見 */

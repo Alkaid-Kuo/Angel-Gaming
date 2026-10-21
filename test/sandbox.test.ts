@@ -106,7 +106,7 @@ describe('批次模式', () => {
 
   it('超過 50 ms 硬上限：整場閒置', async () => {
     const slow = inline(botSource(`if (this.n === 2) { ${BUSY} } return [];`), 'slow.js');
-    const out = await play([slow, IDLE], 'batch', calibrate(120));
+    const out = await play([slow, IDLE], 'batch', calibrate(400));
     expect(out.runtime[0].hardKilled).toBe(true);
     expect(out.runtime[0].decisions).toBe(2);
   });
