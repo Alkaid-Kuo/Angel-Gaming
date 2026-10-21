@@ -28,7 +28,7 @@ const deterministicRules = {
 };
 
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'dist/**', 'dist-web/**', 'out/**'] },
+  { ignores: ['node_modules/**', 'dist/**', 'dist-web/**', 'out/**', 'arms-race/**'] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
