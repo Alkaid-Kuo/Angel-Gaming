@@ -372,6 +372,7 @@ export class GameScreen {
         this.rightClick(e.offsetX, e.offsetY);
       }
     });
+    c.addEventListener('dblclick', (e) => this.selectSameType(e.offsetX, e.offsetY));
     window.addEventListener('mouseup', (e) => {
       if (e.button === 1) this.middleDrag = null;
       if (e.button === 0 && this.leftDown !== null) this.leftRelease(e);
@@ -597,6 +598,10 @@ export class GameScreen {
       this.setMode('attackMove');
       return;
     }
+    if (k === '.') {
+      this.selectIdleWorker();
+      return;
+    }
     if (k === 'h') {
       const ids = this.myUnits().map((u) => u.id);
       if (ids.length > 0) this.send([{ type: 'hold', units: ids }]);
@@ -624,6 +629,35 @@ export class GameScreen {
       }
     }
     this.keys.add(k);
+  }
+
+  /** 雙擊：選取畫面內所有同類型的己方單位 */
+  private selectSameType(px: number, py: number): void {
+    const cur = this.vm.cur;
+    if (cur === null) return;
+    const w = this.renderer.screenToWorld(this.vm.camera, px, py);
+    const u = this.unitAt(w.x, w.y);
+    if (u === null || (this.meta.human !== null && u.owner !== this.meta.human)) return;
+    const a = this.renderer.screenToWorld(this.vm.camera, 0, 0);
+    const b = this.renderer.screenToWorld(this.vm.camera, this.canvas.clientWidth, this.canvas.clientHeight);
+    this.vm.selection = new Set(cur.units.filter((x) => x.owner === u.owner && x.type === u.type && x.x >= a.x && x.x <= b.x && x.y >= a.y && x.y <= b.y).map((x) => x.id));
+    this.vm.selectedBuilding = null;
+    this.updateHud();
+  }
+
+  private idleCursor = 0;
+
+  /** 句點鍵：輪流選取閒置工人並移動鏡頭 */
+  private selectIdleWorker(): void {
+    const cur = this.vm.cur;
+    if (cur === null || this.meta.human === null) return;
+    const idle = cur.units.filter((u) => u.owner === this.meta.human && u.type === 'worker' && u.order === 'idle');
+    if (idle.length === 0) return;
+    const u = idle[this.idleCursor++ % idle.length];
+    this.vm.selection = new Set([u.id]);
+    this.vm.selectedBuilding = null;
+    this.centerOn(u.x, u.y);
+    this.updateHud();
   }
 
   private stepSpeed(dir: number): void {
@@ -700,7 +734,12 @@ export class GameScreen {
       const p = cur.players[human];
       const budget = this.meta.limitBudget ? `　額度 <b>${p.budget}</b>` : '';
       const tech = `　科技 <b>Lv${p.tech.level}</b>${p.tech.weapons + p.tech.armor > 0 ? `（武器 ${p.tech.weapons}／護甲 ${p.tech.armor}）` : ''}`;
-      stats.innerHTML = `礦 <b>${p.minerals}</b>　人口 <b>${p.supplyUsed}/${p.supplyCap}</b>　時間 <b>${formatTime(cur.tick)}</b>${tech}${budget}${p.alive ? '' : '　<span class="warn">已淘汰</span>'}`;
+      const idleWorkers = cur.units.filter((u) => u.owner === human && u.type === 'worker' && u.order === 'idle').length;
+      const groups = new Map<number, number>();
+      for (const u of cur.units) if (u.owner === human && u.group >= 0) groups.set(u.group, (groups.get(u.group) ?? 0) + 1);
+      const groupText = [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([g, c]) => `[${g}] ${c}`).join(' ');
+      const extra = `${idleWorkers > 0 ? `　<span class="hint">閒置工人 ${idleWorkers}（. 鍵選取）</span>` : ''}${groupText !== '' ? `　編隊 ${groupText}` : ''}`;
+      stats.innerHTML = `礦 <b>${p.minerals}</b>　人口 <b>${p.supplyUsed}/${p.supplyCap}</b>　時間 <b>${formatTime(cur.tick)}</b>${tech}${budget}${extra}${p.alive ? '' : '　<span class="warn">已淘汰</span>'}`;
     } else {
       stats.innerHTML = `時間 <b>${formatTime(cur.tick)}</b>　<span style="color:var(--muted)">${this.meta.kind === 'replay' ? '回放' : '觀戰'}　seed ${this.meta.map.seed}</span>`;
     }
