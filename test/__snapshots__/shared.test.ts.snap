@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`prng > 固定輸出（跨平台基準值） 1`] = `
+[
+  4170872123,
+  4194243253,
+  1878473361,
+]
+`;
