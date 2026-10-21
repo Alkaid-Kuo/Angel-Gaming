@@ -72,9 +72,9 @@ export function resolveKnobs(decl: BotDeclaration, overrides: KnobValues | undef
   for (const [key, v] of Object.entries(overrides ?? {})) {
     const def = decl.knobs.find((k) => k.key === key);
     if (def === undefined) throw new BotLoadError(`${label}：沒有旋鈕 ${key}`);
-    if (typeof v !== 'number' || v < def.min || v > def.max || (def.integer && !Number.isInteger(v))) {
-      throw new BotLoadError(`${label}：旋鈕 ${key} 的值 ${v} 超出範圍 ${def.min}～${def.max}`);
-    }
+    if (typeof v !== 'number' || !Number.isFinite(v)) throw new BotLoadError(`${label}：旋鈕 ${key} 的值必須是數字`);
+    if (def.integer && !Number.isInteger(v)) throw new BotLoadError(`${label}：旋鈕 ${key} 是整數旋鈕，不接受 ${v}`);
+    if (v < def.min || v > def.max) throw new BotLoadError(`${label}：旋鈕 ${key} 的值 ${v} 超出範圍 ${def.min}～${def.max}`);
     out[key] = v;
   }
   return out;
