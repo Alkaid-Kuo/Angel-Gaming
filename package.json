@@ -17,7 +17,8 @@
     "test": "vitest run",
     "sim": "node src/cli/main.ts",
     "web": "vite",
-    "build:web": "vite build"
+    "build:web": "vite build",
+    "pack:build": "node scripts/build-pack.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

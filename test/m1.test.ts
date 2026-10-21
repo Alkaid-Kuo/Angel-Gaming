@@ -122,3 +122,25 @@ describe('地圖 PNG', () => {
     expect(RULES.replay.checkpointInterval).toBe(600);
   });
 });
+
+describe('CLI 統計', () => {
+  it('Elo（Bradley–Terry）：勝率越高分數越高，與順序無關，平均約 1500', async () => {
+    const { eloFromWins } = await import('../src/cli/stats.ts');
+    const wins = [
+      [0, 8, 9],
+      [2, 0, 6],
+      [1, 4, 0],
+    ];
+    const elo = eloFromWins(wins);
+    expect(elo[0]).toBeGreaterThan(elo[1]);
+    expect(elo[1]).toBeGreaterThan(elo[2]);
+    expect(Math.abs(elo.reduce((a, b) => a + b, 0) / 3 - 1500)).toBeLessThan(5);
+    // 全勝不發散
+    const all = eloFromWins([
+      [0, 10],
+      [0, 0],
+    ]);
+    expect(Number.isFinite(all[0])).toBe(true);
+    expect(all[0]).toBeGreaterThan(all[1]);
+  });
+});

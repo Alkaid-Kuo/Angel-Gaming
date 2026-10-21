@@ -1,8 +1,8 @@
-// 所有遊戲數值與常數集中於此（規格書 v0.2 初始值）。
+// 所有遊戲數值與常數集中於此（規格書 v0.3）。
 // 長度單位：「單位」（1 格 = 1000 單位）；時間單位：tick（1 秒 = 10 tick）。
 
-export const ENGINE_VERSION = '0.1.0';
-export const SPEC_VERSION = '0.2';
+export const ENGINE_VERSION = '0.2.0';
+export const SPEC_VERSION = '0.3';
 
 export type UnitType = 'worker' | 'spear' | 'archer' | 'cavalry';
 export type BuildingType = 'base' | 'depot' | 'supply' | 'barracks' | 'tower';

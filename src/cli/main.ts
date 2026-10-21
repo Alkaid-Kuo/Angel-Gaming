@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// rts-sim：headless 模擬器 CLI。子指令 match、mapgen、bench；輸出 JSON。
+// rts-sim：headless 模擬器 CLI。子指令 match、roundrobin、mapgen、bench、viewer；輸出 JSON。
 // 結束碼：0 成功、1 參數錯誤、2 選手載入失敗、3 引擎內部錯誤。
 import { randomInt } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { KnobValues } from '../api/types.ts';
 import { MAP_MODES, MATCH_MODES, type MatchMode } from '../config/index.ts';
@@ -14,7 +15,7 @@ import { loadBotFile, type BotFile } from '../sandbox/node-loader.ts';
 import { OfficialController } from '../sandbox/official.ts';
 import { runMatch } from '../sandbox/runner.ts';
 import { renderPng } from './png.ts';
-import { gameOutput, summarize, type BotInfo, type GameOutput } from './stats.ts';
+import { eloFromWins, gameOutput, summarize, type BotInfo, type GameOutput } from './stats.ts';
 
 class ArgError extends Error {}
 
@@ -22,7 +23,7 @@ type Args = Map<string, string[]>;
 
 function parseArgs(argv: readonly string[]): { command: string; args: Args } {
   const command = argv[0];
-  if (command === undefined || command.startsWith('--')) throw new ArgError('缺少子指令（match／mapgen／bench）');
+  if (command === undefined || command.startsWith('--')) throw new ArgError('缺少子指令（match／roundrobin／mapgen／bench／viewer）');
   const args: Args = new Map();
   let key: string | null = null;
   for (const tok of argv.slice(1)) {
@@ -43,6 +44,13 @@ function one(args: Args, key: string): string | undefined {
   if (v === undefined) return undefined;
   if (v.length !== 1) throw new ArgError(`--${key} 需要一個值`);
   return v[0];
+}
+
+function flag(args: Args, key: string): boolean {
+  const v = args.get(key);
+  if (v === undefined) return false;
+  if (v.length !== 0) throw new ArgError(`--${key} 不需要值`);
+  return true;
 }
 
 function intArg(args: Args, key: string, fallback: number | undefined, min: number): number | undefined {
@@ -99,40 +107,77 @@ async function makeControllers(files: readonly BotFile[], exec: 'official' | 'ba
   return out;
 }
 
-interface SeriesOptions {
+interface Roster {
   readonly mode: MatchMode;
-  readonly files: readonly BotFile[];
-  readonly games: number;
-  readonly seed: number;
   readonly exec: 'official' | 'batch';
+  /** 依 --bots 順序 */
+  readonly files: readonly BotFile[];
+  readonly infos: readonly BotInfo[];
+  readonly knobs: readonly KnobValues[];
   readonly replayDir: string | undefined;
-  readonly knobOverrides: readonly (KnobValues | undefined)[];
 }
 
-async function runSeries(o: SeriesOptions): Promise<{ games: GameOutput[]; bots: BotInfo[] }> {
-  const games: GameOutput[] = [];
-  let bots: BotInfo[] = [];
-  for (let i = 0; i < o.games; i++) {
-    const seed = o.seed + i;
-    const controllers = await makeControllers(o.files, o.exec);
-    try {
-      bots = controllers.map((c, k) => ({ file: o.files[k].path, name: c.declaration.name, version: c.declaration.version ?? '' }));
-      const knobs = controllers.map((c, k) => resolveKnobs(c.declaration, o.knobOverrides[k], c.label));
-      const run = await runMatch({ mode: o.mode, seed, controllers, knobs, record: o.replayDir !== undefined });
-      games.push(gameOutput(o.mode, seed, o.exec, run.map, run.slotOf, bots, knobs, run.result, run.runtime, run.wallMs, run.finalHash));
-      if (o.replayDir !== undefined && run.replay !== null) {
-        mkdirSync(o.replayDir, { recursive: true });
-        writeFileSync(join(o.replayDir, `${o.mode}_${seed}.json`), JSON.stringify(run.replay));
-      }
-    } finally {
-      for (const c of controllers) await c.dispose();
-    }
+/** 一場比賽：seats[playerId] = 選手在 --bots 中的索引 */
+interface GamePlan {
+  readonly seed: number;
+  readonly seats: readonly number[];
+}
+
+/** --knobs：JSON 陣列（依 --bots 順序，null 表示預設），或 @檔案路徑 */
+function parseKnobs(arg: string | undefined, n: number): (KnobValues | undefined)[] {
+  if (arg === undefined) return new Array<undefined>(n).fill(undefined);
+  const text = arg.startsWith('@') ? readFileSync(arg.slice(1), 'utf8') : arg;
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new ArgError('--knobs 必須是 JSON 陣列，例如 [{"attackThreshold":8},null]');
   }
-  return { games, bots };
+  if (!Array.isArray(data) || data.length !== n) throw new ArgError(`--knobs 陣列長度必須等於選手數 ${n}`);
+  return data.map((v: unknown) => {
+    if (v === null) return undefined;
+    if (typeof v !== 'object' || Array.isArray(v)) throw new ArgError('--knobs 每一項必須是物件或 null');
+    return v as KnobValues;
+  });
+}
+
+/** 載入選手、讀取宣告並解析旋鈕（旋鈕不合法視為選手載入錯誤） */
+function loadRoster(mode: MatchMode, exec: 'official' | 'batch', paths: readonly string[], knobArg: string | undefined, replayDir: string | undefined): Roster {
+  const files = paths.map((p) => loadBotFile(p));
+  const overrides = parseKnobs(knobArg, files.length);
+  const infos: BotInfo[] = [];
+  const knobs: KnobValues[] = [];
+  files.forEach((f, index) => {
+    const c = new BatchController(f.compiled, f.label);
+    infos.push({ index, file: f.path, name: c.declaration.name, version: c.declaration.version ?? '' });
+    knobs.push(resolveKnobs(c.declaration, overrides[index], f.label));
+  });
+  return { mode, exec, files, infos, knobs, replayDir };
+}
+
+async function playGame(r: Roster, plan: GamePlan): Promise<GameOutput> {
+  const controllers = await makeControllers(plan.seats.map((b) => r.files[b]), r.exec);
+  try {
+    const knobs = plan.seats.map((b) => r.knobs[b]);
+    const run = await runMatch({ mode: r.mode, seed: plan.seed, controllers, knobs, record: r.replayDir !== undefined });
+    if (r.replayDir !== undefined && run.replay !== null) {
+      mkdirSync(r.replayDir, { recursive: true });
+      writeFileSync(join(r.replayDir, `${r.mode}_${plan.seed}_${plan.seats.join('-')}.json`), JSON.stringify(run.replay));
+    }
+    return gameOutput(r.mode, plan.seed, r.exec, run.map, run.slotOf, plan.seats.map((b) => r.infos[b]), knobs, run.result, run.runtime, run.wallMs, run.finalHash);
+  } finally {
+    for (const c of controllers) await c.dispose();
+  }
+}
+
+async function playAll(r: Roster, plans: readonly GamePlan[]): Promise<GameOutput[]> {
+  const out: GameOutput[] = [];
+  for (const plan of plans) out.push(await playGame(r, plan));
+  return out;
 }
 
 async function cmdMatch(args: Args): Promise<void> {
-  knownArgs(args, ['mode', 'bots', 'games', 'seed', 'exec', 'replay-dir', 'out']);
+  knownArgs(args, ['mode', 'bots', 'games', 'seed', 'exec', 'swap', 'knobs', 'replay-dir', 'out']);
   const mode = modeArg(args);
   const botPaths = args.get('bots') ?? [];
   const need = MAP_MODES[mode].players;
@@ -140,9 +185,95 @@ async function cmdMatch(args: Args): Promise<void> {
   const games = intArg(args, 'games', 1, 1)!;
   const seed = intArg(args, 'seed', randomInt(0, 2 ** 31), 0)!;
   const exec = execArg(args, 'official');
-  const files = botPaths.map((p) => loadBotFile(p));
-  const { games: out, bots } = await runSeries({ mode, files, games, seed, exec, replayDir: one(args, 'replay-dir'), knobOverrides: files.map(() => undefined) });
-  emit({ seed, mode, exec, summary: summarize(mode, bots, out), games: out }, one(args, 'out'));
+  const swap = flag(args, 'swap');
+  if (swap && mode !== '1v1') throw new ArgError('--swap 只適用於 1v1');
+  if (swap && games % 2 !== 0) throw new ArgError('--swap 時 --games 必須是偶數（每個 seed 打兩場並交換起點）');
+  const roster = loadRoster(mode, exec, botPaths, one(args, 'knobs'), one(args, 'replay-dir'));
+  const seats = botPaths.map((_, i) => i);
+  const plans: GamePlan[] = [];
+  if (swap) {
+    for (let i = 0; i < games / 2; i++) {
+      plans.push({ seed: seed + i, seats });
+      plans.push({ seed: seed + i, seats: [...seats].reverse() });
+    }
+  } else {
+    for (let i = 0; i < games; i++) plans.push({ seed: seed + i, seats });
+  }
+  const out = await playAll(roster, plans);
+  emit({ seed, mode, exec, swap, summary: summarize(mode, roster.infos, out), games: out }, one(args, 'out'));
+}
+
+function combinations(n: number, k: number): number[][] {
+  const out: number[][] = [];
+  const cur: number[] = [];
+  const rec = (start: number): void => {
+    if (cur.length === k) {
+      out.push(cur.slice());
+      return;
+    }
+    for (let i = start; i < n; i++) {
+      cur.push(i);
+      rec(i + 1);
+      cur.pop();
+    }
+  };
+  rec(0);
+  return out;
+}
+
+/** 循環賽：1v1 每組選手打 --games 場（同 seed 交換起點各一場）；4 人局為所有 4 人組合各打 --games 場 */
+async function cmdRoundrobin(args: Args): Promise<void> {
+  knownArgs(args, ['mode', 'bots', 'games', 'seed', 'exec', 'knobs', 'replay-dir', 'out']);
+  const mode = modeArg(args);
+  const botPaths = args.get('bots') ?? [];
+  const players = MAP_MODES[mode].players;
+  if (botPaths.length < players) throw new ArgError(`${mode} 循環賽至少需要 ${players} 個選手檔案`);
+  const games = intArg(args, 'games', mode === '1v1' ? 10 : 4, 1)!;
+  if (mode === '1v1' && games % 2 !== 0) throw new ArgError('1v1 循環賽的 --games 必須是偶數（同 seed 交換起點）');
+  const seed = intArg(args, 'seed', randomInt(0, 2 ** 31), 0)!;
+  const exec = execArg(args, 'official');
+  const roster = loadRoster(mode, exec, botPaths, one(args, 'knobs'), one(args, 'replay-dir'));
+  const n = botPaths.length;
+  const plans: GamePlan[] = [];
+  if (mode === '1v1') {
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        for (let k = 0; k < games / 2; k++) {
+          plans.push({ seed: seed + k, seats: [i, j] });
+          plans.push({ seed: seed + k, seats: [j, i] });
+        }
+      }
+    }
+  } else {
+    for (const group of combinations(n, players)) {
+      for (let k = 0; k < games; k++) plans.push({ seed: seed + k, seats: group.map((_, x) => group[(x + k) % group.length]) });
+    }
+  }
+  const out = await playAll(roster, plans);
+  // 兩兩勝負：同場名次較前者勝
+  const wins = Array.from({ length: n }, () => new Array<number>(n).fill(0));
+  for (const g of out) {
+    for (const a of g.players) for (const b of g.players) if (a.rank < b.rank) wins[a.botIndex][b.botIndex] += 1;
+  }
+  const elo = eloFromWins(wins);
+  const winRateMatrix = wins.map((row, i) => row.map((w, j) => (i === j || w + wins[j][i] === 0 ? null : Math.round((w * 1000) / (w + wins[j][i])) / 10)));
+  const ranking = roster.infos
+    .map((b, i) => ({ bot: b.name, version: b.version, file: b.file, elo: elo[i], wins: wins[i].reduce((a, v) => a + v, 0), losses: wins.reduce((a, row) => a + row[i], 0) }))
+    .sort((a, b) => b.elo - a.elo);
+  emit(
+    {
+      mode,
+      exec,
+      seed,
+      gamesPerPairing: games,
+      bots: roster.infos.map((b) => ({ bot: b.name, version: b.version, file: b.file })),
+      winRateMatrix,
+      elo: ranking,
+      summary: summarize(mode, roster.infos, out),
+      games: out.map((g) => ({ seed: g.seed, durationTicks: g.durationTicks, finalHash: g.finalHash, players: g.players.map((p) => ({ botIndex: p.botIndex, bot: p.bot, playerId: p.playerId, rank: p.rank, score: p.score })) })),
+    },
+    one(args, 'out'),
+  );
 }
 
 function cmdMapgen(args: Args): void {
@@ -187,31 +318,71 @@ async function cmdBench(args: Args): Promise<void> {
   const exec = execArg(args, 'batch');
   const seed = intArg(args, 'seed', 1, 0)!;
   const botPath = one(args, 'bot') ?? join(packageRoot(), 'bots', 'baseline.js');
-  const file = loadBotFile(botPath);
-  const files = Array.from({ length: MAP_MODES[mode].players }, () => file);
+  const roster = loadRoster(mode, exec, [botPath], undefined, undefined);
+  const seats = Array.from({ length: MAP_MODES[mode].players }, () => 0);
+  const plans = Array.from({ length: games }, (_, i) => ({ seed: seed + i, seats }));
   const t0 = performance.now();
-  const { games: out } = await runSeries({ mode, files, games, seed, exec, replayDir: undefined, knobOverrides: files.map(() => undefined) });
+  const out = await playAll(roster, plans);
   const wallMs = performance.now() - t0;
   const ticks = out.reduce((a, g) => a + g.durationTicks, 0);
-  emit({
-    mode,
-    exec,
-    bot: botPath,
-    games,
-    seedFrom: seed,
-    totalWallMs: Math.round(wallMs),
-    gamesPerSec: Math.round((games / (wallMs / 1000)) * 100) / 100,
-    ticksPerSec: Math.round(ticks / (wallMs / 1000)),
-    avgDurationTicks: Math.round(ticks / games),
-    avgGameWallMs: Math.round(wallMs / games),
-    endedBeforeTimeLimit: out.filter((g) => g.players.some((p) => p.eliminatedTick !== null)).length,
-  }, one(args, 'out'));
+  emit(
+    {
+      mode,
+      exec,
+      bot: botPath,
+      games,
+      seedFrom: seed,
+      totalWallMs: Math.round(wallMs),
+      gamesPerSec: Math.round((games / (wallMs / 1000)) * 100) / 100,
+      ticksPerSec: Math.round(ticks / (wallMs / 1000)),
+      avgDurationTicks: Math.round(ticks / games),
+      avgGameWallMs: Math.round(wallMs / games),
+      endedBeforeTimeLimit: out.filter((g) => g.players.some((p) => p.eliminatedTick !== null)).length,
+    },
+    one(args, 'out'),
+  );
+}
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+};
+
+/** 以本機 HTTP 伺服器開啟回放播放器（瀏覽器的 Worker 不能從 file:// 載入） */
+function cmdViewer(args: Args): Promise<void> {
+  knownArgs(args, ['port', 'dir']);
+  const port = intArg(args, 'port', 8000, 1)!;
+  const root = resolve(one(args, 'dir') ?? [join(packageRoot(), 'viewer'), join(packageRoot(), 'dist-web')].find((d) => existsSync(d)) ?? join(packageRoot(), 'viewer'));
+  if (!existsSync(join(root, 'web', 'index.html'))) throw new ArgError(`找不到回放播放器（${root}${sep}web${sep}index.html）；原始碼版請先執行 npm run build:web`);
+  return new Promise((done) => {
+    const server = createServer((req, res) => {
+      const url = decodeURIComponent((req.url ?? '/').split('?')[0]);
+      const path = normalize(join(root, url === '/' ? 'web/index.html' : url));
+      if (!path.startsWith(root) || !existsSync(path) || !statSync(path).isFile()) {
+        res.writeHead(404).end('Not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream' });
+      res.end(readFileSync(path));
+    });
+    server.listen(port, '127.0.0.1', () => {
+      process.stdout.write(`回放播放器：http://127.0.0.1:${port}/web/index.html （Ctrl+C 結束）\n`);
+    });
+    server.on('close', () => done());
+  });
 }
 
 const USAGE = `用法：
-  rts-sim match  --mode 1v1|ffa4 --bots a.js b.js [c.js d.js] [--games N] [--seed S] [--exec official|batch] [--replay-dir D] [--out F]
-  rts-sim mapgen --mode 1v1|ffa4 [--seed S] [--format ascii|png] [--validate N] [--out F]
-  rts-sim bench  --mode 1v1|ffa4 [--games N] [--exec batch|official] [--seed S] [--bot F] [--out F]`;
+  rts-sim match      --mode 1v1|ffa4 --bots a.js b.js [c.js d.js] [--games N] [--seed S] [--swap] [--knobs JSON|@檔案]
+                     [--exec official|batch] [--replay-dir D] [--out F]
+  rts-sim roundrobin --mode 1v1|ffa4 --bots a.js b.js ... [--games 每組場數] [--seed S] [--knobs JSON|@檔案] [--exec official|batch] [--out F]
+  rts-sim mapgen     --mode 1v1|ffa4 [--seed S] [--format ascii|png] [--validate N] [--out F]
+  rts-sim bench      --mode 1v1|ffa4 [--games N] [--exec batch|official] [--seed S] [--bot F] [--out F]
+  rts-sim viewer     [--port 8000]`;
 
 async function main(): Promise<number> {
   let parsed: { command: string; args: Args };
@@ -226,11 +397,21 @@ async function main(): Promise<number> {
       case 'match':
         await cmdMatch(parsed.args);
         return 0;
+      case 'roundrobin':
+        await cmdRoundrobin(parsed.args);
+        return 0;
       case 'mapgen':
         cmdMapgen(parsed.args);
         return 0;
       case 'bench':
         await cmdBench(parsed.args);
+        return 0;
+      case 'viewer':
+        await cmdViewer(parsed.args);
+        return 0;
+      case 'help':
+      case '--help':
+        process.stdout.write(`${USAGE}\n`);
         return 0;
       default:
         throw new ArgError(`未知子指令：${parsed.command}`);

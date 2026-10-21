@@ -29,7 +29,8 @@
   "include": [
     "src",
     "bots",
-    "test"
+    "test",
+    "scripts"
   ],
   "exclude": [
     "src/web"

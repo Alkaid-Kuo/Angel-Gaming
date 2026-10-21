@@ -6,12 +6,15 @@ import type { GeneratedMap } from '../mapgen/index.ts';
 import type { BotRuntimeStats } from '../sandbox/runner.ts';
 
 export interface BotInfo {
+  /** 在 --bots 清單中的索引 */
+  readonly index: number;
   readonly file: string;
   readonly name: string;
   readonly version: string;
 }
 
 export interface GamePlayerOutput {
+  readonly botIndex: number;
   readonly bot: string;
   readonly botFile: string;
   readonly version: string;
@@ -66,6 +69,7 @@ export function gameOutput(
     for (const t of COMBAT_UNIT_TYPES) productionRatio[t] = percent(s.unitsProduced[t], combatTotal);
     const slot = map.slots[slotOf[p.playerId]];
     return {
+      botIndex: bots[p.playerId].index,
       bot: bots[p.playerId].name,
       botFile: bots[p.playerId].file,
       version: bots[p.playerId].version,
@@ -110,10 +114,10 @@ export function gameOutput(
 
 /** 彙總：1v1 為各選手勝率；4 人為平均名次與名次分布。依選手檔案（--bots 的順序）統計 */
 export function summarize(mode: MatchMode, bots: readonly BotInfo[], games: readonly GameOutput[]): Record<string, unknown> {
-  const per = bots.map((b, i) => ({ index: i, bot: b.name, file: b.file, games: 0, wins: 0, rankSum: 0, ranks: [0, 0, 0, 0] }));
+  const per = bots.map((b) => ({ bot: b.name, version: b.version, file: b.file, games: 0, wins: 0, rankSum: 0, ranks: [0, 0, 0, 0] }));
   for (const g of games) {
     for (const p of g.players) {
-      const s = per[p.playerId];
+      const s = per[p.botIndex];
       s.games += 1;
       if (p.rank === 1) s.wins += 1;
       s.rankSum += p.rank;
@@ -121,10 +125,44 @@ export function summarize(mode: MatchMode, bots: readonly BotInfo[], games: read
     }
   }
   if (mode === '1v1') {
-    return { games: games.length, bots: per.map((s) => ({ bot: s.bot, file: s.file, games: s.games, wins: s.wins, winRate: percent(s.wins, s.games) })) };
+    return { games: games.length, bots: per.map((s) => ({ bot: s.bot, version: s.version, file: s.file, games: s.games, wins: s.wins, winRate: percent(s.wins, s.games) })) };
   }
   return {
     games: games.length,
-    bots: per.map((s) => ({ bot: s.bot, file: s.file, games: s.games, avgRank: s.games === 0 ? 0 : Math.round((s.rankSum / s.games) * 100) / 100, rankDistribution: s.ranks })),
+    bots: per.map((s) => ({ bot: s.bot, version: s.version, file: s.file, games: s.games, avgRank: s.games === 0 ? 0 : Math.round((s.rankSum / s.games) * 100) / 100, rankDistribution: s.ranks })),
   };
+}
+
+/**
+ * Bradley–Terry 最大概似評分（與比賽順序無關），換算為 Elo 尺度（平均 1500）。
+ * wins[i][j] = i 勝 j 的次數。
+ */
+export function eloFromWins(wins: readonly (readonly number[])[]): number[] {
+  const n = wins.length;
+  // 每人加 0.5 場對虛擬平均對手的勝負，避免全勝／全敗發散
+  let p = new Array<number>(n).fill(1);
+  for (let iter = 0; iter < 2000; iter++) {
+    const next = new Array<number>(n).fill(0);
+    let maxDelta = 0;
+    for (let i = 0; i < n; i++) {
+      let w = 0.5;
+      let denom = 1 / (p[i] + 1);
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        const games = wins[i][j] + wins[j][i];
+        if (games === 0) continue;
+        w += wins[i][j];
+        denom += games / (p[i] + p[j]);
+      }
+      next[i] = w / denom;
+    }
+    const geo = Math.exp(next.reduce((a, v) => a + Math.log(v), 0) / n);
+    for (let i = 0; i < n; i++) {
+      next[i] /= geo;
+      maxDelta = Math.max(maxDelta, Math.abs(next[i] - p[i]));
+    }
+    p = next;
+    if (maxDelta < 1e-10) break;
+  }
+  return p.map((v) => Math.round(1500 + 400 * Math.log10(v)));
 }
