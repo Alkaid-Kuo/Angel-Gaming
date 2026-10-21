@@ -63,7 +63,7 @@ export const UNIT_STATS: Readonly<Record<UnitType, UnitStats>> = {
   archer: { producer: 'barracks', cost: 70, supply: 1, trainTicks: 180, hp: 60, attack: 8, cooldown: 15, range: 5000, speed: 220, sight: 8, radius: 350 },
   cavalry: { producer: 'barracks', cost: 100, supply: 2, trainTicks: 220, hp: 150, attack: 12, cooldown: 12, range: 200, speed: 400, sight: 8, radius: 450 },
   // M3 提案（待審）：攻城車只攻擊建築
-  siege: { producer: 'workshop', cost: 150, supply: 3, trainTicks: 300, hp: 300, attack: 30, cooldown: 25, range: 200, speed: 150, sight: 6, radius: 500 },
+  siege: { producer: 'workshop', cost: 150, supply: 3, trainTicks: 300, hp: 200, attack: 30, cooldown: 30, range: 200, speed: 150, sight: 6, radius: 500 },
 };
 
 export const BUILDING_STATS: Readonly<Record<BuildingType, BuildingStats>> = {
@@ -99,7 +99,7 @@ export const DAMAGE_MULTIPLIER: Readonly<Record<UnitType | 'tower', Readonly<Rec
   archer: { spear: 100, archer: 100, cavalry: 100, worker: 100, siege: 100, building: 50 },
   cavalry: { spear: 100, archer: 150, cavalry: 100, worker: 100, siege: 150, building: 100 },
   siege: { spear: null, archer: null, cavalry: null, worker: null, siege: null, building: 400 },
-  tower: { spear: 100, archer: 100, cavalry: 100, worker: 100, siege: 100, building: null },
+  tower: { spear: 100, archer: 100, cavalry: 100, worker: 100, siege: 200, building: null },
 };
 
 export const RULES = {
