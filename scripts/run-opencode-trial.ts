@@ -24,12 +24,14 @@ function stamp(): string {
 }
 
 function runOnce(message: string, cont: boolean): Promise<number | null> {
-  const args = ['run', '--auto', '-m', model];
+  // --dir 與 PWD 都指向工作資料夾：opencode 以 PWD 判斷專案目錄，不能只靠 spawn 的 cwd
+  const args = ['run', '--dir', runDir, '--print-logs', '--log-level', 'INFO', '--auto', '-m', model];
   if (cont) args.push('--continue');
   args.push(message);
   log(`\n===== [${stamp()}] ${cont ? '續行' : '開始'}：${message.slice(0, 80)}\n`);
   return new Promise((resolve) => {
-    const child = spawn(OPENCODE, args, { cwd: runDir, env: { ...process.env, OPENCODE_CONFIG: configFile }, windowsHide: true });
+    // 標準輸入必須關閉：opencode run 在非 TTY 時會等待標準輸入結束
+    const child = spawn(OPENCODE, args, { cwd: runDir, env: { ...process.env, OPENCODE_CONFIG: configFile, PWD: runDir }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', (d: Buffer) => log(d.toString()));
     child.stderr.on('data', (d: Buffer) => log(d.toString()));
     const remain = deadline - Date.now();
