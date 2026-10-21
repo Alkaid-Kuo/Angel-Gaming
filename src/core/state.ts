@@ -198,6 +198,8 @@ export interface Player {
   supplyUsed: number;
   supplyCap: number;
   budget: number;
+  /** 人類玩家預設不限指令額度（M1 對局設定可開啟限制） */
+  readonly unlimitedBudget: boolean;
   alive: boolean;
   eliminatedTick: number;
   eliminationScore: number;
@@ -247,4 +249,6 @@ export interface MatchState {
   over: boolean;
   /** 是否記錄事件（回放重建時關閉） */
   recordEvents: boolean;
+  /** 事件監聽（畫面的事件記錄用；不影響模擬） */
+  eventTap: ((playerId: number, ev: GameEvent) => void) | null;
 }

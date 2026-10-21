@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天使戰隊 RTS</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="setup" class="setup">
+  <h1>天使戰隊 RTS <small>M1 試玩版</small></h1>
+  <section class="card">
+    <h2>開始對局</h2>
+    <div class="modes" id="modes">
+      <label><input type="radio" name="mode" value="h1v1" checked> 1v1：玩家 vs 基準 Bot</label>
+      <label><input type="radio" name="mode" value="h4"> 4 人：玩家 vs 3 個基準 Bot</label>
+      <label><input type="radio" name="mode" value="s1v1"> 觀戰 1v1：基準 Bot vs 基準 Bot</label>
+      <label><input type="radio" name="mode" value="s1v1r"> 觀戰 1v1：基準 Bot vs 隨機 Bot</label>
+      <label><input type="radio" name="mode" value="s4"> 觀戰 4 人：基準 Bot × 4</label>
+    </div>
+    <div class="row">
+      <label>Seed <input id="seed" type="number" min="0" step="1"></label>
+      <button id="reroll" type="button">隨機</button>
+    </div>
+    <div class="row">
+      <label><input id="limit" type="checkbox"> 套用與選手相同的指令額度（每秒 5 個）</label>
+    </div>
+    <button id="start" class="primary" type="button">開始</button>
+  </section>
+  <section class="card">
+    <h2>回放播放器</h2>
+    <p>載入 <code>rts-sim match --replay-dir</code> 產生的回放檔，或對局結束後下載的回放。</p>
+    <input id="replayFile" type="file" accept=".json,application/json">
+  </section>
+  <section class="card help">
+    <h2>操作</h2>
+    <table>
+      <tr><td>左鍵拖曳／點擊</td><td>選取</td></tr>
+      <tr><td>右鍵</td><td>移動；對敵方＝攻擊；工人對礦點＝採集；工人對己方未完工建築＝接續建造；選建築時＝集結點</td></tr>
+      <tr><td>A ＋ 左鍵</td><td>攻擊移動</td></tr>
+      <tr><td>H</td><td>駐守（原地停下）</td></tr>
+      <tr><td>F1～F4</td><td>姿態：積極、防守、堅守、撤退</td></tr>
+      <tr><td>Ctrl ＋ 0～9／0～9</td><td>設定編隊／選取編隊</td></tr>
+      <tr><td>B ＋ 建築鍵 ＋ 左鍵</td><td>工人蓋建築：C 主堡、D 採集站、S 補給站、R 兵營、T 防禦塔（Shift 連續放置）</td></tr>
+      <tr><td>Q／W／E</td><td>選建築時生產（主堡 Q 工人；兵營 Q 長槍兵、W 弓兵、E 騎兵）</td></tr>
+      <tr><td>X</td><td>取消建築的最後一個生產項目，或取消建造中的建築</td></tr>
+      <tr><td>空白鍵／＋／−</td><td>暫停；調整速度</td></tr>
+      <tr><td>WASD／方向鍵／畫面邊緣／中鍵拖曳／滾輪</td><td>平移與縮放（A、W 等鍵在有對應動作時優先執行動作）</td></tr>
+    </table>
+  </section>
+</div>
+<div id="game" class="game hidden"></div>
+<script type="module" src="../src/web/main.ts"></script>
+</body>
+</html>

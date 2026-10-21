@@ -1,10 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
@@ -22,5 +26,12 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["src", "bots", "test"]
+  "include": [
+    "src",
+    "bots",
+    "test"
+  ],
+  "exclude": [
+    "src/web"
+  ]
 }

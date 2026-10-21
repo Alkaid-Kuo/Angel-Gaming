@@ -142,6 +142,8 @@ export const RULES = {
   },
   replay: {
     hashInterval: 100,
+    /** 回放播放器每隔多少 tick 存一個快照（跳轉用） */
+    checkpointInterval: 600,
   },
   stats: {
     /** 偵察：單位進入敵方起點（主堡中心）此格數內記一次 */

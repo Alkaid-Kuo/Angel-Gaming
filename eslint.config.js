@@ -28,7 +28,7 @@ const deterministicRules = {
 };
 
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'dist/**', 'out/**'] },
+  { ignores: ['node_modules/**', 'dist/**', 'dist-web/**', 'out/**'] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
@@ -43,11 +43,17 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       eqeqeq: ['error', 'always'],
+      // 介面文字使用全形空白排版
+      'no-irregular-whitespace': ['error', { skipStrings: true, skipTemplates: true, skipComments: true }],
     },
   },
   {
     files: ['src/core/**', 'src/mapgen/**', 'src/path/**', 'src/replay/**', 'src/shared/**', 'src/config/**', 'bots/**'],
     rules: deterministicRules,
+  },
+  {
+    files: ['src/web/**'],
+    languageOptions: { globals: { ...globals.browser } },
   },
   {
     files: ['bots/**/*.js'],

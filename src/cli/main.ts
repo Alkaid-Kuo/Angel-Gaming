@@ -13,6 +13,7 @@ import { BatchController, resolveKnobs, type BotController } from '../sandbox/co
 import { loadBotFile, type BotFile } from '../sandbox/node-loader.ts';
 import { OfficialController } from '../sandbox/official.ts';
 import { runMatch } from '../sandbox/runner.ts';
+import { renderPng } from './png.ts';
 import { gameOutput, summarize, type BotInfo, type GameOutput } from './stats.ts';
 
 class ArgError extends Error {}
@@ -149,12 +150,18 @@ function cmdMapgen(args: Args): void {
   const mode = modeArg(args);
   const seed = intArg(args, 'seed', randomInt(0, 2 ** 31), 0)!;
   const format = one(args, 'format') ?? 'ascii';
-  if (format !== 'ascii') throw new ArgError('--format 目前只支援 ascii（png 於 M1 加入）');
+  if (format !== 'ascii' && format !== 'png') throw new ArgError('--format 必須是 ascii／png');
   const validate = intArg(args, 'validate', undefined, 1);
   if (validate === undefined) {
     const map = generateMap(mode, seed);
-    const text = `${renderAscii(map)}\n`;
     const out = one(args, 'out');
+    if (format === 'png') {
+      const file = out ?? `map_${mode}_${seed}.png`;
+      writeFileSync(file, renderPng(map));
+      process.stdout.write(`${JSON.stringify({ mode, seed, attempt: map.attempt, file })}\n`);
+      return;
+    }
+    const text = `${renderAscii(map)}\n`;
     if (out === undefined) process.stdout.write(`# mode=${mode} seed=${seed} attempt=${map.attempt}\n${text}`);
     else writeFileSync(out, text);
     return;
@@ -203,7 +210,7 @@ async function cmdBench(args: Args): Promise<void> {
 
 const USAGE = `用法：
   rts-sim match  --mode 1v1|ffa4 --bots a.js b.js [c.js d.js] [--games N] [--seed S] [--exec official|batch] [--replay-dir D] [--out F]
-  rts-sim mapgen --mode 1v1|ffa4 [--seed S] [--format ascii] [--validate N] [--out F]
+  rts-sim mapgen --mode 1v1|ffa4 [--seed S] [--format ascii|png] [--validate N] [--out F]
   rts-sim bench  --mode 1v1|ffa4 [--games N] [--exec batch|official] [--seed S] [--bot F] [--out F]`;
 
 async function main(): Promise<number> {

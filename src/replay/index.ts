@@ -1,7 +1,7 @@
 // 回放：只保存 seed 與指令紀錄，播放時以引擎重新模擬；每 100 tick 的狀態雜湊用來偵測不同步。
 import type { KnobValues } from '../api/types.ts';
 import { ENGINE_VERSION, RULES, SPEC_VERSION, type MatchMode } from '../config/index.ts';
-import { Match } from '../core/match.ts';
+import { Match, type MatchSetup } from '../core/match.ts';
 
 export const REPLAY_FORMAT = 1;
 
@@ -10,6 +10,8 @@ export interface ReplayPlayer {
   readonly bot: string;
   readonly version: string;
   readonly knobs: KnobValues;
+  /** 人類玩家（不限指令額度） */
+  readonly unlimitedBudget?: boolean;
 }
 
 export interface ReplayDecision {
@@ -70,6 +72,21 @@ export function isHashTick(tick: number): boolean {
   return tick % RULES.replay.hashInterval === 0;
 }
 
+export function checkReplayVersion(file: ReplayFile): void {
+  if (file.format !== REPLAY_FORMAT) throw new ReplayVersionError(`回放格式 ${file.format} 不支援（目前 ${REPLAY_FORMAT}）`);
+  if (file.header.engineVersion !== ENGINE_VERSION || file.header.specVersion !== SPEC_VERSION) {
+    throw new ReplayVersionError(`回放版本不符：引擎 ${file.header.engineVersion}／規格 ${file.header.specVersion}，目前為 ${ENGINE_VERSION}／${SPEC_VERSION}`);
+  }
+}
+
+export function replaySetup(file: ReplayFile): MatchSetup {
+  return {
+    mode: file.header.mode,
+    seed: file.header.seed,
+    players: file.header.players.map((p) => ({ knobs: p.knobs, unlimitedBudget: p.unlimitedBudget === true })),
+  };
+}
+
 export interface ReplayRunOutput {
   readonly hashes: ReplayHash[];
   readonly finalHash: string;
@@ -82,11 +99,8 @@ export interface ReplayRunOutput {
  * onTick 可用於播放器（每 tick 結束後呼叫）。
  */
 export function runReplay(file: ReplayFile, verify = true, onTick?: (m: Match) => void): ReplayRunOutput {
-  if (file.format !== REPLAY_FORMAT) throw new ReplayVersionError(`回放格式 ${file.format} 不支援（目前 ${REPLAY_FORMAT}）`);
-  if (file.header.engineVersion !== ENGINE_VERSION || file.header.specVersion !== SPEC_VERSION) {
-    throw new ReplayVersionError(`回放版本不符：引擎 ${file.header.engineVersion}／規格 ${file.header.specVersion}，目前為 ${ENGINE_VERSION}／${SPEC_VERSION}`);
-  }
-  const m = new Match({ mode: file.header.mode, seed: file.header.seed, players: file.header.players.map((p) => ({ knobs: p.knobs })) });
+  checkReplayVersion(file);
+  const m = new Match(replaySetup(file));
   m.setRecordEvents(false);
   const byTick = new Map<number, ReplayDecision[]>();
   for (const d of file.decisions) {

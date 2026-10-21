@@ -41,12 +41,20 @@ npm run sim -- bench --mode 1v1
 npm run sim -- mapgen --mode ffa4 --seed 7
 ```
 
+## 瀏覽器版（M1）：人類對戰、觀戰、回放播放器
+
+```bash
+npm run web
+```
+
+啟動後開 <http://localhost:5173/web/>。可選 1v1／4 人對基準 Bot、觀戰 Bot 對戰，或載入回放檔。操作說明在首頁。打包成靜態網頁用 `npm run build:web`（輸出到 `dist-web/`）。
+
 ## CLI：rts-sim
 
 | 子指令 | 參數 | 說明 |
 | --- | --- | --- |
 | match | `--mode 1v1\|ffa4 --bots a.js b.js [...] [--games N] [--seed S] [--exec official\|batch] [--replay-dir D] [--out F]` | 指定選手對戰 N 場；第 i 場 seed = S + i；預設正式模式 |
-| mapgen | `--mode [--seed S] [--format ascii] [--validate N] [--out F]` | 印出 ASCII 地圖，或驗證 N 個 seed |
+| mapgen | `--mode [--seed S] [--format ascii\|png] [--validate N] [--out F]` | 輸出 ASCII 或 PNG 地圖，或驗證 N 個 seed |
 | bench | `--mode [--games N] [--exec batch] [--bot F] [--out F]` | 基準 Bot 鏡像對戰，回報每秒場數與每秒 tick |
 
 結束碼：0 成功、1 參數錯誤、2 選手載入失敗、3 引擎內部錯誤。
@@ -64,6 +72,9 @@ ASCII 地圖圖例：`.` 平地、`#` 阻擋、`f` 樹林、`m` 礦點、`R` 富
 | `src/sandbox` | 選手載入、批次／正式模式、輔助工具 |
 | `src/replay` | 回放紀錄與重建 |
 | `src/cli` | `rts-sim` |
+| `src/view` | 繪圖用的唯讀快照 |
+| `src/web` | 瀏覽器介面（Canvas 2D）與引擎 Worker |
+| `web/` | 網頁入口 index.html 與樣式 |
 | `src/api/types.ts` | 選手 API 公開型別 |
 | `bots/` | 基準 Bot、隨機 Bot |
 | `test/` | Vitest 測試 |

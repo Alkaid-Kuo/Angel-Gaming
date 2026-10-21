@@ -86,6 +86,7 @@ export function emit(state: MatchState, playerId: number, ev: GameEvent): void {
   const p = state.players[playerId];
   if (!p.alive) return;
   p.events.push(ev);
+  state.eventTap?.(playerId, ev);
 }
 
 export function emitAll(state: MatchState, ev: GameEvent): void {

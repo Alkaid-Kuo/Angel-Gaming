@@ -34,7 +34,7 @@ export function hashState(state: MatchState): string {
   h.int(state.tick).int(state.nextId).int(state.blockVersion).bool(state.over);
   for (const v of state.rng.getState()) h.int(v);
   for (const p of state.players) {
-    h.int(p.id).int(p.slot).int(p.minerals).int(p.supplyUsed).int(p.supplyCap).int(p.budget);
+    h.int(p.id).int(p.slot).int(p.minerals).int(p.supplyUsed).int(p.supplyCap).int(p.budget).bool(p.unlimitedBudget);
     h.bool(p.alive).int(p.eliminatedTick).int(p.eliminationScore);
     let explored = 0;
     for (let i = 0; i < p.explored.length; i++) explored += p.explored[i];

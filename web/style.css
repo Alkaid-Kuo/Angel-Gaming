@@ -1,0 +1,57 @@
+:root {
+  --bg: #0f1216;
+  --panel: rgba(17, 21, 27, 0.92);
+  --border: #2a313b;
+  --text: #e6e9ee;
+  --muted: #94a3b8;
+  --accent: #60a5fa;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; font-size: 14px; }
+.hidden { display: none !important; }
+button { background: #1f2630; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; font: inherit; }
+button:hover { border-color: var(--accent); }
+button.primary { background: #2563eb; border-color: #2563eb; padding: 8px 18px; }
+button.active { border-color: #86efac; color: #86efac; }
+input[type=number] { width: 120px; background: #11161c; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
+select { background: #11161c; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+
+.setup { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+.setup h1 small { font-size: 14px; color: var(--muted); font-weight: normal; }
+.card { background: #141920; border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; }
+.card h2 { margin: 0 0 10px; font-size: 16px; }
+.modes { display: grid; gap: 6px; margin-bottom: 10px; }
+.row { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.help table { border-collapse: collapse; width: 100%; }
+.help td { border-top: 1px solid var(--border); padding: 5px 6px; vertical-align: top; }
+.help td:first-child { white-space: nowrap; color: #cbd5e1; width: 1%; }
+
+.game { position: fixed; inset: 0; overflow: hidden; user-select: none; }
+.game canvas.view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; }
+.game.mode-attack canvas.view { cursor: crosshair; }
+.topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 14px; align-items: center; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.topbar .stat b { color: #fff; }
+.topbar .spacer { flex: 1; }
+.players { position: absolute; top: 42px; left: 8px; display: grid; gap: 4px; }
+.players .p { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; display: flex; gap: 10px; align-items: center; }
+.players .p.dead { opacity: 0.45; text-decoration: line-through; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.bottom { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; padding: 8px; pointer-events: none; align-items: flex-end; }
+.bottom > * { pointer-events: auto; }
+.minimap { width: 200px; height: 200px; border: 1px solid var(--border); background: #000; image-rendering: pixelated; }
+.selection { flex: 1; min-height: 110px; max-width: 560px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.selection .title { font-weight: bold; margin-bottom: 4px; }
+.selection .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.selection .actions button { font-size: 12px; padding: 3px 8px; }
+.selection .queue { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.selection .queue span { background: #1f2630; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+.log { width: 300px; max-height: 200px; overflow: hidden; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12px; line-height: 1.5; }
+.log .t { color: var(--muted); margin-right: 6px; }
+.hint { color: #fde68a; }
+.replaybar { position: absolute; left: 216px; right: 320px; bottom: 128px; display: flex; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.replaybar input[type=range] { flex: 1; }
+.warn { color: #fca5a5; font-weight: bold; }
+.dialog { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #161b22; border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; min-width: 340px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.dialog h2 { margin: 0 0 10px; }
+.dialog ol { padding-left: 20px; }
+.dialog .row { justify-content: flex-end; }

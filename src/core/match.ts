@@ -27,6 +27,7 @@ import { hashState } from './hash.ts';
 import { updateKnowledge, updateScouting, updateVision } from './knowledge.ts';
 import { moveUnits, resolveCollisions } from './movement.ts';
 import { buildObservation, discardObservation, type ObservationPacket } from './observe.ts';
+import { cloneState } from './clone.ts';
 import { SpatialIndex } from './spatial.ts';
 import type { MatchState, MineNode, Player, PlayerStats, Watchtower } from './state.ts';
 import { stepWatchtowers } from './tower.ts';
@@ -34,6 +35,8 @@ import { assetScore, createBuilding, createUnit, HALF_TILE, terrainWalk } from '
 
 export interface MatchPlayerSetup {
   readonly knobs: KnobValues;
+  /** 不限指令額度（人類玩家） */
+  readonly unlimitedBudget?: boolean;
 }
 
 export interface MatchSetup {
@@ -132,6 +135,7 @@ export class Match {
       spatial: new SpatialIndex(w, h),
       over: false,
       recordEvents: true,
+      eventTap: null,
     };
     this.state = state;
     // 礦點 → 瞭望塔 → 各選手主堡與工人，共用 id 計數器
@@ -160,6 +164,7 @@ export class Match {
         supplyUsed: 0,
         supplyCap: 0,
         budget: RULES.budget.initial,
+        unlimitedBudget: setup.players[pid].unlimitedBudget === true,
         alive: true,
         eliminatedTick: -1,
         eliminationScore: 0,
@@ -209,6 +214,18 @@ export class Match {
     state.spatial.rebuild(state.units);
     updateVision(state);
     updateKnowledge(state);
+  }
+
+  /** 由既有狀態建立（回放跳轉用的快照） */
+  static fromState(state: MatchState): Match {
+    const m = Object.create(Match.prototype) as { state: MatchState };
+    m.state = state;
+    return m as unknown as Match;
+  }
+
+  /** 深拷貝目前狀態，得到可獨立繼續模擬的比賽 */
+  clone(): Match {
+    return Match.fromState(cloneState(this.state));
   }
 
   get tick(): number {

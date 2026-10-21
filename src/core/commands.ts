@@ -73,11 +73,13 @@ export function applyCommands(state: MatchState, playerId: number, raw: unknown)
     return;
   }
   for (let i = 0; i < raw.length; i++) {
-    if (p.budget <= 0) {
-      reject(state, p, i, 'NO_BUDGET');
-      continue;
+    if (!p.unlimitedBudget) {
+      if (p.budget <= 0) {
+        reject(state, p, i, 'NO_BUDGET');
+        continue;
+      }
+      p.budget -= 1;
     }
-    p.budget -= 1;
     p.stats.commandsIssued += 1;
     const reason = applyOne(state, p, raw[i]);
     if (reason !== null) reject(state, p, i, reason);
