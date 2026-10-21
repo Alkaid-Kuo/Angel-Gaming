@@ -1,8 +1,21 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
-    "types": ["vite/client"]
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable",
+      "WebWorker"
+    ],
+    "types": [
+      "vite/client"
+    ]
   },
-  "include": ["src/web", "src/view", "src/api", "src/config"]
+  "include": [
+    "src/web",
+    "src/view",
+    "src/api",
+    "src/config"
+  ],
+  "exclude": []
 }

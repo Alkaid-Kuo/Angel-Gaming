@@ -166,6 +166,8 @@ export function createBuilding(state: MatchState, owner: number, type: BuildingT
     size: st.size,
     hp: complete ? st.hp : constructionHp(type, 0),
     maxHp: st.hp,
+    level: 1,
+    task: null,
     complete,
     progress: complete ? st.buildTicks : 0,
     builderId: 0,
@@ -318,6 +320,13 @@ export function setIdle(u: Unit): void {
 
 export function isWorker(u: Unit): boolean {
   return u.type === 'worker';
+}
+
+/** 科技等級：己方已完工主堡的最高等級（沒有則為 1） */
+export function techLevel(state: MatchState, p: Player): number {
+  let level = 1;
+  for (const b of state.buildings) if (b.owner === p.id && b.type === 'base' && b.complete && b.level > level) level = b.level;
+  return level;
 }
 
 /** 資產分數：存活單位成本 ＋ 已完工建築成本 */

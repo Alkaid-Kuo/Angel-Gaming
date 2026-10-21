@@ -2,7 +2,7 @@
 import { BUILDING_STATS, COMBAT_UNIT_TYPES, UNIT_STATS, type BuildingType, type MatchMode, type Stance, type UnitType } from '../config/index.ts';
 import type { Match } from '../core/match.ts';
 import type { MatchState, Player, Unit } from '../core/state.ts';
-import { buildingVisibleTo, tileIndex, unitVisibleTo } from '../core/world.ts';
+import { buildingVisibleTo, techLevel, tileIndex, unitVisibleTo } from '../core/world.ts';
 import { idiv } from '../shared/intmath.ts';
 
 export const GOD_VIEW = -1;
@@ -47,6 +47,9 @@ export interface BuildingFrame {
   readonly progress: number;
   readonly queue: { readonly unit: UnitType; readonly progress: number }[];
   readonly rally: { readonly x: number; readonly y: number } | null;
+  readonly level: number;
+  /** 升級／研究進行中：類型與進度 % */
+  readonly task: { readonly kind: 'upgrade' | 'research'; readonly research: string | null; readonly progress: number } | null;
   /** 迷霧中的記憶（不是目前狀態） */
   readonly remembered: boolean;
   readonly attacking: number;
@@ -63,6 +66,8 @@ export interface PlayerFrame {
   /** 兵力值：存活戰鬥單位成本總和 */
   readonly army: number;
   readonly gathered: number;
+  /** 科技：主堡最高等級與研究等級 */
+  readonly tech: { readonly level: number; readonly weapons: number; readonly armor: number };
 }
 
 export interface FrameView {
@@ -118,7 +123,18 @@ function playerFrame(s: MatchState, p: Player): PlayerFrame {
     if (u.type === 'worker') workers += 1;
     else if ((COMBAT_UNIT_TYPES as readonly string[]).includes(u.type)) army += UNIT_STATS[u.type].cost;
   }
-  return { id: p.id, alive: p.alive, minerals: p.minerals, supplyUsed: p.supplyUsed, supplyCap: p.supplyCap, budget: p.budget, workers, army, gathered: p.stats.gathered };
+  return {
+    id: p.id,
+    alive: p.alive,
+    minerals: p.minerals,
+    supplyUsed: p.supplyUsed,
+    supplyCap: p.supplyCap,
+    budget: p.budget,
+    workers,
+    army,
+    gathered: p.stats.gathered,
+    tech: { level: techLevel(s, p), weapons: p.research.weapons, armor: p.research.armor },
+  };
 }
 
 /** viewer = GOD_VIEW 時顯示全部 */
@@ -149,6 +165,8 @@ export function frameView(m: Match, viewer: number): FrameView {
       progress: b.complete ? 100 : idiv(b.progress * 100, st.buildTicks),
       queue: b.queue.map((q) => ({ unit: q.unit, progress: idiv(q.progress * 100, UNIT_STATS[q.unit].trainTicks) })),
       rally: b.hasRally ? { x: b.rallyX, y: b.rallyY } : null,
+      level: b.level,
+      task: b.task === null ? null : { kind: b.task.kind, research: b.task.kind === 'research' ? b.task.research : null, progress: idiv(b.task.progress * 100, b.task.total) },
       remembered: false,
       attacking: recent(b.lastHitTick) ? b.lastHitTarget : 0,
     });
@@ -169,6 +187,8 @@ export function frameView(m: Match, viewer: number): FrameView {
         progress: mem.progressPercent,
         queue: [],
         rally: null,
+        level: mem.level,
+        task: null,
         remembered: true,
         attacking: 0,
       });

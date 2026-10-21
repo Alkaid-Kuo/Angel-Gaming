@@ -1,5 +1,5 @@
 // 狀態雜湊：涵蓋所有會影響後續模擬的狀態（事件佇列與觀察用的增量除外）。
-import { BUILDING_TYPES, STANCES, UNIT_TYPES } from '../config/index.ts';
+import { BUILDING_TYPES, RESEARCH_TYPES, STANCES, UNIT_TYPES } from '../config/index.ts';
 import { Hasher } from '../shared/hash.ts';
 import type { MatchState, UnitOrder } from './state.ts';
 
@@ -36,6 +36,7 @@ export function hashState(state: MatchState): string {
   for (const p of state.players) {
     h.int(p.id).int(p.slot).int(p.minerals).int(p.supplyUsed).int(p.supplyCap).int(p.budget).bool(p.unlimitedBudget);
     h.bool(p.alive).int(p.eliminatedTick).int(p.eliminationScore);
+    for (const r of RESEARCH_TYPES) h.int(p.research[r]);
     let explored = 0;
     for (let i = 0; i < p.explored.length; i++) explored += p.explored[i];
     h.int(explored).int(p.memory.size);
@@ -56,6 +57,9 @@ export function hashState(state: MatchState): string {
     h.bool(b.complete).int(b.progress).int(b.builderId).int(b.queue.length);
     for (const q of b.queue) h.int(UNIT_TYPES.indexOf(q.unit)).int(q.progress);
     h.bool(b.hasRally).int(b.rallyX).int(b.rallyY).int(b.targetId).int(b.nextAttackTick);
+    h.int(b.level).int(b.maxHp);
+    if (b.task === null) h.int(-1);
+    else h.int(b.task.kind === 'upgrade' ? 0 : 1 + RESEARCH_TYPES.indexOf(b.task.research)).int(b.task.progress).int(b.task.total).int(b.task.cost);
   }
   for (const n of state.nodes) {
     h.int(n.id).int(n.reserve).int(n.minerId).int(n.queue.length);

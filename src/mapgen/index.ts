@@ -98,12 +98,12 @@ class SymmetricBuilder {
     return x >= 0 && y >= 0 && x < this.n && y < this.n;
   }
 
-  /** 第 k 個扇區的旋轉（格座標） */
+  /** 第 k 個扇區的對稱變換（格座標）；8 扇區時 k ≥ 4 先沿對角線鏡射再旋轉 */
   rot(k: number, x: number, y: number): [number, number] {
     const n1 = this.n - 1;
     if (this.sectors === 2) return k % 2 === 0 ? [x, y] : [n1 - x, n1 - y];
-    let rx = x;
-    let ry = y;
+    let rx = this.sectors === 8 && k >= 4 ? y : x;
+    let ry = this.sectors === 8 && k >= 4 ? x : y;
     for (let i = 0; i < k % 4; i++) {
       const nx = n1 - ry;
       const ny = rx;
@@ -271,9 +271,8 @@ function tryGenerate(mode: MatchMode, seed: number, attempt: number): GeneratedM
   const obj: Sector0Objects = { base: { x0: 0, y0: 0, x1: 0, y1: 0 }, mainNodes: [], expansions: [], richNodes: [] };
 
   // 1. 起點（主堡 3×3）
-  const c = idiv(n * MAPGEN.baseCenterPercent, 100);
-  const bx = c - 1 + rng.range(-MAPGEN.baseJitterTiles, MAPGEN.baseJitterTiles);
-  const by = c - 1 + rng.range(-MAPGEN.baseJitterTiles, MAPGEN.baseJitterTiles);
+  const bx = idiv(n * cfg.basePercent[0], 100) - 1 + rng.range(-MAPGEN.baseJitterTiles, MAPGEN.baseJitterTiles);
+  const by = idiv(n * cfg.basePercent[1], 100) - 1 + rng.range(-MAPGEN.baseJitterTiles, MAPGEN.baseJitterTiles);
   obj.base = { x0: bx, y0: by, x1: bx + BASE_SIZE - 1, y1: by + BASE_SIZE - 1 };
   const bcx = bx * TILE_SIZE + idiv(BASE_SIZE * TILE_SIZE, 2);
   const bcy = by * TILE_SIZE + idiv(BASE_SIZE * TILE_SIZE, 2);
@@ -334,10 +333,10 @@ function tryGenerate(mode: MatchMode, seed: number, attempt: number): GeneratedM
 
   // 4. 分礦區 2 處：環外、距主堡中心 16～22 格，分別偏向兩側
   const half = idiv(n, 2);
-  for (const side of [-1, 1]) {
+  for (const [minAng, maxAng] of cfg.expansionAngles) {
     let placed: { nodes: number[][]; area: TileRect } | null = null;
     for (let t = 0; t < MAPGEN.placementTries && placed === null; t++) {
-      const ang = toCenter + side * rng.range(MAPGEN.expansion.minSideAngle, MAPGEN.expansion.maxSideAngle);
+      const ang = toCenter + rng.range(minAng, maxAng);
       const dist = rng.range(MAPGEN.expansion.minDistTiles * TILE_SIZE, MAPGEN.expansion.maxDistTiles * TILE_SIZE);
       const [ecx, ecy] = polar(bcx, bcy, ang, dist);
       const halfArea = idiv(MAPGEN.expansion.buildAreaTiles, 2);
@@ -376,9 +375,14 @@ function tryGenerate(mode: MatchMode, seed: number, attempt: number): GeneratedM
 
   // 5. 富礦區：地圖邊緣中段、相鄰兩起點之間
   const m = MAPGEN.rich.edgeMarginTiles;
-  const rich: number[][] = cfg.sectors === 4
-    ? [[half - 2, m], [half + 1, m]]
-    : [[n - 1 - m - 2, m], [n - 1 - m, m + 2]];
+  let rich: number[][];
+  if (cfg.richPercent !== null) {
+    const rx = idiv(n * cfg.richPercent[0], 100);
+    const ry = idiv(n * cfg.richPercent[1], 100);
+    rich = [[rx, ry], [rx + 2, ry - 1]];
+  } else {
+    rich = cfg.sectors === 4 ? [[half - 2, m], [half + 1, m]] : [[n - 1 - m - 2, m], [n - 1 - m, m + 2]];
+  }
   if (!b.canReserve(rich, 1)) return '富礦區無法放置';
   obj.richNodes = rich;
   b.reserve(rich, 1);
@@ -389,7 +393,7 @@ function tryGenerate(mode: MatchMode, seed: number, attempt: number): GeneratedM
   b.protectTiles(diskTiles(towerTile, towerTile, MAPGEN.protect.watchtowerRadiusTiles + 1), 0);
 
   // 7. 障礙：阻擋與樹林斑塊，另加較大樹林
-  const inSector0 = (x: number, y: number): boolean => cfg.sectors === 4 ? x < half && y < half : x + y < n - 1;
+  const inSector0 = (x: number, y: number): boolean => (cfg.sectors === 8 ? y < x && x < half : cfg.sectors === 4 ? x < half && y < half : x + y < n - 1);
   const placeBlob = (r: number, code: TerrainCode): void => {
     for (let t = 0; t < MAPGEN.placementTries; t++) {
       const cx = rng.nextInt(n);
@@ -455,7 +459,7 @@ function tryGenerate(mode: MatchMode, seed: number, attempt: number): GeneratedM
     slots,
     watchtowers: [{ x: mapCenter, y: mapCenter }],
   };
-  const err = validateMap(map, obj.expansions.flatMap((e) => [0, 1, 2, 3].slice(0, b.sectors).map((k) => b.rotRect(k, e.area))));
+  const err = validateMap(map, obj.expansions.flatMap((e) => Array.from({ length: b.sectors }, (_, k) => b.rotRect(k, e.area))));
   return err ?? map;
 }
 
@@ -464,17 +468,22 @@ export function validateMap(map: GeneratedMap, expansionAreas: readonly TileRect
   const n = map.width;
   const sectors = MAP_MODES[map.mode].sectors;
   const b = new SymmetricBuilder(n, sectors);
-  // 對稱：每格與其旋轉對應格相同
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
-      const [rx, ry] = b.rot(1, x, y);
-      if (map.tiles[y * n + x] !== map.tiles[ry * n + rx]) return `地形不對稱 (${x},${y})`;
+  // 對稱：每格與其旋轉（8 人局另加鏡射）對應格相同
+  const generators = sectors === 8 ? [1, 4] : [1];
+  for (const k of generators) {
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const [rx, ry] = b.rot(k, x, y);
+        if (map.tiles[y * n + x] !== map.tiles[ry * n + rx]) return `地形不對稱 (${x},${y})`;
+      }
     }
   }
   const nodeSet = new Set(map.nodes.map((nd) => nd.tileY * n + nd.tileX));
   for (const nd of map.nodes) {
-    const [rx, ry] = b.rot(1, nd.tileX, nd.tileY);
-    if (!nodeSet.has(ry * n + rx)) return '礦點不對稱';
+    for (const k of generators) {
+      const [rx, ry] = b.rot(k, nd.tileX, nd.tileY);
+      if (!nodeSet.has(ry * n + rx)) return '礦點不對稱';
+    }
     if (map.tiles[nd.tileY * n + nd.tileX] !== TERRAIN.plain) return '礦點不在平地';
   }
   // 通行格網：地形阻擋、礦點、主堡皆不可通行

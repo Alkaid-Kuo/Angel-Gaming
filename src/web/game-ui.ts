@@ -4,7 +4,8 @@ import { BUILDING_STATS, TILE_SIZE, UNIT_STATS, type BuildingType, type Stance, 
 import type { MatchResult } from '../core/match.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import { GOD_VIEW, type BuildingFrame, type FrameView, type UnitFrame } from '../view/snapshot.ts';
-import { BUILD_KEYS, BUILDING_NAME, eventText, formatTime, ORDER_NAME, STANCE_NAME, TRAIN_KEYS, UNIT_NAME } from './labels.ts';
+import { BASE_UPGRADES, MAX_BASE_LEVEL, RESEARCH } from '../config/index.ts';
+import { BUILD_KEYS, BUILDING_NAME, eventText, formatTime, ORDER_NAME, RESEARCH_KEYS, RESEARCH_NAME, STANCE_NAME, TRAIN_KEYS, UNIT_NAME } from './labels.ts';
 import type { FromWorker, MatchMeta, ToWorker } from './protocol.ts';
 import { Broadcast } from './broadcast-ui.ts';
 import { Renderer, teamColor, type ViewModel } from './renderer.ts';
@@ -530,7 +531,7 @@ export class GameScreen {
     if (this.pendingBuild && BUILD_KEYS[k] !== undefined) return true;
     if (k === 'a' && this.myUnits().length > 0) return true;
     const b = this.selectedOwnBuilding();
-    if (b !== null && TRAIN_KEYS[b.type][k] !== undefined) return true;
+    if (b !== null && (TRAIN_KEYS[b.type][k] !== undefined || RESEARCH_KEYS[b.type]?.[k] !== undefined)) return true;
     return false;
   }
 
@@ -612,6 +613,15 @@ export class GameScreen {
         this.send([{ type: 'cancel', buildingId: b.id }]);
         return;
       }
+      if (k === 'u' && b.type === 'base') {
+        this.send([{ type: 'upgrade', buildingId: b.id }]);
+        return;
+      }
+      const research = RESEARCH_KEYS[b.type]?.[k];
+      if (research !== undefined) {
+        this.send([{ type: 'research', buildingId: b.id, research }]);
+        return;
+      }
     }
     this.keys.add(k);
   }
@@ -689,7 +699,8 @@ export class GameScreen {
     if (human !== null) {
       const p = cur.players[human];
       const budget = this.meta.limitBudget ? `　額度 <b>${p.budget}</b>` : '';
-      stats.innerHTML = `礦 <b>${p.minerals}</b>　人口 <b>${p.supplyUsed}/${p.supplyCap}</b>　時間 <b>${formatTime(cur.tick)}</b>${budget}${p.alive ? '' : '　<span class="warn">已淘汰</span>'}`;
+      const tech = `　科技 <b>Lv${p.tech.level}</b>${p.tech.weapons + p.tech.armor > 0 ? `（武器 ${p.tech.weapons}／護甲 ${p.tech.armor}）` : ''}`;
+      stats.innerHTML = `礦 <b>${p.minerals}</b>　人口 <b>${p.supplyUsed}/${p.supplyCap}</b>　時間 <b>${formatTime(cur.tick)}</b>${tech}${budget}${p.alive ? '' : '　<span class="warn">已淘汰</span>'}`;
     } else {
       stats.innerHTML = `時間 <b>${formatTime(cur.tick)}</b>　<span style="color:var(--muted)">${this.meta.kind === 'replay' ? '回放' : '觀戰'}　seed ${this.meta.map.seed}</span>`;
     }
@@ -764,7 +775,7 @@ export class GameScreen {
       const b = cur.buildings.find((x) => x.id === this.vm.selectedBuilding);
       if (b !== undefined) {
         box.append(el('div', 'title', `${BUILDING_NAME[b.type]}${b.owner === human ? '' : `（${this.playerName(b.owner)}）`}${b.remembered ? '（記憶）' : ''}`));
-        box.append(el('div', undefined, `血量 ${b.hp}/${b.maxHp}${b.complete ? '' : `　建造中 ${b.progress}%`}`));
+        box.append(el('div', undefined, `血量 ${b.hp}/${b.maxHp}${b.type === 'base' ? `　Lv${b.level}` : ''}${b.complete ? '' : `　建造中 ${b.progress}%`}${b.task === null ? '' : `　${b.task.kind === 'upgrade' ? '升級中' : `研究${RESEARCH_NAME[b.task.research as keyof typeof RESEARCH_NAME]}`} ${b.task.progress}%（生產暫停）`}`));
         if (b.queue.length > 0) {
           const q = el('div', 'queue');
           b.queue.forEach((item, i) => q.append(el('span', undefined, `${UNIT_NAME[item.unit]}${i === 0 ? ` ${item.progress}%` : ''}`)));
@@ -779,8 +790,24 @@ export class GameScreen {
             bt.addEventListener('click', () => this.send([{ type: 'train', buildingId: b.id, unit }]));
             actions.append(bt);
           }
-          if (!b.complete || b.queue.length > 0) {
-            const bt = el('button', undefined, b.complete ? 'X 取消生產' : 'X 取消建造（退 75%）');
+          if (b.type === 'base' && b.complete && b.level < MAX_BASE_LEVEL && b.task === null) {
+            const up = BASE_UPGRADES[b.level - 1];
+            const bt = el('button', undefined, `U 升級 Lv${b.level + 1} ${up.cost}`);
+            bt.addEventListener('click', () => this.send([{ type: 'upgrade', buildingId: b.id }]));
+            actions.append(bt);
+          }
+          for (const [key, research] of Object.entries(RESEARCH_KEYS[b.type] ?? {})) {
+            if (research === undefined) continue;
+            const lv = cur.players[human!].tech[research];
+            const def = RESEARCH[research].levels[lv];
+            if (def === undefined) continue;
+            const bt = el('button', undefined, `${key.toUpperCase()} ${RESEARCH_NAME[research]} Lv${lv + 1} ${def.cost}`);
+            bt.disabled = !b.complete || b.task !== null;
+            bt.addEventListener('click', () => this.send([{ type: 'research', buildingId: b.id, research }]));
+            actions.append(bt);
+          }
+          if (!b.complete || b.queue.length > 0 || b.task !== null) {
+            const bt = el('button', undefined, !b.complete ? 'X 取消建造（退 75%）' : b.task !== null ? 'X 取消升級／研究' : 'X 取消生產');
             bt.addEventListener('click', () => this.send([{ type: 'cancel', buildingId: b.id }]));
             actions.append(bt);
           }

@@ -1,5 +1,5 @@
 // 經濟：生產（步驟 3）、建造進度（步驟 4）、工人狀態機——採集、開工、接續建造（步驟 5）。
-import { BUILDING_STATS, RULES, TERRAIN, TILE_SIZE, UNIT_STATS, type BuildingType } from '../config/index.ts';
+import { BASE_UPGRADES, BUILDING_STATS, RULES, TERRAIN, TILE_SIZE, UNIT_STATS, type BuildingType } from '../config/index.ts';
 import { moveToRect, stopMoving } from './movement.ts';
 import { GATHER, type Building, type MatchState, type MineNode, type Player, type Unit } from './state.ts';
 import {
@@ -25,7 +25,14 @@ const INTERACT_SQ = RULES.economy.interactRange * RULES.economy.interactRange;
 export function stepProduction(state: MatchState): void {
   const center = state.width * HALF_TILE;
   for (const b of state.buildings) {
-    if (!b.complete || b.queue.length === 0) continue;
+    if (!b.complete) continue;
+    if (b.task !== null) {
+      // 升級／研究進行中：生產佇列暫停
+      b.task.progress += 1;
+      if (b.task.progress >= b.task.total) finishTask(state, b);
+      continue;
+    }
+    if (b.queue.length === 0) continue;
     const head = b.queue[0];
     const need = UNIT_STATS[head.unit].trainTicks;
     if (head.progress < need) head.progress += 1;
@@ -44,6 +51,24 @@ export function stepProduction(state: MatchState): void {
     const p = state.players[b.owner];
     p.stats.unitsProduced[head.unit] += 1;
     emit(state, b.owner, { type: 'unitTrained', tick: state.tick, id: u.id, unitType: head.unit });
+  }
+}
+
+function finishTask(state: MatchState, b: Building): void {
+  const task = b.task!;
+  b.task = null;
+  const p = state.players[b.owner];
+  if (task.kind === 'upgrade') {
+    const up = BASE_UPGRADES[b.level - 1];
+    b.level += 1;
+    b.hp += up.maxHp - b.maxHp;
+    b.maxHp = up.maxHp;
+    p.stats.upgrades += 1;
+    emit(state, b.owner, { type: 'upgradeComplete', tick: state.tick, buildingId: b.id, level: b.level });
+  } else {
+    p.research[task.research] += 1;
+    p.stats.researches += 1;
+    emit(state, b.owner, { type: 'researchComplete', tick: state.tick, research: task.research, level: p.research[task.research] });
   }
 }
 

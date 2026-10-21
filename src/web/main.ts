@@ -58,6 +58,8 @@ const PRESETS: Record<string, { mode: MatchMode; seats: (OpponentKind | 'human')
   s1v1: { mode: '1v1', seats: ['baseline', 'baseline'] },
   s1v1r: { mode: '1v1', seats: ['baseline', 'random'] },
   s4: { mode: 'ffa4', seats: ['baseline', 'baseline', 'baseline', 'baseline'] },
+  h8: { mode: 'ffa8', seats: ['human', 'baseline', 'baseline', 'baseline', 'baseline', 'baseline', 'baseline', 'baseline'] },
+  s8: { mode: 'ffa8', seats: ['baseline', 'baseline', 'baseline', 'baseline', 'baseline', 'baseline', 'baseline', 'baseline'] },
 };
 
 document.getElementById('start')!.addEventListener('click', () => {

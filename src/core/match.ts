@@ -1,7 +1,9 @@
 // 比賽主流程：建立狀態、固定順序的 tick 更新、結果與名次。
 import type { InitData, KnobValues } from '../api/types.ts';
 import {
+  BASE_UPGRADES,
   BUILDING_STATS,
+  RESEARCH,
   BUILDING_TYPES,
   DAMAGE_MULTIPLIER,
   MAP_MODES,
@@ -90,6 +92,8 @@ function emptyStats(): PlayerStats {
     rejections,
     scoutCount: 0,
     towerHeldTicks: 0,
+    upgrades: 0,
+    researches: 0,
   };
 }
 
@@ -169,6 +173,7 @@ export class Match {
         eliminatedTick: -1,
         eliminationScore: 0,
         knobs: { ...setup.players[pid].knobs },
+        research: { weapons: 0, armor: 0 },
         vis: new Uint16Array(w * h),
         explored: new Uint8Array(w * h),
         exploredDelta: [],
@@ -321,7 +326,7 @@ export class Match {
       watchtowers: s.towers.map((t) => ({ id: t.id, x: t.x, y: t.y })),
       me: playerId,
       players: s.players.map((p) => p.id),
-      stats: JSON.parse(JSON.stringify({ units: UNIT_STATS, buildings: BUILDING_STATS, multipliers: DAMAGE_MULTIPLIER })) as InitData['stats'],
+      stats: JSON.parse(JSON.stringify({ units: UNIT_STATS, buildings: BUILDING_STATS, multipliers: DAMAGE_MULTIPLIER, baseUpgrades: BASE_UPGRADES, research: RESEARCH })) as InitData['stats'],
       matchSeed: s.seed,
       knobs: { ...s.players[playerId].knobs },
     };

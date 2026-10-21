@@ -55,10 +55,11 @@ export function updateKnowledge(state: MatchState): void {
       if (visible) {
         const progressPercent = b.complete ? 100 : idiv(b.progress * 100, BUILDING_STATS[b.type].buildTicks);
         if (m === undefined) {
-          m = { id: b.id, owner: b.owner, type: b.type, tileX: b.tileX, tileY: b.tileY, size: b.size, hp: b.hp, complete: b.complete, progressPercent, lastSeenTick: state.tick, visibleNow: true };
+          m = { id: b.id, owner: b.owner, type: b.type, tileX: b.tileX, tileY: b.tileY, size: b.size, hp: b.hp, level: b.level, complete: b.complete, progressPercent, lastSeenTick: state.tick, visibleNow: true };
           p.memory.set(b.id, m);
         } else {
           m.hp = b.hp;
+          m.level = b.level;
           m.complete = b.complete;
           m.progressPercent = progressPercent;
           m.lastSeenTick = state.tick;

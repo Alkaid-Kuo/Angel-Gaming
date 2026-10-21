@@ -35,8 +35,9 @@ export interface PathResult {
 
 const DX = [1, -1, 0, 0, 1, 1, -1, -1];
 const DY = [0, 0, 1, -1, 1, -1, 1, -1];
-const KEY_F = 2 ** 32;
-const KEY_H = 2 ** 14;
+// 優先佇列鍵值 = f × 2^34 ＋ h × 2^15 ＋ 格索引（格數 ≤ 2^15、f 與 h < 2^19，總和 < 2^53）
+const KEY_F = 2 ** 34;
+const KEY_H = 2 ** 15;
 
 export function octile(dx: number, dy: number): number {
   const ax = dx < 0 ? -dx : dx;

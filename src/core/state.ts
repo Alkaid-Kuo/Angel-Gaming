@@ -1,6 +1,6 @@
 // 引擎內部狀態型別。所有數值皆為整數；實體陣列一律依 id 由小到大排列。
 import type { GameEvent, KnobValues } from '../api/types.ts';
-import type { BuildingType, MatchMode, RejectReason, Stance, UnitType } from '../config/index.ts';
+import type { BuildingType, MatchMode, RejectReason, ResearchType, Stance, UnitType } from '../config/index.ts';
 import type { PathCache, PathFinder } from '../path/index.ts';
 import type { Prng } from '../shared/prng.ts';
 import type { GeneratedMap } from '../mapgen/index.ts';
@@ -98,6 +98,11 @@ export interface QueueItem {
   progress: number;
 }
 
+/** 建築正在進行的升級或研究（進行中生產佇列暫停） */
+export type BuildingTask =
+  | { readonly kind: 'upgrade'; progress: number; readonly total: number; readonly cost: number }
+  | { readonly kind: 'research'; readonly research: ResearchType; progress: number; readonly total: number; readonly cost: number };
+
 export interface Building {
   readonly id: number;
   readonly owner: number;
@@ -106,7 +111,10 @@ export interface Building {
   readonly tileY: number;
   readonly size: number;
   hp: number;
-  readonly maxHp: number;
+  maxHp: number;
+  /** 主堡等級（其他建築固定為 1） */
+  level: number;
+  task: BuildingTask | null;
   complete: boolean;
   /** 已建造 tick 數 */
   progress: number;
@@ -163,6 +171,7 @@ export interface BuildingMemory {
   readonly tileY: number;
   readonly size: number;
   hp: number;
+  level: number;
   complete: boolean;
   progressPercent: number;
   lastSeenTick: number;
@@ -184,6 +193,8 @@ export interface PlayerStats {
   rejections: Record<RejectReason, number>;
   scoutCount: number;
   towerHeldTicks: number;
+  upgrades: number;
+  researches: number;
 }
 
 export interface Player {
@@ -204,6 +215,8 @@ export interface Player {
   eliminatedTick: number;
   eliminationScore: number;
   knobs: KnobValues;
+  /** 已完成的研究等級 */
+  research: Record<ResearchType, number>;
   /** 視野計數（每格被幾個來源看見） */
   vis: Uint16Array;
   explored: Uint8Array;

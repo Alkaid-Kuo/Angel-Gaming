@@ -1,8 +1,8 @@
 // 選手 API 的公開型別：開局資料、輔助工具、觀察資料、指令、事件。
 // 選手（bots）只依賴本檔；引擎內部型別不對外。
-import type { BuildingStats, BuildingType, MatchMode, RejectReason, Stance, TargetClass, UnitStats, UnitType } from '../config/index.ts';
+import type { BuildingStats, BuildingType, MatchMode, RejectReason, ResearchType, Stance, TargetClass, UnitStats, UnitType } from '../config/index.ts';
 
-export type { BuildingType, MatchMode, RejectReason, Stance, UnitType } from '../config/index.ts';
+export type { BuildingType, MatchMode, RejectReason, ResearchType, Stance, UnitType } from '../config/index.ts';
 
 // ───────── 宣告與旋鈕 ─────────
 
@@ -69,6 +69,10 @@ export interface GameStats {
   readonly buildings: Readonly<Record<BuildingType, BuildingStats>>;
   /** 兵種倍率（攻擊方 → 目標類別，整數百分比；null = 不可攻擊） */
   readonly multipliers: Readonly<Record<UnitType | 'tower', Readonly<Record<TargetClass, number | null>>>>;
+  /** 主堡升級：索引 0 = Lv1→Lv2 */
+  readonly baseUpgrades: readonly { readonly cost: number; readonly ticks: number; readonly maxHp: number }[];
+  /** 鍛造所研究 */
+  readonly research: Readonly<Record<ResearchType, { readonly levels: readonly { readonly cost: number; readonly ticks: number; readonly tech: number }[]; readonly perLevel: number }>>;
 }
 
 export interface InitData {
@@ -133,12 +137,21 @@ export interface QueueItemView {
   readonly progress: number;
 }
 
+/** 建築正在進行的升級或研究（進行中生產佇列暫停） */
+export type BuildingTaskView =
+  | { readonly type: 'upgrade'; readonly progress: number }
+  | { readonly type: 'research'; readonly research: ResearchType; readonly progress: number };
+
 export interface MyBuildingView {
   readonly id: number;
   readonly type: BuildingType;
   readonly tileX: number;
   readonly tileY: number;
   readonly hp: number;
+  readonly maxHp: number;
+  /** 主堡等級（其他建築為 1） */
+  readonly level: number;
+  readonly task: BuildingTaskView | null;
   readonly complete: boolean;
   /** 建造進度（0～100，%） */
   readonly progress: number;
@@ -162,6 +175,7 @@ export interface EnemyBuildingView {
   readonly tileX: number;
   readonly tileY: number;
   readonly hp: number;
+  readonly level: number;
   readonly complete: boolean;
   readonly progress: number;
 }
@@ -202,6 +216,8 @@ export interface Observation {
   readonly events: readonly GameEvent[];
   readonly knobs: KnobValues;
   readonly commandBudget: number;
+  /** 自己的科技：主堡最高等級與研究等級 */
+  readonly tech: { readonly level: number; readonly weapons: number; readonly armor: number };
 }
 
 // ───────── 事件 ─────────
@@ -217,6 +233,8 @@ export type GameEvent =
   | { readonly type: 'towerChanged'; readonly tick: number; readonly towerId: number; readonly owner: number | null }
   | { readonly type: 'playerEliminated'; readonly tick: number; readonly playerId: number }
   | { readonly type: 'commandRejected'; readonly tick: number; readonly index: number; readonly reason: RejectReason }
+  | { readonly type: 'upgradeComplete'; readonly tick: number; readonly buildingId: number; readonly level: number }
+  | { readonly type: 'researchComplete'; readonly tick: number; readonly research: ResearchType; readonly level: number }
   /** 規格補充（決策 Q5A）：工人抵達後開工失敗 */
   | { readonly type: 'buildFailed'; readonly tick: number; readonly workerId: number; readonly building: BuildingType; readonly tileX: number; readonly tileY: number; readonly reason: 'NO_MINERALS' | 'BAD_PLACEMENT' };
 
@@ -237,7 +255,9 @@ export type Command =
   | { readonly type: 'attack'; readonly units: UnitSet; readonly targetId: number }
   | { readonly type: 'hold'; readonly units: UnitSet }
   | { readonly type: 'stance'; readonly units: UnitSet; readonly stance: Stance }
-  | { readonly type: 'group'; readonly group: number; readonly units: readonly number[] };
+  | { readonly type: 'group'; readonly group: number; readonly units: readonly number[] }
+  | { readonly type: 'upgrade'; readonly buildingId: number }
+  | { readonly type: 'research'; readonly buildingId: number; readonly research: ResearchType };
 
 // ───────── 選手 ─────────
 

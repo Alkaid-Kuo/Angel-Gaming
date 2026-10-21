@@ -11,7 +11,7 @@ import type {
 import { BUILDING_STATS, UNIT_STATS } from '../config/index.ts';
 import { idiv } from '../shared/intmath.ts';
 import type { MatchState, Unit } from './state.ts';
-import { buildingVisibleTo, tileIndex, unitVisibleTo } from './world.ts';
+import { buildingVisibleTo, techLevel, tileIndex, unitVisibleTo } from './world.ts';
 
 function orderView(u: Unit): UnitOrderView {
   const o = u.order;
@@ -72,13 +72,16 @@ export function buildObservation(state: MatchState, playerId: number): Observati
         tileX: b.tileX,
         tileY: b.tileY,
         hp: b.hp,
+        maxHp: b.maxHp,
+        level: b.level,
+        task: b.task === null ? null : b.task.kind === 'upgrade' ? { type: 'upgrade', progress: idiv(b.task.progress * 100, b.task.total) } : { type: 'research', research: b.task.research, progress: idiv(b.task.progress * 100, b.task.total) },
         complete: b.complete,
         progress,
         queue: b.queue.map((q) => ({ unit: q.unit, progress: idiv(q.progress * 100, UNIT_STATS[q.unit].trainTicks) })),
         rally: b.hasRally ? { x: b.rallyX, y: b.rallyY } : null,
       });
     } else if (buildingVisibleTo(state, p, b)) {
-      enemyBuildings.push({ id: b.id, owner: b.owner, type: b.type, tileX: b.tileX, tileY: b.tileY, hp: b.hp, complete: b.complete, progress });
+      enemyBuildings.push({ id: b.id, owner: b.owner, type: b.type, tileX: b.tileX, tileY: b.tileY, hp: b.hp, level: b.level, complete: b.complete, progress });
     }
   }
   const rememberedBuildings: RememberedBuildingView[] = [];
@@ -91,6 +94,7 @@ export function buildObservation(state: MatchState, playerId: number): Observati
       tileX: m.tileX,
       tileY: m.tileY,
       hp: m.hp,
+      level: m.level,
       complete: m.complete,
       progress: m.progressPercent,
       lastSeenTick: m.lastSeenTick,
@@ -116,6 +120,7 @@ export function buildObservation(state: MatchState, playerId: number): Observati
     events: p.events,
     knobs: { ...p.knobs },
     commandBudget: p.budget,
+    tech: { level: techLevel(state, p), weapons: p.research.weapons, armor: p.research.armor },
   };
   p.events = [];
   const exploredDelta = p.exploredDelta;

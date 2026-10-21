@@ -41,11 +41,14 @@ describe('mapgen', () => {
         attempts.set(m.attempt, (attempts.get(m.attempt) ?? 0) + 1);
         // 對稱檢查：每格與其 180°／90° 旋轉對應格相同
         let asym = 0;
+        const sectors = MAP_MODES[mode].sectors;
         for (let y = 0; y < n; y++) {
           for (let x = 0; x < n; x++) {
-            const rx = MAP_MODES[mode].sectors === 2 ? n - 1 - x : n - 1 - y;
-            const ry = MAP_MODES[mode].sectors === 2 ? n - 1 - y : x;
+            const rx = sectors === 2 ? n - 1 - x : n - 1 - y;
+            const ry = sectors === 2 ? n - 1 - y : x;
             if (m.tiles[y * n + x] !== m.tiles[ry * n + rx]) asym++;
+            // 8 人局另需沿對角線鏡射對稱
+            if (sectors === 8 && m.tiles[y * n + x] !== m.tiles[x * n + y]) asym++;
           }
         }
         expect(asym).toBe(0);

@@ -1,11 +1,14 @@
 // 戰鬥：射程判定、目標選擇、單位 AI（步驟 6）、攻擊（步驟 8）、傷害結算與淘汰（步驟 9）。
 import {
   BUILDING_STATS,
+  COMBAT_UNIT_TYPES,
   DAMAGE_MULTIPLIER,
+  RESEARCH,
   RULES,
   TILE_SIZE,
   UNIT_STATS,
   type TargetClass,
+  type UnitType,
 } from '../config/index.ts';
 import { applyPercent } from '../shared/intmath.ts';
 import { chasePoint, isPathTo, moveToPoint, moveToRect, stopMoving } from './movement.ts';
@@ -75,10 +78,32 @@ function multiplier(attacker: Unit['type'] | 'tower', target: TargetClass): numb
 }
 
 export function damageOf(attacker: Unit['type'] | 'tower', target: TargetClass): number {
+  return damageWith(attacker, target, 0, 0);
+}
+
+function isCombatUnit(t: UnitType): boolean {
+  return (COMBAT_UNIT_TYPES as readonly string[]).includes(t);
+}
+
+/** 傷害 = max(1, floor((攻擊 ＋ 武器加成) × 倍率 ÷ 100) − 護甲) */
+export function damageWith(attacker: Unit['type'] | 'tower', target: TargetClass, weaponsLevel: number, armor: number): number {
   const mult = multiplier(attacker, target);
   if (mult === null) throw new Error(`${attacker} 不能攻擊 ${target}`);
   const base = attacker === 'tower' ? BUILDING_STATS.tower.weapon!.attack : UNIT_STATS[attacker].attack;
-  return Math.max(RULES.combat.minDamage, applyPercent(base, mult));
+  const bonus = attacker !== 'tower' && isCombatUnit(attacker) ? weaponsLevel * RESEARCH.weapons.perLevel : 0;
+  return Math.max(RULES.combat.minDamage, applyPercent(base + bonus, mult) - armor);
+}
+
+/** 實際傷害：攻擊方選手的武器研究、目標選手的護甲研究 */
+function hitDamage(state: MatchState, attacker: Unit['type'] | 'tower', attackerOwner: number, target: Entity): number {
+  const weapons = state.players[attackerOwner].research.weapons;
+  const armor = target.kind === 'unit' && isCombatUnit(target.u.type) ? state.players[target.u.owner].research.armor * RESEARCH.armor.perLevel : 0;
+  return damageWith(attacker, targetClass(target), weapons, armor);
+}
+
+/** 該攻擊方能否傷害該目標（例如攻城車只能攻擊建築、防禦塔不攻擊建築） */
+function canDamage(attacker: Unit['type'] | 'tower', target: Entity): boolean {
+  return multiplier(attacker, targetClass(target)) !== null;
 }
 
 // ───────── 目標選擇 ─────────
@@ -126,6 +151,7 @@ export function acquireForUnit(state: MatchState, u: Unit, useSight: boolean): n
   let best: Candidate | null = null;
   for (const v of state.spatial.query(u.x, u.y, queryR, candidateBuf)) {
     if (v.owner === u.owner || !state.unitById.has(v.id)) continue;
+    if (multiplier(u.type, v.type) === null) continue;
     if (!unitVisibleTo(state, p, v)) continue;
     const e: Entity = { kind: 'unit', u: v };
     if (!useSight && !unitInRange(u, e)) continue;
@@ -275,7 +301,7 @@ export function stepUnitAI(state: MatchState): void {
       case 'attack': {
         const p = state.players[u.owner];
         const target = validEnemyTarget(state, p, order.targetId);
-        if (target === null) {
+        if (target === null || !canDamage(u.type, target)) {
           setIdle(u);
           stopMoving(u);
         } else if (unitInRange(u, target)) {
@@ -320,8 +346,8 @@ export function stepAttacks(state: MatchState): Hit[] {
     if (u.attackTarget === 0 || state.tick < u.nextAttackTick) continue;
     const p = state.players[u.owner];
     const target = validEnemyTarget(state, p, u.attackTarget);
-    if (target === null || !unitInRange(u, target)) continue;
-    const damage = damageOf(u.type, targetClass(target));
+    if (target === null || !canDamage(u.type, target) || !unitInRange(u, target)) continue;
+    const damage = hitDamage(state, u.type, u.owner, target);
     hits.push({ attackerId: u.id, attackerOwner: u.owner, targetId: u.attackTarget, damage });
     u.nextAttackTick = state.tick + UNIT_STATS[u.type].cooldown;
     u.lastHitTarget = u.attackTarget;
@@ -333,7 +359,7 @@ export function stepAttacks(state: MatchState): Hit[] {
     const v = state.unitById.get(t.attackTarget);
     const p = state.players[t.owner];
     if (v === undefined || !towerInRange(t, v) || !unitVisibleTo(state, p, v)) continue;
-    const damage = damageOf('tower', v.type);
+    const damage = hitDamage(state, 'tower', t.owner, { kind: 'unit', u: v });
     hits.push({ attackerId: t.id, attackerOwner: t.owner, targetId: v.id, damage });
     t.nextAttackTick = state.tick + BUILDING_STATS.tower.weapon!.cooldown;
     t.lastHitTarget = v.id;

@@ -334,7 +334,8 @@ export class Renderer {
     ctx.font = `bold ${Math.max(9, Math.round(tilePx * (b.size === 1 ? 0.7 : 1)))}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(BUILDING_GLYPH[b.type], x + w / 2, y + w / 2);
+    ctx.fillText(BUILDING_GLYPH[b.type] + (b.level > 1 ? String(b.level) : ''), x + w / 2, y + w / 2);
+    if (b.task !== null) this.bar(x + 2, y + w - 6, w - 4, 4, b.task.progress / 100, '#a78bfa');
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
     if (!b.complete) this.bar(x + 2, y + w - 6, w - 4, 4, b.progress / 100, '#facc15');
@@ -391,6 +392,9 @@ export class Renderer {
         ctx.beginPath();
         ctx.arc(cx, cy, r * 0.25, 0, Math.PI * 2);
         ctx.fill();
+        break;
+      case 'siege':
+        ctx.strokeRect(cx - r * 0.5, cy - r * 0.5, r, r);
         break;
     }
     const selected = vm.selection.has(u.id);

@@ -1,20 +1,25 @@
 // 步驟 2：指令驗證與套用。每個指令消耗 1 點額度（NO_BUDGET 除外），依陣列順序處理。
 import {
+  BASE_UPGRADES,
   BUILDING_STATS,
   BUILDING_TYPES,
+  MAX_BASE_LEVEL,
+  RESEARCH,
+  RESEARCH_TYPES,
   RULES,
   STANCES,
   UNIT_STATS,
   UNIT_TYPES,
   type BuildingType,
   type RejectReason,
+  type ResearchType,
   type Stance,
   type UnitType,
 } from '../config/index.ts';
 import { applyPercent } from '../shared/intmath.ts';
 import { leaveNode, placementKnown, startGather } from './economy.ts';
 import type { MatchState, Player, Unit } from './state.ts';
-import { buildingVisibleTo, emit, inMap, removeBuilding, setIdle, unitVisibleTo } from './world.ts';
+import { buildingVisibleTo, emit, inMap, removeBuilding, setIdle, techLevel, unitVisibleTo } from './world.ts';
 
 type Obj = Record<string, unknown>;
 
@@ -117,6 +122,10 @@ function applyOne(state: MatchState, p: Player, cmd: unknown): RejectReason | nu
       return cmdStance(state, p, cmd);
     case 'group':
       return cmdGroup(state, p, cmd);
+    case 'upgrade':
+      return cmdUpgrade(state, p, cmd);
+    case 'research':
+      return cmdResearch(state, p, cmd);
     default:
       return 'BAD_FORMAT';
   }
@@ -146,6 +155,7 @@ function cmdBuild(state: MatchState, p: Player, cmd: Obj): RejectReason | null {
   if (!isInt(cmd.workerId) || !isOneOf<BuildingType>(cmd.building, BUILDING_TYPES) || !isInt(cmd.tileX) || !isInt(cmd.tileY)) return 'BAD_FORMAT';
   const w = ownWorker(state, p, cmd.workerId);
   if (typeof w === 'string') return w;
+  if (techLevel(state, p) < BUILDING_STATS[cmd.building].requiresTech) return 'NO_TECH';
   if (!placementKnown(state, p, cmd.building, cmd.tileX, cmd.tileY)) return 'BAD_PLACEMENT';
   interrupt(state, w);
   w.order = { kind: 'build', building: cmd.building, tileX: cmd.tileX, tileY: cmd.tileY };
@@ -186,6 +196,12 @@ function cmdCancel(state: MatchState, p: Player, cmd: Obj): RejectReason | null 
   if (!b.complete) {
     p.minerals += applyPercent(BUILDING_STATS[b.type].cost, RULES.construction.cancelRefundPercent);
     removeBuilding(state, b);
+    return null;
+  }
+  if (b.task !== null) {
+    // 取消升級／研究：全額退還
+    p.minerals += b.task.cost;
+    b.task = null;
     return null;
   }
   const item = b.queue.pop();
@@ -255,6 +271,40 @@ function cmdStance(state: MatchState, p: Player, cmd: Obj): RejectReason | null 
     u.targetId = 0;
     u.returning = false;
   }
+  return null;
+}
+
+/** 主堡升級（M3 提案）：進行中生產佇列暫停 */
+function cmdUpgrade(state: MatchState, p: Player, cmd: Obj): RejectReason | null {
+  if (!isInt(cmd.buildingId)) return 'BAD_FORMAT';
+  const b = state.buildingById.get(cmd.buildingId);
+  if (b === undefined || b.owner !== p.id) return 'NOT_OWNED';
+  if (b.type !== 'base' || !b.complete) return 'WRONG_PRODUCER';
+  if (b.level >= MAX_BASE_LEVEL) return 'INVALID_TARGET';
+  if (b.task !== null) return 'QUEUE_FULL';
+  const up = BASE_UPGRADES[b.level - 1];
+  if (p.minerals < up.cost) return 'NO_MINERALS';
+  p.minerals -= up.cost;
+  b.task = { kind: 'upgrade', progress: 0, total: up.ticks, cost: up.cost };
+  return null;
+}
+
+/** 鍛造所研究（M3 提案）：同一研究同時只能在一處進行 */
+function cmdResearch(state: MatchState, p: Player, cmd: Obj): RejectReason | null {
+  if (!isInt(cmd.buildingId) || !isOneOf<ResearchType>(cmd.research, RESEARCH_TYPES)) return 'BAD_FORMAT';
+  const b = state.buildingById.get(cmd.buildingId);
+  if (b === undefined || b.owner !== p.id) return 'NOT_OWNED';
+  if (!b.complete || !BUILDING_STATS[b.type].researches.includes(cmd.research)) return 'WRONG_PRODUCER';
+  const r = cmd.research;
+  const levels = RESEARCH[r].levels;
+  const pending = state.buildings.some((x) => x.owner === p.id && x.task !== null && x.task.kind === 'research' && x.task.research === r);
+  if (pending || p.research[r] >= levels.length) return 'INVALID_TARGET';
+  const next = levels[p.research[r]];
+  if (techLevel(state, p) < next.tech) return 'NO_TECH';
+  if (b.task !== null) return 'QUEUE_FULL';
+  if (p.minerals < next.cost) return 'NO_MINERALS';
+  p.minerals -= next.cost;
+  b.task = { kind: 'research', research: r, progress: 0, total: next.ticks, cost: next.cost };
   return null;
 }
 

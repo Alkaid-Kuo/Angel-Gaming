@@ -9,7 +9,7 @@ function cloneUnit(u: Unit): Unit {
 }
 
 function cloneBuilding(b: Building): Building {
-  return { ...b, queue: b.queue.map((q) => ({ ...q })) };
+  return { ...b, queue: b.queue.map((q) => ({ ...q })), task: b.task === null ? null : { ...b.task } };
 }
 
 function clonePlayer(p: Player): Player {
@@ -18,6 +18,7 @@ function clonePlayer(p: Player): Player {
   return {
     ...p,
     knobs: { ...p.knobs },
+    research: { ...p.research },
     vis: p.vis.slice(),
     explored: p.explored.slice(),
     exploredDelta: p.exploredDelta.slice(),

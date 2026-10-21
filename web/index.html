@@ -17,6 +17,8 @@
       <label><input type="radio" name="mode" value="s1v1"> 觀戰 1v1：基準 Bot vs 基準 Bot</label>
       <label><input type="radio" name="mode" value="s1v1r"> 觀戰 1v1：基準 Bot vs 隨機 Bot</label>
       <label><input type="radio" name="mode" value="s4"> 觀戰 4 人：基準 Bot × 4</label>
+      <label><input type="radio" name="mode" value="h8"> 8 人：玩家 vs 7 個基準 Bot（M3 提案）</label>
+      <label><input type="radio" name="mode" value="s8"> 觀戰 8 人：基準 Bot × 8（M3 提案）</label>
     </div>
     <div class="row">
       <label>Seed <input id="seed" type="number" min="0" step="1"></label>
@@ -41,9 +43,10 @@
       <tr><td>H</td><td>駐守（原地停下）</td></tr>
       <tr><td>F1～F4</td><td>姿態：積極、防守、堅守、撤退</td></tr>
       <tr><td>Ctrl ＋ 0～9／0～9</td><td>設定編隊／選取編隊</td></tr>
-      <tr><td>B ＋ 建築鍵 ＋ 左鍵</td><td>工人蓋建築：C 主堡、D 採集站、S 補給站、R 兵營、T 防禦塔（Shift 連續放置）</td></tr>
-      <tr><td>Q／W／E</td><td>選建築時生產（主堡 Q 工人；兵營 Q 長槍兵、W 弓兵、E 騎兵）</td></tr>
-      <tr><td>X</td><td>取消建築的最後一個生產項目，或取消建造中的建築</td></tr>
+      <tr><td>B ＋ 建築鍵 ＋ 左鍵</td><td>工人蓋建築：C 主堡、D 採集站、S 補給站、R 兵營、T 防禦塔、F 鍛造所、G 攻城工坊（Shift 連續放置；鍛造所與攻城工坊需要主堡 Lv2）</td></tr>
+      <tr><td>Q／W／E</td><td>選建築時生產或研究（主堡 Q 工人；兵營 Q 長槍兵、W 弓兵、E 騎兵；攻城工坊 Q 攻城車；鍛造所 Q 武器、W 護甲）</td></tr>
+      <tr><td>U</td><td>選主堡時升級（Lv2、Lv3）</td></tr>
+      <tr><td>X</td><td>取消升級／研究、最後一個生產項目，或取消建造中的建築</td></tr>
       <tr><td>空白鍵／＋／−</td><td>暫停；調整速度</td></tr>
       <tr><td>WASD／方向鍵／畫面邊緣／中鍵拖曳／滾輪</td><td>平移與縮放（A、W 等鍵在有對應動作時優先執行動作）</td></tr>
     </table>

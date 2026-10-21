@@ -114,7 +114,8 @@ export function gameOutput(
 
 /** 彙總：1v1 為各選手勝率；4 人為平均名次與名次分布。依選手檔案（--bots 的順序）統計 */
 export function summarize(mode: MatchMode, bots: readonly BotInfo[], games: readonly GameOutput[]): Record<string, unknown> {
-  const per = bots.map((b) => ({ bot: b.name, version: b.version, file: b.file, games: 0, wins: 0, rankSum: 0, ranks: [0, 0, 0, 0] }));
+  const seats = games.length > 0 ? games[0].players.length : 4;
+  const per = bots.map((b) => ({ bot: b.name, version: b.version, file: b.file, games: 0, wins: 0, rankSum: 0, ranks: new Array<number>(seats).fill(0) }));
   for (const g of games) {
     for (const p of g.players) {
       const s = per[p.botIndex];
