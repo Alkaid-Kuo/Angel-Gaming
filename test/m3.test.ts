@@ -108,3 +108,70 @@ describe('8 人局（M3 提案）', () => {
     expect(new Set(out.result.players.map((p) => p.rank)).size).toBe(8);
   });
 });
+
+describe('M3 新內容的確定性', () => {
+  it('使用升級、研究、攻城車的對局，回放連跑 3 次雜湊一致', async () => {
+    const { compileBot } = await import('../src/sandbox/compile.ts');
+    const { runReplay } = await import('../src/replay/index.ts');
+    // 測試選手：採礦 → 升級主堡 → 鍛造所＋攻城工坊 → 研究 → 攻城車進攻
+    const src = `
+export default class TechBot {
+  constructor() { this.data = null; this.step = 0; }
+  declare() { return { name: 'Tech', style: '', knobs: [
+    { key: 'a', name: 'a', description: '', min: 0, max: 1, default: 0, integer: true },
+    { key: 'b', name: 'b', description: '', min: 0, max: 1, default: 0, integer: true },
+    { key: 'c', name: 'c', description: '', min: 0, max: 1, default: 0, integer: true }] }; }
+  init(data, helpers) { this.data = data; this.h = helpers; }
+  decide(obs) {
+    const cmds = [];
+    const push = (c) => { if (cmds.length < obs.commandBudget) cmds.push(c); };
+    const main = this.data.mineAreas.find((a) => a.kind === 'main' && a.owner === this.data.me);
+    const nodes = this.data.mineNodes.filter((n) => n.areaId === main.areaId);
+    const workers = obs.myUnits.filter((u) => u.type === 'worker');
+    const idle = workers.filter((u) => u.order.type === 'idle');
+    if (idle.length > 0) push({ type: 'gather', units: idle.map((u) => u.id), nodeId: nodes[obs.tick % nodes.length].id });
+    const base = obs.myBuildings.find((b) => b.type === 'base' && b.complete);
+    if (!base) return cmds;
+    if (base.level < 3 && base.task === null && obs.minerals >= 250) push({ type: 'upgrade', buildingId: base.id });
+    if (workers.length < 10 && base.queue.length === 0 && base.task === null && obs.minerals >= 50) push({ type: 'train', buildingId: base.id, unit: 'worker' });
+    const s = this.data.startSlots.find((x) => x.playerId === this.data.me);
+    const building = workers.some((w) => w.order.type === 'build' || w.order.type === 'construct');
+    for (const type of building ? [] : ['forge', 'workshop', 'supply']) {
+      const have = type !== 'supply' ? obs.myBuildings.some((b) => b.type === type) : obs.supplyCap - obs.supplyUsed > 3;
+      if (have || obs.tech.level < (type === 'supply' ? 1 : 2) || obs.minerals < 150) continue;
+      let placed = false;
+      for (let dy = -7; dy <= 7 && !placed; dy++) {
+        for (let dx = -7; dx <= 7 && !placed; dx++) {
+          const x = s.tileX + dx, y = s.tileY + dy;
+          if (Math.abs(dx) < 4 && Math.abs(dy) < 4) continue;
+          if (workers[0] && this.h.canPlace(type, x, y)) { push({ type: 'build', workerId: workers[0].id, building: type, tileX: x, tileY: y }); placed = true; }
+        }
+      }
+      if (placed) break;
+    }
+    const forge = obs.myBuildings.find((b) => b.type === 'forge' && b.complete);
+    if (forge && forge.task === null && obs.minerals >= 100) push({ type: 'research', buildingId: forge.id, research: obs.tech.armor <= obs.tech.weapons ? 'armor' : 'weapons' });
+    const shop = obs.myBuildings.find((b) => b.type === 'workshop' && b.complete);
+    if (shop && shop.queue.length < 2 && obs.minerals >= 150) push({ type: 'train', buildingId: shop.id, unit: 'siege' });
+    const sieges = obs.myUnits.filter((u) => u.type === 'siege' && u.order.type === 'idle');
+    const enemy = this.data.startSlots.find((x) => x.playerId !== this.data.me);
+    if (sieges.length >= 2) push({ type: 'attackMove', units: sieges.map((u) => u.id), x: enemy.tileX * 1000 + 1500, y: enemy.tileY * 1000 + 1500 });
+    return cmds;
+  }
+}`;
+    const compiled = compileBot(src, 'tech.js');
+    const controllers = [new BatchController(compiled, 'tech.js'), new BatchController(compiled, 'tech.js')];
+    const knobs = controllers.map((c) => resolveKnobs(c.declaration, undefined, c.label));
+    const live = await runMatch({ mode: '1v1', seed: 17, controllers, knobs, record: true });
+    for (const rt of live.runtime) expect(rt.exceptions).toBe(0);
+    const stats = live.result.players.map((p) => p.stats);
+    expect(stats.some((s) => s.upgrades > 0)).toBe(true);
+    expect(stats.some((s) => s.researches > 0)).toBe(true);
+    expect(stats.some((s) => s.unitsProduced.siege > 0)).toBe(true);
+    for (let i = 0; i < 3; i++) {
+      const r = runReplay(live.replay!, true);
+      expect(r.hashes).toEqual(live.replay!.hashes);
+      expect(r.finalHash).toBe(live.finalHash);
+    }
+  });
+});
