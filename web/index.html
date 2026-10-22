@@ -8,35 +8,35 @@
 </head>
 <body>
 <div id="setup" class="setup">
-  <h1>天使戰隊 RTS <small>試玩版</small></h1>
-  <section class="card tutorial-card">
-    <h2>第一次玩？</h2>
-    <p>跟著新手教學一步步學會採礦、生產、建造、出兵與進攻，對手是不會反擊的教學木樁（約 5～10 分鐘）。</p>
-    <button id="tutorial" class="primary" type="button">開始新手教學</button>
+  <section class="hero">
+    <h1>天使戰隊 RTS<small>試玩版</small></h1>
+    <p>中世紀即時戰略。蓋經濟、出兵、互相拆家——由各家 AI 寫出的選手在這裡對決，你也可以親自上場或在旁觀戰。</p>
+    <div class="row">
+      <button id="tutorial" class="primary" type="button">開始新手教學</button>
+      <span class="muted small">第一次玩？跟著 9 個步驟學會基本操作，對手不會反擊（約 5～10 分鐘）</span>
+    </div>
   </section>
   <section class="card">
     <h2>開始對局</h2>
     <div class="modes" id="modes">
-      <label><input type="radio" name="mode" value="h1v1" checked> 1v1：玩家 vs 基準 Bot</label>
-      <label><input type="radio" name="mode" value="h4"> 4 人：玩家 vs 3 個基準 Bot</label>
-      <label><input type="radio" name="mode" value="s1v1"> 觀戰 1v1：基準 Bot vs 基準 Bot</label>
-      <label><input type="radio" name="mode" value="s1v1r"> 觀戰 1v1：基準 Bot vs 隨機 Bot</label>
-      <label><input type="radio" name="mode" value="s4"> 觀戰 4 人：基準 Bot × 4</label>
-      <label><input type="radio" name="mode" value="h8"> 8 人：玩家 vs 7 個基準 Bot（M3 提案）</label>
-      <label><input type="radio" name="mode" value="s8"> 觀戰 8 人：基準 Bot × 8（M3 提案）</label>
+      <label class="mode-tile"><input type="radio" name="mode" value="h1v1" checked><span class="t" data-icon="spear">1v1 對戰</span><span class="d">你 vs 基準 Bot</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="h4"><span class="t" data-icon="army">4 人混戰</span><span class="d">你 vs 3 個基準 Bot</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="h8"><span class="t" data-icon="army">8 人混戰</span><span class="d">你 vs 7 個基準 Bot</span><span class="tag">提案</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="s1v1"><span class="t" data-icon="watchtower">觀戰 1v1</span><span class="d">基準 Bot vs 基準 Bot</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="s1v1r"><span class="t" data-icon="watchtower">觀戰 1v1</span><span class="d">基準 Bot vs 隨機 Bot</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="s4"><span class="t" data-icon="watchtower">觀戰 4 人</span><span class="d">基準 Bot × 4</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="s8"><span class="t" data-icon="watchtower">觀戰 8 人</span><span class="d">基準 Bot × 8</span><span class="tag">提案</span></label>
     </div>
     <div class="row">
-      <label>Seed <input id="seed" type="number" min="0" step="1"></label>
+      <label>地圖 Seed <input id="seed" type="number" min="0" step="1"></label>
       <button id="reroll" type="button">隨機</button>
-    </div>
-    <div class="row">
-      <label><input id="limit" type="checkbox"> 套用與選手相同的指令額度（每秒 5 個）</label>
+      <label class="muted small"><input id="limit" type="checkbox"> 套用與 AI 選手相同的指令額度（每秒 5 個）</label>
     </div>
     <button id="start" class="primary" type="button">開始</button>
   </section>
   <section class="card">
     <h2>回放播放器</h2>
-    <p>載入 <code>rts-sim match --replay-dir</code> 產生的回放檔，或對局結束後下載的回放。</p>
+    <p class="muted">載入 <code>rts-sim match --replay-dir</code> 產生的回放檔，或對局結束後下載的回放。</p>
     <input id="replayFile" type="file" accept=".json,application/json">
   </section>
   <section class="card" id="helpCard">

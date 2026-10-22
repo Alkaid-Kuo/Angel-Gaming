@@ -113,7 +113,7 @@ export class Broadcast {
       if (next === undefined) this.caption.classList.add('hidden');
       else {
         this.caption.textContent = next.text;
-        this.caption.style.borderColor = next.color;
+        this.caption.style.borderLeftColor = next.color;
         this.caption.classList.remove('hidden');
         this.captionUntil = now + 2800;
       }

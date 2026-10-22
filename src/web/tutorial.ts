@@ -172,6 +172,9 @@ export class Tutorial {
     }
     const step = STEPS[this.index];
     head.innerHTML = `<span class="tut-n">教學 ${this.index + 1}／${STEPS.length}</span>${step.title}`;
+    const progress = document.createElement('div');
+    progress.className = 'tut-progress';
+    progress.innerHTML = `<i style="width:${Math.round((this.index * 100) / STEPS.length)}%"></i>`;
     const text = document.createElement('div');
     text.className = 'tut-text';
     text.innerHTML = step.text;
@@ -200,6 +203,6 @@ export class Tutorial {
       this.hooks.setBeacon(null);
     });
     row.append(skip);
-    this.root.append(head, text, row);
+    this.root.append(head, progress, text, row);
   }
 }

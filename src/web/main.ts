@@ -3,6 +3,7 @@ import { TUTORIAL, type MatchMode } from '../config/index.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import { GameScreen } from './game-ui.ts';
 import { helpSections } from './help.ts';
+import { iconSvg, type IconName } from './icons.ts';
 import type { FromWorker, LiveSetup, OpponentKind, ToWorker } from './protocol.ts';
 
 const setupEl = document.getElementById('setup')!;
@@ -82,6 +83,9 @@ document.getElementById('tutorial')!.addEventListener('click', () => {
     setup: { mode: '1v1', seed: TUTORIAL.seed, human: 0, seats: ['human', 'dummy'], limitBudget: false, tutorial: true, timeLimitTicks: TUTORIAL.timeLimitTicks },
   });
 });
+
+// 首頁模式卡片的圖示
+for (const t of document.querySelectorAll<HTMLElement>('.mode-tile .t[data-icon]')) t.insertAdjacentHTML('afterbegin', iconSvg(t.dataset.icon as IconName, 18));
 
 // 首頁的遊戲說明（分頁）
 {

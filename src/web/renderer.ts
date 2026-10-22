@@ -1,7 +1,8 @@
 // Canvas 2D 繪圖：地形、礦點、瞭望塔、建築、單位、迷霧、選取與放置提示、小地圖。只讀取狀態。
 import { BUILDING_STATS, RULES, TILE_SIZE, UNIT_STATS, type BuildingType } from '../config/index.ts';
 import type { BuildingFrame, FrameView, StaticMapView, UnitFrame } from '../view/snapshot.ts';
-import { BUILDING_GLYPH, TEAM_COLORS } from './labels.ts';
+import { drawIcon } from './icons.ts';
+import { TEAM_COLORS } from './labels.ts';
 
 export const TILE_PX = 16;
 /** 指令位置提示的顯示時間（毫秒） */
@@ -48,7 +49,29 @@ export interface ViewModel {
   human: number | null;
 }
 
-const TERRAIN_COLORS = ['#5f7a45', '#2a2d34', '#2f5228'];
+/** 選取時最多畫幾個單位的範圍圈 */
+const MAX_RANGE_RINGS = 24;
+
+/** 顏色調亮（f > 0）或調暗（f < 0） */
+function shade(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = (v: number): number => Math.round(f < 0 ? v * (1 + f) : v + (255 - v) * f);
+  return `rgb(${ch((n >> 16) & 255)},${ch((n >> 8) & 255)},${ch(n & 255)})`;
+}
+
+function hpColor(frac: number): string {
+  return frac > 0.5 ? '#22c55e' : frac > 0.25 ? '#eab308' : '#ef4444';
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
 
 export function teamColor(id: number): string {
   return TEAM_COLORS[id % TEAM_COLORS.length];
@@ -82,39 +105,69 @@ export class Renderer {
     this.fogImage = this.fogCtx.createImageData(map.width, map.height);
   }
 
+  /** 地形底圖（只畫一次）：平地、岩石、樹林，依座標做細微的明暗變化 */
   private paintTerrain(): void {
     const c = this.terrain.getContext('2d')!;
     const { width, height, tiles } = this.map;
+    const T = TILE_PX;
+    const hash = (x: number, y: number): number => (Math.imul(x, 73856093) ^ Math.imul(y, 19349663)) >>> 0;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const t = tiles[y * width + x];
-        c.fillStyle = TERRAIN_COLORS[t];
-        c.fillRect(x * TILE_PX, y * TILE_PX, TILE_PX, TILE_PX);
+        const h = hash(x, y);
+        const px = x * T;
+        const py = y * T;
+        if (t === 1) {
+          // 岩石：深色石塊，上緣亮、下緣暗
+          c.fillStyle = '#23262c';
+          c.fillRect(px, py, T, T);
+          c.fillStyle = h % 3 === 0 ? '#3a3f48' : '#353a42';
+          c.fillRect(px + 1, py + 1, T - 2, T - 2);
+          c.fillStyle = 'rgba(255,255,255,0.08)';
+          c.fillRect(px + 1, py + 1, T - 2, 2);
+          c.fillStyle = 'rgba(0,0,0,0.25)';
+          c.fillRect(px + 1, py + T - 3, T - 2, 2);
+          continue;
+        }
+        // 平地與樹林的地面
+        const shade = (h % 7) - 3;
+        c.fillStyle = t === 2 ? `hsl(105, 30%, ${21 + shade * 0.4}%)` : `hsl(95, 26%, ${34 + shade * 0.6}%)`;
+        c.fillRect(px, py, T, T);
+        if (t === 0 && h % 5 === 0) {
+          c.fillStyle = 'rgba(255,255,255,0.05)';
+          c.fillRect(px + (h % 11), py + ((h >> 4) % 11), 2, 2);
+        }
         if (t === 2) {
-          c.fillStyle = '#23401f';
-          c.beginPath();
-          c.arc(x * TILE_PX + 5, y * TILE_PX + 6, 3, 0, Math.PI * 2);
-          c.arc(x * TILE_PX + 11, y * TILE_PX + 11, 3, 0, Math.PI * 2);
-          c.fill();
-        } else if (t === 1) {
-          c.fillStyle = '#34383f';
-          c.fillRect(x * TILE_PX + 2, y * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
+          // 樹冠：兩到三團
+          const n = 2 + (h % 2);
+          for (let i = 0; i < n; i++) {
+            const tx = px + 3 + ((h >> (i * 5)) % 10);
+            const ty = py + 3 + ((h >> (i * 5 + 3)) % 10);
+            c.fillStyle = '#17301a';
+            c.beginPath();
+            c.arc(tx + 1, ty + 1, 3.6, 0, Math.PI * 2);
+            c.fill();
+            c.fillStyle = i % 2 === 0 ? '#2d5a2c' : '#336633';
+            c.beginPath();
+            c.arc(tx, ty, 3.4, 0, Math.PI * 2);
+            c.fill();
+          }
         }
       }
     }
-    // 淡淡的格線
-    c.strokeStyle = 'rgba(0,0,0,0.06)';
+    // 非常淡的格線
+    c.strokeStyle = 'rgba(0,0,0,0.05)';
     c.lineWidth = 1;
     for (let x = 0; x <= width; x++) {
       c.beginPath();
-      c.moveTo(x * TILE_PX + 0.5, 0);
-      c.lineTo(x * TILE_PX + 0.5, height * TILE_PX);
+      c.moveTo(x * T + 0.5, 0);
+      c.lineTo(x * T + 0.5, height * T);
       c.stroke();
     }
     for (let y = 0; y <= height; y++) {
       c.beginPath();
-      c.moveTo(0, y * TILE_PX + 0.5);
-      c.lineTo(width * TILE_PX, y * TILE_PX + 0.5);
+      c.moveTo(0, y * T + 0.5);
+      c.lineTo(width * T, y * T + 0.5);
       c.stroke();
     }
   }
@@ -190,46 +243,84 @@ export class Renderer {
     const wy = (y: number): number => (y - cam.y) * s;
     const tilePx = TILE_PX * cam.zoom;
 
-    ctx.imageSmoothingEnabled = false;
+    // 縮小時平滑取樣，避免地形閃爍；放大時保持清晰
+    ctx.imageSmoothingEnabled = cam.zoom < 1;
     ctx.drawImage(this.terrain, wx(0), wy(0), this.map.width * tilePx, this.map.height * tilePx);
 
-    // 礦點
+    // 礦點：晶體（一般淺藍、富礦金色、採光灰色）
     this.map.nodes.forEach((n, i) => {
       const reserve = cur.nodes[i];
       const cx = wx(n.tileX * TILE_SIZE + 500);
       const cy = wy(n.tileY * TILE_SIZE + 500);
-      const r = tilePx * 0.42;
+      const r = tilePx * (reserve <= 0 ? 0.32 : 0.44);
+      const [light, dark] = reserve <= 0 ? ['#6b7280', '#4b5563'] : n.rich ? ['#fde68a', '#d97706'] : ['#bae6fd', '#38bdf8'];
+      if (n.rich && reserve > 0 && tilePx >= 8) {
+        ctx.fillStyle = 'rgba(251,191,36,0.18)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.beginPath();
       ctx.moveTo(cx, cy - r);
-      ctx.lineTo(cx + r, cy);
+      ctx.lineTo(cx + r * 0.75, cy - r * 0.15);
       ctx.lineTo(cx, cy + r);
-      ctx.lineTo(cx - r, cy);
+      ctx.lineTo(cx - r * 0.75, cy - r * 0.15);
       ctx.closePath();
-      ctx.fillStyle = reserve <= 0 ? '#4b5563' : n.rich ? '#fbbf24' : '#7dd3fc';
+      ctx.fillStyle = dark;
       ctx.fill();
-      ctx.strokeStyle = '#0f172a';
+      // 左側亮面
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx - r * 0.75, cy - r * 0.15);
+      ctx.closePath();
+      ctx.fillStyle = light;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(15,23,42,0.85)';
       ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx + r * 0.75, cy - r * 0.15);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx - r * 0.75, cy - r * 0.15);
+      ctx.closePath();
       ctx.stroke();
     });
 
-    // 瞭望塔與佔領範圍
+    // 瞭望塔：佔領範圍（虛線）、佔領進度（弧線）、塔身圖示
     this.map.towers.forEach((t, i) => {
-      const owner = cur.towers[i]?.owner ?? -1;
+      const tw = cur.towers[i];
+      const owner = tw?.owner ?? -1;
       const cx = wx(t.x);
       const cy = wy(t.y);
+      const ring = RULES.watchtower.captureRadiusTiles * tilePx;
       ctx.beginPath();
-      ctx.arc(cx, cy, RULES.watchtower.captureRadiusTiles * tilePx, 0, Math.PI * 2);
+      ctx.arc(cx, cy, ring, 0, Math.PI * 2);
       ctx.strokeStyle = owner >= 0 ? teamColor(owner) : 'rgba(255,255,255,0.35)';
       ctx.setLineDash([6, 6]);
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.setLineDash([]);
+      if (tw !== undefined && owner !== -2) {
+        let best = -1;
+        for (let p = 0; p < tw.progress.length; p++) if (p !== owner && tw.progress[p] > 0 && (best < 0 || tw.progress[p] > tw.progress[best])) best = p;
+        if (best >= 0) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, ring, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * tw.progress[best]) / RULES.watchtower.captureTarget);
+          ctx.strokeStyle = teamColor(best);
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
+      }
+      const r = Math.max(6, tilePx * 0.75);
       ctx.beginPath();
-      ctx.arc(cx, cy, tilePx * 0.6, 0, Math.PI * 2);
-      ctx.fillStyle = owner >= 0 ? teamColor(owner) : owner === -2 ? '#6b7280' : '#e5e7eb';
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#111827';
       ctx.fill();
-      ctx.strokeStyle = '#111827';
+      ctx.strokeStyle = owner >= 0 ? teamColor(owner) : owner === -2 ? '#6b7280' : '#e5e7eb';
+      ctx.lineWidth = 2;
       ctx.stroke();
+      drawIcon(ctx, 'watchtower', cx, cy, r * 1.35, owner >= 0 ? teamColor(owner) : '#e5e7eb', 1.8);
     });
 
     // 建築
@@ -270,6 +361,7 @@ export class Renderer {
       ctx.stroke();
     }
     for (const u of cur.units) this.drawUnit(u, pos.get(u.id)!, vm, wx, wy, s);
+    this.drawRanges(vm, pos, wx, wy, s, tilePx);
 
     // 迷霧
     if (cur.fog !== null) {
@@ -361,33 +453,57 @@ export class Renderer {
 
   private drawBuilding(b: BuildingFrame, vm: ViewModel, wx: (x: number) => number, wy: (y: number) => number, tilePx: number): void {
     const ctx = this.ctx;
-    const x = wx(b.tileX * TILE_SIZE);
-    const y = wy(b.tileY * TILE_SIZE);
-    const w = b.size * tilePx;
-    ctx.globalAlpha = b.remembered ? 0.55 : b.complete ? 0.92 : 0.5;
-    ctx.fillStyle = teamColor(b.owner);
-    ctx.fillRect(x + 1, y + 1, w - 2, w - 2);
-    ctx.globalAlpha = 1;
+    const x = wx(b.tileX * TILE_SIZE) + 1;
+    const y = wy(b.tileY * TILE_SIZE) + 1;
+    const w = b.size * tilePx - 2;
+    const color = teamColor(b.owner);
     const selected = vm.selectedBuilding === b.id;
-    ctx.strokeStyle = selected ? '#ffffff' : '#0f172a';
-    ctx.lineWidth = selected ? 2 : 1;
-    ctx.strokeRect(x + 1, y + 1, w - 2, w - 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `bold ${Math.max(9, Math.round(tilePx * (b.size === 1 ? 0.7 : 1)))}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(BUILDING_GLYPH[b.type] + (b.level > 1 ? String(b.level) : ''), x + w / 2, y + w / 2);
-    if (b.task !== null) this.bar(x + 2, y + w - 6, w - 4, 4, b.task.progress / 100, '#a78bfa');
-    ctx.textAlign = 'start';
-    ctx.textBaseline = 'alphabetic';
-    if (!b.complete) this.bar(x + 2, y + w - 6, w - 4, 4, b.progress / 100, '#facc15');
-    if (b.hp < b.maxHp || selected) this.bar(x + 2, y + 2, w - 4, 3, b.hp / b.maxHp, '#22c55e');
-    if (b.type === 'tower' && b.complete && selected) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.beginPath();
-      ctx.arc(x + w / 2, y + w / 2, (BUILDING_STATS.tower.weapon!.range / TILE_SIZE) * tilePx, 0, Math.PI * 2);
-      ctx.stroke();
+    const rad = Math.min(6, w * 0.18);
+    // 陰影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    roundRect(ctx, x + 2, y + 3, w, w, rad);
+    ctx.fill();
+    ctx.globalAlpha = b.remembered ? 0.45 : b.complete ? 1 : 0.6;
+    ctx.fillStyle = shade(color, -0.35);
+    roundRect(ctx, x, y, w, w, rad);
+    ctx.fill();
+    // 上半部較亮
+    ctx.fillStyle = shade(color, -0.1);
+    roundRect(ctx, x, y, w, w * 0.55, rad);
+    ctx.fill();
+    if (!b.complete) {
+      // 建造中：斜紋
+      ctx.save();
+      roundRect(ctx, x, y, w, w, rad);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = Math.max(2, w * 0.06);
+      for (let d = -w; d < w; d += Math.max(6, w * 0.22)) {
+        ctx.beginPath();
+        ctx.moveTo(x + d, y + w);
+        ctx.lineTo(x + d + w, y);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = selected ? '#ffffff' : shade(color, 0.25);
+    ctx.lineWidth = selected ? 2.5 : 1.5;
+    if (b.remembered) ctx.setLineDash([4, 3]);
+    roundRect(ctx, x, y, w, w, rad);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (w >= 10) drawIcon(ctx, b.type, x + w / 2, y + w / 2, w * (b.size === 1 ? 0.78 : 0.6), b.remembered ? 'rgba(255,255,255,0.6)' : '#ffffff', Math.max(1.4, w * 0.045));
+    // 主堡等級
+    for (let i = 1; i < b.level; i++) {
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.arc(x + w - 4 - (i - 1) * 6, y + 4, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (b.task !== null) this.bar(x + 2, y + w - 6, w - 4, 4, b.task.progress / 100, '#a78bfa');
+    if (!b.complete) this.bar(x + 2, y + w - 6, w - 4, 4, b.progress / 100, '#facc15');
+    if (b.hp < b.maxHp || selected) this.bar(x + 2, y - 6, w - 4, 3, b.hp / b.maxHp, hpColor(b.hp / b.maxHp));
   }
 
   private drawUnit(u: UnitFrame, p: { x: number; y: number }, vm: ViewModel, wx: (x: number) => number, wy: (y: number) => number, s: number): void {
@@ -395,59 +511,85 @@ export class Renderer {
     const cx = wx(p.x);
     const cy = wy(p.y);
     const r = Math.max(3, UNIT_STATS[u.type].radius * s);
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = teamColor(u.owner);
-    ctx.fill();
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    // 兵種記號：工人小點、長槍兵直線、弓兵圓環、騎兵大圓
-    ctx.strokeStyle = '#ffffff';
-    ctx.fillStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
-    switch (u.type) {
-      case 'worker':
-        ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(1, r * 0.3), 0, Math.PI * 2);
-        ctx.fill();
-        if (u.carrying > 0) {
-          ctx.fillStyle = '#7dd3fc';
-          ctx.fillRect(cx + r * 0.3, cy - r, r * 0.6, r * 0.6);
-        }
-        break;
-      case 'spear':
-        ctx.beginPath();
-        ctx.moveTo(cx - r * 0.6, cy + r * 0.6);
-        ctx.lineTo(cx + r * 0.6, cy - r * 0.6);
-        ctx.stroke();
-        break;
-      case 'archer':
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
-        ctx.stroke();
-        break;
-      case 'cavalry':
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.25, 0, Math.PI * 2);
-        ctx.fill();
-        break;
-      case 'siege':
-        ctx.strokeRect(cx - r * 0.5, cy - r * 0.5, r, r);
-        break;
-    }
+    const color = teamColor(u.owner);
     const selected = vm.selection.has(u.id);
     if (selected) {
+      ctx.fillStyle = 'rgba(134,239,172,0.18)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = shade(color, -0.15);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(8,12,20,0.9)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    // 兵種圖示（太小時只畫一個點）
+    if (r >= 5) drawIcon(ctx, u.type, cx, cy, r * 1.5, '#ffffff', Math.max(1.3, r * 0.16));
+    else {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(1, r * 0.35), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (u.carrying > 0) {
+      const d = Math.max(2.5, r * 0.4);
+      const bx = cx + r * 0.75;
+      const by = cy - r * 0.75;
+      ctx.fillStyle = '#7dd3fc';
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx, by - d);
+      ctx.lineTo(bx + d * 0.7, by);
+      ctx.lineTo(bx, by + d);
+      ctx.lineTo(bx - d * 0.7, by);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (selected) {
       ctx.strokeStyle = '#86efac';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
       ctx.arc(cx, cy, r + 3, 0, Math.PI * 2);
       ctx.stroke();
     }
-    if (u.hp < u.maxHp || selected) this.bar(cx - r, cy - r - 6, r * 2, 3, u.hp / u.maxHp, u.hp / u.maxHp > 0.5 ? '#22c55e' : u.hp / u.maxHp > 0.25 ? '#eab308' : '#ef4444');
+    if (u.hp < u.maxHp || selected) this.bar(cx - r, cy - r - 6, r * 2, 3, u.hp / u.maxHp, hpColor(u.hp / u.maxHp));
+  }
+
+  /** 選取的單位與防禦塔：攻擊範圍（實線，到目標邊緣）與視野（虛線，只選一個時） */
+  private drawRanges(vm: ViewModel, pos: Map<number, { x: number; y: number }>, wx: (x: number) => number, wy: (y: number) => number, s: number, tilePx: number): void {
+    const cur = vm.cur!;
+    const ctx = this.ctx;
+    const units = cur.units.filter((u) => vm.selection.has(u.id)).slice(0, MAX_RANGE_RINGS);
+    const circle = (x: number, y: number, r: number, color: string, dash: number[], width: number): void => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    for (const u of units) {
+      const p = pos.get(u.id)!;
+      const st = UNIT_STATS[u.type];
+      circle(wx(p.x), wy(p.y), (st.radius + st.range) * s, 'rgba(248,113,113,0.7)', [], 1.5);
+      if (units.length === 1) circle(wx(p.x), wy(p.y), (st.sight + 0.5) * tilePx, 'rgba(226,232,240,0.45)', [5, 5], 1.2);
+    }
+    if (units.length === 0 && vm.selectedBuilding !== null) {
+      const b = cur.buildings.find((x) => x.id === vm.selectedBuilding);
+      if (b !== undefined && !b.remembered) {
+        const cx = wx((b.tileX + b.size / 2) * TILE_SIZE);
+        const cy = wy((b.tileY + b.size / 2) * TILE_SIZE);
+        const weapon = BUILDING_STATS[b.type].weapon;
+        if (weapon !== null && b.complete) circle(cx, cy, weapon.range * s, 'rgba(248,113,113,0.7)', [], 1.5);
+        circle(cx, cy, (BUILDING_STATS[b.type].sight + b.size / 2) * tilePx, 'rgba(226,232,240,0.35)', [5, 5], 1.2);
+      }
+    }
   }
 
   private bar(x: number, y: number, w: number, h: number, frac: number, color: string): void {

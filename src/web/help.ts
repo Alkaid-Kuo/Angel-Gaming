@@ -1,6 +1,7 @@
 // 遊戲說明：規則、建築與兵種（數值直接取自設定檔）、操作。首頁與遊戲內的說明面板共用。
 import { BASE_UPGRADES, BUILDING_STATS, BUILDING_TYPES, DAMAGE_MULTIPLIER, RESEARCH, RESEARCH_TYPES, RULES, TICKS_PER_SECOND, TILE_SIZE, UNIT_STATS, UNIT_TYPES, type UnitType } from '../config/index.ts';
-import { BUILD_KEYS, BUILDING_GLYPH, BUILDING_NAME, BUILDING_TIP, RESEARCH_NAME, RESEARCH_TIP, TEAM_COLORS, TRAIN_KEYS, UNIT_NAME, UNIT_TIP } from './labels.ts';
+import { iconSvg } from './icons.ts';
+import { BUILD_KEYS, BUILDING_NAME, BUILDING_TIP, RESEARCH_NAME, RESEARCH_TIP, TEAM_COLORS, TRAIN_KEYS, UNIT_NAME, UNIT_TIP } from './labels.ts';
 
 export interface HelpSection {
   readonly id: string;
@@ -98,25 +99,19 @@ function svg(body: string): string {
   return `<svg width="22" height="22" viewBox="0 0 22 22" style="vertical-align:middle">${body}</svg>`;
 }
 const BLUE = TEAM_COLORS[0];
-const UNIT_ICON: Record<UnitType, string> = {
-  worker: `<circle cx="11" cy="11" r="6" fill="${BLUE}" stroke="#0f172a"/><circle cx="11" cy="11" r="2" fill="#fff"/>`,
-  spear: `<circle cx="11" cy="11" r="7" fill="${BLUE}" stroke="#0f172a"/><line x1="7" y1="15" x2="15" y2="7" stroke="#fff" stroke-width="1.5"/>`,
-  archer: `<circle cx="11" cy="11" r="7" fill="${BLUE}" stroke="#0f172a"/><circle cx="11" cy="11" r="3.5" fill="none" stroke="#fff" stroke-width="1.5"/>`,
-  cavalry: `<circle cx="11" cy="11" r="9" fill="${BLUE}" stroke="#0f172a"/><circle cx="11" cy="11" r="5.5" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="11" cy="11" r="2" fill="#fff"/>`,
-  siege: `<circle cx="11" cy="11" r="9" fill="${BLUE}" stroke="#0f172a"/><rect x="6.5" y="6.5" width="9" height="9" fill="none" stroke="#fff" stroke-width="1.5"/>`,
-};
 const diamond = (color: string): string => svg(`<polygon points="11,3 19,11 11,19 3,11" fill="${color}" stroke="#0f172a"/>`);
 
 function legendHtml(): string {
   const teams = TEAM_COLORS.map((c, i) => `<span style="white-space:nowrap">${svg(`<rect x="3" y="3" width="16" height="16" rx="3" fill="${c}"/>`)} P${i}</span>`).join('　');
-  const buildings = BUILDING_TYPES.map((t) => `<span style="white-space:nowrap">${svg(`<rect x="1" y="1" width="20" height="20" fill="${BLUE}" stroke="#0f172a"/><text x="11" y="15.5" font-size="12" text-anchor="middle" fill="#fff" font-weight="bold">${BUILDING_GLYPH[t]}</text>`)} ${BUILDING_NAME[t]}</span>`).join('　');
-  const units = UNIT_TYPES.map((t) => `<span style="white-space:nowrap">${svg(UNIT_ICON[t])} ${UNIT_NAME[t]}</span>`).join('　');
+  const chip = (inner: string, round: boolean): string => `<span class="legend-chip${round ? ' round' : ''}" style="background:${BLUE}">${inner}</span>`;
+  const buildings = BUILDING_TYPES.map((t) => `<span style="white-space:nowrap">${chip(iconSvg(t, 16, '#fff', 2), false)} ${BUILDING_NAME[t]}</span>`).join('　');
+  const units = UNIT_TYPES.map((t) => `<span style="white-space:nowrap">${chip(iconSvg(t, 16, '#fff', 2), true)} ${UNIT_NAME[t]}</span>`).join('　');
   const rows: [string, string][] = [
     ['隊伍顏色', teams],
-    ['建築（方塊，字代表種類）', `${buildings}<br><span class="muted">半透明＝建造中或記憶中的樣子；黃色進度條＝建造進度；紫色＝升級／研究進度；綠色＝血量</span>`],
-    ['單位（圓形，記號代表兵種）', `${units}<br><span class="muted">綠色圓圈＝已選取；淺藍小方塊＝工人身上帶著礦</span>`],
+    ['建築（圓角方塊，圖示代表種類）', `${buildings}<br><span class="muted">斜紋＝建造中；虛線框＝記憶中的樣子；黃色進度條＝建造進度；紫色＝升級／研究進度；主堡右上的金點＝等級</span>`],
+    ['單位（圓形，圖示代表兵種）', `${units}<br><span class="muted">綠色圓圈＝已選取；紅色實線圈＝攻擊範圍、白色虛線圈＝視野（選取時顯示）；淺藍小晶體＝工人身上帶著礦</span>`],
     ['礦點', `${diamond('#7dd3fc')} 一般礦點（每趟 ${RULES.economy.mineAmount} 礦）　${diamond('#fbbf24')} 富礦點（每趟 ${RULES.economy.richMineAmount} 礦）　${diamond('#4b5563')} 已採光（仍會擋路）`],
-    ['瞭望塔', `${svg('<circle cx="11" cy="11" r="9" fill="none" stroke="#fff" stroke-dasharray="3 3" opacity="0.6"/><circle cx="11" cy="11" r="4" fill="#e5e7eb" stroke="#111827"/>')} 地圖中央的白點與虛線圈：站進圈內一段時間就能佔領，變成佔領者的顏色；灰色＝看不到`],
+    ['瞭望塔', `${chip(iconSvg('watchtower', 16, '#e5e7eb', 2), true)} 地圖中央的塔與虛線圈：站進圈內一段時間就能佔領，圈上的彩色弧線是佔領進度；佔領後塔變成佔領者的顏色；灰色＝看不到`],
     ['地形', `${svg('<rect x="1" y="1" width="20" height="20" fill="#5f7a45"/>')} 平地　${svg('<rect x="1" y="1" width="20" height="20" fill="#2a2d34"/><rect x="4" y="4" width="14" height="14" fill="#34383f"/>')} 岩石（不能通過）　${svg('<rect x="1" y="1" width="20" height="20" fill="#2f5228"/><circle cx="7" cy="8" r="3.5" fill="#23401f"/><circle cx="14" cy="14" r="3.5" fill="#23401f"/>')} 樹林（減速、擋視線）`],
     ['迷霧', `${svg('<rect x="1" y="1" width="20" height="20" fill="#000"/>')} 未探索　${svg('<rect x="1" y="1" width="20" height="20" fill="#5f7a45"/><rect x="1" y="1" width="20" height="20" fill="#000" opacity="0.53"/>')} 看過但目前看不到`],
     ['指令提示', `${svg('<circle cx="11" cy="11" r="7" fill="none" stroke="#86efac" stroke-width="2"/>')} 移動　${svg('<circle cx="11" cy="11" r="7" fill="none" stroke="#f87171" stroke-width="2"/>')} 攻擊　${svg('<circle cx="11" cy="11" r="7" fill="none" stroke="#fde047" stroke-width="2"/>')} 集結點　${svg('<circle cx="11" cy="11" r="8" fill="none" stroke="#facc15" stroke-width="3"/>')} 教學提示`],

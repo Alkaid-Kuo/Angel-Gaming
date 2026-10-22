@@ -1,6 +1,6 @@
 // 對局／觀戰／回放畫面：版面（頂列、地圖區、底部固定面板）、輸入處理、指令格、提示訊息、事件記錄、結束對話框。
 import type { Command, GameEvent } from '../api/types.ts';
-import { BASE_UPGRADES, BUILDING_STATS, MAX_BASE_LEVEL, RESEARCH, RULES, TILE_SIZE, UNIT_STATS, type BuildingType, type ResearchType, type Stance, type UnitType } from '../config/index.ts';
+import { BASE_UPGRADES, BUILDING_STATS, DAMAGE_MULTIPLIER, MAX_BASE_LEVEL, RESEARCH, RULES, TICKS_PER_SECOND, TILE_SIZE, UNIT_STATS, type BuildingType, type ResearchType, type Stance, type UnitType } from '../config/index.ts';
 import type { MatchResult } from '../core/match.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import { GOD_VIEW, type BuildingFrame, type FrameView, type UnitFrame } from '../view/snapshot.ts';
@@ -9,6 +9,7 @@ import { Broadcast } from './broadcast-ui.ts';
 import type { Comment } from './commentary.ts';
 import { CommandCard, type CardItem } from './command-card.ts';
 import { HelpOverlay } from './help.ts';
+import { iconSvg, type IconName } from './icons.ts';
 import {
   BUILD_KEYS,
   BUILDING_NAME,
@@ -71,6 +72,15 @@ function download(name: string, data: unknown): void {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+/** 指令格項目代號 → 圖示 */
+function cardIcon(id: string): IconName | undefined {
+  const [kind, arg] = id.split(':');
+  if (kind === 'stance') return `stance-${arg}` as IconName;
+  if ((kind === 'build' || kind === 'train' || kind === 'research' || kind === 'placing') && arg !== undefined) return arg as IconName;
+  const direct: Record<string, IconName> = { move: 'move', attackMove: 'attackMove', hold: 'hold', gather: 'gather', build: 'build', back: 'back', cancel: 'cancel', upgrade: 'upgrade' };
+  return direct[kind];
+}
+
 /** 只在內容改變時才寫入 innerHTML（避免每幀重建） */
 function setHtml(e: HTMLElement, html: string): void {
   if (e.dataset.html !== html) {
@@ -107,6 +117,8 @@ export class GameScreen {
   private readonly logEl: HTMLElement;
   private readonly toastEl: HTMLElement;
   private readonly tipEl: HTMLElement;
+  /** 觀戰：地圖區上方正中央的對戰計分條 */
+  private readonly scorebugEl: HTMLElement;
   private comments: Comment[] = [];
   private scoreboard: readonly ScoreRow[] | null = null;
   private readonly dialog: HTMLElement;
@@ -178,8 +190,10 @@ export class GameScreen {
     this.logEl = el('div', 'log');
     this.toastEl = el('div', 'toast hidden');
     this.tipEl = el('div', 'map-tip hidden');
+    this.scorebugEl = el('div', 'scorebug');
     this.dialog = el('div', 'dialog hidden');
     this.stage.append(this.canvas, this.playersEl, this.logEl, this.toastEl, this.tipEl, this.dialog);
+    if (human === null) this.stage.append(this.scorebugEl);
     // ── 底部面板 ──
     const panel = el('div', 'panel');
     const row = el('div', 'panel-row');
@@ -1168,21 +1182,22 @@ export class GameScreen {
     if (human !== null) {
       const p = cur.players[human];
       const supplyFull = p.supplyUsed >= p.supplyCap;
-      const budget = this.meta.limitBudget ? `<span class="stat">額度 <b>${p.budget}</b></span>` : '';
-      const tech = `<span class="stat opt">科技 <b>Lv${p.tech.level}</b>${p.tech.weapons + p.tech.armor > 0 ? `（武器 ${p.tech.weapons}／護甲 ${p.tech.armor}）` : ''}</span>`;
+      const budget = this.meta.limitBudget ? `<span class="pill" title="指令額度：每 0.2 秒回補 1 點，最多 5 點">額度 <b>${p.budget}</b></span>` : '';
+      const tech = `<span class="pill tech opt" title="科技：主堡等級與研究">${iconSvg('tech', 16)}Lv<b>${p.tech.level}</b>${p.tech.weapons + p.tech.armor > 0 ? `<span class="muted">武${p.tech.weapons} 甲${p.tech.armor}</span>` : ''}</span>`;
       const groups = new Map<number, number>();
       for (const u of cur.units) if (u.owner === human && u.group >= 0) groups.set(u.group, (groups.get(u.group) ?? 0) + 1);
       const groupText = [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([g, c]) => `[${g}] ${c}`).join(' ');
       setHtml(
         this.statsEl,
-        `<span class="stat big">◆ <b>${p.minerals}</b> 礦</span><span class="stat big${supplyFull ? ' full' : ''}" title="人口滿了就要蓋補給站">人口 <b>${p.supplyUsed}/${p.supplyCap}</b></span><span class="stat">時間 <b>${formatTime(cur.tick)}</b></span>${tech}${budget}${groupText !== '' ? `<span class="stat opt">編隊 ${groupText}</span>` : ''}${p.alive ? '' : '<span class="warn">已淘汰</span>'}`,
+        `<span class="pill big minerals" title="礦：用來生產與建造">${iconSvg('minerals', 18)}<b>${p.minerals}</b></span><span class="pill big pop${supplyFull ? ' full' : ''}" title="人口：滿了就要蓋補給站">${iconSvg('population', 18)}<b>${p.supplyUsed}/${p.supplyCap}</b></span><span class="pill time">${iconSvg('time', 16)}<b>${formatTime(cur.tick)}</b></span>${tech}${budget}${groupText !== '' ? `<span class="pill opt">編隊 ${groupText}</span>` : ''}${p.alive ? '' : '<span class="warn">已淘汰</span>'}`,
       );
       const idle = cur.units.filter((u) => u.owner === human && u.type === 'worker' && u.order === 'idle').length;
       const idleText = `閒置工人 ${idle}`;
       if (this.idleBtn.textContent !== idleText) this.idleBtn.textContent = idleText;
       this.idleBtn.classList.toggle('hidden', idle === 0);
     } else {
-      setHtml(this.statsEl, `<span class="stat">時間 <b>${formatTime(cur.tick)}</b></span><span class="stat muted">${this.meta.kind === 'replay' ? '回放' : '觀戰'}　seed ${this.meta.map.seed}</span>`);
+      setHtml(this.statsEl, `<span class="pill">${this.meta.kind === 'replay' ? '回放' : '觀戰'}</span><span class="muted small">seed ${this.meta.map.seed}</span>`);
+      setHtml(this.scorebugEl, this.matchBarHtml(cur));
     }
     const speedText = `${this.speed}x`;
     if (this.speedEl.textContent !== speedText) this.speedEl.textContent = speedText;
@@ -1204,7 +1219,7 @@ export class GameScreen {
     }
     setHtml(this.infoEl, this.infoHtml());
     if (human !== null) {
-      const items = this.cardItems();
+      const items = this.cardItems().map((it) => (it === null || it.icon !== undefined ? it : { ...it, icon: cardIcon(it.id) }));
       const ids = new Set(items.flatMap((it) => (it === null ? [] : [it.id])));
       this.card.setHighlight(this.tutorialHighlight.find((id) => ids.has(id)) ?? null);
       this.card.update(items);
@@ -1222,6 +1237,23 @@ export class GameScreen {
             .join(''),
     );
     this.logEl.classList.toggle('commentary', this.scoreboard !== null);
+  }
+
+  /** 觀戰頂列：1v1 為雙方對陣與兵力拉鋸條；多人局為各隊籌碼 */
+  private matchBarHtml(cur: FrameView): string {
+    const ps = cur.players;
+    const clock = `<div class="clock">${formatTime(cur.tick)}</div>`;
+    const kind = '兵力';
+    if (ps.length === 2) {
+      const [a, b] = ps;
+      const total = a.army + b.army;
+      const pa = total === 0 ? 50 : Math.round((a.army * 100) / total);
+      const team = (p: (typeof ps)[number], right: boolean): string =>
+        `<div class="team${p.alive ? '' : ' dead'}">${right ? '' : `<span class="swatch" style="background:${teamColor(p.id)}"></span>`}<span class="name">${esc(this.playerName(p.id))}</span><span class="pill" title="兵力：戰鬥單位的總成本">${iconSvg('army', 14)}<b>${p.army}</b></span>${right ? `<span class="swatch" style="background:${teamColor(p.id)}"></span>` : ''}</div>`;
+      return `<div class="matchbar">${team(a, false)}<div class="vs">${clock}<div class="tug" title="兵力比例"><i style="width:${pa}%;background:${teamColor(a.id)}"></i><i style="width:${100 - pa}%;background:${teamColor(b.id)}"></i></div><div class="tag">${kind}</div></div>${team(b, true)}</div>`;
+    }
+    const chips = ps.map((p) => `<span class="chip${p.alive ? '' : ' dead'}"><span class="swatch" style="background:${teamColor(p.id)}"></span>${esc(this.playerName(p.id))}<b>${p.army}</b></span>`).join('');
+    return `<div class="matchbar"><div class="vs">${clock}<div class="tag">${kind}</div></div><div class="chips">${chips}</div></div>`;
   }
 
   /** 觀戰數據面板：各選手一欄，數值最高者標示 */
@@ -1250,51 +1282,113 @@ ${line('資產分數', '時限到時用來排名：存活單位＋已完工建�
   private infoHtml(): string {
     const cur = this.vm.cur!;
     const human = this.meta.human;
-    // 觀戰：數據面板常駐；選取的東西只顯示一行摘要（細節看滑鼠提示）
-    if (human === null && this.scoreboard !== null) {
-      const sel = cur.units.filter((u) => this.vm.selection.has(u.id));
-      const b = this.vm.selectedBuilding === null ? undefined : cur.buildings.find((x) => x.id === this.vm.selectedBuilding);
-      const line =
-        sel.length === 1
-          ? `${UNIT_NAME[sel[0].type]}（${esc(this.playerName(sel[0].owner))}）血量 ${sel[0].hp}/${sel[0].maxHp}`
-          : sel.length > 1
-            ? `已選取 ${sel.length} 個單位`
-            : b !== undefined
-              ? `${BUILDING_NAME[b.type]}（${esc(this.playerName(b.owner))}）血量 ${b.hp}/${b.maxHp}`
-              : '';
-      return `${line !== '' ? `<div class="kv">${line}</div>` : ''}${this.scoreboardHtml(this.scoreboard)}`;
-    }
     const units = cur.units.filter((u) => this.vm.selection.has(u.id));
-    const owner = (o: number): string => (o === human ? '' : `<span class="muted">（${this.playerName(o)}）</span>`);
-    if (this.pendingBuild) return '<div class="title">建造</div><div class="hint">選一種建築，再左鍵放到地圖上（Esc 返回）</div>';
-    if (units.length === 1) {
-      const u = units[0];
-      return `<div class="title">${UNIT_NAME[u.type]}${owner(u.owner)}</div>${hpBar(u.hp, u.maxHp)}<div class="kv">血量 ${u.hp}/${u.maxHp}　姿態 ${STANCE_NAME[u.stance]}　狀態 ${ORDER_NAME[u.order] ?? u.order}${u.carrying > 0 ? `　攜帶 ${u.carrying} 礦` : ''}${u.group >= 0 ? `　編隊 ${u.group}` : ''}</div><div class="muted small">${UNIT_TIP[u.type]}</div>`;
-    }
+    if (this.pendingBuild) return `<div class="title">${iconSvg('build', 20)}建造</div><div class="hint">選一種建築，再左鍵放到地圖上（Esc 返回）</div>`;
+    const back = human === null && this.scoreboard !== null ? '<div class="muted small" style="margin-top:6px">按 Esc 或點空地回到數據面板</div>' : '';
+    if (units.length === 1) return this.unitCardHtml(units[0]) + back;
     if (units.length > 1) {
       const counts = new Map<UnitType, number>();
       for (const u of units) counts.set(u.type, (counts.get(u.type) ?? 0) + 1);
       const hp = units.reduce((a, u) => a + u.hp, 0);
       const max = units.reduce((a, u) => a + u.maxHp, 0);
-      return `<div class="title">已選取 ${units.length} 個單位</div>${hpBar(hp, max)}<div class="chips">${[...counts.entries()].map(([t, n]) => `<span>${UNIT_NAME[t]} ×${n}</span>`).join('')}</div>`;
+      const dps = units.reduce((a, u) => a + this.unitDps(u), 0);
+      return `<div class="title">已選取 ${units.length} 個單位</div>${hpBar(hp, max)}<div class="statgrid"><div><span>總血量</span><b>${hp}/${max}</b></div><div><span>每秒總傷害</span><b>${dps.toFixed(1)}</b></div></div><div class="chips">${[...counts.entries()].map(([t, n]) => `<span>${iconSvg(t, 16)}${UNIT_NAME[t]} ×${n}</span>`).join('')}</div>${back}`;
     }
     if (this.vm.selectedBuilding !== null) {
       const b = cur.buildings.find((x) => x.id === this.vm.selectedBuilding);
-      if (b !== undefined) {
-        const parts = [`<div class="title">${BUILDING_NAME[b.type]}${b.type === 'base' ? ` Lv${b.level}` : ''}${owner(b.owner)}${b.remembered ? '<span class="muted">（記憶中的樣子）</span>' : ''}</div>`, hpBar(b.hp, b.maxHp), `<div class="kv">血量 ${b.hp}/${b.maxHp}</div>`];
-        if (!b.complete) parts.push(`<div class="kv">建造中 ${b.progress}%</div>${progressBar(b.progress, '#facc15')}`);
-        if (b.task !== null) parts.push(`<div class="kv">${b.task.kind === 'upgrade' ? '升級中' : `研究${RESEARCH_NAME[b.task.research as ResearchType]}`} ${b.task.progress}%（生產暫停）</div>${progressBar(b.task.progress, '#a78bfa')}`);
-        if (b.queue.length > 0) {
-          parts.push(`<div class="queue">${b.queue.map((q, i) => `<span>${UNIT_NAME[q.unit]}${i === 0 ? ` ${q.progress}%` : ''}</span>`).join('')}</div>`);
-          parts.push(progressBar(b.queue[0].progress, '#60a5fa'));
-        }
-        if (b.owner === human && !b.remembered) {
-          parts.push(`<div class="muted small">${BUILDING_TIP[b.type]}${BUILDING_STATS[b.type].produces.length > 0 ? '。右鍵點地上設定集結點' : ''}</div>`);
-        }
-        return parts.join('');
-      }
+      if (b !== undefined) return this.buildingCardHtml(b) + back;
     }
-    return human === null ? '<div class="muted">點選單位或建築查看資訊</div>' : '<div class="title">尚未選取</div><div class="muted">左鍵點選或拖曳框選單位、點選建築；右鍵對選取的單位下指令。<br>不知道怎麼玩？按 <kbd>?</kbd> 看說明。</div>';
+    if (human === null && this.scoreboard !== null) return this.scoreboardHtml(this.scoreboard);
+    return human === null
+      ? '<div class="muted">點選單位或建築查看資訊</div>'
+      : '<div class="title">尚未選取</div><div class="muted">左鍵點選或拖曳框選單位、點選建築；右鍵對選取的單位下指令。<br>滑鼠停在地圖上的東西會顯示說明；不知道怎麼玩？按 <kbd>?</kbd>。</div>';
+  }
+
+  /** 單位的每秒傷害（含武器研究，未計倍率與護甲） */
+  private unitDps(u: UnitFrame): number {
+    const st = UNIT_STATS[u.type];
+    const w = u.type === 'worker' ? 0 : (this.vm.cur?.players[u.owner]?.tech.weapons ?? 0) * RESEARCH.weapons.perLevel;
+    return ((st.attack + w) * TICKS_PER_SECOND) / st.cooldown;
+  }
+
+  /** 相剋：它打誰有加成、誰打它有加成 */
+  private counterHtml(attacker: UnitType | 'tower'): string {
+    const row = DAMAGE_MULTIPLIER[attacker];
+    const name = (t: string): string => (t === 'building' ? '建築' : t === 'tower' ? '防禦塔' : UNIT_NAME[t as UnitType]);
+    const strong = Object.entries(row).flatMap(([t, m]) => (m !== null && m > 100 ? [`對${name(t)} ×${m / 100}`] : []));
+    const weakVs = Object.entries(row).flatMap(([t, m]) => (m !== null && m < 100 ? [`對${name(t)} ×${m / 100}`] : []));
+    const cannot = Object.entries(row).flatMap(([t, m]) => (m === null ? [name(t)] : []));
+    const feared =
+      attacker === 'tower'
+        ? []
+        : (Object.keys(DAMAGE_MULTIPLIER) as (UnitType | 'tower')[]).flatMap((a) => {
+            const m = DAMAGE_MULTIPLIER[a][attacker];
+            return m !== null && m > 100 ? [`${name(a)}（×${m / 100}）`] : [];
+          });
+    const parts: string[] = [];
+    if (strong.length > 0) parts.push(`<span class="up">▲ 強項：${strong.join('、')}</span>`);
+    if (weakVs.length > 0) parts.push(`<span class="down">▼ 較弱：${weakVs.join('、')}</span>`);
+    if (cannot.length > 0) parts.push(`<span class="muted">不能攻擊：${cannot.length >= 5 ? '任何單位（只打建築）' : cannot.join('、')}</span>`);
+    if (feared.length > 0) parts.push(`<span class="down">⚠ 怕：${feared.join('、')}</span>`);
+    return parts.length === 0 ? '' : `<div class="counters">${parts.join('<br>')}</div>`;
+  }
+
+  private unitCardHtml(u: UnitFrame): string {
+    const human = this.meta.human;
+    const st = UNIT_STATS[u.type];
+    const tech = this.vm.cur?.players[u.owner]?.tech ?? { level: 1, weapons: 0, armor: 0 };
+    const combat = u.type !== 'worker';
+    const w = combat ? tech.weapons * RESEARCH.weapons.perLevel : 0;
+    const a = combat ? tech.armor * RESEARCH.armor.perLevel : 0;
+    const range = st.range <= 300 ? '近戰' : `${Math.round(st.range / 100) / 10} 格`;
+    const owner = u.owner === human ? '' : `<span class="muted">（${esc(this.playerName(u.owner))}）</span>`;
+    const stat = (k: string, v: string): string => `<div><span>${k}</span><b>${v}</b></div>`;
+    const stats = [
+      stat('血量', `${u.hp}/${u.maxHp}`),
+      stat('攻擊', `${st.attack}${w > 0 ? `+${w}` : ''}`),
+      stat('攻擊間隔', `${st.cooldown / TICKS_PER_SECOND} 秒`),
+      stat('每秒傷害', this.unitDps(u).toFixed(1)),
+      stat('射程', range),
+      stat('視野', `${st.sight} 格`),
+      stat('速度', `${(st.speed * TICKS_PER_SECOND) / TILE_SIZE} 格/秒`),
+      stat('護甲', String(a)),
+      stat('成本／人口', `${st.cost}／${st.supply}`),
+      stat('姿態', STANCE_NAME[u.stance]),
+      stat('狀態', ORDER_NAME[u.order] ?? u.order),
+    ];
+    if (u.carrying > 0) stats.push(stat('攜帶', `${u.carrying} 礦`));
+    if (u.group >= 0) stats.push(stat('編隊', String(u.group)));
+    return `<div class="unit-card"><div class="portrait" style="background:${teamColor(u.owner)}">${iconSvg(u.type, 38, '#fff', 2)}</div><div>
+<div class="title">${UNIT_NAME[u.type]}${owner}</div>${hpBar(u.hp, u.maxHp)}
+<div class="statgrid">${stats.join('')}</div>
+${this.counterHtml(u.type)}<div class="muted small" style="margin-top:6px">${UNIT_TIP[u.type]}。地圖上紅色實線圈是攻擊範圍、白色虛線圈是視野。</div></div></div>`;
+  }
+
+  private buildingCardHtml(b: BuildingFrame): string {
+    const human = this.meta.human;
+    const st = BUILDING_STATS[b.type];
+    const owner = b.owner === human ? '' : `<span class="muted">（${esc(this.playerName(b.owner))}）</span>`;
+    const stat = (k: string, v: string): string => `<div><span>${k}</span><b>${v}</b></div>`;
+    const stats = [stat('血量', `${b.hp}/${b.maxHp}`), stat('視野', `${st.sight} 格`)];
+    if (st.weapon !== null) stats.push(stat('攻擊', String(st.weapon.attack)), stat('攻擊間隔', `${st.weapon.cooldown / TICKS_PER_SECOND} 秒`), stat('射程', `${st.weapon.range / TILE_SIZE} 格`));
+    if (st.supplyProvided > 0) stats.push(stat('提供人口', `+${st.supplyProvided}`));
+    if (st.isDropoff) stats.push(stat('卸礦點', '是'));
+    stats.push(stat('成本', String(st.cost)));
+    const parts = [
+      `<div class="unit-card"><div class="portrait" style="background:${teamColor(b.owner)}">${iconSvg(b.type, 38, '#fff', 2)}</div><div>`,
+      `<div class="title">${BUILDING_NAME[b.type]}${b.type === 'base' ? ` Lv${b.level}` : ''}${owner}${b.remembered ? '<span class="muted">（記憶中的樣子）</span>' : ''}</div>`,
+      hpBar(b.hp, b.maxHp),
+      `<div class="statgrid">${stats.join('')}</div>`,
+    ];
+    if (!b.complete) parts.push(`<div class="kv">建造中 ${b.progress}%</div>${progressBar(b.progress, '#facc15')}`);
+    if (b.task !== null) parts.push(`<div class="kv">${b.task.kind === 'upgrade' ? '升級中' : `研究${RESEARCH_NAME[b.task.research as ResearchType]}`} ${b.task.progress}%（生產暫停）</div>${progressBar(b.task.progress, '#a78bfa')}`);
+    if (b.queue.length > 0) {
+      parts.push(`<div class="queue">${b.queue.map((q, i) => `<span>${iconSvg(q.unit, 14)}${UNIT_NAME[q.unit]}${i === 0 ? ` ${q.progress}%` : ''}</span>`).join('')}</div>`);
+      parts.push(progressBar(b.queue[0].progress, '#60a5fa'));
+    }
+    if (st.weapon !== null) parts.push(this.counterHtml('tower'));
+    parts.push(`<div class="muted small" style="margin-top:6px">${BUILDING_TIP[b.type]}${b.owner === human && st.produces.length > 0 ? '。右鍵點地上設定集結點' : ''}</div></div></div>`);
+    return parts.join('');
   }
 
   private showEnd(result: MatchResult): void {
@@ -1306,10 +1400,13 @@ ${line('資產分數', '時限到時用來排名：存活單位＋已完工建�
     d.append(el('h2', undefined, title));
     if (this.meta.tutorial && myRank === 1) d.append(el('p', undefined, '你已經學會基本操作。回選單試試「1v1：玩家 vs 基準 Bot」，基準 Bot 會出兵反擊。'));
     const ol = el('ol');
-    for (const pid of result.ranking) {
+    result.ranking.forEach((pid, i) => {
       const p = result.players.find((x) => x.playerId === pid)!;
-      ol.append(el('li', undefined, `${this.playerName(pid)}　資產 ${p.score}${p.eliminatedTick >= 0 ? `　淘汰於 ${formatTime(p.eliminatedTick)}` : ''}`));
-    }
+      const li = el('li');
+      li.style.borderLeftColor = teamColor(pid);
+      li.append(el('span', 'rank', String(i + 1)), el('span', undefined, this.playerName(pid)), el('span', 'muted', `資產 ${p.score}${p.eliminatedTick >= 0 ? `　淘汰於 ${formatTime(p.eliminatedTick)}` : ''}`));
+      ol.append(li);
+    });
     d.append(ol, el('div', undefined, `比賽長度 ${formatTime(result.durationTicks)}`));
     const row = el('div', 'row');
     if (this.meta.kind === 'live') {

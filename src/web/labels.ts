@@ -7,7 +7,6 @@ export const TEAM_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#a855f7
 
 export const UNIT_NAME: Record<UnitType, string> = { worker: '工人', spear: '長槍兵', archer: '弓兵', cavalry: '騎兵', siege: '攻城車' };
 export const BUILDING_NAME: Record<BuildingType, string> = { base: '主堡', depot: '採集站', supply: '補給站', barracks: '兵營', tower: '防禦塔', forge: '鍛造所', workshop: '攻城工坊' };
-export const BUILDING_GLYPH: Record<BuildingType, string> = { base: '堡', depot: '站', supply: '補', barracks: '營', tower: '塔', forge: '鍛', workshop: '坊' };
 export const RESEARCH_NAME: Record<ResearchType, string> = { weapons: '武器', armor: '護甲' };
 /** 指令格與說明用的一句話介紹 */
 export const UNIT_TIP: Record<UnitType, string> = {

@@ -1,5 +1,6 @@
 // 指令格：固定 15 個按鈕（5 × 3），只更新內容、不重建元素。
 // 每秒會收到約 10 個畫面更新；若每次都重建按鈕，按下與放開之間元素被換掉，瀏覽器就不會觸發點擊。
+import { iconSvg, type IconName } from './icons.ts';
 
 export interface CardItem {
   /** 識別碼（教學提示用），例如 'train:worker'、'build:supply' */
@@ -7,6 +8,7 @@ export interface CardItem {
   /** 快捷鍵（顯示用；比對時不分大小寫） */
   readonly hotkey: string;
   readonly label: string;
+  readonly icon?: IconName;
   readonly cost?: number;
   readonly enabled: boolean;
   /** 不可用的原因 */
@@ -44,7 +46,7 @@ export class CommandCard {
     for (let i = 0; i < CARD_SLOTS; i++) {
       const b = el('button', 'slot empty');
       b.type = 'button';
-      b.append(el('span', 'hk'), el('span', 'name'), el('span', 'cost'));
+      b.append(el('span', 'hk'), el('span', 'ic'), el('span', 'name'), el('span', 'cost'));
       b.addEventListener('click', () => this.press(i));
       b.addEventListener('mouseenter', () => {
         this.hover = i;
@@ -66,12 +68,13 @@ export class CommandCard {
     this.items = Array.from({ length: CARD_SLOTS }, (_, i) => items[i] ?? null);
     for (let i = 0; i < CARD_SLOTS; i++) {
       const it = this.items[i];
-      const sig = it === null ? '' : `${it.id}|${it.hotkey}|${it.label}|${it.cost ?? ''}|${it.enabled ? 1 : 0}|${it.active === true ? 1 : 0}|${it.id === this.highlightId ? 1 : 0}`;
+      const sig = it === null ? '' : `${it.id}|${it.hotkey}|${it.label}|${it.icon ?? ''}|${it.cost ?? ''}|${it.enabled ? 1 : 0}|${it.active === true ? 1 : 0}|${it.id === this.highlightId ? 1 : 0}`;
       if (sig === this.signatures[i]) continue;
       this.signatures[i] = sig;
       const b = this.buttons[i];
-      const [hk, name, cost] = b.children as unknown as [HTMLElement, HTMLElement, HTMLElement];
+      const [hk, ic, name, cost] = b.children as unknown as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
       hk.textContent = it?.hotkey ?? '';
+      ic.innerHTML = it?.icon !== undefined ? iconSvg(it.icon, 22) : '';
       name.textContent = it?.label ?? '';
       cost.textContent = it?.cost !== undefined ? `◆${it.cost}` : '';
       b.className = `slot${it === null ? ' empty' : ''}${it !== null && !it.enabled ? ' off' : ''}${it?.active === true ? ' on' : ''}${it !== null && it.id === this.highlightId ? ' tut' : ''}`;
