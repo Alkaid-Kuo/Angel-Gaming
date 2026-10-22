@@ -18,7 +18,9 @@
     "sim": "node src/cli/main.ts",
     "web": "vite",
     "build:web": "vite build",
-    "pack:build": "node scripts/build-pack.ts"
+    "pack:build": "node scripts/build-pack.ts",
+    "serve": "node src/cli/main.ts viewer",
+    "serve:lan": "node src/cli/main.ts viewer --host 0.0.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

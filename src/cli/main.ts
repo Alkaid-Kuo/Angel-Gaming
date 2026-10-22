@@ -4,6 +4,7 @@
 import { randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { networkInterfaces } from 'node:os';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { KnobValues } from '../api/types.ts';
@@ -352,25 +353,46 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
 };
 
-/** 以本機 HTTP 伺服器開啟回放播放器（瀏覽器的 Worker 不能從 file:// 載入） */
+/** 本機的區網 IPv4 位址（--host 0.0.0.0 時顯示給手機或其他電腦連線用） */
+function lanAddresses(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')) out.push(a.address);
+  }
+  return out;
+}
+
+/**
+ * 以 HTTP 伺服器開啟瀏覽器版（瀏覽器的 Worker 不能從 file:// 載入）；只提供建置好的靜態檔案。
+ * 預設只綁 127.0.0.1；--host 0.0.0.0 開放給同一個區網的裝置（第一次執行時 Windows 防火牆會詢問）。
+ */
 function cmdViewer(args: Args): Promise<void> {
-  knownArgs(args, ['port', 'dir']);
+  knownArgs(args, ['port', 'dir', 'host']);
   const port = intArg(args, 'port', 8000, 1)!;
+  const host = one(args, 'host') ?? '127.0.0.1';
   const root = resolve(one(args, 'dir') ?? [join(packageRoot(), 'viewer'), join(packageRoot(), 'dist-web')].find((d) => existsSync(d)) ?? join(packageRoot(), 'viewer'));
-  if (!existsSync(join(root, 'web', 'index.html'))) throw new ArgError(`找不到回放播放器（${root}${sep}web${sep}index.html）；原始碼版請先執行 npm run build:web`);
+  if (!existsSync(join(root, 'web', 'index.html'))) throw new ArgError(`找不到瀏覽器版（${root}${sep}web${sep}index.html）；原始碼版請先執行 npm run build:web`);
   return new Promise((done) => {
     const server = createServer((req, res) => {
-      const url = decodeURIComponent((req.url ?? '/').split('?')[0]);
+      let url: string;
+      try {
+        url = decodeURIComponent((req.url ?? '/').split('?')[0]);
+      } catch {
+        res.writeHead(400).end('Bad request');
+        return;
+      }
       const path = normalize(join(root, url === '/' ? 'web/index.html' : url));
-      if (!path.startsWith(root) || !existsSync(path) || !statSync(path).isFile()) {
+      // 只允許 root 以內的檔案（root + 分隔符，避免同名前綴的兄弟資料夾）
+      if (!path.startsWith(root + sep) || !existsSync(path) || !statSync(path).isFile()) {
         res.writeHead(404).end('Not found');
         return;
       }
-      res.writeHead(200, { 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream' });
+      res.writeHead(200, { 'Content-Type': MIME[extname(path)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
       res.end(readFileSync(path));
     });
-    server.listen(port, '127.0.0.1', () => {
-      process.stdout.write(`回放播放器：http://127.0.0.1:${port}/web/index.html （Ctrl+C 結束）\n`);
+    server.listen(port, host, () => {
+      const hosts = host === '0.0.0.0' ? ['127.0.0.1', ...lanAddresses()] : [host];
+      process.stdout.write(`瀏覽器版（Ctrl+C 結束）：\n${hosts.map((h) => `  http://${h}:${port}/web/index.html`).join('\n')}\n`);
     });
     server.on('close', () => done());
   });
@@ -382,7 +404,7 @@ const USAGE = `用法：
   rts-sim roundrobin --mode 1v1|ffa4 --bots a.js b.js ... [--games 每組場數] [--seed S] [--knobs JSON|@檔案] [--exec official|batch] [--out F]
   rts-sim mapgen     --mode 1v1|ffa4 [--seed S] [--format ascii|png] [--validate N] [--out F]
   rts-sim bench      --mode 1v1|ffa4 [--games N] [--exec batch|official] [--seed S] [--bot F] [--out F]
-  rts-sim viewer     [--port 8000]`;
+  rts-sim viewer     [--port 8000] [--host 127.0.0.1|0.0.0.0] [--dir D]`;
 
 async function main(): Promise<number> {
   let parsed: { command: string; args: Args };
