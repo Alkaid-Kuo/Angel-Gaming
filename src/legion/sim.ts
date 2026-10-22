@@ -532,11 +532,20 @@ export class LegionMatch {
         const x = num(c.x);
         const y = num(c.y);
         if (x === null || y === null) return this.rejectCmd(p, type, '座標不合法');
-        r.order = type;
-        r.tx = Math.max(0, Math.min(this.map.width * TILE - 1, x));
-        r.ty = Math.max(0, Math.min(this.map.height * TILE - 1, y));
+        const tx = Math.max(0, Math.min(this.map.width * TILE - 1, x));
+        const ty = Math.max(0, Math.min(this.map.height * TILE - 1, y));
         const f = num(c.facing);
+        const near = (tx - r.tx) * (tx - r.tx) + (ty - r.ty) * (ty - r.ty) <= RULES.sameGoal * RULES.sameGoal;
         r.tFacing = type === 'move' && f !== null ? normDeg(f) : -1;
+        // 與目前目的地幾乎相同的同類指令：只更新目的地（避免反覆重新規劃造成原地打轉）
+        if (r.order === type && near) {
+          r.tx = tx;
+          r.ty = ty;
+          return;
+        }
+        r.order = type;
+        r.tx = tx;
+        r.ty = ty;
         r.target = -1;
         r.fireTarget = -1;
         r.path = [];
@@ -690,7 +699,7 @@ export class LegionMatch {
     switch (r.order) {
       case 'idle':
       case 'hold':
-        if (r.tFacing >= 0) r.facing = turnToward(r.facing, r.tFacing, r.def.turn);
+        if (r.tFacing >= 0) this.turnTo(r, r.tFacing);
         if (r.def.range === 0 && r.order === 'idle') r.target = -1;
         return;
       case 'move':
@@ -740,7 +749,20 @@ export class LegionMatch {
   }
 
   private faceTo(r: Regiment, t: Regiment): void {
-    if (t.px !== r.x || t.py !== r.y) r.facing = turnToward(r.facing, iatan2(t.py - r.y, t.px - r.x), r.def.turn);
+    if (t.px !== r.x || t.py !== r.y) this.turnTo(r, iatan2(t.py - r.y, t.px - r.x));
+  }
+
+  /** 轉向：沒在接戰的步兵要轉超過 120° 時直接向後轉（士兵原地轉身），其餘依轉向速度慢慢轉 */
+  private turnTo(r: Regiment, want: number): void {
+    if (!r.def.cavalry && this.tick - r.lastMelee > 10 && Math.abs(angleDiff(want, r.facing)) > RULES.aboutFace) this.aboutFace(r);
+    r.facing = turnToward(r.facing, want, r.def.turn);
+  }
+
+  /** 向後轉：朝向翻轉 180°，隊形序號反轉，士兵不用穿過自己的隊伍 */
+  private aboutFace(r: Regiment): void {
+    r.facing = normDeg(r.facing + 180);
+    r.slots.reverse();
+    r.slots.forEach((sid, i) => (this.soldiers[sid].ord = i));
   }
 
   private hillRange(r: Regiment): number {
@@ -800,19 +822,25 @@ export class LegionMatch {
     const remain = d - (last ? stopAt : 0);
     if (remain <= 0) {
       if (last) {
-        if (r.tFacing >= 0 && !routed) r.facing = turnToward(r.facing, r.tFacing, r.def.turn);
+        if (r.tFacing >= 0 && !routed) this.turnTo(r, r.tFacing);
         return true;
       }
       r.pathIdx += 1;
       return false;
     }
     const want = iatan2(dy, dx);
-    const diff = Math.abs(angleDiff(want, r.facing));
+    let diff = Math.abs(angleDiff(want, r.facing));
+    // 步兵短距離往後挪：面向不變、倒退走（速度減半）
+    const backing = !routed && !r.def.cavalry && last && diff > RULES.aboutFace && remain <= RULES.backStep;
     if (routed) r.facing = want;
-    else r.facing = turnToward(r.facing, want, r.def.turn);
-    // 先原地轉向再前進（潰散不轉向）
-    if (!routed && diff > 60) return false;
+    else if (!backing) {
+      this.turnTo(r, want);
+      diff = Math.abs(angleDiff(want, r.facing));
+    }
+    // 轉向太大時先原地轉再走：騎兵 60°、步兵 90°（潰散與倒退不受限）
+    if (!routed && !backing && diff > (r.def.cavalry ? 60 : 90)) return false;
     let speed = idiv(baseSpeed * terrainSpeed(this.terrainAt(r.x, r.y), r.kind), 100);
+    if (backing) speed = idiv(speed, 2);
     // 隊形散開時放慢，等士兵跟上
     if (r.lag > 2000) speed = idiv(speed, 2);
     const step = Math.min(speed, remain);
