@@ -4,7 +4,9 @@ import type { MatchMode } from '../config/index.ts';
 import type { MatchResult } from '../core/match.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import type { Hotspot } from '../view/broadcast.ts';
+import type { ScoreRow } from '../view/scoreboard.ts';
 import type { FrameView, StaticMapView } from '../view/snapshot.ts';
+import type { Comment } from './commentary.ts';
 
 export type OpponentKind = 'baseline' | 'random' | 'dummy';
 
@@ -60,6 +62,8 @@ export type FromWorker =
       readonly combat: { readonly level: number; readonly hotspots: readonly Hotspot[] };
       readonly highlight: boolean;
       readonly skipping: 'fight' | 'end' | null;
+      /** 觀戰與回放才有：數據面板與自動解說 */
+      readonly analysis: { readonly scoreboard: ScoreRow[]; readonly comments: Comment[] } | null;
     }
   | { readonly type: 'end'; readonly result: MatchResult }
   | { readonly type: 'replay'; readonly file: ReplayFile }

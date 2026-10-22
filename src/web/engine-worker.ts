@@ -12,6 +12,8 @@ import { BatchController, resolveKnobs, type BotController } from '../sandbox/co
 import { HumanController } from '../sandbox/human.ts';
 import { MatchDriver } from '../sandbox/runner.ts';
 import { CombatMeter } from '../view/broadcast.ts';
+import { ScoreTracker } from '../view/scoreboard.ts';
+import { Commentator } from './commentary.ts';
 import { frameView, GOD_VIEW, staticMapView } from '../view/snapshot.ts';
 import type { FromWorker, LiveSetup, OpponentKind, ToWorker } from './protocol.ts';
 
@@ -46,6 +48,15 @@ let pendingEvents: { to: number; ev: GameEvent }[] = [];
 let highlight = false;
 let skipping: 'fight' | 'end' | null = null;
 const meter = new CombatMeter();
+const scores = new ScoreTracker();
+const commentator = new Commentator();
+/** 觀戰與回放才計算數據面板與解說（人類對局不需要） */
+let analysis = false;
+
+function primeAnalysis(m: Match): void {
+  scores.reset();
+  commentator.prime(m.state);
+}
 
 function currentMatch(): Match | null {
   return driver?.match ?? cursor?.current ?? null;
@@ -54,6 +65,7 @@ function currentMatch(): Match | null {
 /** 事件監聽：只收集目前觀看者的事件（上帝視角只收重大事件，每個事件只收一次） */
 function attachTap(m: Match): void {
   m.state.eventTap = (pid, ev) => {
+    if (analysis) commentator.onEvent(pid, ev);
     if (viewer === GOD_VIEW) {
       if (!GOD_EVENTS.has(ev.type)) return;
       if (ev.type === 'enemyKilled' && ev.kind !== 'building') return;
@@ -73,7 +85,18 @@ function sendFrame(): void {
   const events = pendingEvents;
   pendingEvents = [];
   post(
-    { type: 'frame', frame, events, speed, paused, desyncTick: cursor?.desyncTick ?? null, combat: { level: meter.level, hotspots: meter.hotspots }, highlight, skipping },
+    {
+      type: 'frame',
+      frame,
+      events,
+      speed,
+      paused,
+      desyncTick: cursor?.desyncTick ?? null,
+      combat: { level: meter.level, hotspots: meter.hotspots },
+      highlight,
+      skipping,
+      analysis: analysis ? { scoreboard: scores.rows(m.state), comments: commentator.take() } : null,
+    },
     frame.fog === null ? [] : [frame.fog.buffer],
   );
 }
@@ -100,6 +123,8 @@ async function startLive(setup: LiveSetup): Promise<void> {
   pendingEvents = [];
   skipping = null;
   meter.reset();
+  analysis = setup.human === null;
+  primeAnalysis(driver.match);
   attachTap(driver.match);
   const names = setup.seats.map((s, i) => (s === 'human' ? '玩家' : `${OPPONENT_NAME[s]}（P${i}）`));
   post({ type: 'ready', meta: { kind: 'live', map: staticMapView(driver.match, names), human: setup.human, limitBudget: setup.limitBudget, tutorial: setup.tutorial, durationTicks: null } });
@@ -116,6 +141,8 @@ function startReplay(msg: Extract<ToWorker, { type: 'startReplay' }>): void {
   pendingEvents = [];
   skipping = null;
   meter.reset();
+  analysis = true;
+  primeAnalysis(cursor.current);
   attachTap(cursor.current);
   const names = msg.file.header.players.map((p) => `${p.bot}${p.version !== '' ? ` ${p.version}` : ''}（P${p.playerId}）`);
   post({ type: 'ready', meta: { kind: 'replay', map: staticMapView(cursor.current, names), human: null, limitBudget: false, tutorial: false, durationTicks: msg.file.result?.durationTicks ?? null } });
@@ -126,6 +153,10 @@ async function stepOne(m: Match): Promise<void> {
   if (driver !== null) await driver.stepTick();
   else cursor!.step();
   meter.update(m.state);
+  if (analysis) {
+    scores.update(m.state);
+    commentator.update(m.state, meter, () => scores.rows(m.state));
+  }
 }
 
 /** 依經過時間推進對應數量的 tick；快轉時一次推進一大段 */
@@ -196,6 +227,7 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
           pendingEvents = [];
           cursor.seek(msg.tick);
           meter.reset();
+          primeAnalysis(cursor.current);
           attachTap(cursor.current);
           ended = cursor.over;
           sendFrame();

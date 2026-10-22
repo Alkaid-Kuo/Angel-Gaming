@@ -1,9 +1,7 @@
 // 觀戰呈現（M3）：自動導播、跟隨選手、事件字幕、戰力曲線、精華模式與快轉。
-import type { GameEvent } from '../api/types.ts';
 import { TILE_SIZE } from '../config/index.ts';
-import { FIGHT_LEVEL, type Hotspot } from '../view/broadcast.ts';
+import type { Hotspot } from '../view/broadcast.ts';
 import type { FrameView } from '../view/snapshot.ts';
-import { BUILDING_NAME } from './labels.ts';
 import type { FromWorker, MatchMeta, ToWorker } from './protocol.ts';
 import { teamColor } from './renderer.ts';
 
@@ -34,7 +32,6 @@ export class Broadcast {
   private readonly meta: MatchMeta;
   private readonly post: (m: ToWorker) => void;
   private readonly cam: CameraHooks;
-  private readonly name: (id: number) => string;
   private readonly caption: HTMLElement;
   private readonly graph: HTMLCanvasElement;
   private readonly controls: HTMLElement;
@@ -47,16 +44,14 @@ export class Broadcast {
   private target: { x: number; y: number; hits: number } | null = null;
   private targetSince = 0;
   private level = 0;
-  private wasFighting = false;
   private history: { tick: number; army: number[] }[] = [];
   private frame: FrameView | null = null;
 
   /** root：地圖區（字幕、戰力曲線）；controlsRoot：底部面板（鏡頭與快轉控制） */
-  constructor(root: HTMLElement, controlsRoot: HTMLElement, meta: MatchMeta, post: (m: ToWorker) => void, cam: CameraHooks, name: (id: number) => string) {
+  constructor(root: HTMLElement, controlsRoot: HTMLElement, meta: MatchMeta, post: (m: ToWorker) => void, cam: CameraHooks) {
     this.meta = meta;
     this.post = post;
     this.cam = cam;
-    this.name = name;
     this.caption = el('div', 'caption hidden');
     this.graph = el('canvas', 'armygraph');
     this.graph.width = 260;
@@ -103,24 +98,10 @@ export class Broadcast {
     const last = this.history[this.history.length - 1];
     if (last === undefined || f.tick - last.tick >= GRAPH_SAMPLE_TICKS) this.history.push({ tick: f.tick, army: f.players.map((p) => p.army) });
     this.drawGraph();
-    for (const { to, ev } of msg.events) this.captionFor(to, ev);
-    // 交戰開始字幕：強度降到門檻的一半以下才重新計算，避免在門檻附近反覆觸發
-    if (this.level >= FIGHT_LEVEL && !this.wasFighting && this.hotspots.length > 0) {
-      const ps = this.hotspots[0].players;
-      if (ps.length >= 2) this.pushCaption(`交戰！${ps.map((p) => this.name(p)).join(' vs ')}`, teamColor(ps[0]));
-    }
-    this.wasFighting = this.level >= FIGHT_LEVEL / 2 && (this.wasFighting || this.level >= FIGHT_LEVEL);
   }
 
-  private captionFor(to: number, ev: GameEvent): void {
-    if (ev.type === 'playerEliminated') this.pushCaption(`${this.name(ev.playerId)} 被淘汰！`, teamColor(ev.playerId));
-    else if (ev.type === 'towerChanged') this.pushCaption(ev.owner === null ? '瞭望塔失守' : `${this.name(ev.owner)} 佔領瞭望塔`, ev.owner === null ? '#e5e7eb' : teamColor(ev.owner));
-    else if (ev.type === 'enemyKilled' && ev.kind === 'building') {
-      this.pushCaption(`${this.name(to)} 摧毀了 ${this.name(ev.owner)} 的${BUILDING_NAME[ev.entityType as keyof typeof BUILDING_NAME]}`, teamColor(to));
-    }
-  }
-
-  private pushCaption(text: string, color: string): void {
+  /** 大字幕（自動解說的重大事件） */
+  pushCaption(text: string, color: string): void {
     this.captions.push({ text, color });
     if (this.captions.length > 4) this.captions.shift();
   }

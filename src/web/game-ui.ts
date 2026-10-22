@@ -4,7 +4,9 @@ import { BASE_UPGRADES, BUILDING_STATS, MAX_BASE_LEVEL, RESEARCH, RULES, TILE_SI
 import type { MatchResult } from '../core/match.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import { GOD_VIEW, type BuildingFrame, type FrameView, type UnitFrame } from '../view/snapshot.ts';
+import type { ScoreRow } from '../view/scoreboard.ts';
 import { Broadcast } from './broadcast-ui.ts';
+import type { Comment } from './commentary.ts';
 import { CommandCard, type CardItem } from './command-card.ts';
 import { HelpOverlay } from './help.ts';
 import {
@@ -25,7 +27,7 @@ import {
   UNIT_TIP,
 } from './labels.ts';
 import type { FromWorker, MatchMeta, ToWorker } from './protocol.ts';
-import { Renderer, teamColor, type ViewModel } from './renderer.ts';
+import { MAX_ZOOM, MIN_ZOOM, Renderer, teamColor, type ViewModel } from './renderer.ts';
 import { Tutorial } from './tutorial.ts';
 
 const LIVE_SPEEDS = [0.5, 1, 2, 3, 4];
@@ -42,6 +44,16 @@ const EDGE_PX = 6;
 const TOAST_MS = 2600;
 const LOG_LINES = 7;
 const MARKER_COLOR = { move: '#86efac', attack: '#f87171', rally: '#fde047' } as const;
+const COMMENT_KEEP = 60;
+const TERRAIN_TIP: Record<number, string> = {
+  1: '<b>岩石</b><br>不能通過，也不能蓋建築',
+  2: `<b>樹林</b><br>可以通過，但速度只有 ${RULES.movement.forestSpeedPercent}%；會擋視線（${RULES.vision.forestSightTiles} 格外看不進去）`,
+};
+
+/** 名稱等外部文字放進 HTML 前先跳脫 */
+function esc(text: string): string {
+  return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -94,6 +106,9 @@ export class GameScreen {
   private readonly infoEl: HTMLElement;
   private readonly logEl: HTMLElement;
   private readonly toastEl: HTMLElement;
+  private readonly tipEl: HTMLElement;
+  private comments: Comment[] = [];
+  private scoreboard: readonly ScoreRow[] | null = null;
   private readonly dialog: HTMLElement;
   private readonly card: CommandCard;
   private readonly help: HelpOverlay;
@@ -162,8 +177,9 @@ export class GameScreen {
     this.playersEl = el('div', 'players');
     this.logEl = el('div', 'log');
     this.toastEl = el('div', 'toast hidden');
+    this.tipEl = el('div', 'map-tip hidden');
     this.dialog = el('div', 'dialog hidden');
-    this.stage.append(this.canvas, this.playersEl, this.logEl, this.toastEl, this.dialog);
+    this.stage.append(this.canvas, this.playersEl, this.logEl, this.toastEl, this.tipEl, this.dialog);
     // ── 底部面板 ──
     const panel = el('div', 'panel');
     const row = el('div', 'panel-row');
@@ -219,7 +235,6 @@ export class GameScreen {
           },
           moveTo: (x, y) => this.centerOn(x, y),
         },
-        (id) => this.playerName(id),
       );
     }
     this.help = new HelpOverlay(this.stage);
@@ -302,6 +317,7 @@ export class GameScreen {
       this.paused = msg.paused;
       this.desyncTick = msg.desyncTick;
       this.broadcast?.onFrame(msg);
+      if (msg.analysis !== null) this.ingestAnalysis(msg.analysis.scoreboard, msg.analysis.comments);
       this.vm.hotspots = msg.combat.hotspots;
       this.ingestEvents(
         msg.events.map((e) => e.ev),
@@ -317,6 +333,24 @@ export class GameScreen {
     } else if (msg.type === 'replay') {
       download(`replay_${this.meta.map.mode}_${this.meta.map.seed}.json`, msg.file satisfies ReplayFile);
     }
+  }
+
+  /** 觀戰：數據面板與自動解說（重大解說同時顯示為大字幕） */
+  private ingestAnalysis(scoreboard: readonly ScoreRow[], comments: readonly Comment[]): void {
+    this.scoreboard = scoreboard;
+    for (const c of comments) {
+      this.comments.push(c);
+      if (c.major) {
+        const first = /\{P(\d+)\}/.exec(c.text);
+        this.broadcast?.pushCaption(c.text.replace(/\{P(\d+)\}/g, (_, id: string) => this.playerName(Number(id))), first === null ? '#e5e7eb' : teamColor(Number(first[1])));
+      }
+    }
+    if (this.comments.length > COMMENT_KEEP) this.comments = this.comments.slice(-COMMENT_KEEP);
+  }
+
+  /** 解說文字：{P0} 換成帶隊伍色的名稱 */
+  private commentHtml(text: string): string {
+    return esc(text).replace(/\{P(\d+)\}/g, (_, id: string) => `<b style="color:${teamColor(Number(id))}">${esc(this.playerName(Number(id)))}</b>`);
   }
 
   private ingestEvents(events: readonly GameEvent[], frame: FrameView): void {
@@ -360,6 +394,7 @@ export class GameScreen {
     this.pan(dt);
     this.broadcast?.update(t, dt);
     this.updateGhost();
+    this.updateTip();
     this.renderer.draw(this.vm, performance.now());
     this.raf = requestAnimationFrame((tt) => this.tick(tt));
   }
@@ -385,6 +420,78 @@ export class GameScreen {
     this.vm.camera.x += (dx * PAN_PX_PER_SEC * dt) / s;
     this.vm.camera.y += (dy * PAN_PX_PER_SEC * dt) / s;
     this.renderer.clampCamera(this.vm.camera);
+  }
+
+  /** 看全圖（觀戰時同時切到自由鏡頭） */
+  private fitMap(): void {
+    this.broadcast?.userMovedCamera();
+    this.renderer.fitCamera(this.vm.camera);
+  }
+
+  /** 滑鼠所指的東西的說明（單位、建築、瞭望塔、礦點、地形、迷霧） */
+  private hoverHtml(wx: number, wy: number): string | null {
+    const cur = this.vm.cur;
+    if (cur === null) return null;
+    const human = this.meta.human;
+    const owner = (o: number): string => (o === human ? '（我方）' : `（${esc(this.playerName(o))}）`);
+    const u = this.unitAt(wx, wy);
+    if (u !== null) {
+      return `<b>${UNIT_NAME[u.type]}</b>${owner(u.owner)}<br>血量 ${u.hp}/${u.maxHp}　${ORDER_NAME[u.order] ?? u.order}${u.carrying > 0 ? `　攜帶 ${u.carrying} 礦` : ''}<br><span class="muted">${UNIT_TIP[u.type]}</span>`;
+    }
+    const b = this.buildingAt(wx, wy);
+    if (b !== null) {
+      const status = !b.complete ? `　建造中 ${b.progress}%` : b.task !== null ? `　${b.task.kind === 'upgrade' ? '升級中' : '研究中'} ${b.task.progress}%` : b.queue.length > 0 ? `　生產${UNIT_NAME[b.queue[0].unit]} ${b.queue[0].progress}%` : '';
+      return `<b>${BUILDING_NAME[b.type]}${b.type === 'base' ? ` Lv${b.level}` : ''}</b>${owner(b.owner)}<br>血量 ${b.hp}/${b.maxHp}${status}${b.remembered ? '<br><span class="muted">記憶中的樣子（現在看不到）</span>' : ''}<br><span class="muted">${BUILDING_TIP[b.type]}</span>`;
+    }
+    const towerR = RULES.watchtower.captureRadiusTiles * TILE_SIZE;
+    const ti = this.meta.map.towers.findIndex((t) => (t.x - wx) ** 2 + (t.y - wy) ** 2 <= towerR * towerR);
+    if (ti >= 0) {
+      const t = cur.towers[ti];
+      const own = t === undefined || t.owner === -1 ? '目前無人佔領' : t.owner === -2 ? '目前不在視野內，看不到誰佔領' : `目前由 ${t.owner === human ? '我方' : esc(this.playerName(t.owner))} 佔領`;
+      const mine = human !== null && t !== undefined ? `　我方佔領進度 ${t.progress[human] ?? 0}%` : '';
+      return `<b>瞭望塔</b><br>任何單位站進虛線圈內一段時間就能佔領；佔領後看得到周圍 ${RULES.watchtower.sightTiles} 格。不能被攻擊。<br>${own}${mine}`;
+    }
+    const tx = Math.floor(wx / TILE_SIZE);
+    const ty = Math.floor(wy / TILE_SIZE);
+    const map = this.meta.map;
+    if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return null;
+    const i = ty * map.width + tx;
+    const fog = cur.fog?.[i] ?? 2;
+    const ni = map.nodes.findIndex((n) => n.tileX === tx && n.tileY === ty);
+    if (ni >= 0 && fog > 0) {
+      const n = map.nodes[ni];
+      const left = cur.nodes[ni];
+      const amount = n.rich ? RULES.economy.richMineAmount : RULES.economy.mineAmount;
+      return left <= 0
+        ? '<b>礦點（已採光）</b><br>沒有礦了，但仍然擋路、不能在上面蓋建築'
+        : `<b>${n.rich ? '富礦點' : '礦點'}</b><br>還剩 ${left} 礦，每趟採 ${amount} 礦<br><span class="muted">選工人後右鍵點礦點開始採礦；同時只能 1 人開採，其他人排隊。蓋採集站在旁邊可以縮短往返</span>`;
+    }
+    if (fog === 0) return '<b>未探索</b><br>還沒有單位到過這裡';
+    const terrain = TERRAIN_TIP[map.tiles[i]];
+    if (terrain !== undefined) return terrain;
+    return fog === 1 ? '<b>迷霧</b><br>以前看過，但目前沒有單位在附近，看不到這裡的敵人' : null;
+  }
+
+  private updateTip(): void {
+    const show = this.mouse.inside && this.leftDown === null && this.middleDrag === null && this.vm.mode === 'normal' && !this.help.isOpen;
+    if (!show) {
+      this.tipEl.classList.add('hidden');
+      return;
+    }
+    const w = this.renderer.screenToWorld(this.vm.camera, this.mouse.x, this.mouse.y);
+    const html = this.hoverHtml(w.x, w.y);
+    if (html === null) {
+      this.tipEl.classList.add('hidden');
+      return;
+    }
+    setHtml(this.tipEl, html);
+    this.tipEl.classList.remove('hidden');
+    const pad = 18;
+    const maxX = this.canvas.clientWidth - this.tipEl.offsetWidth - 4;
+    const maxY = this.canvas.clientHeight - this.tipEl.offsetHeight - 4;
+    const x = this.mouse.x + pad > maxX ? this.mouse.x - this.tipEl.offsetWidth - pad : this.mouse.x + pad;
+    const y = Math.min(maxY, this.mouse.y + pad);
+    this.tipEl.style.transform = `translate(${Math.max(4, x)}px, ${Math.max(4, y)}px)`;
   }
 
   private centerOn(x: number, y: number): void {
@@ -489,6 +596,7 @@ export class GameScreen {
     });
     c.addEventListener('mouseleave', () => {
       this.mouse.inside = false;
+      this.tipEl.classList.add('hidden');
     });
     c.addEventListener('mousemove', (e) => {
       this.mouse.x = e.offsetX;
@@ -508,6 +616,7 @@ export class GameScreen {
       } else if (this.leftDown !== null && this.vm.mode === 'normal') {
         this.vm.drag = { x0: this.leftDown.x, y0: this.leftDown.y, x1: e.offsetX, y1: e.offsetY };
       }
+      this.updateTip();
     });
     c.addEventListener('mousedown', (e) => {
       if (e.button === 1) {
@@ -526,7 +635,7 @@ export class GameScreen {
         e.preventDefault();
         const cam = this.vm.camera;
         const before = this.renderer.screenToWorld(cam, e.offsetX, e.offsetY);
-        cam.zoom = Math.max(0.5, Math.min(3, cam.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+        cam.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, cam.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
         const s = this.renderer.scale(cam);
         cam.x = before.x - e.offsetX / s;
         cam.y = before.y - e.offsetY / s;
@@ -776,6 +885,10 @@ export class GameScreen {
       this.card.trigger(item);
       return;
     }
+    if (k === 'z') {
+      this.fitMap();
+      return;
+    }
     if (/^f[1-4]$/.test(k)) e.preventDefault();
     this.keys.add(k);
   }
@@ -1001,6 +1114,9 @@ export class GameScreen {
     faster.addEventListener('click', () => this.stepSpeed(1));
     const helpBtn = el('button', undefined, '說明 ?');
     helpBtn.addEventListener('click', () => this.help.toggle());
+    const fitBtn = el('button', undefined, '看全圖');
+    fitBtn.title = '縮放到整張地圖（Z）';
+    fitBtn.addEventListener('click', () => this.fitMap());
     topbar.append(this.statsEl, this.idleBtn, spacer);
     if (this.meta.human === null) {
       const viewer = el('select');
@@ -1009,7 +1125,7 @@ export class GameScreen {
       viewer.addEventListener('change', () => this.post({ type: 'viewer', viewer: Number(viewer.value) }));
       topbar.append(viewer);
     }
-    topbar.append(slower, this.speedEl, faster, this.pauseBtn, helpBtn);
+    topbar.append(fitBtn, slower, this.speedEl, faster, this.pauseBtn, helpBtn);
     if (this.meta.kind === 'live') {
       const save = el('button', undefined, '下載回放');
       save.addEventListener('click', () => this.post({ type: 'getReplay' }));
@@ -1072,12 +1188,14 @@ export class GameScreen {
     if (this.speedEl.textContent !== speedText) this.speedEl.textContent = speedText;
     const pauseText = this.paused ? '繼續' : '暫停';
     if (this.pauseBtn.textContent !== pauseText) this.pauseBtn.textContent = pauseText;
-    // 觀戰的選手列
-    if (human === null) {
+    // 觀戰的選手列（有數據面板時不需要）
+    if (human === null && this.scoreboard === null) {
       setHtml(
         this.playersEl,
-        cur.players.map((p) => `<div class="p${p.alive ? '' : ' dead'}"><span class="dot" style="background:${teamColor(p.id)}"></span>${this.playerName(p.id)}　礦 ${p.minerals}　人口 ${p.supplyUsed}/${p.supplyCap}　兵力 ${p.army}　工人 ${p.workers}</div>`).join(''),
+        cur.players.map((p) => `<div class="p${p.alive ? '' : ' dead'}"><span class="dot" style="background:${teamColor(p.id)}"></span>${esc(this.playerName(p.id))}　礦 ${p.minerals}</div>`).join(''),
       );
+    } else {
+      setHtml(this.playersEl, '');
     }
     if (this.replaybar !== null && this.slider !== null) {
       if (!this.sliderDragging) this.slider.value = String(cur.tick);
@@ -1093,16 +1211,59 @@ export class GameScreen {
     }
     setHtml(
       this.logEl,
-      this.log
-        .slice(-LOG_LINES)
-        .map((l) => `<div><span class="t">${formatTime(l.tick)}</span>${l.text}</div>`)
-        .join(''),
+      this.scoreboard !== null
+        ? this.comments
+            .slice(-LOG_LINES)
+            .map((c) => `<div class="${c.major ? 'major' : ''}"><span class="t">${formatTime(c.tick)}</span>${this.commentHtml(c.text)}</div>`)
+            .join('')
+        : this.log
+            .slice(-LOG_LINES)
+            .map((l) => `<div><span class="t">${formatTime(l.tick)}</span>${esc(l.text)}</div>`)
+            .join(''),
     );
+    this.logEl.classList.toggle('commentary', this.scoreboard !== null);
+  }
+
+  /** 觀戰數據面板：各選手一欄，數值最高者標示 */
+  private scoreboardHtml(rows: readonly ScoreRow[]): string {
+    const alive = rows.filter((r) => r.alive);
+    const best = (f: (r: ScoreRow) => number): number => Math.max(...alive.map(f));
+    const cell = (r: ScoreRow, v: number, f: (r: ScoreRow) => number, text = String(v)): string => `<td class="${r.alive && alive.length > 1 && v === best(f) && v > 0 ? 'lead' : ''}">${r.alive ? text : '—'}</td>`;
+    const comp = (r: ScoreRow): string => (['spear', 'archer', 'cavalry', 'siege'] as UnitType[]).flatMap((t) => ((r.comp[t] ?? 0) > 0 ? [`${UNIT_NAME[t].replace('兵', '')}${r.comp[t]}`] : [])).join(' ') || '—';
+    const head = rows.map((r) => `<th style="color:${teamColor(r.id)}">${esc(this.playerName(r.id))}${r.alive ? '' : '（淘汰）'}</th>`).join('');
+    const line = (label: string, tip: string, f: (r: ScoreRow) => number, fmt?: (r: ScoreRow) => string): string =>
+      `<tr><td title="${tip}">${label}</td>${rows.map((r) => cell(r, f(r), f, fmt?.(r))).join('')}</tr>`;
+    return `<table class="score"><tr><th></th>${head}</tr>
+${line('礦', '目前持有、還沒花掉的礦', (r) => r.minerals)}
+${line('工人', '採礦的工人數', (r) => r.workers)}
+${line('收入／分', '最近一分鐘採到的礦', (r) => r.incomePerMin)}
+${line('兵力', '戰鬥單位的總成本（礦）', (r) => r.army)}
+<tr><td title="戰鬥單位數（長槍、弓、騎、攻城）">兵種</td>${rows.map((r) => `<td>${r.alive ? comp(r) : '—'}</td>`).join('')}</tr>
+${line('人口', '目前人口／上限', (r) => r.supplyUsed, (r) => `${r.supplyUsed}/${r.supplyCap}`)}
+${line('科技', '主堡等級、武器、護甲研究', (r) => r.techLevel * 100 + r.weapons + r.armor, (r) => `Lv${r.techLevel}${r.weapons + r.armor > 0 ? ` 武${r.weapons} 甲${r.armor}` : ''}${r.holdsWatchtower ? ' ◎塔' : ''}`)}
+${line('採集點', '主堡與採集站數（越多代表擴張越多）', (r) => r.dropoffs)}
+${line('防禦塔', '已完工的防禦塔', (r) => r.towers)}
+${line('資產分數', '時限到時用來排名：存活單位＋已完工建築的成本', (r) => r.assets)}
+</table>`;
   }
 
   private infoHtml(): string {
     const cur = this.vm.cur!;
     const human = this.meta.human;
+    // 觀戰：數據面板常駐；選取的東西只顯示一行摘要（細節看滑鼠提示）
+    if (human === null && this.scoreboard !== null) {
+      const sel = cur.units.filter((u) => this.vm.selection.has(u.id));
+      const b = this.vm.selectedBuilding === null ? undefined : cur.buildings.find((x) => x.id === this.vm.selectedBuilding);
+      const line =
+        sel.length === 1
+          ? `${UNIT_NAME[sel[0].type]}（${esc(this.playerName(sel[0].owner))}）血量 ${sel[0].hp}/${sel[0].maxHp}`
+          : sel.length > 1
+            ? `已選取 ${sel.length} 個單位`
+            : b !== undefined
+              ? `${BUILDING_NAME[b.type]}（${esc(this.playerName(b.owner))}）血量 ${b.hp}/${b.maxHp}`
+              : '';
+      return `${line !== '' ? `<div class="kv">${line}</div>` : ''}${this.scoreboardHtml(this.scoreboard)}`;
+    }
     const units = cur.units.filter((u) => this.vm.selection.has(u.id));
     const owner = (o: number): string => (o === human ? '' : `<span class="muted">（${this.playerName(o)}）</span>`);
     if (this.pendingBuild) return '<div class="title">建造</div><div class="hint">選一種建築，再左鍵放到地圖上（Esc 返回）</div>';

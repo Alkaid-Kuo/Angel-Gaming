@@ -69,11 +69,23 @@ table.keys td:first-child { width: 1%; }
 .dialog ol { padding-left: 20px; }
 .dialog .row { justify-content: flex-end; }
 
+/* 地圖滑鼠提示 */
+.map-tip { position: absolute; left: 0; top: 0; max-width: 300px; background: rgba(11, 16, 23, 0.95); border: 1px solid #475569; border-radius: 8px; padding: 7px 10px; font-size: 13px; line-height: 1.5; pointer-events: none; z-index: 3; box-shadow: 0 6px 18px rgba(0,0,0,0.45); }
+/* 觀戰解說欄 */
+.log.commentary { width: min(460px, 60%); font-size: 13px; background: linear-gradient(to top, rgba(10,14,20,0.85), rgba(10,14,20,0.55)); border-radius: 8px; padding: 6px 10px; text-shadow: none; }
+.log.commentary .major { color: #fde68a; }
+/* 觀戰數據面板 */
+table.score { border-collapse: collapse; font-size: 13px; width: 100%; }
+table.score th { text-align: right; font-weight: bold; padding: 1px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+table.score td { text-align: right; padding: 1px 8px; border-top: 1px solid #1f2937; white-space: nowrap; }
+table.score td:first-child { text-align: left; color: var(--muted); cursor: help; }
+table.score td.lead { color: #86efac; font-weight: bold; }
+
 /* 底部固定面板 */
 .panel { background: var(--panel-solid); border-top: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .panel-row { display: flex; gap: 8px; align-items: stretch; height: 182px; }
 .minimap { width: 182px; height: 182px; flex: none; border: 1px solid var(--border); background: #000; image-rendering: pixelated; cursor: pointer; }
-.info { flex: 1; min-width: 0; background: #0f141a; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; overflow: hidden; }
+.info { flex: 1; min-width: 0; background: #0f141a; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; overflow: auto; }
 .info .title { font-weight: bold; font-size: 16px; margin-bottom: 6px; }
 .info .kv { margin: 4px 0; }
 .info .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -143,4 +155,6 @@ table.keys td:first-child { width: 1%; }
   .info { padding: 6px 10px; font-size: 13px; }
   .tutorial { width: 330px; padding: 8px 10px; font-size: 13px; }
   .tutorial .tut-head { font-size: 14px; }
+  .log.commentary div:nth-last-child(n+5) { display: none; }
+  table.score { font-size: 12px; }
 }

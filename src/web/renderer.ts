@@ -6,6 +6,9 @@ import { BUILDING_GLYPH, TEAM_COLORS } from './labels.ts';
 export const TILE_PX = 16;
 /** 指令位置提示的顯示時間（毫秒） */
 const MARKER_MS = 600;
+/** 縮放範圍（看全圖時可以縮到更小） */
+export const MIN_ZOOM = 0.15;
+export const MAX_ZOOM = 3;
 
 export interface Camera {
   /** 畫面左上角的世界座標（單位） */
@@ -137,6 +140,7 @@ export class Renderer {
     }
   }
 
+  /** 限制鏡頭範圍；地圖比畫面小時置中 */
   clampCamera(cam: Camera): void {
     const s = this.scale(cam);
     const viewW = this.canvas.clientWidth / s;
@@ -144,8 +148,16 @@ export class Renderer {
     const mapW = this.map.width * TILE_SIZE;
     const mapH = this.map.height * TILE_SIZE;
     const margin = 4 * TILE_SIZE;
-    cam.x = Math.max(-margin, Math.min(mapW - viewW + margin, cam.x));
-    cam.y = Math.max(-margin, Math.min(mapH - viewH + margin, cam.y));
+    cam.x = viewW >= mapW + 2 * margin ? (mapW - viewW) / 2 : Math.max(-margin, Math.min(mapW - viewW + margin, cam.x));
+    cam.y = viewH >= mapH + 2 * margin ? (mapH - viewH) / 2 : Math.max(-margin, Math.min(mapH - viewH + margin, cam.y));
+  }
+
+  /** 縮放到看得到整張地圖並置中 */
+  fitCamera(cam: Camera): void {
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    cam.zoom = Math.max(MIN_ZOOM, Math.min(w / (this.map.width * TILE_PX), h / (this.map.height * TILE_PX)) * 0.96);
+    this.clampCamera(cam);
   }
 
   /** 插值後的單位位置 */
