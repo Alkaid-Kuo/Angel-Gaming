@@ -55,7 +55,7 @@ npm run web
 npm run pack:build
 ```
 
-產生參賽包到 `out/pack/`（規格書、基準 Bot、範例模板、CLI、回放播放器）。試跑與評測：`scripts/run-opencode-trial.ts`（opencode 版執行器）、`scripts/evaluate-trials.ts`（合規、對基準 Bot、風格統計、版本線、循環賽）。
+產生參賽包到 `out/pack/`（規格書、基準 Bot、範例模板、CLI、回放播放器）。試跑與評測：`scripts/run-opencode-trial.ts`（opencode 版執行器）、`scripts/evaluate-trials.ts`（合規、對基準 Bot、風格統計、版本線、循環賽）、`scripts/watchability.ts`（觀賞性指標：交戰次數、平靜比例、領先易手）。M2 試跑作品在 `arms-race/2026-10-22_M2試跑/`，精選回放在 `arms-race/2026-10-22_M3精選回放/`。
 
 ## CLI：rts-sim
 
