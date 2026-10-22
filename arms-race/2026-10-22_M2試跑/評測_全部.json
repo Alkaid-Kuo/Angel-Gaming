@@ -1,0 +1,948 @@
+{
+  "report": [
+    {
+      "run": "Claude-Opus_速攻_2026-10-22",
+      "hasFinal": true,
+      "snapshots": [
+        "v1.js",
+        "v2.js",
+        "v3.js",
+        "v4.js",
+        "v5.js",
+        "v6.js",
+        "v7.js",
+        "v8.js",
+        "v9.js",
+        "v10.js",
+        "v11.js",
+        "v12.js",
+        "v13.js",
+        "v14.js",
+        "v15.js"
+      ],
+      "compliance": {
+        "v1.js": {
+          "ok": true,
+          "bytes": 26013,
+          "error": null
+        },
+        "v2.js": {
+          "ok": true,
+          "bytes": 27311,
+          "error": null
+        },
+        "v3.js": {
+          "ok": true,
+          "bytes": 37256,
+          "error": null
+        },
+        "v4.js": {
+          "ok": true,
+          "bytes": 40313,
+          "error": null
+        },
+        "v5.js": {
+          "ok": true,
+          "bytes": 40725,
+          "error": null
+        },
+        "v6.js": {
+          "ok": true,
+          "bytes": 42029,
+          "error": null
+        },
+        "v7.js": {
+          "ok": true,
+          "bytes": 43660,
+          "error": null
+        },
+        "v8.js": {
+          "ok": true,
+          "bytes": 44843,
+          "error": null
+        },
+        "v9.js": {
+          "ok": true,
+          "bytes": 45564,
+          "error": null
+        },
+        "v10.js": {
+          "ok": true,
+          "bytes": 46363,
+          "error": null
+        },
+        "v11.js": {
+          "ok": true,
+          "bytes": 46589,
+          "error": null
+        },
+        "v12.js": {
+          "ok": true,
+          "bytes": 46659,
+          "error": null
+        },
+        "v13.js": {
+          "ok": true,
+          "bytes": 46659,
+          "error": null
+        },
+        "v14.js": {
+          "ok": true,
+          "bytes": 46655,
+          "error": null
+        },
+        "v15.js": {
+          "ok": true,
+          "bytes": 46679,
+          "error": null
+        },
+        "final.js": {
+          "ok": true,
+          "bytes": 46679,
+          "error": null
+        }
+      },
+      "finalVsBaseline": {
+        "winRate": 100,
+        "games": 100
+      },
+      "style": {
+        "firstDamageTick": 2020.3,
+        "firstExpansionTick": 1542.3,
+        "expandedGamesPct": 100,
+        "gathered": 3075.6,
+        "unitsProduced": 31,
+        "towersBuilt": 0,
+        "workerKills": 0,
+        "scoutCount": 15.6,
+        "towerHeldTicks": 685.1,
+        "richGatherRatio": 0,
+        "spearPct": 100,
+        "archerPct": 0,
+        "cavalryPct": 0,
+        "apm": 21.2,
+        "decideMsAvg": 0,
+        "decideMsMax": 1.4,
+        "softTimeouts": 0,
+        "exceptions": 0
+      },
+      "baselineStyleSameGames": {
+        "firstDamageTick": 1904.8,
+        "firstExpansionTick": null,
+        "expandedGamesPct": 0,
+        "gathered": 2343.4,
+        "unitsProduced": 20.5,
+        "towersBuilt": 0,
+        "workerKills": 0,
+        "scoutCount": 0.1,
+        "towerHeldTicks": 3.4,
+        "richGatherRatio": 0,
+        "spearPct": 42.4,
+        "archerPct": 38.8,
+        "cavalryPct": 18.9,
+        "apm": 11.5,
+        "decideMsAvg": 0,
+        "decideMsMax": 0.4,
+        "softTimeouts": 0,
+        "exceptions": 0
+      },
+      "ffa4VsBaselines": {
+        "avgRank": 1,
+        "games": 20
+      },
+      "versionLine": [
+        {
+          "version": "v1.js",
+          "winRate": 76
+        },
+        {
+          "version": "v2.js",
+          "winRate": 94
+        },
+        {
+          "version": "v3.js",
+          "winRate": 100
+        },
+        {
+          "version": "v4.js",
+          "winRate": 100
+        },
+        {
+          "version": "v5.js",
+          "winRate": 100
+        },
+        {
+          "version": "v6.js",
+          "winRate": 100
+        },
+        {
+          "version": "v7.js",
+          "winRate": 100
+        },
+        {
+          "version": "v8.js",
+          "winRate": 100
+        },
+        {
+          "version": "v9.js",
+          "winRate": 100
+        },
+        {
+          "version": "v10.js",
+          "winRate": 100
+        },
+        {
+          "version": "v11.js",
+          "winRate": 100
+        },
+        {
+          "version": "v12.js",
+          "winRate": 100
+        },
+        {
+          "version": "v13.js",
+          "winRate": 100
+        },
+        {
+          "version": "v14.js",
+          "winRate": 100
+        },
+        {
+          "version": "v15.js",
+          "winRate": 100
+        }
+      ],
+      "bugs": "# BUGS／規格不清之處\n\n開發「速攻」選手時發現的引擎行為疑點與規格模糊處。選手端只做迴避，沒有利用。\n\n## 1. 兩單位在建築轉角正面相撞會永久互卡\n\n- 重現：1v1 `--seed 22`，選手前置兵營工人（往敵方移動）與新生產的工人（往礦點移動）在主堡右上角正面相遇，兩者位置從 tick ≈ 400 到 1300 以上都不變（每 100 tick 只移動約 25 單位，之後完全不動）。\n- 推測原因：尋路不考慮其他單位，推擠又是對稱的「各推開一半」；兩者朝彼此前進、側面被建築擋住（單位中心不可進入建築），每 tick 移動量被推擠抵銷，形成死鎖。\n- 影響：卡住的工人整場不再工作；若是建造工人，建築永遠蓋不起來。\n- 選手端迴避：偵測「有移動／建造指令但 40 tick 內位移 < 200」的工人，先往側面移開 1.5 格再恢復原指令。\n\n## 2. 採集站緊貼礦點時，工人會卡在礦點與採集站之間\n\n- 重現：4 人局 `--seed 10`（舊版選手 v2 的採集站放在 (80,14)，緊鄰礦點 (80,13)、(82,15)）。tick 1200～1250 間有 4 名工人位置完全不變，其中兩名身上帶著 5 礦卻無法交付；整場經濟只剩約一半。\n- 觀察到工人中心座標 (80000, 14250) 落在採集站佔用格 (80,14) 的邊界上，疑似「單位中心不可進入建築」在格子邊界（x 恰為 1000 的倍數）的判定有誤差，或被推擠推進建築後卡住。\n- 選手端迴避：採集站四周保留 1 格走道（周圍一圈不可有礦點或阻擋地形）。修正後同條件的 4 人局平均名次從 1.8 進步到 1.1。\n\n## 3. 規格不清\n\n- 「工人中心距離礦點邊緣 ≤ 200 單位」才能開採，但工人半徑 300：代表工人圓必須與礦點格重疊，而規格又說「單位中心不可進入礦點」——兩者如何共存（是否只檢查中心點）沒有寫清楚。\n- 生產完成的單位以 `move` 前往集結點（沿途不交戰）；規格有寫，但沒有提供「集結時改用攻擊移動」的選項，選手只能每次決策額外下指令補救。\n- 統計欄位 `firstDamageTick` 沒有說明是「首次造成傷害」還是「首次受到傷害」，也沒說明是否包含對建築的傷害。\n- `stats.multipliers` 中防禦塔對建築的倍率為 `null`（規格寫「不攻擊建築」），選手若直接拿來計算需自行處理 null。\n- 主礦區只有 4 個礦點、合計 4000 礦；規格有寫儲量，但沒有提醒這代表單礦經濟在約 4000 tick 後就會枯竭，對長局的影響很大。\n",
+      "notes": "# SpeedRush（速攻）— 策略說明\n\n交付檔：`final.js`（與 `versions/v15.js` 相同）。單一 ES2020 檔案、無 import、約 45 KB。\n\n## 策略概要\n\n**核心思路：用最短的經濟鋪墊換最早的兵營，小批長槍兵一成形就壓進最近的敵方主堡，之後兵營不停出兵直線增援；看不到敵方戰鬥單位時直接點主堡，力求在對手成形前結束比賽。**\n\n1. **開局（tick 0～≈500）**：開局 100 礦立刻在主礦旁蓋採集站（四周留 1 格走道，避免工人卡死），把工人往返距離砍半；工人補到 5 名後立刻蓋第一座兵營。\n2. **成軍（≈900 起）**：兵營完工就連續生產，出兵優先於第二座兵營與工人。預設純長槍兵：最便宜、血最厚、出得最快。自我對戰與對基準 Bot 的測試都顯示它比混兵強。\n3. **首波（≈1700～2000）**：戰鬥單位數達「首波兵力」就全軍攻擊移動到路徑最近的敵方起點。兵營集結點設在自家往敵方方向 6 格處；家中散兵湊滿 3 隻就再送上前線。\n4. **攻城**：部隊附近沒有敵方戰鬥單位或防禦塔時，直接下令攻擊敵方主堡（主堡全毀即淘汰）；有敵兵逼近就立刻改回攻擊移動迎戰。\n5. **進退判斷**：評估前線敵我戰力（成本 × 血量比例，防禦塔另計；敵方弓兵血薄、被貼身就倒，威脅打七折）。敵方 > 我方 × 1.3 時撤回集結點，並提高重整門檻（隨時間遞減回首波兵力），湊齊後再壓上。這樣不會白白送兵，但壓力不斷。\n6. **回防**：主堡 15 格內敵方戰力 ≥ 150 且大於守軍時全軍回防；對方主堡血量 < 500 時照打不回。家中沒有兵、又遭敵方工人騷擾時，拉工人集中反擊。\n7. **後勤**：補給站依兵營數預留緩衝。有卸貨點的礦剩不到 3400 時（主礦約採掉 600，大約在首波出發前後），派工人到最近的分礦蓋採集站，每多一個礦區工人上限再加一份，第二條礦線提早上線，撐住後續源源不絕的增援。礦量 ≥ 300 時自動加蓋兵營（上限 6 座）。\n8. **時限收尾**：最後 400 tick 取消趕不及完成的生產（全額退款），剩下的礦換成來得及完工的補給站，讓資產分數最大化。\n9. **4 人局**：先打「路徑最近且仍存活」的對手，淘汰後自動轉向下一個；從某一家撤退一次就換打下一家存活對手，不在硬骨頭上耗兵。對手起點已清空但尚未淘汰時，改打記憶中的建築，再去巡它的分礦。\n10. **穩定性**：工人若正面互卡，先往側面移開再恢復原指令。已下令但尚未開工的建築會先預扣成本，選址時也避開。decide 全程 try/catch，official 模式平均約 0.05 ms、最大約 2.9 ms（軟上限 5 ms）。\n\n## 旋鈕（代碼與範圍從 v1 到最終版完全一致）\n\n| 代碼 | 名稱 | 範圍（預設） | 用途 |\n| --- | --- | --- | --- |\n| `rushSize` | 首波兵力 | 2～12（5） | 戰鬥單位數達此值即發動第一波。越小越早出擊（設 2 約在 tick 1300 開打），越大首波越厚。撤退後的重整門檻也不會低於此值。 |\n| `workerCap` | 工人上限 | 4～16（10） | 每個礦區的工人上限：只有主礦時就是這個值，每多一個有卸貨點的礦區再加一份（至少 5，總數不超過 30）。越低越早把礦轉成兵。開局「工人補到 5 名就蓋兵營」的 5 也不會超過這個值。 |\n| `barracksCount` | 兵營數 | 1～4（2） | 前期兵營數量。越多出兵越快，但經濟越吃緊；之後礦量堆積時仍會自動加蓋。 |\n| `cavalryRatio` | 騎兵比例 | 0～80（0） | 兵營產出中騎兵的百分比（剋弓兵、移動快）。 |\n| `archerRatio` | 弓兵比例 | 0～60（0） | 兵營產出中弓兵的百分比（剋長槍兵），其餘為長槍兵。與騎兵比例相加超過 100 時按比例縮放。 |\n| `proxyDistance` | 兵營前置距離 | 0～60（0） | 第一座兵營蓋在往敵方主堡直線上的百分比位置（0 為自家主堡旁）。前置可提早約 200 tick 開打，但對同級對手較冒險，預設關閉。 |\n\n所有旋鈕都測過全部最小、全部最大與混合值，1v1 與 4 人局都沒有例外或逾時。比賽中旋鈕若被改動，每次決策都會重新讀取並夾回範圍內。\n\n## 成績（最終版 v15）\n\n| 測試 | 結果 |\n| --- | --- |\n| 1v1 對基準 Bot（official，`--swap --games 50 --seed 1`） | **100%**，平均約 2900 tick 結束 |\n| 首次交戰時間 | 平均 tick 2000（基準 Bot 首次進攻約在 tick 3000） |\n| 4 人局對 3 隻基準 Bot | batch 40 場全拿第 1；official 12 場全拿第 1 |\n| 4 人混戰（舊版 v5、v4、塔防型測試對手） | 80 場平均名次 1.48，66 場第 1（v10 同條件為 2.00；4 家實力相當時期望值為 2.5） |\n| 4 人混戰（與 v12、v13、v14 同場） | 40 場平均名次 2.17（其餘三家 2.38～2.88） |\n| 塔防型測試對手（基準 Bot 加 3 座防禦塔） | 100% |\n| 純工人速攻測試對手 | 90% |\n| 弓兵佔 6 成的對手（自己的 v12 調旋鈕） | 75% |\n| 版本循環賽（batch，每組 20 場，v13 時測） | Elo：v13 2036 > v12 1955 > v10 1553 ≈ v8 1553 > v4 1308 > 基準 594；之後的 v14 對 v13 為 63%（140 場） |\n\n## 已知弱點\n\n- 遇到同樣是速攻的對手（鏡像對戰）常拖到時限比資產；v12 提早開分礦後，經濟面已比舊版強。\n- 對弓兵佔 6 成的對手約 75%：試過自動混騎兵反而更差，最後改用「弓兵威脅打七折」解決一部分。\n- 4 人局若同時被兩家速攻夾擊，仍有約 1/6 機率第一個出局。\n\n## 試過但沒採用（與當時版本相比沒有明顯進步，或某一面變差）\n\n- 交戰集火（指定攻擊血最少的敵兵）：鏡像約 44%，4 人局略差。\n- 依對手兵種自動混騎兵剋弓兵：對弓兵 6 成的對手反而從 65% 掉到 37.5%。\n- 短兵相接時不撤退：鏡像只剩約 25%。\n- 對手推進時改成「基地互拆」不回防：鏡像持平。\n- 首波兵力改 3、4、6：鏡像都在 40%～57% 之間，維持 5。\n- 前置兵營（proxyDistance 20～60）：首波提早約 200 tick，但對同級對手較弱，預設關閉。\n- 重整門檻下修、回防範圍放大或門檻降低、集結點外移、散兵更快出發、第二次開分礦提早：都在五五波附近，4 人局沒有更好。\n\n## 測試工具（`out/`）\n\n- `t1.sh`／`t4.sh`／`tv.sh`：1v1 對基準、4 人局對基準、任意兩隻對戰（batch 模式）的快速統計。\n- `turtle.js`：基準 Bot 加 3 座防禦塔的塔防型對手；`wrush.js`：純工人速攻對手。\n"
+    },
+    {
+      "run": "Claude-Opus_快速擴張_2026-10-22",
+      "hasFinal": true,
+      "snapshots": [
+        "v1.js",
+        "v2.js",
+        "v3.js",
+        "v4.js",
+        "v5.js",
+        "v6.js",
+        "v7.js",
+        "v8.js",
+        "v9.js"
+      ],
+      "compliance": {
+        "v1.js": {
+          "ok": true,
+          "bytes": 34572,
+          "error": null
+        },
+        "v2.js": {
+          "ok": true,
+          "bytes": 37143,
+          "error": null
+        },
+        "v3.js": {
+          "ok": true,
+          "bytes": 39521,
+          "error": null
+        },
+        "v4.js": {
+          "ok": true,
+          "bytes": 41528,
+          "error": null
+        },
+        "v5.js": {
+          "ok": true,
+          "bytes": 43415,
+          "error": null
+        },
+        "v6.js": {
+          "ok": true,
+          "bytes": 44576,
+          "error": null
+        },
+        "v7.js": {
+          "ok": true,
+          "bytes": 45757,
+          "error": null
+        },
+        "v8.js": {
+          "ok": true,
+          "bytes": 44639,
+          "error": null
+        },
+        "v9.js": {
+          "ok": true,
+          "bytes": 44639,
+          "error": null
+        },
+        "final.js": {
+          "ok": true,
+          "bytes": 44639,
+          "error": null
+        }
+      },
+      "finalVsBaseline": {
+        "winRate": 100,
+        "games": 100
+      },
+      "style": {
+        "firstDamageTick": 3165.6,
+        "firstExpansionTick": 1013.1,
+        "expandedGamesPct": 100,
+        "gathered": 5989.8,
+        "unitsProduced": 49.4,
+        "towersBuilt": 7.7,
+        "workerKills": 17.9,
+        "scoutCount": 22.8,
+        "towerHeldTicks": 523.4,
+        "richGatherRatio": 0,
+        "spearPct": 67.9,
+        "archerPct": 27.7,
+        "cavalryPct": 4.4,
+        "apm": 23.1,
+        "decideMsAvg": 0,
+        "decideMsMax": 1.3,
+        "softTimeouts": 0,
+        "exceptions": 0
+      },
+      "baselineStyleSameGames": {
+        "firstDamageTick": 3173.9,
+        "firstExpansionTick": null,
+        "expandedGamesPct": 0,
+        "gathered": 3228.7,
+        "unitsProduced": 27.9,
+        "towersBuilt": 0,
+        "workerKills": 0,
+        "scoutCount": 0.1,
+        "towerHeldTicks": 61.1,
+        "richGatherRatio": 0,
+        "spearPct": 40.7,
+        "archerPct": 38.5,
+        "cavalryPct": 20.8,
+        "apm": 12.2,
+        "decideMsAvg": 0,
+        "decideMsMax": 0.4,
+        "softTimeouts": 0,
+        "exceptions": 0
+      },
+      "ffa4VsBaselines": {
+        "avgRank": 1,
+        "games": 20
+      },
+      "versionLine": [
+        {
+          "version": "v1.js",
+          "winRate": 98
+        },
+        {
+          "version": "v2.js",
+          "winRate": 100
+        },
+        {
+          "version": "v3.js",
+          "winRate": 100
+        },
+        {
+          "version": "v4.js",
+          "winRate": 100
+        },
+        {
+          "version": "v5.js",
+          "winRate": 100
+        },
+        {
+          "version": "v6.js",
+          "winRate": 100
+        },
+        {
+          "version": "v7.js",
+          "winRate": 100
+        },
+        {
+          "version": "v8.js",
+          "winRate": 100
+        },
+        {
+          "version": "v9.js",
+          "winRate": 100
+        }
+      ],
+      "bugs": "# BUGS／規格不清之處\n\n開發期間沒有利用任何引擎漏洞。以下是觀察到的問題與平衡疑慮，供規格修訂參考。\n\n## 1. 整數旋鈕給非整數值時，錯誤訊息不正確（CLI）\n\n- 重現：`--knobs '[{\"expandWorkers\":13.7},null]'`（`expandWorkers` 宣告為 8～20 的整數）\n- 實際：`選手載入失敗：旋鈕 expandWorkers 的值 13.7 超出範圍 8～20`\n- 13.7 在範圍內，真正原因是「不是整數」。訊息應改為「必須是整數」。\n- 規格也沒寫清楚：整數旋鈕收到小數時，應該拒絕還是取整。\n\n## 2. 規格不清：建築放置需要「已探索」，但地圖物件開局全公開\n\n- 規格寫明地形、礦點、起點開局全部公開，但 `build`／`canPlace` 要求佔用格「已探索」。\n- 結果是擴張時必須先派工人走到分礦把該區探索過，`build` 指令才不會被 `BAD_PLACEMENT` 拒絕。\n- 這可能是刻意設計（擴張要先派人過去），但規格的「開局資料」章節最好註明：公開資訊不等於已探索。\n\n## 3. 平衡疑慮：防禦塔不佔人口，又計入資產分數\n\n- 人口硬上限是 50，經濟好的一方很快會卡人口、累積大量礦。\n- 防禦塔（120 礦）不佔人口，完工後以全額成本計入資產分數；補給站與兵營同理。\n- 因此「卡人口後把多餘的礦換成塔」同時提升防守和時限判定的分數，是很強的後期策略。\n- 本 Bot 有用這招，但上限 12 座，而且塔都蓋在分礦與前線，有實際防守作用。\n- 如果不希望時限判定變成比誰蓋得多，可以考慮資產分數只計單位，或對建築打折。\n\n## 4. 平衡疑慮：主礦距離主堡偏遠，主礦旁蓋採集站幾乎穩賺\n\n- 主礦點離主堡中心 6～7 格，扣掉主堡半徑後，工人單程仍約 4 格。\n- 在主礦線旁蓋一座採集站（100 礦）就能把來回時間縮短約 3～4 成，飽和所需工人估計從約 11 名降到約 7 名。\n- 這是正常機制，不是漏洞，但等於每局都該做的固定操作。如果主礦設計成「主堡旁」，可以考慮把主礦拉近，或限制採集站與主堡的距離。\n\n## 5. 小觀察：observation 中 `gatherNodeId` 為 null，引擎內部以 0 表示\n\n- 引擎內部用 `gatherNodeId === 0` 表示沒有礦點，觀察資料轉成 `null`，行為與規格一致。\n- 但若某天礦點 id 從 0 起算，就會跟「沒有礦點」衝突。目前礦點 id 從 1 起算，沒有實際影響。\n\n## 6. 小觀察：official 模式第一個 decide 的耗時較高\n\n- tick 0 的 decide 在 official 模式約 2～3 ms（JIT 冷啟動），之後平均約 0.04 ms。\n- 在較慢的機器上，第一次決策有可能超過 5 ms 軟上限而整批作廢。\n- 建議軟上限不要套用在 tick 0，或另外給一次暖機呼叫。\n",
+      "notes": "# Expander（快速擴張）— 說明\r\n\r\n交付檔：`final.js`（與 `versions/v9.js` 內容相同）。單一檔案、ES2020、無 import，約 46 KB。\r\n\r\n## 策略概要\r\n\r\n風格是「先擴張、拚經濟，後期用大軍碾壓」。\r\n\r\n1. **開局經濟**\r\n   - 主堡不停產工人，閒置工人依「礦點人數 × 權重＋距離」分配，每個礦點最多約 3 人；每 25 tick 把過飽和礦點的工人調到人少的礦點。\r\n   - 主礦離主堡有 6～7 格，所以在主礦線旁另蓋一座採集站，縮短來回距離。\r\n   - 補給站提早蓋：預留人口為「3＋產能建築數×3」，避免人口卡住生產。這項在 v9 讓對 rush 的勝率從約 80% 升到 100%。附近的值都比較差：「3＋產能×2.5」對 v9 只有 30%；「4＋產能×3」並允許 3 座同時蓋，對 v9 只有 20%。\r\n2. **快速擴張**\r\n   - 工人數到 `expandWorkers`（預設 10，約 t950）時，派最近的工人先走到第一座分礦，礦一夠就蓋採集站（只要 100 礦、200 tick）。\r\n   - 工人數到 `secondExpandWorkers`（預設 16）時佔第二座分礦。\r\n   - 另有時間保底：t1500 一定有第一座分礦，t2400 一定有第二座。\r\n   - 礦多、人口也高時，在分礦補蓋主堡，用來增加產能、人口和資產分數。\r\n3. **安全網：防 rush**\r\n   - 第一座兵營在擴張後立刻蓋。兵少（< 8～12 人口）時，防守集結點設在隘口內側，並在那裡先蓋一座防禦塔，讓塔和兵一起守。\r\n   - 戰鬥人口有一條隨時間上升的「保底兵力」曲線；兵力低於曲線或基地受威脅時，先產兵、暫停工人。\r\n   - 主基地被優勢敵軍入侵時，依兵力差額拉工人一起攻擊最近的敵兵。\r\n   - 分礦遇到打不過的敵軍時，該分礦的工人暫時撤回主礦（120 tick）。\r\n   - 礦量採「單一保留制」：照優先序，只讓第一個買不起的項目保留礦，其後項目暫停，避免多個保留疊在一起卡死經濟。\r\n4. **中後期**\r\n   - 兵營數隨工人數增加（最多 5 座）；礦在累積時再加蓋，最多 6～7 座。\r\n   - 兵種以長槍兵為主（每礦血量最高），並依看過的敵兵組成補剋制兵種：見騎兵加長槍、見長槍加弓兵、見弓兵加騎兵。\r\n   - 人口將滿時少出騎兵（2 人口），多餘的礦拿去在分礦與前線蓋防禦塔。塔不佔人口，能守分礦，也計入資產分數。\r\n5. **總攻（碾壓）**\r\n   - 戰鬥人口達 `attackSupply`、人口將滿（≥47），或 t4800 以後，全軍攻擊移動到路徑最近且仍存活的敵方主堡。抵達後改打附近已知的建築，優先打主堡。\r\n   - 前線附近敵方戰力超過我方 1.15 倍就撤回重整。存款多、人口將滿時門檻放寬到 2.2 倍，因為補兵快，可以拿兵換。\r\n   - 援軍在集結點湊滿 7 人口才出發，不會一隻一隻送掉。\r\n6. **4 人局**\r\n   - 地圖、礦區、起點都從開局資料推算，沒有寫死座標。\r\n   - 進攻目標是路徑最近且仍存活的敵人。分礦防禦塔加上補蓋的主堡，讓時限到時的資產分數通常排第一。\r\n\r\n## 旋鈕\r\n\r\n| 代碼 | 名稱 | 範圍（預設） | 用途 |\r\n| --- | --- | --- | --- |\r\n| `expandWorkers` | 擴張時機 | 8～20（10） | 工人數達此值就去第一座分礦蓋採集站；越小越貪 |\r\n| `secondExpandWorkers` | 第二分礦時機 | 12～32（16） | 工人數達此值就佔第二座分礦；實際上至少比第一座多 2 名，且不超過工人目標 |\r\n| `workerTarget` | 工人目標 | 16～40（28） | 全場工人數上限（經濟規模）；擴張門檻會自動壓在此值以下 |\r\n| `attackSupply` | 總攻兵力 | 12～44（28） | 戰鬥人口達此值就全軍出擊；人口將滿時也會出擊；同時是保底兵力曲線的上限 |\r\n| `towersPerExpansion` | 分礦防禦塔 | 0～3（1） | 每座分礦旁固定要蓋的塔數（主基地隘口那座塔不受影響） |\r\n\r\n旋鈕每次 decide 都重新讀取，比賽中途改值也會立即生效；超出範圍或非數字時夾回範圍或用預設值。全部取最小值、全部取最大值、交錯極端值的組合都測過，對基準 Bot 都是 100% 勝率，也沒有任何例外。\r\n\r\n## 測試結果（final.js）\r\n\r\n| 對手 | 結果 |\r\n| --- | --- |\r\n| 基準 Bot（1v1、`--swap --games 50`、official） | 100%（50/50） |\r\n| 基準 Bot rush 化旋鈕（門檻 6／工人 8 等） | 100% |\r\n| 自製雙兵營 rush bot（`tmp/rush.js`，三組旋鈕、兩組 seed 各 40 場） | 100% |\r\n| 4 人局（vs 3 隻基準 Bot） | 平均名次 1.0 |\r\n| 4 人局（vs v1／rush／基準） | 平均名次約 1.4 |\r\n| 1v1 鏡像：v8 對 v7 | 60～65% |\r\n| 1v1 鏡像：v9 對 v8 | 約 54%（80 場） |\r\n| 4 人局（v8／v7／v1／基準 混戰，60 場） | v8 平均名次約 2.05，v7 約 2.00，兩者持平 |\r\n| 4 人局（v9／v8／v1／基準，兩組各 24 場） | v9 2.21／2.00，v8 1.71／2.04；合計 v9 約 2.1、v8 約 1.9，差距在雜訊邊緣 |\r\n\r\ndecide 平均約 0.04 ms，最大約 2～3 ms，只出現在 tick 0 冷啟動（official 模式）；沒有軟超時，也沒有例外。\r\n\r\n## 已知弱點\r\n\r\n- 測試用的 rush 對手目前全勝；但對更強、更早的 rush 仍可能吃虧，這是貪經濟的代價。曾試過派工人偵察敵方兵營數，效果不穩定，所以沒有採用。\r\n- 4 人混戰中，與同風格的舊版相比沒有明顯優勢。\r\n- 同風格鏡像對戰勝負接近五五波，主要由兵種配比決定。\r\n"
+    },
+    {
+      "run": "Claude-Sonnet_速攻_2026-10-22",
+      "hasFinal": true,
+      "snapshots": [
+        "v1.js",
+        "v2.js",
+        "v3.js",
+        "v4.js",
+        "v5.js",
+        "v6.js",
+        "v7.js",
+        "v8.js",
+        "v9.js",
+        "v10.js",
+        "v11.js",
+        "v12.js"
+      ],
+      "compliance": {
+        "v1.js": {
+          "ok": true,
+          "bytes": 14896,
+          "error": null
+        },
+        "v2.js": {
+          "ok": true,
+          "bytes": 18070,
+          "error": null
+        },
+        "v3.js": {
+          "ok": true,
+          "bytes": 23243,
+          "error": null
+        },
+        "v4.js": {
+          "ok": true,
+          "bytes": 24345,
+          "error": null
+        },
+        "v5.js": {
+          "ok": true,
+          "bytes": 24404,
+          "error": null
+        },
+        "v6.js": {
+          "ok": true,
+          "bytes": 24911,
+          "error": null
+        },
+        "v7.js": {
+          "ok": true,
+          "bytes": 26019,
+          "error": null
+        },
+        "v8.js": {
+          "ok": true,
+          "bytes": 29704,
+          "error": null
+        },
+        "v9.js": {
+          "ok": true,
+          "bytes": 30313,
+          "error": null
+        },
+        "v10.js": {
+          "ok": true,
+          "bytes": 30314,
+          "error": null
+        },
+        "v11.js": {
+          "ok": true,
+          "bytes": 30478,
+          "error": null
+        },
+        "v12.js": {
+          "ok": true,
+          "bytes": 30478,
+          "error": null
+        },
+        "final.js": {
+          "ok": true,
+          "bytes": 30478,
+          "error": null
+        }
+      },
+      "finalVsBaseline": {
+        "winRate": 100,
+        "games": 100
+      },
+      "style": {
+        "firstDamageTick": 1523.1,
+        "firstExpansionTick": null,
+        "expandedGamesPct": 0,
+        "gathered": 1388,
+        "unitsProduced": 16.2,
+        "towersBuilt": 0,
+        "workerKills": 0,
+        "scoutCount": 6.7,
+        "towerHeldTicks": 89,
+        "richGatherRatio": 0,
+        "spearPct": 100,
+        "archerPct": 0,
+        "cavalryPct": 0,
+        "apm": 15.4,
+        "decideMsAvg": 0,
+        "decideMsMax": 0.8,
+        "softTimeouts": 0,
+        "exceptions": 0
+      },
+      "baselineStyleSameGames": {
+        "firstDamageTick": 1529,
+        "firstExpansionTick": null,
+        "expandedGamesPct": 0,
+        "gathered": 1733.3,
+        "unitsProduced": 17,
+        "towersBuilt": 0,
+        "workerKills": 0,
+        "scoutCount": 0,
+        "towerHeldTicks": 0,
+        "richGatherRatio": 0,
+        "spearPct": 44.1,
+        "archerPct": 33.6,
+        "cavalryPct": 22.3,
+        "apm": 13.6,
+        "decideMsAvg": 0,
+        "decideMsMax": 0.4,
+        "softTimeouts": 0,
+        "exceptions": 0
+      },
+      "ffa4VsBaselines": {
+        "avgRank": 1,
+        "games": 20
+      },
+      "versionLine": [
+        {
+          "version": "v1.js",
+          "winRate": 100
+        },
+        {
+          "version": "v2.js",
+          "winRate": 100
+        },
+        {
+          "version": "v3.js",
+          "winRate": 100
+        },
+        {
+          "version": "v4.js",
+          "winRate": 100
+        },
+        {
+          "version": "v5.js",
+          "winRate": 100
+        },
+        {
+          "version": "v6.js",
+          "winRate": 100
+        },
+        {
+          "version": "v7.js",
+          "winRate": 100
+        },
+        {
+          "version": "v8.js",
+          "winRate": 100
+        },
+        {
+          "version": "v9.js",
+          "winRate": 100
+        },
+        {
+          "version": "v10.js",
+          "winRate": 100
+        },
+        {
+          "version": "v11.js",
+          "winRate": 100
+        },
+        {
+          "version": "v12.js",
+          "winRate": 100
+        }
+      ],
+      "bugs": "# BUGS.md：引擎漏洞與規格不清之處\n\n本次開發沒有發現需要利用的引擎漏洞，也沒有利用任何漏洞（選手只使用觀察資料與 helpers）。以下是實際遇到的規格不清或容易誤解之處：\n\n1. **主礦總量只有 4000（4 個礦點 × 儲量 1000）**（已實測確認）\n   規格書「地圖物件」只寫了礦點儲量，沒有點出後果：不擴張的選手在約 tick 4000 後經濟歸零（實測雙方 `gathered` 都停在 4000 上下、對局拖到時限時雙方都沒有收入）。建議在「經濟」章節明講，或在選手 API 提供各礦區剩餘總量（目前要自己加總 `mineNodes[].reserve`）。\n2. **建造的扣款時機（工人抵達時）容易讓選手超支**（規格已寫，但容易漏看）\n   規格寫了「下指令時不檢查礦量、抵達時才扣款」，但 `obs.minerals` 沒有扣掉「已下令、未抵達」的預訂金額；連續下令的選手必須自己保留礦，否則會 `buildFailed(NO_MINERALS)`。建議在觀察資料補一欄預訂金額，或在規格書用醒目方式說明。\n3. **統計欄位 `firstDamageTick` 的定義不明**\n   README 只列出欄位名稱。1v1 實測雙方的值很接近但不同（例如 2482 與 2457），看不出是「該選手造成傷害」還是「該選手受到傷害」的第一個 tick。\n4. **（未驗證的疑問）`rememberedBuildings` 在建築被摧毀後的清除時機**\n   規格寫「看到該處已無建築時才會消失」。若部隊在遠處（超出視野）把建築打掉，記憶是否仍殘留已被摧毀的建築，我沒有針對這點做專門測試；選手若拿記憶建築當進攻目標可能被舊資訊誤導，建議規格說明。\n5. **`attack` 指令的目標必須「看得到」，而 `attackMove` 沒有「優先打建築」的選項**（API 使用陷阱，非漏洞）\n   要集火主堡只能等它進入視野後下 `attack`；單位在 `attack` 期間不會回擊攻擊自己的單位，所以選手要自己拆分「應對威脅的單位」與「打建築的單位」。建議在規格的「指令與自動行為」段落補一句提醒。\n",
+      "notes": "# NOTES.md：Blitz（速攻）\n\n交付檔：`final.js`（流派名稱 Blitz，版本 v12，內容與 `versions/v12.js` 相同）。每個版本快照與對基準 Bot 的勝率見 `CHANGELOG.md`。\n\n## 策略概要\n\n核心想法：「用最精簡的經濟換最早的第一波，持續增援；打得贏就推到底，打不贏就撤回重整，避免速攻變成送兵。」\n\n1. **開局**：4 名初始工人 + 連續生產到 7 人（出擊前只養 7 人），第 150 礦立刻在主堡旁蓋第一座兵營（約 tick 350～450），再蓋補給站（提前量 3 人口，避免兵營完工後卡人口）。採購採「嚴格優先序」：買不起的項目會擋住後面的項目（存錢），確保兵營與補給站不被工人／兵種搶走資金；工人建造的預訂金額會先保留，不會超支。\n2. **出兵**：只出長槍兵（成本效益最高、對建築 100% 傷害）。兵營完工即連續生產，下一隻在上一隻進度 85% 時排入，既不空轉也不長期鎖礦。\n3. **第一波**：湊滿 `rushSize`（預設 3 隻長槍兵，約 tick 1330）就全軍攻擊移動到「離本營路徑最近」的敵方主堡；第一次交戰約 tick 1500，對基準 Bot 的 1v1 平均約 2300 tick 結束。出擊後才把工人補到 `workerCap`、兵營補到 `barracksCount`。\n4. **增援**：新單位湊滿一批（預設 2 人口，隨近期看到的敵軍規模提高，最多 8）才併入部隊派出，避免零星送死。\n5. **戰場指揮（`fight`）**：\n   - 敵方戰鬥單位 ≥ 2 隻：全部交給引擎自動索敵（姿態 aggressive 的 attackMove，目標為敵軍重心）。這比自己分配集火在自我對戰中強非常多。\n   - 敵軍很少時：對每個威脅指派足夠殺掉它的最近單位，其餘單位用 `attack` 直擊建築（優先序：身邊的防禦塔 → 主堡 → 兵營 → 其他；主堡血量 < 450 時直接補刀）。\n6. **打不過就撤**：交戰時敵軍人口（防禦塔每座算 3 人口）≥ 0.8 × 交戰我軍＋1 就撤回本營與新兵會合，並重選目標。再出擊門檻：無塔 → 敵軍規模 ×1.0＋2、等 40 tick；有塔 → ×2.6＋2、等 400 tick（對蓋塔龜縮的對手要更有耐心）。部隊全滅時，必須重新湊滿「出擊兵力／近期敵軍峰值／對方塔數」三者最大者才再出擊。\n7. **本營防守**：本營 16 格內出現敵方戰鬥單位時，留守新兵就地迎擊；敵方 ≥ 4 隻時召回外出部隊（除非對方主堡已快被打倒）。\n8. **4 人局目標選擇**：預設打「離本營路徑最近」的存活敵人，但每座已知防禦塔加 25 格懲罰（優先欺負沒蓋塔的鄰居）；目標被殲滅或撤退後重選。對有塔目標的出擊門檻再提高（每座塔 +3 人口）。\n9. **後期擴張**：主礦剩餘 ≤ 900 時，在最近的己方分礦區蓋採集站並把閒置工人轉過去（實測 12 工人約 tick 4300 才會觸發，影響很小）。\n\n## 旋鈕（所有版本代碼與範圍一致）\n\n| 代碼 | 名稱 | 範圍 | 預設 | 用途 |\n| --- | --- | --- | --- | --- |\n| `rushSize` | 出擊兵力 | 3～24（整數） | 3 | 戰鬥單位人口達此值即全軍出擊；越小越早壓上（也越冒險）。調到 24 會變成慢熱的大軍推進（約 tick 3200 才第一次交戰）。 |\n| `workerCap` | 工人上限 | 5～16（整數） | 12 | 出擊後工人補到的數量（出擊前固定只養 7 人）。主礦收入約：7 人 0.54／tick、10 人 0.75、12 人 0.88、16 人 0.94，所以超過 12 人邊際效益很低。 |\n| `barracksCount` | 兵營數量 | 1～3（整數） | 3 | 兵營目標數；第 1 座最早蓋，其餘在出擊後依資金補。只有 1 座時產能偏低（自我對戰勝率明顯變差）。 |\n| `archerRatio` | 弓兵比例 | 0～40（整數，%） | 0 | 兵營產出中弓兵比例。弓兵對建築只有 50% 傷害，不利速攻，預設 0。 |\n| `cavalryRatio` | 騎兵比例 | 0～30（整數，%） | 0 | 兵營產出中騎兵比例（其餘為長槍兵）。騎兵快但貴、佔 2 人口，預設 0。 |\n\n## 驗證結果\n\n- 對基準 Bot 1v1：official 50 場（`--swap --seed 1`）100% 勝，平均約 2300 tick 結束，第一次交戰約 tick 1500；batch 100 場 100%、200 場（v2）100%。基準 Bot 換成各種旋鈕（早攻／多工人／全弓兵等）也 100%。\n- 4 人局（我 + 3 基準 Bot）：official 20 場全第 1；batch 100 場全第 1（另一批 150 場 149 場第 1）。\n- 旋鈕邊界：五顆旋鈕各取最小／最大的 32 種組合，1v1 全部可正常運作（勝率 100%）、4 人局全部可運作且無例外、無超時（official 模式 `decideMsMax` 約 1.5～2.3 ms，遠低於軟上限 5 ms）。\n- 自製「蓋塔基準 Bot」（基準 Bot 加蓋 4 座防禦塔，位於 `opp/turtle.js`）：1v1 100% 勝；1 蓋塔＋2 基準的 4 人局 30/30 第 1；3 隻蓋塔對手的 4 人局第 1 約 95%（58/60，平均名次約 1.1）。\n- 自我對戰（同檔不同旋鈕／同檔不同版本）：v12 對 v2 勝 92%、對 v11 約 50%（兩者只差蓋塔對手的行為）；v11 對 v10 勝 65%、對 v9 勝 78%。預設旋鈕對偏運營的旋鈕組合（如 rushSize 6／workerCap 10／barracksCount 2）勝率約 35～60%（各輪循環賽結果有波動）。\n- 自我對戰的發現：`workerCap` 10 在自我對戰中比 12 強（約 60% vs 48%），但 12 在 4 人局（尤其對蓋塔對手）更穩，因此預設取 12。\n\n## 已知限制\n\n- 主礦只有 4000 礦，只有後期才會擴張；若第一波沒能解決對手，後期收入有限（見 BUGS.md 第 1 點）。\n- 不偵察：只靠進攻部隊的視野判斷敵軍強度，所以第一波必定會「用兵探路」；對防守很強的對手第一波通常會撤退而不是硬拚。\n- 單位微操很簡單：沒有風箏、沒有集火弱單位的細節，靠數量與自動索敵取勝。\n- 3 隻蓋塔龜縮對手的 4 人局仍有少數場次會拖到時限而排名下滑；更強的龜縮（更多塔、更大守軍）可能讓速攻難以收尾。\n"
+    },
+    {
+      "run": "Claude-Sonnet_快速擴張_2026-10-22",
+      "hasFinal": true,
+      "snapshots": [
+        "v1.js",
+        "v2.js",
+        "v3.js",
+        "v4.js",
+        "v5.js",
+        "v6.js",
+        "v7.js",
+        "v8.js",
+        "v9.js",
+        "v10.js",
+        "v11.js",
+        "v12.js"
+      ],
+      "compliance": {
+        "v1.js": {
+          "ok": true,
+          "bytes": 29503,
+          "error": null
+        },
+        "v2.js": {
+          "ok": true,
+          "bytes": 29840,
+          "error": null
+        },
+        "v3.js": {
+          "ok": true,
+          "bytes": 31277,
+          "error": null
+        },
+        "v4.js": {
+          "ok": true,
+          "bytes": 32497,
+          "error": null
+        },
+        "v5.js": {
+          "ok": true,
+          "bytes": 32999,
+          "error": null
+        },
+        "v6.js": {
+          "ok": true,
+          "bytes": 34743,
+          "error": null
+        },
+        "v7.js": {
+          "ok": true,
+          "bytes": 34743,
+          "error": null
+        },
+        "v8.js": {
+          "ok": true,
+          "bytes": 34743,
+          "error": null
+        },
+        "v9.js": {
+          "ok": true,
+          "bytes": 35427,
+          "error": null
+        },
+        "v10.js": {
+          "ok": true,
+          "bytes": 35429,
+          "error": null
+        },
+        "v11.js": {
+          "ok": true,
+          "bytes": 35600,
+          "error": null
+        },
+        "v12.js": {
+          "ok": true,
+          "bytes": 35668,
+          "error": null
+        },
+        "final.js": {
+          "ok": true,
+          "bytes": 35669,
+          "error": null
+        }
+      },
+      "finalVsBaseline": {
+        "winRate": 100,
+        "games": 100
+      },
+      "style": {
+        "firstDamageTick": 3169.5,
+        "firstExpansionTick": 281.7,
+        "expandedGamesPct": 100,
+        "gathered": 6386.1,
+        "unitsProduced": 49.4,
+        "towersBuilt": 12.4,
+        "workerKills": 14.3,
+        "scoutCount": 23.8,
+        "towerHeldTicks": 69.6,
+        "richGatherRatio": 19.5,
+        "spearPct": 68.8,
+        "archerPct": 28.7,
+        "cavalryPct": 2.5,
+        "apm": 22.6,
+        "decideMsAvg": 0,
+        "decideMsMax": 1.2,
+        "softTimeouts": 0,
+        "exceptions": 0
+      },
+      "baselineStyleSameGames": {
+        "firstDamageTick": 3172.7,
+        "firstExpansionTick": null,
+        "expandedGamesPct": 0,
+        "gathered": 3228.1,
+        "unitsProduced": 26.8,
+        "towersBuilt": 0,
+        "workerKills": 0.1,
+        "scoutCount": 1.9,
+        "towerHeldTicks": 88.3,
+        "richGatherRatio": 0,
+        "spearPct": 40.9,
+        "archerPct": 39,
+        "cavalryPct": 20.2,
+        "apm": 12.1,
+        "decideMsAvg": 0,
+        "decideMsMax": 0.4,
+        "softTimeouts": 0,
+        "exceptions": 0
+      },
+      "ffa4VsBaselines": {
+        "avgRank": 1,
+        "games": 20
+      },
+      "versionLine": [
+        {
+          "version": "v1.js",
+          "winRate": 100
+        },
+        {
+          "version": "v2.js",
+          "winRate": 100
+        },
+        {
+          "version": "v3.js",
+          "winRate": 100
+        },
+        {
+          "version": "v4.js",
+          "winRate": 100
+        },
+        {
+          "version": "v5.js",
+          "winRate": 100
+        },
+        {
+          "version": "v6.js",
+          "winRate": 100
+        },
+        {
+          "version": "v7.js",
+          "winRate": 100
+        },
+        {
+          "version": "v8.js",
+          "winRate": 100
+        },
+        {
+          "version": "v9.js",
+          "winRate": 100
+        },
+        {
+          "version": "v10.js",
+          "winRate": 100
+        },
+        {
+          "version": "v11.js",
+          "winRate": 100
+        },
+        {
+          "version": "v12.js",
+          "winRate": 100
+        }
+      ],
+      "bugs": "# BUGS.md — 發現的漏洞與規格不清之處\n\n本選手未使用任何引擎漏洞。以下是開發過程中遇到的「規格不清」或「平衡疑慮」，供規格書修訂參考。\n\n## 規格不清\n\n1. **開局無法對未探索區域下 `build`／`canPlace`**\n   分礦區在開局時多半未探索，`canPlace('depot', …)` 回傳 false、`build` 會以 `BAD_PLACEMENT` 拒絕。\n   規格有寫「已探索」，但沒有明講「想開局搶擴張必須先派工人探路」；初學的選手容易卡在這裡。\n   建議在「經濟」或「建造規則」補一句範例，或提供 `isExplored(tileX, tileY)` 輔助工具。\n\n2. **1v1 時限到時的名次是否算「勝」**\n   規格寫「時限到時依資產分數排名」；CLI 的 `winRate` 是把 rank 1 算成勝（含時限判分）。\n   規格沒有明說 1v1 的勝率是否包含「時限判分勝」；建議明寫，因為兩種算法對龜縮型選手差很多。\n\n3. **富礦區歸屬**\n   規格寫「富礦區 每人份 1、中立位置（地圖邊緣）」，`mineAreas` 中 `owner` 為 null。\n   1v1 地圖有 2 個富礦區（位於地圖邊角），4 人局 4 個，沒有任何規則阻止選手去佔離對手更近的那個。\n   「每人份」是設計意圖還是只是生成方式，規格沒說清楚。\n\n4. **建造指令的工人 `order` 狀態轉換未寫明**\n   實測：下 `build` 後工人 `order.type` 維持 `build`（座標為目標），到達並扣款開工後才變成 `construct`（含 `buildingId`）。\n   選手若要判斷「這座未完工建築有沒有人在蓋」只能靠這個行為；建議寫進規格的 order 說明。\n\n5. **`attack` 工人的收尾行為**\n   規格說「攻擊指定目標：持續追擊直到目標死亡或離開己方視野」。\n   之後是回到 `idle`（需選手重派工）還是恢復原採集循環，規格沒寫；選手只能保守地每次決策都檢查閒置工人。\n\n## 平衡疑慮（不是漏洞，但值得知道）\n\n6. **資產分數允許「把剩餘礦蓋成建築」來贏下僵局**\n   時限判分＝存活單位成本＋已完工建築成本。人口上限 50 之後多餘的礦無處可用，\n   選手可以不停蓋防禦塔／補給站把礦轉成分數，並同時讓進攻方打不進去。\n   實測兩隻同樣的選手互打時，常常 0 交戰、整場靠「誰蓋的塔多」決勝（單場最多蓋到 48 座塔，分數 10000+ 對 7500）。\n   這會讓「龜縮＋蓋塔」成為主流解；若不希望如此，可以考慮：建築分數打折、只計單位、或限制防禦塔數量。\n\n7. **極端早攻（8 工人、6 人口攻擊門檻的基準 Bot）對快速擴張風格有 10% 左右的勝率損失**\n   開局先蓋採集站的流派，第一批戰鬥單位在 tick 2000 之前只有 3～4 隻，而 6 人口的早攻 tick 2000 就到，\n   兵營要等到工人數達標後才蓋。這是風格取捨，不是漏洞；列在這裡是因為「基準 Bot 的旋鈕」可以調成這樣，\n   評測時若使用這種旋鈕組合，快速擴張流會明顯吃虧。\n",
+      "notes": "# QuickExpand（快速擴張流）— 選手說明\n\n## 策略概要\n1. **開局搶擴張**：4 名工人先分散採主礦；工人數達「擴張時機」前 3 隻就派一名工人走去分礦區探路（開局未探索，`canPlace` 不能用），\n   到達後立刻蓋採集站（100 礦，最便宜的擴張）。採集站完工後新工人自動平均分配到各礦區（每礦點先 1 人、再 2 人、最多約 3 人）。\n2. **擴張順序**：最近的分礦 → 第二分礦 → 最近的富礦區（依「擴張礦區數」旋鈕決定要幾個）。礦區枯竭、工人閒置會自動改派；富礦點（每趟 8 礦）在平均分配時偏好多放 1 人，富礦區優先飽和。\n3. **經濟與生產**：主堡不間斷出工人至「工人目標」；補給站依人口餘額與兵營數量提前蓋；\n   兵營數量隨工人數增加（工人 8→1 座、13→2 座…最多 5 座），兵營持續生產長槍兵為主、弓兵為輔（敵方弓兵占多數時改產騎兵）。\n4. **防守**：集結點放在分礦外側（面向敵方）；敵方戰鬥單位靠近任何己方建築 → 全軍攻擊移動過去；\n   兵力不足但「全軍＋附近工人」估計能贏時，工人當民兵一起攻擊（Lanchester 戰力＝總血量×總傷害）；每個擴張礦區蓋防禦塔。\n5. **剩餘的礦轉成防禦塔**：礦 ≥ 130 時持續在各擴張礦區與主堡周圍加蓋防禦塔（每處最多 20 座、可同時 6 座施工），\n   塔位用完後期再補蓋補給站——避免礦閒置，同時強化防守並提高時限到時的資產分數（鏡像對戰實測：越早把礦轉成塔越好）。\n6. **後期碾壓**：戰鬥單位人口達「總攻門檻」就全軍攻擊移動（優先打已知敵方主堡），新單位在集結點累積 ≥ 4 隻就送上去增援。\n   總攻中會評估交戰處敵方（含防禦塔）與我方的戰力比，敵方 > 我方 0.8 倍就撤回集結點並暫停出擊 1500 tick，避免打進塔陣虧本；\n   兵力回補後再度出擊。\n7. **4 人局**：進攻目標為已知的最近敵方主堡，沒有已知建築時依序探訪最近的存活敵方起點；其餘邏輯相同。\n\n## 旋鈕（代碼與範圍在所有版本中一致）\n| 代碼 | 名稱 | 範圍 | 預設 | 用途 |\n| --- | --- | --- | --- | --- |\n| `expandAt` | 擴張時機 | 5～16（整數） | 5 | 工人數達此值時蓋第一座分礦採集站；越小越早擴張。超過 12 時一律以 12 計（主礦 4 個礦點的飽和量） |\n| `workerTarget` | 工人目標 | 10～32（整數） | 24 | 工人總數目標（實際上限還受「可用礦點數×3」限制） |\n| `armyPush` | 總攻門檻 | 12～45（整數） | 20 | 戰鬥單位人口達此值即全軍出擊；實際值最高不超過「50 − 工人數 − 1」，避免永遠達不到 |\n| `expansions` | 擴張礦區數 | 1～3（整數） | 3 | 最多佔用幾個額外礦區（分礦、第二分礦、富礦） |\n| `towers` | 防禦塔數 | 0～3（整數） | 1 | 每個擴張礦區旁的基本防禦塔數量（0 也可，剩餘礦轉塔的機制仍會運作） |\n| `archerShare` | 弓兵比例 | 0～70（整數，%） | 30 | 戰鬥單位中弓兵占比，其餘以長槍兵為主 |\n\n旋鈕每次決策都從 `obs.knobs` 重新讀取，比賽中途改變也能正確應對。\n\n## 時間軸（預設旋鈕，1v1）\n- tick 0：4 工人各採一個礦點、主堡開始出工人；同時派 1 名工人去最近的分礦探路。\n- tick ≈ 280～450：分礦採集站開工（`firstExpansionTick` 平均 ≈ 280）。\n- tick ≈ 700～800：第一座補給站；工人達 8 隻後蓋第一座兵營（≈ tick 1000～1100），第二、第三礦區隨後依序開採。\n- tick ≈ 2000：2 座兵營、約 17 名工人、3～5 隻戰鬥單位；第一批防禦塔上線。\n- tick ≈ 2800～3000：人口 50/50、戰鬥單位 ≥ 20 → 總攻；之後多餘的礦持續轉成防禦塔。\n- 對基準 Bot 平均約 tick 3900 結束（基準 Bot 的主堡被拆）。\n\n## 實測結果（rts-sim，本機）\n- 1v1 對基準 Bot（預設旋鈕）：官方模式 50 場 50 勝；批次模式 300 場 300 勝。\n- 4 人局（我 vs 3 基準 Bot）：100 場全部第 1 名。\n- 對「早攻型」基準 Bot（`attackThreshold 6, workerCap 8, archerRatio 0`）：約 90%（唯一明顯弱點，見下）。\n- 鏡像對戰：v10 對 v9 62:18、v12 對 v11 約 62%（4 組不重疊種子 200:120）；旋鈕全部取邊界值也能正常運作（無例外、無被拒指令）。\n- decide 平均 ≈ 0.05 ms、最大 ≈ 2 ms（軟上限 5 ms），無軟超時。\n\n## 已知弱點\n- 開局先擴張，第一批戰鬥單位在 tick 2000 前只有 3～4 隻；極端早攻（8 工人＋6 人口出擊）約有 10% 機率打穿。\n  已用「民兵」（工人加入戰鬥）與修正探路工人造成的補給站停工，把這個機率從 30% 壓到 10%；曾試過讓兵營優先於工人，鏡像對戰反而變弱，所以沒有採用。\n- 鏡像／龜縮對手：打進塔陣不划算，所以總攻會因交戰評估而撤退，最後靠資產分數（建築＋單位）決勝。\n"
+    }
+  ],
+  "roundrobin": {
+    "bots": [
+      "Claude-Opus_速攻_2026-10-22",
+      "Claude-Opus_快速擴張_2026-10-22",
+      "Claude-Sonnet_速攻_2026-10-22",
+      "Claude-Sonnet_快速擴張_2026-10-22",
+      "baseline"
+    ],
+    "oneVsOne": {
+      "winRateMatrix": [
+        [
+          null,
+          85,
+          95,
+          40,
+          100
+        ],
+        [
+          15,
+          null,
+          95,
+          5,
+          100
+        ],
+        [
+          5,
+          5,
+          null,
+          15,
+          100
+        ],
+        [
+          60,
+          95,
+          85,
+          null,
+          100
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          null
+        ]
+      ],
+      "elo": [
+        {
+          "bot": "QuickExpand",
+          "version": "v12",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Sonnet_快速擴張_2026-10-22\\final.js",
+          "elo": 1932,
+          "wins": 68,
+          "losses": 12
+        },
+        {
+          "bot": "SpeedRush",
+          "version": "v15",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Opus_速攻_2026-10-22\\final.js",
+          "elo": 1881,
+          "wins": 64,
+          "losses": 16
+        },
+        {
+          "bot": "Expander",
+          "version": "v9",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Opus_快速擴張_2026-10-22\\final.js",
+          "elo": 1628,
+          "wins": 43,
+          "losses": 37
+        },
+        {
+          "bot": "Blitz",
+          "version": "v12",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Sonnet_速攻_2026-10-22\\final.js",
+          "elo": 1375,
+          "wins": 25,
+          "losses": 55
+        },
+        {
+          "bot": "Baseline",
+          "version": "v1",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\_eval-pack\\bots\\baseline.js",
+          "elo": 684,
+          "wins": 0,
+          "losses": 80
+        }
+      ]
+    },
+    "ffa4": {
+      "elo": [
+        {
+          "bot": "Expander",
+          "version": "v9",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Opus_快速擴張_2026-10-22\\final.js",
+          "elo": 1652,
+          "wins": 35,
+          "losses": 13
+        },
+        {
+          "bot": "SpeedRush",
+          "version": "v15",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Opus_速攻_2026-10-22\\final.js",
+          "elo": 1637,
+          "wins": 34,
+          "losses": 14
+        },
+        {
+          "bot": "QuickExpand",
+          "version": "v12",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Sonnet_快速擴張_2026-10-22\\final.js",
+          "elo": 1528,
+          "wins": 26,
+          "losses": 22
+        },
+        {
+          "bot": "Blitz",
+          "version": "v12",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Sonnet_速攻_2026-10-22\\final.js",
+          "elo": 1380,
+          "wins": 15,
+          "losses": 33
+        },
+        {
+          "bot": "Baseline",
+          "version": "v1",
+          "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\_eval-pack\\bots\\baseline.js",
+          "elo": 1304,
+          "wins": 10,
+          "losses": 38
+        }
+      ],
+      "summary": {
+        "games": 20,
+        "bots": [
+          {
+            "bot": "SpeedRush",
+            "version": "v15",
+            "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Opus_速攻_2026-10-22\\final.js",
+            "games": 16,
+            "avgRank": 1.88,
+            "rankDistribution": [
+              7,
+              5,
+              3,
+              1
+            ]
+          },
+          {
+            "bot": "Expander",
+            "version": "v9",
+            "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Opus_快速擴張_2026-10-22\\final.js",
+            "games": 16,
+            "avgRank": 1.81,
+            "rankDistribution": [
+              6,
+              7,
+              3,
+              0
+            ]
+          },
+          {
+            "bot": "Blitz",
+            "version": "v12",
+            "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Sonnet_速攻_2026-10-22\\final.js",
+            "games": 16,
+            "avgRank": 3.06,
+            "rankDistribution": [
+              0,
+              6,
+              3,
+              7
+            ]
+          },
+          {
+            "bot": "QuickExpand",
+            "version": "v12",
+            "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\Claude-Sonnet_快速擴張_2026-10-22\\final.js",
+            "games": 16,
+            "avgRank": 2.38,
+            "rankDistribution": [
+              7,
+              2,
+              1,
+              6
+            ]
+          },
+          {
+            "bot": "Baseline",
+            "version": "v1",
+            "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\C--Claude-Sandbox-Angel-Gaming\\6d50ceec-4800-490d-926d-1a47ad1d122a\\scratchpad\\arms-race\\_eval-pack\\bots\\baseline.js",
+            "games": 16,
+            "avgRank": 3.38,
+            "rankDistribution": [
+              0,
+              0,
+              10,
+              6
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
