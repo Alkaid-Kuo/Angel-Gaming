@@ -55,6 +55,18 @@ npm run web
 npm run serve:lan
 ```
 
+## 軍團戰（原型）
+
+取代 RTS 的新電競項目：雙方 AI 各用 500 點選兵、在看不到對手的情況下布陣，開場就行軍接敵。規則見 [docs/軍團戰 規格書 v0.1（草案）.md](docs/軍團戰%20規格書%20v0.1（草案）.md)，原型實作與量測結果見 [docs/2026-10-22_軍團戰原型報告.md](docs/2026-10-22_軍團戰原型報告.md)。
+
+觀戰：`npm run web` 後開 <http://localhost:5173/web/legion.html>（首頁也有入口），選雙方 AI（鐵壁推進、林中伏兵、箭雨）與模式（殲滅戰、佔點）。
+
+批次量測（勝率、時長、觀賞性指標、模擬速度）：
+
+```bash
+node scripts/legion-bench.ts 10 both
+```
+
 ## 軍備競賽工具（M2）
 
 ```bash
@@ -92,5 +104,8 @@ ASCII 地圖圖例：`.` 平地、`#` 阻擋、`f` 樹林、`m` 礦點、`R` 富
 | `src/web` | 瀏覽器介面（Canvas 2D）與引擎 Worker |
 | `web/` | 網頁入口 index.html 與樣式 |
 | `src/api/types.ts` | 選手 API 公開型別 |
+| `src/legion` | 軍團戰引擎（地圖、模擬、尋路、選手 API 型別、比賽驅動與回放） |
+| `src/web/legion` | 軍團戰觀戰頁（Canvas 繪製、轉播介面、自動解說、引擎 Worker） |
+| `bots/legion-*.js` | 軍團戰基準 AI：鐵壁推進、林中伏兵、箭雨 |
 | `bots/` | 基準 Bot、隨機 Bot |
 | `test/` | Vitest 測試 |

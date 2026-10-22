@@ -32,6 +32,8 @@ export interface LegionMap {
   /** 潰散時撤離的地圖邊緣（單位 x 座標）：依 playerId */
   readonly rearX: readonly number[];
   readonly flags: readonly FlagPoint[];
+  /** 地標（解說用的地名），單位座標 */
+  readonly landmarks: readonly FlagPoint[];
   /** 不可通行格 → 最近的可通行格（可通行格對應自己） */
   readonly snap: Int32Array;
   /** 1 = 緊鄰不可通行格（尋路加成本，讓隊形走在橋與淺灘的中間） */
@@ -185,6 +187,23 @@ export function riverValley(): LegionMap {
       { name: '西南高地', x: 64500, y: 59500 },
       { name: '中央淺灘', x: 80000, y: 50000 },
       { name: '東北高地', x: 95500, y: 40500 },
+    ],
+    landmarks: [
+      { name: '中央淺灘', x: 80000, y: 50000 },
+      { name: '北橋', x: 85300, y: 21500 },
+      { name: '南橋', x: 74700, y: 78500 },
+      { name: '西南高地', x: 64500, y: 59500 },
+      { name: '東北高地', x: 95500, y: 40500 },
+      { name: '北橋西側的樹林', x: 64500, y: 12500 },
+      { name: '北橋東側的樹林', x: 101500, y: 13500 },
+      { name: '南橋東側的樹林', x: 95500, y: 87500 },
+      { name: '南橋西側的樹林', x: 58500, y: 86500 },
+      { name: '淺灘西北的樹林', x: 60500, y: 42500 },
+      { name: '淺灘東南的樹林', x: 99500, y: 57500 },
+      { name: '西側樹林', x: 34500, y: 38500 },
+      { name: '東側樹林', x: 125500, y: 61500 },
+      { name: '藍方陣地', x: 10000, y: 50000 },
+      { name: '紅方陣地', x: 150000, y: 50000 },
     ],
     snap: buildSnap(terrain, w, h),
     edge: buildEdge(terrain, w, h),

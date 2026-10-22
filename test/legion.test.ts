@@ -5,7 +5,7 @@ import { MAPS, terrainAt } from '../src/legion/map.ts';
 import { LegionBatchController, runLegionMatch, runLegionReplay } from '../src/legion/runner.ts';
 import { LegionMatch } from '../src/legion/sim.ts';
 import type { LegionEvent } from '../src/legion/api.ts';
-import { compileBot } from '../src/sandbox/compile.ts';
+import { compileBot, type CompiledBot } from '../src/sandbox/compile.ts';
 import { resolveKnobs } from '../src/sandbox/controller.ts';
 
 const W = 160000;
@@ -28,7 +28,7 @@ function run(m: LegionMatch, ticks: number, cmds?: (tick: number) => [number, un
 }
 
 const map = MAPS['river-valley']();
-const bot = (name: string) => compileBot(readFileSync(`bots/legion-${name}.js`, 'utf8'), `legion-${name}.js`);
+const bot = (name: string): CompiledBot => compileBot(readFileSync(`bots/legion-${name}.js`, 'utf8'), `legion-${name}.js`);
 
 describe('軍團戰：地圖', () => {
   it('河谷：旋轉 180° 對稱、有兩座橋與一處淺灘、三個旗點對稱', () => {
@@ -93,7 +93,7 @@ describe('軍團戰：引擎公平與確定性', () => {
   });
 
   it('基準 AI 對戰：同 seed 結果相同，回放重建雜湊一致', () => {
-    const play = () => {
+    const play = (): ReturnType<typeof runLegionMatch> => {
       const ctrls = ['push', 'ambush'].map((n, i) => new LegionBatchController(bot(n), n, map, 42, i));
       return runLegionMatch({ seed: 42, mode: 'capture', controllers: ctrls, knobs: ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label)), record: true });
     };
@@ -125,7 +125,7 @@ describe('軍團戰：戰鬥規則', () => {
   });
 
   it('衝鋒：撞上已架陣長槍的正面幾乎沒有效果並被反彈；撞上劍士背後傷亡慘重', () => {
-    const charge = (target: Dep, brace: boolean) => {
+    const charge = (target: Dep, brace: boolean): { m: LegionMatch; imp: LegionEvent | undefined } => {
       const { m, events } = match([{ type: 'heavyCav', x: 15000, y: 50000, facing: 0 }], [target]);
       // 把目標搬到騎兵前方 12 格（重騎兵視野 10 格，要看得到才能下令衝鋒）
       const t = m.regiments[1];
@@ -192,7 +192,7 @@ describe('軍團戰：戰鬥規則', () => {
     const forest = { type: 'sword', x: 64000, y: 12000 };
     const { m } = match([{ type: 'light', x: 15000, y: 50000 }], [{ type: 'spear', x: 145000, y: 50000 }]);
     const hide = m.regiments[1];
-    const move = (r: (typeof m.regiments)[number], x: number, y: number) => {
+    const move = (r: (typeof m.regiments)[number], x: number, y: number): void => {
       const dx = x - r.x;
       const dy = y - r.y;
       r.x = x;
@@ -238,7 +238,13 @@ describe('軍團戰：基準 AI', () => {
       const out = runLegionMatch({ seed: 3, mode: 'annihilation', controllers: [c, new LegionBatchController(bot('push'), 'push', map, 3, 1)], knobs: [resolveKnobs(c.declaration, undefined, name), resolveKnobs(c.declaration, undefined, name)].map((k, i) => (i === 0 ? k : resolveKnobs(new LegionBatchController(bot('push'), 'push', map, 3, 1).declaration, undefined, 'push'))), record: false });
       const mine = out.match.regiments.filter((r) => r.owner === 0);
       expect(mine.reduce((s, r) => s + r.def.cost, 0)).toBeLessThanOrEqual(RULES.budget);
-      expect(out.match.players[0].cost).toBeGreaterThan(400);
+      expect(out.match.players[0].cost).toBeGreaterThan(450);
+      // 兩個座位都不能有布陣失敗的軍團
+      for (const seat of [0, 1]) {
+        const ctrls = [0, 1].map((i) => new LegionBatchController(bot(i === seat ? name : 'push'), name, map, 5, i));
+        const m = new LegionMatch({ seed: 5, mode: 'capture', deployments: ctrls.map((c, i) => c.deploy(new LegionMatch({ seed: 5, mode: 'capture', deployments: [[], []] }).initData(i, resolveKnobs(c.declaration, undefined, name))).value) });
+        expect(m.observe(seat).events.filter((e) => e.type === 'deployRejected')).toEqual([]);
+      }
       expect(out.runtime[0].errors).toEqual([]);
     }
   });

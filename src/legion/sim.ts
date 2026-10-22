@@ -97,6 +97,8 @@ export interface Regiment {
   revealedUntil: number;
   /** 敵方從這個 tick 起連續看得到它；-1 = 目前沒被看見 */
   spottedSince: number;
+  /** 最後一次在樹林中隱蔽（敵方看不到）的 tick */
+  lastHidden: number;
   lastMelee: number;
   lastHit: number;
   /** 弓兵的射擊目標（軍團 id） */
@@ -369,6 +371,7 @@ export class LegionMatch {
       dmgDealt: 0,
       revealedUntil: -1,
       spottedSince: -1,
+      lastHidden: -1000,
       lastMelee: -1000,
       lastHit: -1000,
       fireTarget: -1,
@@ -1161,11 +1164,12 @@ export class LegionMatch {
 
   /**
    * 主動攻擊：在樹林中就被看見一段時間。
-   * 敵方在接觸前一刻才第一次看到（或還沒看到）這個軍團，算一次埋伏（每次接戰只算一次）。
+   * 埋伏：這個軍團最近 8 秒內還隱蔽在樹林裡，而且敵方在接觸前 5 秒內才第一次看到（或還沒看到）它（每次接戰只算一次）。
    */
   private revealOnAttack(r: Regiment): void {
     if (this.terrainAt(r.x, r.y) === T.Forest) r.revealedUntil = this.tick + RULES.vision.revealTicks;
     if (this.tick - r.lastMelee <= 30 && r.lastMelee >= 0) return;
+    if (this.tick - r.lastHidden > RULES.ambushHiddenTicks) return;
     if (r.spottedSince < 0 || this.tick - r.spottedSince <= RULES.ambushTicks) this.emit({ type: 'ambush', tick: this.tick, reg: r.id });
   }
 
@@ -1436,6 +1440,7 @@ export class LegionMatch {
       for (let p = 0; p < this.players.length; p++) if (p !== r.owner && this.visible[p][r.id] === 1) seen = true;
       if (!seen) r.spottedSince = -1;
       else if (r.spottedSince < 0) r.spottedSince = this.tick;
+      if (!seen && this.concealed(r)) r.lastHidden = this.tick;
     }
   }
 
@@ -1593,7 +1598,7 @@ export class LegionMatch {
     for (const r of this.regiments) {
       h.int(r.x).int(r.y).int(r.facing).int(r.width).int(r.effWidth).int(r.slots.length).int(r.target).int(r.fireTarget);
       h.int(r.brace).int(r.braceTimer).bool(r.charging).int(r.chargeTravel).int(r.impactUntil).int(r.level).int(r.dmgDealt);
-      h.bool(r.routed).bool(r.destroyed).int(r.revealedUntil).int(r.spottedSince).str(r.order);
+      h.bool(r.routed).bool(r.destroyed).int(r.revealedUntil).int(r.spottedSince).int(r.lastHidden).str(r.order);
     }
     for (const p of this.projectiles) h.int(p.t1).int(p.target).int(p.dmg);
     for (const f of this.flags) h.int(f.owner).int(f.value).int(f.capturer);

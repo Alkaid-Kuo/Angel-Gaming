@@ -147,8 +147,9 @@ export const RULES = {
   routPercent: 20,
   /** 全軍潰敗：未潰散軍團的剩餘兵力低於開場點數的這個百分比即判負（原型新增，待確認） */
   collapsePercent: 20,
-  /** 埋伏：敵方在接觸前這麼多 tick 內才第一次看到這個軍團，就算一次埋伏 */
-  ambushTicks: 30,
+  /** 埋伏：最近這麼多 tick 內還隱蔽在樹林裡，而且敵方在接觸前這麼多 tick 內才第一次看到它 */
+  ambushHiddenTicks: 80,
+  ambushTicks: 50,
   /** 潰散時的移動速度倍率 */
   routSpeed: 110,
   soldier: {

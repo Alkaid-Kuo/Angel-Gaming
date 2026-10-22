@@ -371,7 +371,7 @@ export default class ForestAmbush extends LegionBase {
         { key: 'ambushers', name: '伏兵', description: '藏在樹林裡的劍士團數', min: 1, max: 3, default: 2, integer: true },
         { key: 'patience', name: '耐心', description: '多久沒接戰就主動進攻（秒）', min: 20, max: 180, default: 45, integer: true },
         { key: 'raid', name: '騎兵繞後', description: '1 = 騎兵繞南橋偷襲；0 = 留在高地後方待命', min: 0, max: 1, default: 1, integer: true },
-        { key: 'spring', name: '出擊距離', description: '敵軍離樹林多近（格）伏兵就殺出', min: 4, max: 16, default: 10, integer: true },
+        { key: 'spring', name: '出擊距離', description: '敵軍離樹林多近（格）伏兵就殺出', min: 2, max: 16, default: 5, integer: true },
       ],
     };
   }
@@ -402,8 +402,8 @@ export default class ForestAmbush extends LegionBase {
     };
     take('spear', 'main', { tx: 17, ty: 45, facing: 0 });
     take('spear', 'main', { tx: 17, ty: 55, facing: 0 });
-    take('archer', 'archer', { tx: 10, ty: 50, facing: 0, width: 12 });
-    take('shield', 'main', { tx: 13, ty: 50, facing: 0 });
+    take('archer', 'archer', { tx: 8, ty: 50, facing: 0, width: 12 });
+    take('shield', 'main', { tx: 14, ty: 50, facing: 0 });
     const n = k.ambushers ?? 2;
     for (let i = 0; i < n; i++) take('sword', 'ambush', { tx: 16, ty: [30, 22, 38][i], facing: 0, width: 8 });
     take('heavyCav', 'cav', { tx: 12, ty: 70, facing: 0 });
@@ -424,7 +424,7 @@ export default class ForestAmbush extends LegionBase {
     const forest = this.at(60, 42);
     const main = this.mine('main');
     const engagedMain = obs.enemies.find((e) => !e.routed && main.some((m) => this.gap(m, e) < 2));
-    const near = obs.enemies.filter((e) => !e.routed && e.kind !== 'light' && this.dist(e, forest) / 1000 < (k.spring ?? 10) + 4);
+    const near = obs.enemies.filter((e) => !e.routed && e.kind !== 'light' && this.dist(e, forest) / 1000 < (k.spring ?? 5) + 4);
     if (obs.enemies.some((e) => !e.routed && e.kind !== 'light' && this.loc(e).x < 80)) this.fought = true;
     if (engagedMain || near.length > 0) this.sprung = true;
     if (!this.fought && obs.tick > (k.patience ?? 45) * 10 * this.patienceScale) {

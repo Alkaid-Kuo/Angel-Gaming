@@ -8,7 +8,7 @@ export default defineConfig({
     outDir: 'dist-web',
     emptyOutDir: true,
     target: 'es2022',
-    rollupOptions: { input: 'web/index.html' },
+    rollupOptions: { input: { main: 'web/index.html', legion: 'web/legion.html' } },
   },
   worker: {
     format: 'es',
