@@ -9,6 +9,32 @@ export const UNIT_NAME: Record<UnitType, string> = { worker: '工人', spear: '�
 export const BUILDING_NAME: Record<BuildingType, string> = { base: '主堡', depot: '採集站', supply: '補給站', barracks: '兵營', tower: '防禦塔', forge: '鍛造所', workshop: '攻城工坊' };
 export const BUILDING_GLYPH: Record<BuildingType, string> = { base: '堡', depot: '站', supply: '補', barracks: '營', tower: '塔', forge: '鍛', workshop: '坊' };
 export const RESEARCH_NAME: Record<ResearchType, string> = { weapons: '武器', armor: '護甲' };
+/** 指令格與說明用的一句話介紹 */
+export const UNIT_TIP: Record<UnitType, string> = {
+  worker: '採礦、建造；只有你指定攻擊目標時才會戰鬥',
+  spear: '便宜、血厚；剋騎兵',
+  archer: '射程遠、血薄；打建築傷害減半',
+  cavalry: '移動最快；剋弓兵與攻城車',
+  siege: '只能攻擊建築，拆建築極快；怕防禦塔',
+};
+export const BUILDING_TIP: Record<BuildingType, string> = {
+  base: '生產工人、卸礦點、人口 +10；升級後解鎖鍛造所與攻城工坊',
+  depot: '卸礦點：蓋在礦區旁，縮短工人往返',
+  supply: '人口上限 +8',
+  barracks: '生產長槍兵、弓兵、騎兵',
+  tower: '自動攻擊附近的敵方單位；不佔人口',
+  forge: '研究武器、護甲（戰鬥單位攻擊／護甲 +1）',
+  workshop: '生產攻城車',
+};
+export const RESEARCH_TIP: Record<ResearchType, string> = { weapons: '所有戰鬥單位攻擊 +1', armor: '所有戰鬥單位護甲 +1（每次受到的傷害 −1）' };
+/** 指令被拒時給人類看的補充建議 */
+export const REJECT_HINT: Partial<Record<RejectReason, string>> = {
+  NO_SUPPLY: '請先蓋補給站',
+  NO_MINERALS: '多派工人採礦，或等一下',
+  BAD_PLACEMENT: '要平地、已探索，不能壓到礦點或其他建築',
+  NO_TECH: '選取主堡按 U 升級',
+  QUEUE_FULL: '一次最多排 5 個',
+};
 export const STANCE_NAME: Record<Stance, string> = { aggressive: '積極', defensive: '防守', hold: '堅守', retreat: '撤退' };
 export const ORDER_NAME: Record<string, string> = {
   idle: '閒置',

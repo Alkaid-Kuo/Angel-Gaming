@@ -47,6 +47,8 @@ export interface MatchSetup {
   readonly players: readonly MatchPlayerSetup[];
   /** 測試用：指定地圖（否則依 seed 生成） */
   readonly map?: GeneratedMap;
+  /** 時限（tick）；省略時為 RULES.match.timeLimitTicks（教學等非正式對局使用） */
+  readonly timeLimitTicks?: number;
 }
 
 export interface PlayerResult {
@@ -105,6 +107,8 @@ export class Match {
     if (setup.players.length !== cfg.players) {
       throw new Error(`${setup.mode} 需要 ${cfg.players} 位選手，收到 ${setup.players.length}`);
     }
+    const timeLimitTicks = setup.timeLimitTicks ?? RULES.match.timeLimitTicks;
+    if (!Number.isSafeInteger(timeLimitTicks) || timeLimitTicks <= 0) throw new Error(`時限必須是正整數 tick，收到 ${timeLimitTicks}`);
     const map = setup.map ?? generateMap(setup.mode, setup.seed);
     const w = map.width;
     const h = map.height;
@@ -138,6 +142,7 @@ export class Match {
       pathCache: new PathCache(),
       spatial: new SpatialIndex(w, h),
       over: false,
+      timeLimitTicks,
       recordEvents: true,
       eventTap: null,
     };
@@ -303,7 +308,7 @@ export class Match {
     updateScouting(s);
     // 12 結束判定
     const alive = s.players.filter((p) => p.alive).length;
-    if (alive <= 1 || s.tick + 1 >= RULES.match.timeLimitTicks) s.over = true;
+    if (alive <= 1 || s.tick + 1 >= s.timeLimitTicks) s.over = true;
     s.tick += 1;
   }
 

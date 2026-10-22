@@ -6,7 +6,7 @@ import type { ReplayFile } from '../replay/index.ts';
 import type { Hotspot } from '../view/broadcast.ts';
 import type { FrameView, StaticMapView } from '../view/snapshot.ts';
 
-export type OpponentKind = 'baseline' | 'random';
+export type OpponentKind = 'baseline' | 'random' | 'dummy';
 
 export interface LiveSetup {
   readonly mode: MatchMode;
@@ -17,6 +17,10 @@ export interface LiveSetup {
   readonly seats: readonly (OpponentKind | 'human')[];
   /** 人類是否套用與選手相同的指令額度限制 */
   readonly limitBudget: boolean;
+  /** 新手教學 */
+  readonly tutorial: boolean;
+  /** 非預設時限（教學） */
+  readonly timeLimitTicks?: number;
 }
 
 export type ToWorker =
@@ -38,6 +42,7 @@ export interface MatchMeta {
   readonly map: StaticMapView;
   readonly human: number | null;
   readonly limitBudget: boolean;
+  readonly tutorial: boolean;
   /** 回放總長（tick）；對局中為 null */
   readonly durationTicks: number | null;
 }

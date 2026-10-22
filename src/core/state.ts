@@ -264,6 +264,8 @@ export interface MatchState {
   readonly pathCache: PathCache;
   readonly spatial: SpatialIndex;
   over: boolean;
+  /** 時限（tick）；預設為 RULES.match.timeLimitTicks，教學等非正式對局可另訂 */
+  readonly timeLimitTicks: number;
   /** 是否記錄事件（回放重建時關閉） */
   recordEvents: boolean;
   /** 事件監聽（畫面的事件記錄用；不影響模擬） */

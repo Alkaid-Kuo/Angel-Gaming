@@ -1,10 +1,12 @@
 :root {
   --bg: #0f1216;
   --panel: rgba(17, 21, 27, 0.92);
+  --panel-solid: #12171e;
   --border: #2a313b;
   --text: #e6e9ee;
   --muted: #94a3b8;
   --accent: #60a5fa;
+  --gold: #facc15;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; font-size: 14px; }
@@ -15,49 +17,130 @@ button.primary { background: #2563eb; border-color: #2563eb; padding: 8px 18px; 
 button.active { border-color: #86efac; color: #86efac; }
 input[type=number] { width: 120px; background: #11161c; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
 select { background: #11161c; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+kbd { display: inline-block; min-width: 18px; padding: 0 5px; border: 1px solid #475569; border-bottom-width: 2px; border-radius: 4px; background: #1e293b; color: #f8fafc; font: 12px/18px "Noto Sans TC", "Microsoft JhengHei", sans-serif; text-align: center; margin: 0 1px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.hint { color: #fde68a; }
+.warn { color: #fca5a5; font-weight: bold; }
+.blue { color: #60a5fa; }
 
-.setup { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+/* ── 首頁 ── */
+.setup { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
 .setup h1 small { font-size: 14px; color: var(--muted); font-weight: normal; }
 .card { background: #141920; border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; }
 .card h2 { margin: 0 0 10px; font-size: 16px; }
+.card.tutorial-card { border-color: #2563eb; background: #111a2b; }
+.card.tutorial-card p { margin: 0 0 10px; }
 .modes { display: grid; gap: 6px; margin-bottom: 10px; }
 .row { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
-.help table { border-collapse: collapse; width: 100%; }
-.help td { border-top: 1px solid var(--border); padding: 5px 6px; vertical-align: top; }
-.help td:first-child { white-space: nowrap; color: #cbd5e1; width: 1%; }
+.help-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+table.data { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.data th { text-align: left; color: var(--muted); font-weight: normal; border-bottom: 1px solid var(--border); padding: 4px 6px; white-space: nowrap; }
+table.data td { border-top: 1px solid var(--border); padding: 5px 6px; vertical-align: top; }
+table.data td:first-child { white-space: nowrap; color: #cbd5e1; }
+table.keys td:first-child { width: 1%; }
 
-.game { position: fixed; inset: 0; overflow: hidden; user-select: none; }
-.game canvas.view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; }
-.game.mode-attack canvas.view { cursor: crosshair; }
-.topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 14px; align-items: center; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+/* ── 遊戲畫面：頂列／地圖區／底部面板 ── */
+.game { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; user-select: none; }
+.topbar { display: flex; gap: 10px; align-items: center; padding: 6px 12px; background: var(--panel-solid); border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+.topbar .stats { display: flex; gap: 16px; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.topbar > button, .topbar > select, .topbar > .speed { flex: none; }
 .topbar .stat b { color: #fff; }
+.topbar .stat.big { font-size: 17px; }
+.topbar .stat.big b { color: #7dd3fc; }
+.topbar .stat.full b { color: #f87171; }
 .topbar .spacer { flex: 1; }
-.players { position: absolute; top: 42px; left: 8px; display: grid; gap: 4px; }
+.topbar .speed { min-width: 30px; text-align: center; }
+.topbar button.idle { background: #3b2f0b; border-color: #a16207; color: #fde68a; }
+
+.stage { position: relative; overflow: hidden; min-height: 0; }
+.stage canvas.view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; }
+.game.mode-target .stage canvas.view { cursor: crosshair; }
+.players { position: absolute; top: 8px; left: 8px; display: grid; gap: 4px; }
 .players .p { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; display: flex; gap: 10px; align-items: center; }
 .players .p.dead { opacity: 0.45; text-decoration: line-through; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-.bottom { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; padding: 8px; pointer-events: none; align-items: flex-end; }
-.bottom > * { pointer-events: auto; }
-.minimap { width: 200px; height: 200px; border: 1px solid var(--border); background: #000; image-rendering: pixelated; }
-.selection { flex: 1; min-height: 110px; max-width: 560px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
-.selection .title { font-weight: bold; margin-bottom: 4px; }
-.selection .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-.selection .actions button { font-size: 12px; padding: 3px 8px; }
-.selection .queue { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
-.selection .queue span { background: #1f2630; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 12px; }
-.log { width: 300px; max-height: 200px; overflow: hidden; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12px; line-height: 1.5; }
+.log { position: absolute; left: 8px; bottom: 8px; width: 320px; padding: 4px 8px; font-size: 12px; line-height: 1.55; pointer-events: none; text-shadow: 0 1px 2px #000, 0 0 4px #000; }
+.log:empty { display: none; }
 .log .t { color: var(--muted); margin-right: 6px; }
-.hint { color: #fde68a; }
-.replaybar { position: absolute; left: 216px; right: 320px; bottom: 128px; display: flex; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
-.replaybar input[type=range] { flex: 1; }
-.warn { color: #fca5a5; font-weight: bold; }
-.dialog { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #161b22; border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; min-width: 340px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.toast { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); max-width: 80%; background: rgba(127, 29, 29, 0.95); border: 1px solid #f87171; color: #fff; border-radius: 8px; padding: 8px 16px; font-size: 15px; pointer-events: none; z-index: 5; }
+.dialog { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #161b22; border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; min-width: 340px; max-width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.5); z-index: 6; }
 .dialog h2 { margin: 0 0 10px; }
 .dialog ol { padding-left: 20px; }
 .dialog .row { justify-content: flex-end; }
 
-/* M3 觀戰 */
-.caption { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); background: rgba(17,21,27,0.92); border: 2px solid #e5e7eb; border-radius: 10px; padding: 8px 18px; font-size: 18px; font-weight: bold; pointer-events: none; white-space: nowrap; }
-.armygraph { position: absolute; top: 44px; right: 8px; border: 1px solid var(--border); border-radius: 6px; }
-.bcast { position: absolute; top: 146px; right: 8px; display: flex; flex-direction: column; gap: 4px; width: 260px; }
+/* 底部固定面板 */
+.panel { background: var(--panel-solid); border-top: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.panel-row { display: flex; gap: 8px; align-items: stretch; height: 182px; }
+.minimap { width: 182px; height: 182px; flex: none; border: 1px solid var(--border); background: #000; image-rendering: pixelated; cursor: pointer; }
+.info { flex: 1; min-width: 0; background: #0f141a; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; overflow: hidden; }
+.info .title { font-weight: bold; font-size: 16px; margin-bottom: 6px; }
+.info .kv { margin: 4px 0; }
+.info .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.info .chips span, .info .queue span { background: #1f2630; border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; font-size: 13px; }
+.info .queue { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.bar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; max-width: 360px; }
+.bar.thin { height: 5px; margin-top: 3px; }
+.bar i { display: block; height: 100%; }
+.replaybar { display: flex; gap: 8px; align-items: center; }
+.replaybar input[type=range] { flex: 1; }
+
+/* 指令格 */
+.card-grid { position: relative; display: grid; grid-template-columns: repeat(5, 62px); grid-template-rows: repeat(3, 58px); gap: 4px; flex: none; }
+.card-grid .slot { position: relative; padding: 9px 2px 11px; border-radius: 6px; background: #1c2430; border: 1px solid #334155; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 13px; line-height: 1.1; overflow: hidden; }
+.card-grid .slot:hover { border-color: var(--accent); background: #233044; }
+.card-grid .slot.empty { visibility: hidden; }
+.card-grid .slot.off { opacity: 0.45; }
+.card-grid .slot.on { border-color: #86efac; box-shadow: inset 0 0 0 1px #86efac; }
+.card-grid .slot.tut { animation: tutPulse 0.9s ease-in-out infinite; border-color: var(--gold); }
+.card-grid .slot .hk { position: absolute; top: 2px; left: 4px; font-size: 11px; color: var(--gold); font-weight: bold; }
+.card-grid .slot .name { padding: 0 3px; }
+.card-grid .slot .cost { position: absolute; bottom: 1px; right: 3px; font-size: 10px; color: #7dd3fc; }
+.card-tip { position: absolute; bottom: calc(100% + 8px); right: 0; width: 260px; background: #0b1017; border: 1px solid #475569; border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.5; z-index: 10; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+.card-tip .k { margin-left: 8px; color: var(--gold); }
+.card-tip .c { color: #7dd3fc; }
+.card-tip .r { color: #fca5a5; }
+@keyframes tutPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.9); } 50% { box-shadow: 0 0 0 5px rgba(250, 204, 21, 0.25); } }
+
+/* 教學面板 */
+.tutorial { position: absolute; top: 10px; left: 10px; width: 380px; max-width: calc(100% - 20px); background: rgba(13, 22, 40, 0.96); border: 1px solid #2563eb; border-radius: 10px; padding: 12px 14px; z-index: 4; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+.tutorial .tut-head { font-size: 16px; font-weight: bold; margin-bottom: 6px; }
+.tutorial .tut-n { display: inline-block; margin-right: 8px; color: var(--gold); font-size: 12px; font-weight: normal; }
+.tutorial .tut-text { line-height: 1.65; }
+.tutorial .tut-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.tutorial .tut-wait { color: var(--muted); font-size: 12px; flex: 1; }
+
+/* 說明面板 */
+.help-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 8; }
+.help-box { width: min(980px, 94%); max-height: 90%; display: flex; flex-direction: column; background: #121821; border: 1px solid #475569; border-radius: 12px; overflow: hidden; }
+.help-head { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.help-head .close { margin-left: auto; }
+.help-body { padding: 12px 16px; overflow: auto; line-height: 1.65; }
+.help-body p { margin: 6px 0 10px; }
+
+/* M3 觀戰（位置相對於地圖區） */
+.caption { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(17,21,27,0.92); border: 2px solid #e5e7eb; border-radius: 10px; padding: 8px 18px; font-size: 18px; font-weight: bold; pointer-events: none; white-space: nowrap; }
+.armygraph { position: absolute; top: 8px; right: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.panel .side { flex: none; width: 240px; }
+.bcast { display: flex; flex-direction: column; gap: 6px; }
 .bcast button, .bcast select { width: 100%; }
+
+/* 小螢幕：縮小面板與按鈕 */
+@media (max-width: 1000px) {
+  .topbar { gap: 6px; padding: 4px 8px; }
+  .topbar .stats { gap: 10px; }
+  .topbar .stat.opt { display: none; }
+  .topbar button { padding: 3px 7px; }
+}
+@media (max-height: 720px) {
+  .panel { padding: 6px; }
+  .panel-row { height: 134px; }
+  .minimap { width: 134px; height: 134px; }
+  .card-grid { grid-template-columns: repeat(5, 54px); grid-template-rows: repeat(3, 42px); gap: 3px; }
+  .card-grid .slot { font-size: 12px; padding: 8px 1px 9px; }
+  .card-grid .slot .hk { font-size: 10px; top: 1px; left: 3px; }
+  .info .title { font-size: 14px; margin-bottom: 3px; }
+  .info { padding: 6px 10px; font-size: 13px; }
+  .tutorial { width: 330px; padding: 8px 10px; font-size: 13px; }
+  .tutorial .tut-head { font-size: 14px; }
+}

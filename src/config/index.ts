@@ -57,6 +57,12 @@ export interface BuildingStats {
 export const TICKS_PER_SECOND = 10;
 export const TILE_SIZE = 1000;
 
+/** 瀏覽器版新手教學（非正式對局）：固定地圖與較長的時限，讓新手不必趕時間 */
+export const TUTORIAL = {
+  seed: 20261022,
+  timeLimitTicks: 36000,
+} as const;
+
 export const UNIT_STATS: Readonly<Record<UnitType, UnitStats>> = {
   worker: { producer: 'base', cost: 50, supply: 1, trainTicks: 120, hp: 40, attack: 4, cooldown: 10, range: 200, speed: 250, sight: 6, radius: 300 },
   spear: { producer: 'barracks', cost: 60, supply: 1, trainTicks: 150, hp: 120, attack: 10, cooldown: 12, range: 200, speed: 200, sight: 6, radius: 350 },

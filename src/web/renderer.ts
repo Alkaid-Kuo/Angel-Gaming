@@ -4,6 +4,8 @@ import type { BuildingFrame, FrameView, StaticMapView, UnitFrame } from '../view
 import { BUILDING_GLYPH, TEAM_COLORS } from './labels.ts';
 
 export const TILE_PX = 16;
+/** 指令位置提示的顯示時間（毫秒） */
+const MARKER_MS = 600;
 
 export interface Camera {
   /** 畫面左上角的世界座標（單位） */
@@ -30,7 +32,11 @@ export interface ViewModel {
   selectedBuilding: number | null;
   drag: { x0: number; y0: number; x1: number; y1: number } | null;
   ghost: Ghost | null;
-  mode: 'normal' | 'attackMove' | 'place';
+  mode: 'normal' | 'attackMove' | 'move' | 'place';
+  /** 下指令的位置提示（短暫的擴散圓圈） */
+  markers: { x: number; y: number; color: string; at: number }[];
+  /** 教學提示的位置（地圖與小地圖上閃爍） */
+  beacon: { x: number; y: number } | null;
   /** 受攻擊提示（小地圖閃爍） */
   alerts: { x: number; y: number; until: number }[];
   /** 交戰熱點（觀戰時於小地圖標示） */
@@ -308,10 +314,34 @@ export class Renderer {
       ctx.strokeRect(x + 0.5, y + 0.5, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
     }
 
-    if (vm.mode === 'attackMove') {
-      ctx.fillStyle = 'rgba(239,68,68,0.9)';
-      ctx.font = '14px sans-serif';
-      ctx.fillText('攻擊移動：左鍵點選目的地（Esc 取消）', 12, this.canvas.clientHeight - 14);
+    // 指令位置提示
+    vm.markers = vm.markers.filter((m) => now - m.at < MARKER_MS);
+    for (const m of vm.markers) {
+      const t = (now - m.at) / MARKER_MS;
+      ctx.globalAlpha = 1 - t;
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(wx(m.x), wy(m.y), 4 + t * 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // 教學提示
+    if (vm.beacon !== null) {
+      const pulse = (now % 1200) / 1200;
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 1 - pulse * 0.7;
+      ctx.beginPath();
+      ctx.arc(wx(vm.beacon.x), wy(vm.beacon.y), tilePx * (1.2 + pulse * 1.6), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    if (vm.mode === 'attackMove' || vm.mode === 'move') {
+      ctx.fillStyle = vm.mode === 'attackMove' ? 'rgba(248,113,113,0.95)' : 'rgba(134,239,172,0.95)';
+      ctx.font = 'bold 15px sans-serif';
+      ctx.fillText(vm.mode === 'attackMove' ? '攻擊移動：左鍵點目的地（Esc 取消）' : '移動：左鍵點目的地（Esc 取消）', 12, this.canvas.clientHeight - 14);
     }
 
     this.drawMinimap(vm, pos);
@@ -449,6 +479,13 @@ export class Renderer {
       m.arc((a.x / TILE_SIZE) * k, (a.y / TILE_SIZE) * k, 6, 0, Math.PI * 2);
       m.stroke();
     }
+    if (vm.beacon !== null) {
+      m.strokeStyle = Math.floor(now / 300) % 2 === 0 ? '#facc15' : '#fef08a';
+      m.lineWidth = 2;
+      m.beginPath();
+      m.arc((vm.beacon.x / TILE_SIZE) * k, (vm.beacon.y / TILE_SIZE) * k, 7, 0, Math.PI * 2);
+      m.stroke();
+    }
     for (const h of vm.hotspots) {
       m.strokeStyle = 'rgba(250,204,21,0.9)';
       m.lineWidth = 1.5;
@@ -463,9 +500,9 @@ export class Renderer {
     m.strokeRect((cam.x / TILE_SIZE) * k, (cam.y / TILE_SIZE) * k, (this.canvas.clientWidth / sc / TILE_SIZE) * k, (this.canvas.clientHeight / sc / TILE_SIZE) * k);
   }
 
-  /** 小地圖像素 → 世界座標 */
+  /** 小地圖像素（顯示尺寸，可能被 CSS 縮放）→ 世界座標 */
   minimapToWorld(px: number, py: number): { x: number; y: number } {
-    const k = this.minimap.width / Math.max(this.map.width, this.map.height);
+    const k = this.minimap.clientWidth / Math.max(this.map.width, this.map.height);
     return { x: (px / k) * TILE_SIZE, y: (py / k) * TILE_SIZE };
   }
 }

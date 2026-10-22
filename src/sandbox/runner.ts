@@ -29,6 +29,8 @@ export interface RunMatchOptions {
   readonly record: boolean;
   /** 各 playerId 是否不限指令額度（人類玩家） */
   readonly unlimitedBudget?: readonly boolean[];
+  /** 非預設時限（教學等非正式對局） */
+  readonly timeLimitTicks?: number;
 }
 
 export interface RunMatchOutput {
@@ -64,12 +66,18 @@ export class MatchDriver {
     const n = opts.controllers.length;
     this.controllers = opts.controllers;
     const unlimited = opts.unlimitedBudget ?? [];
-    this.match = new Match({ mode: opts.mode, seed: opts.seed, players: opts.knobs.map((k, i) => ({ knobs: k, unlimitedBudget: unlimited[i] === true })) });
+    this.match = new Match({
+      mode: opts.mode,
+      seed: opts.seed,
+      players: opts.knobs.map((k, i) => ({ knobs: k, unlimitedBudget: unlimited[i] === true })),
+      ...(opts.timeLimitTicks !== undefined ? { timeLimitTicks: opts.timeLimitTicks } : {}),
+    });
     this.replay = opts.record
       ? createReplay(
           opts.mode,
           opts.seed,
           opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: opts.knobs[i], ...(unlimited[i] === true ? { unlimitedBudget: true } : {}) })),
+          opts.timeLimitTicks,
         )
       : null;
     this.runtime = opts.controllers.map(() => emptyRuntime());
@@ -118,12 +126,27 @@ export class MatchDriver {
         const out = isPromise(r) ? await r : r;
         this.applyOutcome(pid, out);
       }
+    } else {
+      this.applyRealtime();
     }
     match.endTick();
     if (this.replay !== null && isHashTick(match.tick)) this.replay.hashes.push({ tick: match.tick, hash: match.hash() });
     if (match.over && this.replay !== null) {
       const result = match.result();
       this.replay.result = { ranking: result.ranking, durationTicks: result.durationTicks, finalHash: match.hash() };
+    }
+  }
+
+  /** 非決策 tick：人類玩家累積的指令立即套用（依 playerId 順序） */
+  private applyRealtime(): void {
+    const match = this.match;
+    for (let pid = 0; pid < this.controllers.length; pid++) {
+      const take = this.controllers[pid].takeRealtime;
+      if (take === undefined || !match.isAlive(pid) || this.idle[pid]) continue;
+      const commands = take.call(this.controllers[pid]);
+      if (commands.length === 0) continue;
+      this.replay?.decisions.push({ tick: match.tick, playerId: pid, commands });
+      match.applyCommands(pid, commands);
     }
   }
 

@@ -1,7 +1,7 @@
 // 回放游標：逐 tick 重建比賽，供回放播放器使用；每 600 tick 存快照，跳轉時從最近快照重算。
 import { RULES } from '../config/index.ts';
 import { Match } from '../core/match.ts';
-import { checkReplayVersion, isHashTick, replaySetup, type ReplayDecision, type ReplayFile } from './index.ts';
+import { applyDecision, checkReplayVersion, isHashTick, replaySetup, type ReplayDecision, type ReplayFile } from './index.ts';
 
 export class ReplayCursor {
   readonly file: ReplayFile;
@@ -42,14 +42,12 @@ export class ReplayCursor {
     const m = this.match;
     if (m.over) return;
     m.beginTick();
-    if (m.isDecisionTick()) {
-      const list = this.byTick.get(m.tick) ?? [];
+    const list = this.byTick.get(m.tick);
+    if (list !== undefined) {
       for (let pid = 0; pid < m.playerCount; pid++) {
         if (!m.isAlive(pid)) continue;
         const d = list.find((x) => x.playerId === pid);
-        if (d === undefined) continue;
-        if (d.knobs !== undefined) m.setKnobs(pid, d.knobs);
-        if (d.voided !== true) m.applyCommands(pid, d.commands);
+        if (d !== undefined) applyDecision(m, pid, d);
       }
     }
     m.endTick();

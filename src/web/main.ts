@@ -1,7 +1,8 @@
 // 瀏覽器版入口：對局設定、建立引擎 Worker、切換畫面。
-import type { MatchMode } from '../config/index.ts';
+import { TUTORIAL, type MatchMode } from '../config/index.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import { GameScreen } from './game-ui.ts';
+import { helpSections } from './help.ts';
 import type { FromWorker, LiveSetup, OpponentKind, ToWorker } from './protocol.ts';
 
 const setupEl = document.getElementById('setup')!;
@@ -71,9 +72,38 @@ document.getElementById('start')!.addEventListener('click', () => {
     return;
   }
   const humanIdx = preset.seats.indexOf('human');
-  const setup: LiveSetup = { mode: preset.mode, seed, human: humanIdx >= 0 ? humanIdx : null, seats: preset.seats, limitBudget: limitInput.checked };
+  const setup: LiveSetup = { mode: preset.mode, seed, human: humanIdx >= 0 ? humanIdx : null, seats: preset.seats, limitBudget: limitInput.checked, tutorial: false };
   launch({ type: 'startLive', setup });
 });
+
+document.getElementById('tutorial')!.addEventListener('click', () => {
+  launch({
+    type: 'startLive',
+    setup: { mode: '1v1', seed: TUTORIAL.seed, human: 0, seats: ['human', 'dummy'], limitBudget: false, tutorial: true, timeLimitTicks: TUTORIAL.timeLimitTicks },
+  });
+});
+
+// 首頁的遊戲說明（分頁）
+{
+  const card = document.getElementById('helpCard')!;
+  const tabs = card.querySelector<HTMLElement>('.help-tabs')!;
+  const content = card.querySelector<HTMLElement>('.help-content')!;
+  const sections = helpSections();
+  const buttons = sections.map((s) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = s.title;
+    b.addEventListener('click', () => show(s.id));
+    tabs.append(b);
+    return b;
+  });
+  const show = (id: string): void => {
+    const i = Math.max(0, sections.findIndex((s) => s.id === id));
+    content.innerHTML = sections[i].html;
+    buttons.forEach((b, j) => b.classList.toggle('active', j === i));
+  };
+  show('rules');
+}
 
 document.getElementById('replayFile')!.addEventListener('change', (e) => {
   const input = e.target as HTMLInputElement;

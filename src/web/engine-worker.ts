@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 // 引擎 Worker（批次模式）：人類對戰／觀戰時逐 tick 推進比賽；回放時以 ReplayCursor 重建。
 import baselineSource from '../../bots/baseline.js?raw';
+import dummySource from '../../bots/dummy.js?raw';
 import randomSource from '../../bots/random.js?raw';
 import type { GameEvent } from '../api/types.ts';
 import { TICKS_PER_SECOND } from '../config/index.ts';
@@ -20,7 +21,9 @@ const post = (msg: FromWorker, transfer: Transferable[] = []): void => ctx.postM
 const compiled: Record<OpponentKind, CompiledBot> = {
   baseline: compileBot(baselineSource, 'baseline.js'),
   random: compileBot(randomSource, 'random.js'),
+  dummy: compileBot(dummySource, 'dummy.js'),
 };
+const OPPONENT_NAME: Record<OpponentKind, string> = { baseline: '基準 Bot', random: '隨機 Bot', dummy: '教學木樁' };
 
 /** 上帝視角只顯示的事件類型（擊殺只取建築） */
 const GOD_EVENTS = new Set<GameEvent['type']>(['playerEliminated', 'towerChanged', 'enemyKilled']);
@@ -88,7 +91,7 @@ async function startLive(setup: LiveSetup): Promise<void> {
   }
   const knobs = controllers.map((c) => (c instanceof HumanController ? {} : resolveKnobs(c.declaration, undefined, c.label)));
   const unlimited = setup.seats.map((s) => s === 'human' && !setup.limitBudget);
-  driver = new MatchDriver({ mode: setup.mode, seed: setup.seed, controllers, knobs, record: true, unlimitedBudget: unlimited });
+  driver = new MatchDriver({ mode: setup.mode, seed: setup.seed, controllers, knobs, record: true, unlimitedBudget: unlimited, ...(setup.timeLimitTicks !== undefined ? { timeLimitTicks: setup.timeLimitTicks } : {}) });
   await driver.init();
   cursor = null;
   ended = false;
@@ -98,8 +101,8 @@ async function startLive(setup: LiveSetup): Promise<void> {
   skipping = null;
   meter.reset();
   attachTap(driver.match);
-  const names = setup.seats.map((s, i) => (s === 'human' ? '玩家' : s === 'baseline' ? `基準 Bot（P${i}）` : `隨機 Bot（P${i}）`));
-  post({ type: 'ready', meta: { kind: 'live', map: staticMapView(driver.match, names), human: setup.human, limitBudget: setup.limitBudget, durationTicks: null } });
+  const names = setup.seats.map((s, i) => (s === 'human' ? '玩家' : `${OPPONENT_NAME[s]}（P${i}）`));
+  post({ type: 'ready', meta: { kind: 'live', map: staticMapView(driver.match, names), human: setup.human, limitBudget: setup.limitBudget, tutorial: setup.tutorial, durationTicks: null } });
   sendFrame();
 }
 
@@ -115,7 +118,7 @@ function startReplay(msg: Extract<ToWorker, { type: 'startReplay' }>): void {
   meter.reset();
   attachTap(cursor.current);
   const names = msg.file.header.players.map((p) => `${p.bot}${p.version !== '' ? ` ${p.version}` : ''}（P${p.playerId}）`);
-  post({ type: 'ready', meta: { kind: 'replay', map: staticMapView(cursor.current, names), human: null, limitBudget: false, durationTicks: msg.file.result?.durationTicks ?? null } });
+  post({ type: 'ready', meta: { kind: 'replay', map: staticMapView(cursor.current, names), human: null, limitBudget: false, tutorial: false, durationTicks: msg.file.result?.durationTicks ?? null } });
   sendFrame();
 }
 

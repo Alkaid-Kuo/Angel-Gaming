@@ -89,6 +89,44 @@ describe('人類玩家', () => {
     expect(replay.decisions.filter((d) => d.playerId === 0).length).toBe(2);
     expect(runReplay(replay, true).finalHash).toBe(m.hash());
   });
+
+  it('人類的指令在非決策 tick 也立即套用，錄進回放後可由 runReplay 與回放游標重建', async () => {
+    const human = new HumanController();
+    const bot = new BatchController(BASELINE.compiled, 'baseline.js');
+    const driver = new MatchDriver({ mode: '1v1', seed: 6, controllers: [human, bot], knobs: [{}, resolveKnobs(bot.declaration, undefined, 'b')], record: true, unlimitedBudget: [true, false] });
+    await driver.init();
+    const m = driver.match;
+    await driver.stepTick(); // tick 0（決策 tick）
+    const workers = m.state.units.filter((u) => u.owner === 0).map((u) => u.id);
+    const node = m.state.nodes.find((n) => n.areaId === m.state.players[0].mainAreaId)!;
+    human.enqueue([{ type: 'gather', units: workers, nodeId: node.id }]);
+    await driver.stepTick(); // tick 1：不是決策 tick，指令仍立即套用
+    expect(m.state.units.find((u) => u.id === workers[0])!.order.kind).toBe('gather');
+    for (let i = 0; i < 400; i++) await driver.stepTick();
+    const base = m.state.buildings.find((b) => b.owner === 0)!;
+    human.enqueue([{ type: 'train', buildingId: base.id, unit: 'worker' }]);
+    await driver.stepTick();
+    while (!m.over) await driver.stepTick();
+    const mine = driver.replay!.decisions.filter((d) => d.playerId === 0);
+    expect(mine.map((d) => d.tick)).toEqual([1, 402]);
+    expect(runReplay(driver.replay!, true).finalHash).toBe(m.hash());
+    const cursor = new ReplayCursor(driver.replay!);
+    while (!cursor.over) cursor.step();
+    expect(cursor.desyncTick).toBeNull();
+    expect(cursor.current.hash()).toBe(m.hash());
+  });
+
+  it('自訂時限（教學用）：到時結束，回放標頭記錄時限並可重建', async () => {
+    const human = new HumanController();
+    const bot = new BatchController(BASELINE.compiled, 'baseline.js');
+    const driver = new MatchDriver({ mode: '1v1', seed: 7, controllers: [human, bot], knobs: [{}, resolveKnobs(bot.declaration, undefined, 'b')], record: true, timeLimitTicks: 1200 });
+    await driver.init();
+    while (!driver.match.over) await driver.stepTick();
+    expect(driver.match.tick).toBe(1200);
+    expect(driver.replay!.header.timeLimitTicks).toBe(1200);
+    expect(runReplay(driver.replay!, true).durationTicks).toBe(1200);
+    expect(() => new Match({ mode: '1v1', seed: 1, players: [{ knobs: {} }, { knobs: {} }], timeLimitTicks: 0 })).toThrow();
+  });
 });
 
 describe('畫面快照', () => {

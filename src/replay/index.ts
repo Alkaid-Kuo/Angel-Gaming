@@ -38,6 +38,8 @@ export interface ReplayFile {
     readonly mode: MatchMode;
     readonly seed: number;
     readonly players: readonly ReplayPlayer[];
+    /** 非預設時限（教學等非正式對局） */
+    readonly timeLimitTicks?: number;
   };
   readonly decisions: ReplayDecision[];
   readonly hashes: ReplayHash[];
@@ -57,10 +59,10 @@ export class ReplayDesyncError extends Error {
   }
 }
 
-export function createReplay(mode: MatchMode, seed: number, players: readonly ReplayPlayer[]): ReplayFile {
+export function createReplay(mode: MatchMode, seed: number, players: readonly ReplayPlayer[], timeLimitTicks?: number): ReplayFile {
   return {
     format: REPLAY_FORMAT,
-    header: { engineVersion: ENGINE_VERSION, specVersion: SPEC_VERSION, mode, seed, players },
+    header: { engineVersion: ENGINE_VERSION, specVersion: SPEC_VERSION, mode, seed, players, ...(timeLimitTicks !== undefined ? { timeLimitTicks } : {}) },
     decisions: [],
     hashes: [],
     result: null,
@@ -84,7 +86,17 @@ export function replaySetup(file: ReplayFile): MatchSetup {
     mode: file.header.mode,
     seed: file.header.seed,
     players: file.header.players.map((p) => ({ knobs: p.knobs, unlimitedBudget: p.unlimitedBudget === true })),
+    ...(file.header.timeLimitTicks !== undefined ? { timeLimitTicks: file.header.timeLimitTicks } : {}),
   };
+}
+
+/**
+ * 套用一筆回放決策。選手的決策只出現在決策 tick；人類玩家的即時指令可出現在任何 tick（v0.4 起）。
+ * 同一 tick 必須依 playerId 順序呼叫。
+ */
+export function applyDecision(m: Match, pid: number, d: ReplayDecision): void {
+  if (d.knobs !== undefined) m.setKnobs(pid, d.knobs);
+  if (d.voided !== true) m.applyCommands(pid, d.commands);
 }
 
 export interface ReplayRunOutput {
@@ -113,15 +125,14 @@ export function runReplay(file: ReplayFile, verify = true, onTick?: (m: Match) =
   const hashes: ReplayHash[] = [];
   while (!m.over) {
     m.beginTick();
-    if (m.isDecisionTick()) {
-      const list = byTick.get(m.tick) ?? [];
+    const decisionTick = m.isDecisionTick();
+    const list = byTick.get(m.tick);
+    if (decisionTick || list !== undefined) {
       for (let pid = 0; pid < m.playerCount; pid++) {
         if (!m.isAlive(pid)) continue;
-        m.discardObservation(pid);
-        const d = list.find((x) => x.playerId === pid);
-        if (d === undefined) continue;
-        if (d.knobs !== undefined) m.setKnobs(pid, d.knobs);
-        if (d.voided !== true) m.applyCommands(pid, d.commands);
+        if (decisionTick) m.discardObservation(pid);
+        const d = list?.find((x) => x.playerId === pid);
+        if (d !== undefined) applyDecision(m, pid, d);
       }
     }
     m.endTick();

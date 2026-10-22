@@ -26,9 +26,14 @@ export class HumanController implements BotController {
 
   decide(packet: ObservationPacket): DecideOutcome {
     this.events.push(...packet.obs.events);
-    const commands = JSON.parse(JSON.stringify(this.queue)) as unknown;
+    return { commands: this.takeRealtime(), voided: false, exception: null, killed: false, elapsedMs: 0 };
+  }
+
+  /** 人類的指令每個 tick 都會套用（不必等決策 tick） */
+  takeRealtime(): Command[] {
+    const commands = JSON.parse(JSON.stringify(this.queue)) as Command[];
     this.queue = [];
-    return { commands, voided: false, exception: null, killed: false, elapsedMs: 0 };
+    return commands;
   }
 
   dispose(): void {}

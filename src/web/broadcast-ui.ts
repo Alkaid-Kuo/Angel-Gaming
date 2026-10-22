@@ -51,7 +51,8 @@ export class Broadcast {
   private history: { tick: number; army: number[] }[] = [];
   private frame: FrameView | null = null;
 
-  constructor(root: HTMLElement, meta: MatchMeta, post: (m: ToWorker) => void, cam: CameraHooks, name: (id: number) => string) {
+  /** root：地圖區（字幕、戰力曲線）；controlsRoot：底部面板（鏡頭與快轉控制） */
+  constructor(root: HTMLElement, controlsRoot: HTMLElement, meta: MatchMeta, post: (m: ToWorker) => void, cam: CameraHooks, name: (id: number) => string) {
     this.meta = meta;
     this.post = post;
     this.cam = cam;
@@ -77,7 +78,8 @@ export class Broadcast {
     this.skipEndBtn = el('button', undefined, '直接看結果');
     this.skipEndBtn.addEventListener('click', () => this.post({ type: 'skip', to: 'end' }));
     this.controls.append(this.modeSelect, this.highlightBtn, this.skipFightBtn, this.skipEndBtn);
-    root.append(this.caption, this.graph, this.controls);
+    root.append(this.caption, this.graph);
+    controlsRoot.append(this.controls);
   }
 
   /** 使用者手動移動鏡頭時切回自由鏡頭 */

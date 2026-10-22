@@ -8,7 +8,12 @@
 </head>
 <body>
 <div id="setup" class="setup">
-  <h1>天使戰隊 RTS <small>M1 試玩版</small></h1>
+  <h1>天使戰隊 RTS <small>試玩版</small></h1>
+  <section class="card tutorial-card">
+    <h2>第一次玩？</h2>
+    <p>跟著新手教學一步步學會採礦、生產、建造、出兵與進攻，對手是不會反擊的教學木樁（約 5～10 分鐘）。</p>
+    <button id="tutorial" class="primary" type="button">開始新手教學</button>
+  </section>
   <section class="card">
     <h2>開始對局</h2>
     <div class="modes" id="modes">
@@ -34,22 +39,10 @@
     <p>載入 <code>rts-sim match --replay-dir</code> 產生的回放檔，或對局結束後下載的回放。</p>
     <input id="replayFile" type="file" accept=".json,application/json">
   </section>
-  <section class="card help">
-    <h2>操作</h2>
-    <table>
-      <tr><td>左鍵拖曳／點擊</td><td>選取（Shift 加選；雙擊選取畫面內同類型單位；. 鍵輪流選取閒置工人）</td></tr>
-      <tr><td>右鍵</td><td>移動；對敵方＝攻擊；工人對礦點＝採集；工人對己方未完工建築＝接續建造；選建築時＝集結點</td></tr>
-      <tr><td>A ＋ 左鍵</td><td>攻擊移動</td></tr>
-      <tr><td>H</td><td>駐守（原地停下）</td></tr>
-      <tr><td>F1～F4</td><td>姿態：積極、防守、堅守、撤退</td></tr>
-      <tr><td>Ctrl ＋ 0～9／0～9</td><td>設定編隊／選取編隊</td></tr>
-      <tr><td>B ＋ 建築鍵 ＋ 左鍵</td><td>工人蓋建築：C 主堡、D 採集站、S 補給站、R 兵營、T 防禦塔、F 鍛造所、G 攻城工坊（Shift 連續放置；鍛造所與攻城工坊需要主堡 Lv2）</td></tr>
-      <tr><td>Q／W／E</td><td>選建築時生產或研究（主堡 Q 工人；兵營 Q 長槍兵、W 弓兵、E 騎兵；攻城工坊 Q 攻城車；鍛造所 Q 武器、W 護甲）</td></tr>
-      <tr><td>U</td><td>選主堡時升級（Lv2、Lv3）</td></tr>
-      <tr><td>X</td><td>取消升級／研究、最後一個生產項目，或取消建造中的建築</td></tr>
-      <tr><td>空白鍵／＋／−</td><td>暫停；調整速度</td></tr>
-      <tr><td>WASD／方向鍵／畫面邊緣／中鍵拖曳／滾輪</td><td>平移與縮放（A、W 等鍵在有對應動作時優先執行動作）</td></tr>
-    </table>
+  <section class="card" id="helpCard">
+    <h2>遊戲說明</h2>
+    <div class="help-tabs"></div>
+    <div class="help-content"></div>
   </section>
 </div>
 <div id="game" class="game hidden"></div>

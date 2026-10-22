@@ -1,5 +1,5 @@
 // 選手控制器介面、宣告驗證、旋鈕解析、批次模式控制器。
-import type { Bot, BotDeclaration, InitData, KnobDef, KnobValues } from '../api/types.ts';
+import type { Bot, BotDeclaration, Command, InitData, KnobDef, KnobValues } from '../api/types.ts';
 import { RULES } from '../config/index.ts';
 import type { ObservationPacket } from '../core/observe.ts';
 import { BotLoadError, type CompiledBot } from './compile.ts';
@@ -29,6 +29,11 @@ export interface BotController {
   init(data: InitData): InitOutcome | Promise<InitOutcome>;
   decide(packet: ObservationPacket): DecideOutcome | Promise<DecideOutcome>;
   dispose(): void | Promise<void>;
+  /**
+   * 即時輸入（只有人類玩家實作）：非決策 tick 也取出累積的指令，在該 tick 立即套用並錄進回放。
+   * 選手 Bot 不實作，維持每 5 tick 決策一次。
+   */
+  takeRealtime?(): Command[];
 }
 
 /** 驗證 declare() 的結果；不合規格拋出 BotLoadError */
