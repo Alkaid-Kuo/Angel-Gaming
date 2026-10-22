@@ -69,5 +69,9 @@ export function hashState(state: MatchState): string {
     h.int(t.id).int(t.owner);
     for (const v of t.progress) h.int(v);
   }
+  if (state.ruleset === 'conquest') {
+    for (const p of state.players) h.int(p.vp).int(p.domination);
+    for (const t of state.towers) h.int(t.hold).int(t.capturer);
+  }
   return h.digest();
 }

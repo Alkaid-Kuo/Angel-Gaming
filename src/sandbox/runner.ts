@@ -1,7 +1,7 @@
 // 比賽驅動：依 tick 順序呼叫引擎與選手控制器；正式模式可平行決策，套用一律依 playerId 順序。
 // MatchDriver 可逐 tick 推進（瀏覽器對局用），runMatch 一路跑到結束（CLI 用）。
 import type { KnobValues } from '../api/types.ts';
-import type { MatchMode } from '../config/index.ts';
+import type { MatchMode, Ruleset } from '../config/index.ts';
 import { Match, type MatchResult } from '../core/match.ts';
 import type { ObservationPacket } from '../core/observe.ts';
 import type { GeneratedMap } from '../mapgen/index.ts';
@@ -31,6 +31,8 @@ export interface RunMatchOptions {
   readonly unlimitedBudget?: readonly boolean[];
   /** 非預設時限（教學等非正式對局） */
   readonly timeLimitTicks?: number;
+  /** 賽制（省略為傳統） */
+  readonly ruleset?: Ruleset;
 }
 
 export interface RunMatchOutput {
@@ -71,6 +73,7 @@ export class MatchDriver {
       seed: opts.seed,
       players: opts.knobs.map((k, i) => ({ knobs: k, unlimitedBudget: unlimited[i] === true })),
       ...(opts.timeLimitTicks !== undefined ? { timeLimitTicks: opts.timeLimitTicks } : {}),
+      ...(opts.ruleset !== undefined ? { ruleset: opts.ruleset } : {}),
     });
     this.replay = opts.record
       ? createReplay(
@@ -78,6 +81,7 @@ export class MatchDriver {
           opts.seed,
           opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: opts.knobs[i], ...(unlimited[i] === true ? { unlimitedBudget: true } : {}) })),
           opts.timeLimitTicks,
+          opts.ruleset,
         )
       : null;
     this.runtime = opts.controllers.map(() => emptyRuntime());

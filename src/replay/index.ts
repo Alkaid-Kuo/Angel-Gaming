@@ -1,6 +1,6 @@
 // 回放：只保存 seed 與指令紀錄，播放時以引擎重新模擬；每 100 tick 的狀態雜湊用來偵測不同步。
 import type { KnobValues } from '../api/types.ts';
-import { ENGINE_VERSION, RULES, SPEC_VERSION, type MatchMode } from '../config/index.ts';
+import { ENGINE_VERSION, RULES, SPEC_VERSION, type MatchMode, type Ruleset } from '../config/index.ts';
 import { Match, type MatchSetup } from '../core/match.ts';
 
 export const REPLAY_FORMAT = 1;
@@ -40,6 +40,8 @@ export interface ReplayFile {
     readonly players: readonly ReplayPlayer[];
     /** 非預設時限（教學等非正式對局） */
     readonly timeLimitTicks?: number;
+    /** 賽制（省略為傳統） */
+    readonly ruleset?: Ruleset;
   };
   readonly decisions: ReplayDecision[];
   readonly hashes: ReplayHash[];
@@ -59,10 +61,10 @@ export class ReplayDesyncError extends Error {
   }
 }
 
-export function createReplay(mode: MatchMode, seed: number, players: readonly ReplayPlayer[], timeLimitTicks?: number): ReplayFile {
+export function createReplay(mode: MatchMode, seed: number, players: readonly ReplayPlayer[], timeLimitTicks?: number, ruleset?: Ruleset): ReplayFile {
   return {
     format: REPLAY_FORMAT,
-    header: { engineVersion: ENGINE_VERSION, specVersion: SPEC_VERSION, mode, seed, players, ...(timeLimitTicks !== undefined ? { timeLimitTicks } : {}) },
+    header: { engineVersion: ENGINE_VERSION, specVersion: SPEC_VERSION, mode, seed, players, ...(timeLimitTicks !== undefined ? { timeLimitTicks } : {}), ...(ruleset !== undefined && ruleset !== 'classic' ? { ruleset } : {}) },
     decisions: [],
     hashes: [],
     result: null,
@@ -87,6 +89,7 @@ export function replaySetup(file: ReplayFile): MatchSetup {
     seed: file.header.seed,
     players: file.header.players.map((p) => ({ knobs: p.knobs, unlimitedBudget: p.unlimitedBudget === true })),
     ...(file.header.timeLimitTicks !== undefined ? { timeLimitTicks: file.header.timeLimitTicks } : {}),
+    ...(file.header.ruleset !== undefined ? { ruleset: file.header.ruleset } : {}),
   };
 }
 

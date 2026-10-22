@@ -23,6 +23,8 @@ export interface GamePlayerOutput {
   readonly rank: number;
   readonly eliminatedTick: number | null;
   readonly score: number;
+  /** 搶點模式的勝利點（傳統模式為 0） */
+  readonly vp: number;
   readonly knobs: KnobValues;
   readonly stats: Record<string, unknown>;
 }
@@ -78,6 +80,7 @@ export function gameOutput(
       rank: p.rank,
       eliminatedTick: p.eliminatedTick >= 0 ? p.eliminatedTick : null,
       score: p.score,
+      vp: p.vp,
       knobs: knobs[p.playerId],
       stats: {
         gathered: s.gathered,

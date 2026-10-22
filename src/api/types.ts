@@ -64,6 +64,35 @@ export interface InitWatchtower {
   readonly y: number;
 }
 
+/** 搶點模式的控制點（開局資料） */
+export interface InitControlPoint {
+  readonly id: number;
+  /** 單位座標 */
+  readonly x: number;
+  readonly y: number;
+  /** 每次結算的收入與勝利點 */
+  readonly income: number;
+  readonly vp: number;
+  /** 中央控制點 */
+  readonly center: boolean;
+}
+
+/** 搶點模式的規則數值（開局資料） */
+export interface ConquestInit {
+  readonly victoryPoints: number;
+  readonly timeLimitTicks: number;
+  /** 收入與勝利點每隔幾 tick 結算一次 */
+  readonly incomeInterval: number;
+  /** 有完工主堡時，每次結算的基本收入 */
+  readonly baseIncome: number;
+  /** 佔領值上限；圈內每隻戰鬥單位每 tick 加 1，最多加 captureMaxRate */
+  readonly captureTarget: number;
+  readonly captureMaxRate: number;
+  /** 佔領圈半徑（單位，從控制點中心算到單位中心） */
+  readonly captureRadius: number;
+  readonly points: readonly InitControlPoint[];
+}
+
 export interface GameStats {
   readonly units: Readonly<Record<UnitType, UnitStats>>;
   readonly buildings: Readonly<Record<BuildingType, BuildingStats>>;
@@ -91,6 +120,10 @@ export interface InitData {
   readonly matchSeed: number;
   /** 開局時的旋鈕值（規格補充：開局規劃也需要旋鈕） */
   readonly knobs: KnobValues;
+  /** 賽制：classic 傳統；conquest 搶點 */
+  readonly ruleset: 'classic' | 'conquest';
+  /** 搶點模式才有，傳統模式為 null */
+  readonly conquest: ConquestInit | null;
 }
 
 export interface Helpers {
@@ -200,6 +233,19 @@ export interface WatchtowerView {
   readonly myProgress: number;
 }
 
+/** 搶點模式的控制點狀態（公開資訊，不受迷霧限制） */
+export interface ControlPointView {
+  readonly id: number;
+  /** 佔領者；中立為 null */
+  readonly owner: number | null;
+  /** 佔領者的佔領值（0～captureTarget；被奪時遞減，到 0 變中立） */
+  readonly hold: number;
+  /** 正在佔領這個中立點的選手；沒有則 null */
+  readonly capturer: number | null;
+  /** capturer 的佔領進度（0～captureTarget） */
+  readonly progress: number;
+}
+
 export interface Observation {
   readonly tick: number;
   readonly minerals: number;
@@ -218,6 +264,12 @@ export interface Observation {
   readonly commandBudget: number;
   /** 自己的科技：主堡最高等級與研究等級 */
   readonly tech: { readonly level: number; readonly weapons: number; readonly armor: number };
+  /** 搶點模式才有（傳統模式為 null）：控制點狀態 */
+  readonly controlPoints: readonly ControlPointView[] | null;
+  /** 搶點模式才有（傳統模式為 null）：各選手勝利點，索引為 playerId */
+  readonly victoryPoints: readonly number[] | null;
+  /** 搶點模式才有（傳統模式為 null）：各選手連續控制過半控制點的 tick 數（壓制倒數） */
+  readonly domination: readonly number[] | null;
 }
 
 // ───────── 事件 ─────────

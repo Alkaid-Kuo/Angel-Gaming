@@ -8,7 +8,7 @@ import { networkInterfaces } from 'node:os';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { KnobValues } from '../api/types.ts';
-import { MAP_MODES, MATCH_MODES, type MatchMode } from '../config/index.ts';
+import { MAP_MODES, MATCH_MODES, RULESETS, type MatchMode, type Ruleset } from '../config/index.ts';
 import { generateMap, renderAscii, MapGenError } from '../mapgen/index.ts';
 import { BotLoadError } from '../sandbox/compile.ts';
 import { BatchController, resolveKnobs, type BotController } from '../sandbox/controller.ts';
@@ -68,6 +68,12 @@ function modeArg(args: Args): MatchMode {
   return m as MatchMode;
 }
 
+function rulesetArg(args: Args): Ruleset {
+  const r = one(args, 'ruleset') ?? 'classic';
+  if (!(RULESETS as readonly string[]).includes(r)) throw new ArgError(`--ruleset 必須是 ${RULESETS.join('／')}`);
+  return r as Ruleset;
+}
+
 function execArg(args: Args, fallback: 'official' | 'batch'): 'official' | 'batch' {
   const e = one(args, 'exec') ?? fallback;
   if (e !== 'official' && e !== 'batch') throw new ArgError('--exec 必須是 official／batch');
@@ -116,6 +122,7 @@ interface Roster {
   readonly infos: readonly BotInfo[];
   readonly knobs: readonly KnobValues[];
   readonly replayDir: string | undefined;
+  readonly ruleset: Ruleset;
 }
 
 /** 一場比賽：seats[playerId] = 選手在 --bots 中的索引 */
@@ -143,7 +150,7 @@ function parseKnobs(arg: string | undefined, n: number): (KnobValues | undefined
 }
 
 /** 載入選手、讀取宣告並解析旋鈕（旋鈕不合法視為選手載入錯誤） */
-function loadRoster(mode: MatchMode, exec: 'official' | 'batch', paths: readonly string[], knobArg: string | undefined, replayDir: string | undefined): Roster {
+function loadRoster(mode: MatchMode, exec: 'official' | 'batch', paths: readonly string[], knobArg: string | undefined, replayDir: string | undefined, ruleset: Ruleset): Roster {
   const files = paths.map((p) => loadBotFile(p));
   const overrides = parseKnobs(knobArg, files.length);
   const infos: BotInfo[] = [];
@@ -153,14 +160,14 @@ function loadRoster(mode: MatchMode, exec: 'official' | 'batch', paths: readonly
     infos.push({ index, file: f.path, name: c.declaration.name, version: c.declaration.version ?? '' });
     knobs.push(resolveKnobs(c.declaration, overrides[index], f.label));
   });
-  return { mode, exec, files, infos, knobs, replayDir };
+  return { mode, exec, files, infos, knobs, replayDir, ruleset };
 }
 
 async function playGame(r: Roster, plan: GamePlan): Promise<GameOutput> {
   const controllers = await makeControllers(plan.seats.map((b) => r.files[b]), r.exec);
   try {
     const knobs = plan.seats.map((b) => r.knobs[b]);
-    const run = await runMatch({ mode: r.mode, seed: plan.seed, controllers, knobs, record: r.replayDir !== undefined });
+    const run = await runMatch({ mode: r.mode, seed: plan.seed, controllers, knobs, record: r.replayDir !== undefined, ruleset: r.ruleset });
     if (r.replayDir !== undefined && run.replay !== null) {
       mkdirSync(r.replayDir, { recursive: true });
       writeFileSync(join(r.replayDir, `${r.mode}_${plan.seed}_${plan.seats.join('-')}.json`), JSON.stringify(run.replay));
@@ -178,7 +185,7 @@ async function playAll(r: Roster, plans: readonly GamePlan[]): Promise<GameOutpu
 }
 
 async function cmdMatch(args: Args): Promise<void> {
-  knownArgs(args, ['mode', 'bots', 'games', 'seed', 'exec', 'swap', 'knobs', 'replay-dir', 'out']);
+  knownArgs(args, ['mode', 'bots', 'games', 'seed', 'exec', 'swap', 'knobs', 'replay-dir', 'out', 'ruleset']);
   const mode = modeArg(args);
   const botPaths = args.get('bots') ?? [];
   const need = MAP_MODES[mode].players;
@@ -189,7 +196,7 @@ async function cmdMatch(args: Args): Promise<void> {
   const swap = flag(args, 'swap');
   if (swap && mode !== '1v1') throw new ArgError('--swap 只適用於 1v1');
   if (swap && games % 2 !== 0) throw new ArgError('--swap 時 --games 必須是偶數（每個 seed 打兩場並交換起點）');
-  const roster = loadRoster(mode, exec, botPaths, one(args, 'knobs'), one(args, 'replay-dir'));
+  const roster = loadRoster(mode, exec, botPaths, one(args, 'knobs'), one(args, 'replay-dir'), rulesetArg(args));
   const seats = botPaths.map((_, i) => i);
   const plans: GamePlan[] = [];
   if (swap) {
@@ -201,7 +208,7 @@ async function cmdMatch(args: Args): Promise<void> {
     for (let i = 0; i < games; i++) plans.push({ seed: seed + i, seats });
   }
   const out = await playAll(roster, plans);
-  emit({ seed, mode, exec, swap, summary: summarize(mode, roster.infos, out), games: out }, one(args, 'out'));
+  emit({ seed, mode, ruleset: roster.ruleset, exec, swap, summary: summarize(mode, roster.infos, out), games: out }, one(args, 'out'));
 }
 
 function combinations(n: number, k: number): number[][] {
@@ -224,7 +231,7 @@ function combinations(n: number, k: number): number[][] {
 
 /** 循環賽：1v1 每組選手打 --games 場（同 seed 交換起點各一場）；4 人局為所有 4 人組合各打 --games 場 */
 async function cmdRoundrobin(args: Args): Promise<void> {
-  knownArgs(args, ['mode', 'bots', 'games', 'seed', 'exec', 'knobs', 'replay-dir', 'out']);
+  knownArgs(args, ['mode', 'bots', 'games', 'seed', 'exec', 'knobs', 'replay-dir', 'out', 'ruleset']);
   const mode = modeArg(args);
   const botPaths = args.get('bots') ?? [];
   const players = MAP_MODES[mode].players;
@@ -233,7 +240,7 @@ async function cmdRoundrobin(args: Args): Promise<void> {
   if (mode === '1v1' && games % 2 !== 0) throw new ArgError('1v1 循環賽的 --games 必須是偶數（同 seed 交換起點）');
   const seed = intArg(args, 'seed', randomInt(0, 2 ** 31), 0)!;
   const exec = execArg(args, 'official');
-  const roster = loadRoster(mode, exec, botPaths, one(args, 'knobs'), one(args, 'replay-dir'));
+  const roster = loadRoster(mode, exec, botPaths, one(args, 'knobs'), one(args, 'replay-dir'), rulesetArg(args));
   const n = botPaths.length;
   const plans: GamePlan[] = [];
   if (mode === '1v1') {
@@ -313,13 +320,13 @@ function cmdMapgen(args: Args): void {
 }
 
 async function cmdBench(args: Args): Promise<void> {
-  knownArgs(args, ['mode', 'games', 'exec', 'seed', 'bot', 'out']);
+  knownArgs(args, ['mode', 'games', 'exec', 'seed', 'bot', 'out', 'ruleset']);
   const mode = modeArg(args);
   const games = intArg(args, 'games', mode === '1v1' ? 20 : 10, 1)!;
   const exec = execArg(args, 'batch');
   const seed = intArg(args, 'seed', 1, 0)!;
   const botPath = one(args, 'bot') ?? join(packageRoot(), 'bots', 'baseline.js');
-  const roster = loadRoster(mode, exec, [botPath], undefined, undefined);
+  const roster = loadRoster(mode, exec, [botPath], undefined, undefined, rulesetArg(args));
   const seats = Array.from({ length: MAP_MODES[mode].players }, () => 0);
   const plans = Array.from({ length: games }, (_, i) => ({ seed: seed + i, seats }));
   const t0 = performance.now();
@@ -399,7 +406,7 @@ function cmdViewer(args: Args): Promise<void> {
 }
 
 const USAGE = `用法：
-  rts-sim match      --mode 1v1|ffa4 --bots a.js b.js [c.js d.js] [--games N] [--seed S] [--swap] [--knobs JSON|@檔案]
+  rts-sim match      --mode 1v1|ffa4 --bots a.js b.js [c.js d.js] [--games N] [--seed S] [--swap] [--knobs JSON|@檔案] [--ruleset classic|conquest]
                      [--exec official|batch] [--replay-dir D] [--out F]
   rts-sim roundrobin --mode 1v1|ffa4 --bots a.js b.js ... [--games 每組場數] [--seed S] [--knobs JSON|@檔案] [--exec official|batch] [--out F]
   rts-sim mapgen     --mode 1v1|ffa4 [--seed S] [--format ascii|png] [--validate N] [--out F]

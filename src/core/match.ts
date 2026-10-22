@@ -6,6 +6,7 @@ import {
   RESEARCH,
   BUILDING_TYPES,
   DAMAGE_MULTIPLIER,
+  CONQUEST,
   MAP_MODES,
   REJECT_REASONS,
   RULES,
@@ -15,6 +16,7 @@ import {
   type BuildingType,
   type MatchMode,
   type RejectReason,
+  type Ruleset,
   type UnitType,
 } from '../config/index.ts';
 import { generateMap, type GeneratedMap } from '../mapgen/index.ts';
@@ -32,7 +34,7 @@ import { buildObservation, discardObservation, type ObservationPacket } from './
 import { cloneState } from './clone.ts';
 import { SpatialIndex } from './spatial.ts';
 import type { MatchState, MineNode, Player, PlayerStats, Watchtower } from './state.ts';
-import { stepWatchtowers } from './tower.ts';
+import { nearestWalkableTile, stepControlPoints, stepWatchtowers } from './tower.ts';
 import { assetScore, createBuilding, createUnit, HALF_TILE, terrainWalk } from './world.ts';
 
 export interface MatchPlayerSetup {
@@ -47,8 +49,10 @@ export interface MatchSetup {
   readonly players: readonly MatchPlayerSetup[];
   /** 測試用：指定地圖（否則依 seed 生成） */
   readonly map?: GeneratedMap;
-  /** 時限（tick）；省略時為 RULES.match.timeLimitTicks（教學等非正式對局使用） */
+  /** 時限（tick）；省略時依賽制（傳統 RULES.match.timeLimitTicks、搶點 CONQUEST.timeLimitTicks） */
   readonly timeLimitTicks?: number;
+  /** 賽制；省略為傳統 */
+  readonly ruleset?: Ruleset;
 }
 
 export interface PlayerResult {
@@ -59,6 +63,8 @@ export interface PlayerResult {
   readonly eliminatedTick: number;
   /** 資產分數（淘汰者為淘汰當下） */
   readonly score: number;
+  /** 搶點模式的勝利點（傳統模式為 0） */
+  readonly vp: number;
   readonly stats: PlayerStats;
 }
 
@@ -107,7 +113,9 @@ export class Match {
     if (setup.players.length !== cfg.players) {
       throw new Error(`${setup.mode} 需要 ${cfg.players} 位選手，收到 ${setup.players.length}`);
     }
-    const timeLimitTicks = setup.timeLimitTicks ?? RULES.match.timeLimitTicks;
+    const ruleset = setup.ruleset ?? 'classic';
+    const conquest = ruleset === 'conquest';
+    const timeLimitTicks = setup.timeLimitTicks ?? (conquest ? CONQUEST.timeLimitTicks : RULES.match.timeLimitTicks);
     if (!Number.isSafeInteger(timeLimitTicks) || timeLimitTicks <= 0) throw new Error(`時限必須是正整數 tick，收到 ${timeLimitTicks}`);
     const map = setup.map ?? generateMap(setup.mode, setup.seed);
     const w = map.width;
@@ -142,13 +150,15 @@ export class Match {
       pathCache: new PathCache(),
       spatial: new SpatialIndex(w, h),
       over: false,
+      ruleset,
       timeLimitTicks,
       recordEvents: true,
       eventTap: null,
     };
     this.state = state;
     // 礦點 → 瞭望塔 → 各選手主堡與工人，共用 id 計數器
-    map.nodes.forEach((nd, index) => {
+    // 搶點模式取消採礦：不建立礦點（礦區位置改設控制點）
+    if (!conquest) map.nodes.forEach((nd, index) => {
       const node: MineNode = { id: state.nextId++, index, tileX: nd.tileX, tileY: nd.tileY, rich: nd.rich, areaId: nd.areaId, reserve: nd.reserve, minerId: 0, queue: [] };
       state.nodes.push(node);
       state.nodeById.set(node.id, node);
@@ -156,9 +166,31 @@ export class Match {
       state.nodeAt[ti] = node.id;
       state.walk[ti] = 0;
     });
-    for (const wt of map.watchtowers) {
-      const t: Watchtower = { id: state.nextId++, x: wt.x, y: wt.y, owner: -1, progress: new Int32Array(cfg.players), visOwner: -1 };
-      state.towers.push(t);
+    const tower = (x: number, y: number, sight: number, income: number, vp: number, center: boolean): Watchtower => ({
+      id: state.nextId++,
+      x,
+      y,
+      owner: -1,
+      progress: new Int32Array(cfg.players),
+      visOwner: -1,
+      sight,
+      income,
+      vp,
+      center,
+      hold: 0,
+      capturer: -1,
+    });
+    if (conquest) {
+      // 控制點：分礦與富礦區的中心（最近的可通行格）＋中央
+      for (const area of map.areas) {
+        if (area.kind === 'main') continue;
+        const nodes = map.nodes.filter((n) => n.areaId === area.areaId);
+        const t = nearestWalkableTile(state, idiv(nodes.reduce((a, n) => a + n.tileX, 0) * 2 + nodes.length, nodes.length * 2), idiv(nodes.reduce((a, n) => a + n.tileY, 0) * 2 + nodes.length, nodes.length * 2));
+        state.towers.push(tower(t.x * TILE_SIZE + HALF_TILE, t.y * TILE_SIZE + HALF_TILE, CONQUEST.pointSightTiles, CONQUEST.pointIncome, CONQUEST.pointVp, false));
+      }
+      for (const wt of map.watchtowers) state.towers.push(tower(wt.x, wt.y, CONQUEST.centerSightTiles, CONQUEST.centerIncome, CONQUEST.centerVp, true));
+    } else {
+      for (const wt of map.watchtowers) state.towers.push(tower(wt.x, wt.y, RULES.watchtower.sightTiles, 0, 0, false));
     }
     for (let pid = 0; pid < cfg.players; pid++) {
       const slot = map.slots[slotOf[pid]];
@@ -169,7 +201,7 @@ export class Match {
         startX: slot.tileX * TILE_SIZE + 1500,
         startY: slot.tileY * TILE_SIZE + 1500,
         mainAreaId: mainArea.areaId,
-        minerals: RULES.economy.startMinerals,
+        minerals: conquest ? CONQUEST.startMinerals : RULES.economy.startMinerals,
         supplyUsed: 0,
         supplyCap: 0,
         budget: RULES.budget.initial,
@@ -177,6 +209,8 @@ export class Match {
         alive: true,
         eliminatedTick: -1,
         eliminationScore: 0,
+        vp: 0,
+        domination: 0,
         knobs: { ...setup.players[pid].knobs },
         research: { weapons: 0, armor: 0 },
         vis: new Uint16Array(w * h),
@@ -192,16 +226,20 @@ export class Match {
     for (const p of state.players) {
       const slot = map.slots[p.slot];
       const base = createBuilding(state, p.id, 'base', slot.tileX, slot.tileY, true);
-      // 開局工人：主堡外圈最接近主礦區的格
+      // 開局單位：主堡外圈最接近主礦區的格（搶點模式沒有礦點：最接近地圖中心）
       const mainNodes = state.nodes.filter((n) => n.areaId === p.mainAreaId);
-      let mx = 0;
-      let my = 0;
-      for (const n of mainNodes) {
-        mx += n.tileX * TILE_SIZE + HALF_TILE;
-        my += n.tileY * TILE_SIZE + HALF_TILE;
+      let mx = idiv(w * TILE_SIZE, 2);
+      let my = idiv(h * TILE_SIZE, 2);
+      if (mainNodes.length > 0) {
+        mx = 0;
+        my = 0;
+        for (const n of mainNodes) {
+          mx += n.tileX * TILE_SIZE + HALF_TILE;
+          my += n.tileY * TILE_SIZE + HALF_TILE;
+        }
+        mx = idiv(mx, mainNodes.length);
+        my = idiv(my, mainNodes.length);
       }
-      mx = idiv(mx, mainNodes.length);
-      my = idiv(my, mainNodes.length);
       const spots: { i: number; d: number }[] = [];
       for (let y = base.tileY - 1; y <= base.tileY + base.size; y++) {
         for (let x = base.tileX - 1; x <= base.tileX + base.size; x++) {
@@ -214,12 +252,13 @@ export class Match {
         }
       }
       spots.sort((a, b) => a.d - b.d || a.i - b.i);
-      for (let k = 0; k < RULES.economy.startWorkers; k++) {
+      const start: UnitType[] = conquest ? [...Array.from({ length: CONQUEST.startWorkers }, (): UnitType => 'worker'), ...CONQUEST.startArmy] : Array.from({ length: RULES.economy.startWorkers }, (): UnitType => 'worker');
+      start.forEach((type, k) => {
         const s = spots[k % spots.length];
         const x = s.i % w;
-        createUnit(state, p.id, 'worker', x * TILE_SIZE + HALF_TILE, ((s.i - x) / w) * TILE_SIZE + HALF_TILE);
-        p.supplyUsed += UNIT_STATS.worker.supply;
-      }
+        createUnit(state, p.id, type, x * TILE_SIZE + HALF_TILE, ((s.i - x) / w) * TILE_SIZE + HALF_TILE);
+        p.supplyUsed += UNIT_STATS[type].supply;
+      });
     }
     state.spatial.rebuild(state.units);
     updateVision(state);
@@ -302,13 +341,15 @@ export class Match {
     resolveCollisions(s);
     const hits = stepAttacks(s); // 8
     resolveDamage(s, hits); // 9
-    stepWatchtowers(s); // 10
+    if (s.ruleset === 'conquest') stepControlPoints(s); // 10（搶點模式：佔領、收入、勝利點）
+    else stepWatchtowers(s); // 10
     updateVision(s); // 11
     updateKnowledge(s);
     updateScouting(s);
     // 12 結束判定
     const alive = s.players.filter((p) => p.alive).length;
-    if (alive <= 1 || s.tick + 1 >= s.timeLimitTicks) s.over = true;
+    const vpWin = s.ruleset === 'conquest' && s.players.some((p) => p.alive && (p.vp >= CONQUEST.victoryPoints || (CONQUEST.dominationTicks > 0 && p.domination >= CONQUEST.dominationTicks)));
+    if (alive <= 1 || vpWin || s.tick + 1 >= s.timeLimitTicks) s.over = true;
     s.tick += 1;
   }
 
@@ -328,12 +369,26 @@ export class Match {
       mineNodes: s.nodes.map((n) => ({ id: n.id, tileX: n.tileX, tileY: n.tileY, rich: n.rich, areaId: n.areaId, reserve: s.map.nodes[n.index].reserve })),
       mineAreas: s.map.areas.map((a) => ({ areaId: a.areaId, kind: a.kind, owner: a.slot === null ? null : slotOwner.get(a.slot)! })),
       startSlots: s.players.map((p) => ({ playerId: p.id, tileX: s.map.slots[p.slot].tileX, tileY: s.map.slots[p.slot].tileY })),
-      watchtowers: s.towers.map((t) => ({ id: t.id, x: t.x, y: t.y })),
+      watchtowers: s.ruleset === 'conquest' ? [] : s.towers.map((t) => ({ id: t.id, x: t.x, y: t.y })),
       me: playerId,
       players: s.players.map((p) => p.id),
       stats: JSON.parse(JSON.stringify({ units: UNIT_STATS, buildings: BUILDING_STATS, multipliers: DAMAGE_MULTIPLIER, baseUpgrades: BASE_UPGRADES, research: RESEARCH })) as InitData['stats'],
       matchSeed: s.seed,
       knobs: { ...s.players[playerId].knobs },
+      ruleset: s.ruleset,
+      conquest:
+        s.ruleset === 'conquest'
+          ? {
+              victoryPoints: CONQUEST.victoryPoints,
+              timeLimitTicks: s.timeLimitTicks,
+              incomeInterval: CONQUEST.incomeInterval,
+              baseIncome: CONQUEST.baseIncome,
+              captureTarget: CONQUEST.captureTarget,
+              captureMaxRate: CONQUEST.captureMaxRate,
+              captureRadius: CONQUEST.captureRadiusTiles * TILE_SIZE,
+              points: s.towers.map((t) => ({ id: t.id, x: t.x, y: t.y, income: t.income, vp: t.vp, center: t.center })),
+            }
+          : null,
     };
   }
 
@@ -341,7 +396,7 @@ export class Match {
     const s = this.state;
     const lottery = (pid: number): number => hashInts([s.seed, LOTTERY_TAG, pid]);
     const alive = s.players.filter((p) => p.alive).map((p) => ({ p, score: assetScore(s, p.id) }));
-    alive.sort((a, b) => b.score - a.score || lottery(a.p.id) - lottery(b.p.id));
+    alive.sort((a, b) => (s.ruleset === 'conquest' ? b.p.domination - a.p.domination || b.p.vp - a.p.vp : 0) || b.score - a.score || lottery(a.p.id) - lottery(b.p.id));
     const dead = s.players.filter((p) => !p.alive).map((p) => ({ p, score: p.eliminationScore }));
     dead.sort((a, b) => b.p.eliminatedTick - a.p.eliminatedTick || b.score - a.score || lottery(a.p.id) - lottery(b.p.id));
     const ordered = alive.concat(dead);
@@ -351,6 +406,7 @@ export class Match {
       rank: i + 1,
       eliminatedTick: x.p.eliminatedTick,
       score: x.score,
+      vp: x.p.vp,
       stats: structuredClone(x.p.stats),
     }));
     players.sort((a, b) => a.playerId - b.playerId);

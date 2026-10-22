@@ -57,6 +57,49 @@ export interface BuildingStats {
 export const TICKS_PER_SECOND = 10;
 export const TILE_SIZE = 1000;
 
+/** 賽制：classic 傳統（採礦、拆家）；conquest 搶點（原型，數值待審） */
+export type Ruleset = 'classic' | 'conquest';
+export const RULESETS: readonly Ruleset[] = ['classic', 'conquest'];
+
+/**
+ * 搶點模式（原型，數值待審）：取消採礦，收入與勝利點來自地圖上的控制點。
+ * 控制點設在原本的分礦、富礦與中央瞭望塔位置；1v1 共 7 個。
+ */
+export const CONQUEST = {
+  /** 時限：6 分鐘 */
+  timeLimitTicks: 3600,
+  /** 先到此勝利點者獲勝 */
+  victoryPoints: 1000,
+  /** 收入與勝利點的結算間隔（tick） */
+  incomeInterval: 10,
+  /** 每次結算：主堡（至少一座完工）的基本收入（收入以固定為主，避免控制點滾雪球） */
+  baseIncome: 9,
+  /** 每次結算：一般控制點／中央控制點的收入與勝利點 */
+  pointIncome: 1,
+  pointVp: 1,
+  centerIncome: 2,
+  centerVp: 2,
+  /** 勝利點倍率隨時間提高（[起始 tick, 倍率]，依起始 tick 遞增）：後段的點更值錢，讓落後方有機會追回 */
+  vpEscalation: [[0, 1]] as readonly (readonly [number, number])[],
+  /**
+   * 壓制倒數（0 為關閉）：同時控制超過半數的控制點即開始倒數，倒數完直接獲勝；
+   * 一旦不再過半，倒數歸零。勝利點仍照常累積，作為時限到時的排名依據。
+   */
+  dominationTicks: 450,
+  /** 佔領值上限（滿值即佔領；被奪時先扣到 0 變中立） */
+  captureTarget: 60,
+  /** 圈內戰鬥單位數加速佔領的上限（每 tick 最多加這麼多） */
+  captureMaxRate: 3,
+  captureRadiusTiles: 3,
+  /** 佔領後提供的視野（格） */
+  pointSightTiles: 6,
+  centerSightTiles: 10,
+  /** 開局：礦、工人數、戰鬥單位 */
+  startMinerals: 350,
+  startWorkers: 2,
+  startArmy: ['spear', 'spear', 'spear', 'spear'],
+} as const satisfies { readonly startArmy: readonly UnitType[] } & Record<string, unknown>;
+
 /** 瀏覽器版新手教學（非正式對局）：固定地圖與較長的時限，讓新手不必趕時間 */
 export const TUTORIAL = {
   seed: 20261022,

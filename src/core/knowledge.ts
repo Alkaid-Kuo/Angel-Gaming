@@ -37,9 +37,9 @@ export function updateVision(state: MatchState): void {
     if (t.owner === t.visOwner) continue;
     const anchor = toTile(t.y) * state.width + toTile(t.x);
     if (t.visOwner >= 0 && state.players[t.visOwner].alive) {
-      applyVision(state, state.players[t.visOwner], anchor, RULES.watchtower.sightTiles, true, -1);
+      applyVision(state, state.players[t.visOwner], anchor, t.sight, true, -1);
     }
-    if (t.owner >= 0) applyVision(state, state.players[t.owner], anchor, RULES.watchtower.sightTiles, true, 1);
+    if (t.owner >= 0) applyVision(state, state.players[t.owner], anchor, t.sight, true, 1);
     t.visOwner = t.owner;
   }
 }

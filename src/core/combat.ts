@@ -459,8 +459,10 @@ export function checkElimination(state: MatchState): void {
   for (const p of eliminated) {
     for (const t of state.towers) {
       t.progress[p.id] = 0;
+      if (t.capturer === p.id) t.capturer = -1;
       if (t.owner === p.id) {
         t.owner = -1;
+        t.hold = 0;
         emitTowerChanged(state, t, p.id);
       }
     }

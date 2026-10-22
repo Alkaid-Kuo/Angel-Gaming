@@ -112,7 +112,7 @@ export function buildObservation(state: MatchState, playerId: number): Observati
     enemyBuildings,
     rememberedBuildings,
     mineNodes: state.nodes.map((n) => ({ id: n.id, reserve: p.nodeKnown[n.index] })),
-    watchtowers: state.towers.map((t) => {
+    watchtowers: (state.ruleset === 'conquest' ? [] : state.towers).map((t) => {
       const visible = p.vis[tileIndex(state, t.x, t.y)] > 0;
       return { id: t.id, visible, owner: visible && t.owner >= 0 ? t.owner : null, myProgress: t.progress[playerId] };
     }),
@@ -121,6 +121,12 @@ export function buildObservation(state: MatchState, playerId: number): Observati
     knobs: { ...p.knobs },
     commandBudget: p.budget,
     tech: { level: techLevel(state, p), weapons: p.research.weapons, armor: p.research.armor },
+    controlPoints:
+      state.ruleset === 'conquest'
+        ? state.towers.map((t) => ({ id: t.id, owner: t.owner >= 0 ? t.owner : null, hold: t.hold, capturer: t.capturer >= 0 ? t.capturer : null, progress: t.capturer >= 0 ? t.progress[t.capturer] : 0 }))
+        : null,
+    victoryPoints: state.ruleset === 'conquest' ? state.players.map((q) => q.vp) : null,
+    domination: state.ruleset === 'conquest' ? state.players.map((q) => q.domination) : null,
   };
   p.events = [];
   const exploredDelta = p.exploredDelta;

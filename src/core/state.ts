@@ -1,6 +1,6 @@
 // 引擎內部狀態型別。所有數值皆為整數；實體陣列一律依 id 由小到大排列。
 import type { GameEvent, KnobValues } from '../api/types.ts';
-import type { BuildingType, MatchMode, RejectReason, ResearchType, Stance, UnitType } from '../config/index.ts';
+import type { BuildingType, MatchMode, RejectReason, ResearchType, Ruleset, Stance, UnitType } from '../config/index.ts';
 import type { PathCache, PathFinder } from '../path/index.ts';
 import type { Prng } from '../shared/prng.ts';
 import type { GeneratedMap } from '../mapgen/index.ts';
@@ -165,6 +165,16 @@ export interface Watchtower {
   progress: Int32Array;
   /** 目前獲得瞭望塔視野的選手（-1 為無） */
   visOwner: number;
+  /** 視野半徑（格）：傳統模式為瞭望塔視野；搶點模式依控制點種類 */
+  readonly sight: number;
+  /** 搶點模式：每次結算的收入與勝利點（傳統模式為 0） */
+  readonly income: number;
+  readonly vp: number;
+  /** 搶點模式的中央控制點 */
+  readonly center: boolean;
+  /** 搶點模式：佔領者的佔領值（被奪時先扣到 0）；正在佔領中立點的選手（-1 為無） */
+  hold: number;
+  capturer: number;
 }
 
 export interface BuildingMemory {
@@ -218,6 +228,10 @@ export interface Player {
   alive: boolean;
   eliminatedTick: number;
   eliminationScore: number;
+  /** 搶點模式的勝利點（傳統模式恆為 0） */
+  vp: number;
+  /** 搶點模式：連續控制過半控制點的 tick 數（壓制倒數） */
+  domination: number;
   knobs: KnobValues;
   /** 已完成的研究等級 */
   research: Record<ResearchType, number>;
@@ -264,6 +278,8 @@ export interface MatchState {
   readonly pathCache: PathCache;
   readonly spatial: SpatialIndex;
   over: boolean;
+  /** 賽制 */
+  readonly ruleset: Ruleset;
   /** 時限（tick）；預設為 RULES.match.timeLimitTicks，教學等非正式對局可另訂 */
   readonly timeLimitTicks: number;
   /** 是否記錄事件（回放重建時關閉） */
