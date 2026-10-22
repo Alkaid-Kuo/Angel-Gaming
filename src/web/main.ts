@@ -1,5 +1,6 @@
 // 瀏覽器版入口：對局設定、建立引擎 Worker、切換畫面。
-import { TUTORIAL, type MatchMode } from '../config/index.ts';
+import type { KnobValues } from '../api/types.ts';
+import { TUTORIAL, type MatchMode, type Ruleset } from '../config/index.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import { GameScreen } from './game-ui.ts';
 import { helpSections } from './help.ts';
@@ -54,7 +55,15 @@ function launch(first: ToWorker): void {
   w.postMessage(first);
 }
 
-const PRESETS: Record<string, { mode: MatchMode; seats: (OpponentKind | 'human')[] }> = {
+const PRESETS: Record<string, { mode: MatchMode; seats: (OpponentKind | 'human')[]; ruleset?: Ruleset; knobs?: (KnobValues | null)[] }> = {
+  hc1v1: { mode: '1v1', seats: ['human', 'conquest'], ruleset: 'conquest' },
+  sc1v1: { mode: '1v1', seats: ['conquest', 'conquest'], ruleset: 'conquest' },
+  sc4: {
+    mode: 'ffa4',
+    seats: ['conquest', 'conquest', 'conquest', 'conquest'],
+    ruleset: 'conquest',
+    knobs: [null, { groups: 1, aggression: 100, archerRatio: 0 }, { groups: 3, aggression: 20, archerRatio: 40 }, { groups: 2, aggression: 30, towersPerPoint: 2 }],
+  },
   h1v1: { mode: '1v1', seats: ['human', 'baseline'] },
   h4: { mode: 'ffa4', seats: ['human', 'baseline', 'baseline', 'baseline'] },
   s1v1: { mode: '1v1', seats: ['baseline', 'baseline'] },
@@ -73,7 +82,16 @@ document.getElementById('start')!.addEventListener('click', () => {
     return;
   }
   const humanIdx = preset.seats.indexOf('human');
-  const setup: LiveSetup = { mode: preset.mode, seed, human: humanIdx >= 0 ? humanIdx : null, seats: preset.seats, limitBudget: limitInput.checked, tutorial: false };
+  const setup: LiveSetup = {
+    mode: preset.mode,
+    seed,
+    human: humanIdx >= 0 ? humanIdx : null,
+    seats: preset.seats,
+    limitBudget: limitInput.checked,
+    tutorial: false,
+    ...(preset.ruleset !== undefined ? { ruleset: preset.ruleset } : {}),
+    ...(preset.knobs !== undefined ? { knobs: preset.knobs } : {}),
+  };
   launch({ type: 'startLive', setup });
 });
 

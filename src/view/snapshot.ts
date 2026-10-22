@@ -1,5 +1,5 @@
 // 繪圖用的唯讀快照：從引擎狀態擷取某位觀看者（或上帝視角）看得到的內容。不修改狀態。
-import { BUILDING_STATS, COMBAT_UNIT_TYPES, UNIT_STATS, type BuildingType, type MatchMode, type Stance, type UnitType } from '../config/index.ts';
+import { BUILDING_STATS, COMBAT_UNIT_TYPES, UNIT_STATS, type BuildingType, type MatchMode, type Ruleset, type Stance, type UnitType } from '../config/index.ts';
 import type { Match } from '../core/match.ts';
 import type { MatchState, Player, Unit } from '../core/state.ts';
 import { buildingVisibleTo, techLevel, tileIndex, unitVisibleTo } from '../core/world.ts';
@@ -14,8 +14,10 @@ export interface StaticMapView {
   readonly height: number;
   readonly tiles: number[];
   readonly nodes: { readonly id: number; readonly tileX: number; readonly tileY: number; readonly rich: boolean }[];
-  readonly towers: { readonly id: number; readonly x: number; readonly y: number }[];
+  /** 傳統模式為瞭望塔；搶點模式為控制點（center 為中央點） */
+  readonly towers: { readonly id: number; readonly x: number; readonly y: number; readonly center: boolean; readonly income: number; readonly vp: number }[];
   readonly players: { readonly id: number; readonly name: string; readonly startTileX: number; readonly startTileY: number }[];
+  readonly ruleset: Ruleset;
 }
 
 export interface UnitFrame {
@@ -68,6 +70,9 @@ export interface PlayerFrame {
   readonly gathered: number;
   /** 科技：主堡最高等級與研究等級 */
   readonly tech: { readonly level: number; readonly weapons: number; readonly armor: number };
+  /** 搶點模式：勝利點與壓制倒數（連續控制過半的 tick 數） */
+  readonly vp: number;
+  readonly domination: number;
 }
 
 export interface FrameView {
@@ -79,7 +84,7 @@ export interface FrameView {
   readonly buildings: BuildingFrame[];
   /** 各礦點（依 nodes 順序）的儲量：觀看者已知值 */
   readonly nodes: number[];
-  readonly towers: { readonly owner: number; readonly progress: number[] }[];
+  readonly towers: { readonly owner: number; readonly progress: number[]; readonly hold: number; readonly capturer: number }[];
   /** 迷霧：0 未探索、1 已探索不可見、2 目前可見；上帝視角為 null */
   readonly fog: Uint8Array | null;
 }
@@ -93,8 +98,9 @@ export function staticMapView(m: Match, names: readonly string[]): StaticMapView
     height: s.height,
     tiles: Array.from(s.map.tiles),
     nodes: s.nodes.map((n) => ({ id: n.id, tileX: n.tileX, tileY: n.tileY, rich: n.rich })),
-    towers: s.towers.map((t) => ({ id: t.id, x: t.x, y: t.y })),
+    towers: s.towers.map((t) => ({ id: t.id, x: t.x, y: t.y, center: t.center, income: t.income, vp: t.vp })),
     players: s.players.map((p) => ({ id: p.id, name: names[p.id] ?? `P${p.id}`, startTileX: s.map.slots[p.slot].tileX, startTileY: s.map.slots[p.slot].tileY })),
+    ruleset: s.ruleset,
   };
 }
 
@@ -133,6 +139,8 @@ function playerFrame(s: MatchState, p: Player): PlayerFrame {
     workers,
     army,
     gathered: p.stats.gathered,
+    vp: p.vp,
+    domination: p.domination,
     tech: { level: techLevel(s, p), weapons: p.research.weapons, armor: p.research.armor },
   };
 }
@@ -208,7 +216,8 @@ export function frameView(m: Match, viewer: number): FrameView {
     buildings,
     nodes: s.nodes.map((n) => (vp === null ? n.reserve : vp.nodeKnown[n.index])),
     // 佔領者：看不到瞭望塔時為 -2（未知）
-    towers: s.towers.map((t) => ({ owner: vp === null || vp.vis[tileIndex(s, t.x, t.y)] > 0 ? t.owner : -2, progress: Array.from(t.progress) })),
+    // 搶點模式的控制點歸屬是公開資訊；傳統模式的瞭望塔看不到時為 -2
+    towers: s.towers.map((t) => ({ owner: s.ruleset === 'conquest' || vp === null || vp.vis[tileIndex(s, t.x, t.y)] > 0 ? t.owner : -2, progress: Array.from(t.progress), hold: t.hold, capturer: t.capturer })),
     fog,
   };
 }

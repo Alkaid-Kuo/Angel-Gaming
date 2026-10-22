@@ -1,5 +1,5 @@
 // 遊戲說明：規則、建築與兵種（數值直接取自設定檔）、操作。首頁與遊戲內的說明面板共用。
-import { BASE_UPGRADES, BUILDING_STATS, BUILDING_TYPES, DAMAGE_MULTIPLIER, RESEARCH, RESEARCH_TYPES, RULES, TICKS_PER_SECOND, TILE_SIZE, UNIT_STATS, UNIT_TYPES, type UnitType } from '../config/index.ts';
+import { BASE_UPGRADES, BUILDING_STATS, CONQUEST, BUILDING_TYPES, DAMAGE_MULTIPLIER, RESEARCH, RESEARCH_TYPES, RULES, TICKS_PER_SECOND, TILE_SIZE, UNIT_STATS, UNIT_TYPES, type UnitType } from '../config/index.ts';
 import { iconSvg } from './icons.ts';
 import { BUILD_KEYS, BUILDING_NAME, BUILDING_TIP, RESEARCH_NAME, RESEARCH_TIP, TEAM_COLORS, TRAIN_KEYS, UNIT_NAME, UNIT_TIP } from './labels.ts';
 
@@ -41,6 +41,7 @@ function rulesHtml(): string {
 <p><b>相剋：</b>長槍兵剋騎兵、騎兵剋弓兵、弓兵靠射程磨長槍兵；攻城車拆建築最快但怕防禦塔。</p>
 <p><b>迷霧：</b>只看得到自己單位與建築視野內的東西；看過的敵方建築會留下記憶（半透明）。要在分礦蓋建築，要先有自己的單位到過那裡。</p>
 <p><b>瞭望塔：</b>地圖中央的圓點。派單位站在 ${RULES.watchtower.captureRadiusTiles} 格內一段時間就能佔領，得到周圍 ${RULES.watchtower.sightTiles} 格的視野。</p>
+<p><b>搶點模式（新，原型）：</b>沒有採礦，收入主要是主堡的固定收入。地圖上 7 個控制點（分礦、富礦、中央），戰鬥單位站進圈內就能佔領，敵人的點要先打到中立。<b>同時控制超過半數的點就開始 ${CONQUEST.dominationTicks / TICKS_PER_SECOND} 秒壓制倒數，倒數完直接獲勝</b>；被奪回一個點倒數就歸零。拆掉對手所有主堡也能獲勝；${CONQUEST.timeLimitTicks / TICKS_PER_SECOND / 60} 分鐘時限到時比勝利點（控制點每秒累積）。</p>
 <p><b>姿態：</b>積極（預設，主動攻擊視野內的敵人，最多追 ${RULES.stance.aggressiveChaseTiles} 格）、防守（只打射程內的敵人，不離開 ${RULES.stance.defensiveLeashTiles} 格）、堅守（原地不動，只打射程內的敵人）、撤退（不自動攻擊，只執行你指定的攻擊）。</p>`;
 }
 

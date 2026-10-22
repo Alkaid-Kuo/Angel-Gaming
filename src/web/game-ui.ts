@@ -1,6 +1,6 @@
 // 對局／觀戰／回放畫面：版面（頂列、地圖區、底部固定面板）、輸入處理、指令格、提示訊息、事件記錄、結束對話框。
 import type { Command, GameEvent } from '../api/types.ts';
-import { BASE_UPGRADES, BUILDING_STATS, DAMAGE_MULTIPLIER, MAX_BASE_LEVEL, RESEARCH, RULES, TICKS_PER_SECOND, TILE_SIZE, UNIT_STATS, type BuildingType, type ResearchType, type Stance, type UnitType } from '../config/index.ts';
+import { BASE_UPGRADES, BUILDING_STATS, CONQUEST, DAMAGE_MULTIPLIER, MAX_BASE_LEVEL, RESEARCH, RULES, TICKS_PER_SECOND, TILE_SIZE, UNIT_STATS, type BuildingType, type ResearchType, type Stance, type UnitType } from '../config/index.ts';
 import type { MatchResult } from '../core/match.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import { GOD_VIEW, type BuildingFrame, type FrameView, type UnitFrame } from '../view/snapshot.ts';
@@ -457,8 +457,19 @@ export class GameScreen {
       const status = !b.complete ? `　建造中 ${b.progress}%` : b.task !== null ? `　${b.task.kind === 'upgrade' ? '升級中' : '研究中'} ${b.task.progress}%` : b.queue.length > 0 ? `　生產${UNIT_NAME[b.queue[0].unit]} ${b.queue[0].progress}%` : '';
       return `<b>${BUILDING_NAME[b.type]}${b.type === 'base' ? ` Lv${b.level}` : ''}</b>${owner(b.owner)}<br>血量 ${b.hp}/${b.maxHp}${status}${b.remembered ? '<br><span class="muted">記憶中的樣子（現在看不到）</span>' : ''}<br><span class="muted">${BUILDING_TIP[b.type]}</span>`;
     }
+    if (this.meta.map.ruleset === 'conquest') {
+      const r = CONQUEST.captureRadiusTiles * TILE_SIZE;
+      const ci = this.meta.map.towers.findIndex((t) => (t.x - wx) ** 2 + (t.y - wy) ** 2 <= r * r);
+      if (ci >= 0) {
+        const t = this.meta.map.towers[ci];
+        const st = cur.towers[ci];
+        const own = st === undefined || st.owner < 0 ? '中立' : `${st.owner === human ? '我方' : esc(this.playerName(st.owner))}（佔領值 ${st.hold}/${CONQUEST.captureTarget}）`;
+        const cap = st !== undefined && st.capturer >= 0 ? `<br>${st.capturer === human ? '我方' : esc(this.playerName(st.capturer))} 正在佔領：${Math.round(((st.progress[st.capturer] ?? 0) * 100) / CONQUEST.captureTarget)}%` : '';
+        return `<b>${t.center ? '中央控制點' : '控制點'}</b><br>每秒 +${(t.vp * TICKS_PER_SECOND) / CONQUEST.incomeInterval} 勝利點、+${(t.income * TICKS_PER_SECOND) / CONQUEST.incomeInterval} 礦<br>目前：${own}${cap}<br><span class="muted">戰鬥單位站進圈內就會佔領（敵人的點要先打到中立）；同時控制超過半數的點，${CONQUEST.dominationTicks / TICKS_PER_SECOND} 秒後獲勝</span>`;
+      }
+    }
     const towerR = RULES.watchtower.captureRadiusTiles * TILE_SIZE;
-    const ti = this.meta.map.towers.findIndex((t) => (t.x - wx) ** 2 + (t.y - wy) ** 2 <= towerR * towerR);
+    const ti = this.meta.map.ruleset === 'conquest' ? -1 : this.meta.map.towers.findIndex((t) => (t.x - wx) ** 2 + (t.y - wy) ** 2 <= towerR * towerR);
     if (ti >= 0) {
       const t = cur.towers[ti];
       const own = t === undefined || t.owner === -1 ? '目前無人佔領' : t.owner === -2 ? '目前不在視野內，看不到誰佔領' : `目前由 ${t.owner === human ? '我方' : esc(this.playerName(t.owner))} 佔領`;
@@ -1187,9 +1198,10 @@ export class GameScreen {
       const groups = new Map<number, number>();
       for (const u of cur.units) if (u.owner === human && u.group >= 0) groups.set(u.group, (groups.get(u.group) ?? 0) + 1);
       const groupText = [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([g, c]) => `[${g}] ${c}`).join(' ');
+      const conquest = this.meta.map.ruleset === 'conquest' ? this.conquestPills(cur, human) : '';
       setHtml(
         this.statsEl,
-        `<span class="pill big minerals" title="礦：用來生產與建造">${iconSvg('minerals', 18)}<b>${p.minerals}</b></span><span class="pill big pop${supplyFull ? ' full' : ''}" title="人口：滿了就要蓋補給站">${iconSvg('population', 18)}<b>${p.supplyUsed}/${p.supplyCap}</b></span><span class="pill time">${iconSvg('time', 16)}<b>${formatTime(cur.tick)}</b></span>${tech}${budget}${groupText !== '' ? `<span class="pill opt">編隊 ${groupText}</span>` : ''}${p.alive ? '' : '<span class="warn">已淘汰</span>'}`,
+        `${conquest}<span class="pill big minerals" title="礦：用來生產與建造">${iconSvg('minerals', 18)}<b>${p.minerals}</b></span><span class="pill big pop${supplyFull ? ' full' : ''}" title="人口：滿了就要蓋補給站">${iconSvg('population', 18)}<b>${p.supplyUsed}/${p.supplyCap}</b></span><span class="pill time">${iconSvg('time', 16)}<b>${formatTime(cur.tick)}</b></span>${tech}${budget}${groupText !== '' ? `<span class="pill opt">編隊 ${groupText}</span>` : ''}${p.alive ? '' : '<span class="warn">已淘汰</span>'}`,
       );
       const idle = cur.units.filter((u) => u.owner === human && u.type === 'worker' && u.order === 'idle').length;
       const idleText = `閒置工人 ${idle}`;
@@ -1240,7 +1252,32 @@ export class GameScreen {
   }
 
   /** 觀戰頂列：1v1 為雙方對陣與兵力拉鋸條；多人局為各隊籌碼 */
+  /** 控制點歸屬的小圓點列 */
+  private pointPips(cur: FrameView): string {
+    return `<div class="pips">${this.meta.map.towers
+      .map((t, i) => {
+        const o = cur.towers[i]?.owner ?? -1;
+        return `<i class="${t.center ? 'center' : ''}" style="background:${o >= 0 ? teamColor(o) : 'transparent'};border-color:${o >= 0 ? teamColor(o) : 'rgba(255,255,255,0.5)'}"></i>`;
+      })
+      .join('')}</div>`;
+  }
+
+  /** 壓制倒數中的選手（最多一位會控制過半） */
+  private dominator(cur: FrameView): { id: number; left: number } | null {
+    const p = cur.players.find((x) => x.alive && x.domination > 0);
+    return p === undefined ? null : { id: p.id, left: Math.max(0, Math.ceil((CONQUEST.dominationTicks - p.domination) / TICKS_PER_SECOND)) };
+  }
+
+  private conquestPills(cur: FrameView, human: number): string {
+    const me = cur.players[human];
+    const held = cur.towers.filter((t) => t.owner === human).length;
+    const d = this.dominator(cur);
+    const dom = d === null ? '' : `<span class="pill dom" style="border-color:${teamColor(d.id)};color:${teamColor(d.id)}" title="控制過半的點就開始倒數，倒數完獲勝">${d.id === human ? '我方壓制中' : `${esc(this.playerName(d.id))} 壓制中`} <b>${d.left}</b> 秒</span>`;
+    return `<span class="pill big" title="勝利點：時限到時比這個">${iconSvg('flag', 18)}<b>${me.vp}</b></span><span class="pill" title="自己控制的點數／全部">控制點 <b>${held}/${cur.towers.length}</b></span>${dom}`;
+  }
+
   private matchBarHtml(cur: FrameView): string {
+    if (this.meta.map.ruleset === 'conquest') return this.conquestBarHtml(cur);
     const ps = cur.players;
     const clock = `<div class="clock">${formatTime(cur.tick)}</div>`;
     const kind = '兵力';
@@ -1256,6 +1293,22 @@ export class GameScreen {
     return `<div class="matchbar"><div class="vs">${clock}<div class="tag">${kind}</div></div><div class="chips">${chips}</div></div>`;
   }
 
+  /** 搶點模式的計分條：雙方勝利點、控制點歸屬、壓制倒數 */
+  private conquestBarHtml(cur: FrameView): string {
+    const ps = cur.players;
+    const d = this.dominator(cur);
+    const dom = d === null ? '' : `<div class="dom-banner" style="background:${teamColor(d.id)}">${esc(this.playerName(d.id))} 壓制中・${d.left} 秒</div>`;
+    const held = (id: number): number => cur.towers.filter((t) => t.owner === id).length;
+    const clock = `<div class="clock">${formatTime(cur.tick)}</div>`;
+    if (ps.length === 2) {
+      const team = (p: (typeof ps)[number], right: boolean): string =>
+        `<div class="team${p.alive ? '' : ' dead'}">${right ? '' : `<span class="swatch" style="background:${teamColor(p.id)}"></span>`}<span class="name">${esc(this.playerName(p.id))}</span><span class="pill" title="勝利點">${iconSvg('flag', 14)}<b>${p.vp}</b></span><span class="pill" title="控制點數">${held(p.id)}</span>${right ? `<span class="swatch" style="background:${teamColor(p.id)}"></span>` : ''}</div>`;
+      return `<div class="matchbar">${team(ps[0], false)}<div class="vs">${clock}${this.pointPips(cur)}${dom}</div>${team(ps[1], true)}</div>`;
+    }
+    const chips = ps.map((p) => `<span class="chip${p.alive ? '' : ' dead'}"><span class="swatch" style="background:${teamColor(p.id)}"></span>${esc(this.playerName(p.id))}<b>${p.vp}</b><span class="muted">${held(p.id)} 點</span></span>`).join('');
+    return `<div class="matchbar"><div class="vs">${clock}${this.pointPips(cur)}${dom}</div><div class="chips">${chips}</div></div>`;
+  }
+
   /** 觀戰數據面板：各選手一欄，數值最高者標示 */
   private scoreboardHtml(rows: readonly ScoreRow[]): string {
     const alive = rows.filter((r) => r.alive);
@@ -1265,7 +1318,14 @@ export class GameScreen {
     const head = rows.map((r) => `<th style="color:${teamColor(r.id)}">${esc(this.playerName(r.id))}${r.alive ? '' : '（淘汰）'}</th>`).join('');
     const line = (label: string, tip: string, f: (r: ScoreRow) => number, fmt?: (r: ScoreRow) => string): string =>
       `<tr><td title="${tip}">${label}</td>${rows.map((r) => cell(r, f(r), f, fmt?.(r))).join('')}</tr>`;
+    const conquest =
+      this.meta.map.ruleset === 'conquest'
+        ? `${line('勝利點', '控制點每秒累積；時限到時比這個', (r) => r.vp)}
+${line('控制點', '目前控制的點數', (r) => r.pointsHeld)}
+${line('壓制倒數', '控制過半的點時開始倒數（秒），倒數完獲勝', (r) => r.domination, (r) => (r.domination > 0 ? `${Math.ceil((CONQUEST.dominationTicks - r.domination) / TICKS_PER_SECOND)} 秒` : '—'))}`
+        : '';
     return `<table class="score"><tr><th></th>${head}</tr>
+${conquest}
 ${line('礦', '目前持有、還沒花掉的礦', (r) => r.minerals)}
 ${line('工人', '採礦的工人數', (r) => r.workers)}
 ${line('收入／分', '最近一分鐘採到的礦', (r) => r.incomePerMin)}
@@ -1399,12 +1459,19 @@ ${this.counterHtml(u.type)}<div class="muted small" style="margin-top:6px">${UNI
     const title = myRank === null ? '比賽結束' : myRank === 1 ? (this.meta.tutorial ? '教學完成！' : '勝利！') : `第 ${myRank} 名`;
     d.append(el('h2', undefined, title));
     if (this.meta.tutorial && myRank === 1) d.append(el('p', undefined, '你已經學會基本操作。回選單試試「1v1：玩家 vs 基準 Bot」，基準 Bot 會出兵反擊。'));
+    const conquest = this.meta.map.ruleset === 'conquest';
+    if (conquest) {
+      const winner = result.players.find((p) => p.playerId === result.ranking[0]);
+      const dominated = this.vm.cur?.players[result.ranking[0]]?.domination ?? 0;
+      const how = dominated >= CONQUEST.dominationTicks ? '壓制倒數完成' : result.players.some((p) => p.eliminatedTick >= 0 && p.playerId !== winner?.playerId) && result.players.filter((p) => p.eliminatedTick < 0).length === 1 ? '淘汰所有對手' : '時限到，勝利點最多';
+      d.append(el('p', undefined, `${this.playerName(result.ranking[0])} 獲勝：${how}`));
+    }
     const ol = el('ol');
     result.ranking.forEach((pid, i) => {
       const p = result.players.find((x) => x.playerId === pid)!;
       const li = el('li');
       li.style.borderLeftColor = teamColor(pid);
-      li.append(el('span', 'rank', String(i + 1)), el('span', undefined, this.playerName(pid)), el('span', 'muted', `資產 ${p.score}${p.eliminatedTick >= 0 ? `　淘汰於 ${formatTime(p.eliminatedTick)}` : ''}`));
+      li.append(el('span', 'rank', String(i + 1)), el('span', undefined, this.playerName(pid)), el('span', 'muted', `${conquest ? `勝利點 ${p.vp}` : `資產 ${p.score}`}${p.eliminatedTick >= 0 ? `　淘汰於 ${formatTime(p.eliminatedTick)}` : ''}`));
       ol.append(li);
     });
     d.append(ol, el('div', undefined, `比賽長度 ${formatTime(result.durationTicks)}`));

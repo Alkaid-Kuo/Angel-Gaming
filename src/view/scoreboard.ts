@@ -31,6 +31,10 @@ export interface ScoreRow {
   /** 時限判定用的資產分數：存活單位成本 ＋ 已完工建築成本 */
   readonly assets: number;
   readonly holdsWatchtower: boolean;
+  /** 搶點模式：勝利點、控制點數、連續控制過半的 tick 數 */
+  readonly vp: number;
+  readonly pointsHeld: number;
+  readonly domination: number;
 }
 
 export class ScoreTracker {
@@ -95,6 +99,9 @@ export class ScoreTracker {
         towers,
         assets: p.alive ? assetScore(s, p.id) : p.eliminationScore,
         holdsWatchtower: s.towers.some((t) => t.owner === p.id),
+        vp: p.vp,
+        pointsHeld: s.towers.filter((t) => t.owner === p.id).length,
+        domination: p.domination,
       };
     });
   }

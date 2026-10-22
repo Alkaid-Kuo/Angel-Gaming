@@ -1,5 +1,5 @@
 // Canvas 2D 繪圖：地形、礦點、瞭望塔、建築、單位、迷霧、選取與放置提示、小地圖。只讀取狀態。
-import { BUILDING_STATS, RULES, TILE_SIZE, UNIT_STATS, type BuildingType } from '../config/index.ts';
+import { BUILDING_STATS, CONQUEST, RULES, TILE_SIZE, UNIT_STATS, type BuildingType } from '../config/index.ts';
 import type { BuildingFrame, FrameView, StaticMapView, UnitFrame } from '../view/snapshot.ts';
 import { drawIcon } from './icons.ts';
 import { TEAM_COLORS } from './labels.ts';
@@ -57,6 +57,12 @@ function shade(hex: string, f: number): string {
   const n = parseInt(hex.slice(1), 16);
   const ch = (v: number): number => Math.round(f < 0 ? v * (1 + f) : v + (255 - v) * f);
   return `rgb(${ch((n >> 16) & 255)},${ch((n >> 8) & 255)},${ch(n & 255)})`;
+}
+
+/** #rrggbb → rgba(r,g,b,a) */
+function hexAlpha(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
 function hpColor(frac: number): string {
@@ -287,8 +293,10 @@ export class Renderer {
       ctx.stroke();
     });
 
+    // 搶點模式：控制點（範圍、佔領值、佔領進度、旗幟）
+    if (this.map.ruleset === 'conquest') this.drawControlPoints(cur, wx, wy, tilePx);
     // 瞭望塔：佔領範圍（虛線）、佔領進度（弧線）、塔身圖示
-    this.map.towers.forEach((t, i) => {
+    else this.map.towers.forEach((t, i) => {
       const tw = cur.towers[i];
       const owner = tw?.owner ?? -1;
       const cx = wx(t.x);
@@ -449,6 +457,56 @@ export class Renderer {
     }
 
     this.drawMinimap(vm, pos);
+  }
+
+  private drawControlPoints(cur: FrameView, wx: (x: number) => number, wy: (y: number) => number, tilePx: number): void {
+    const ctx = this.ctx;
+    const arc = (x: number, y: number, r: number, frac: number, color: string, width: number): void => {
+      if (frac <= 0) return;
+      ctx.beginPath();
+      ctx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, frac));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    };
+    this.map.towers.forEach((t, i) => {
+      const st = cur.towers[i];
+      if (st === undefined) return;
+      const cx = wx(t.x);
+      const cy = wy(t.y);
+      const R = CONQUEST.captureRadiusTiles * tilePx;
+      const color = st.owner >= 0 ? teamColor(st.owner) : '#e5e7eb';
+      // 範圍
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.fillStyle = st.owner >= 0 ? hexAlpha(color, 0.14) : 'rgba(255,255,255,0.05)';
+      ctx.fill();
+      ctx.setLineDash(st.owner >= 0 ? [] : [6, 5]);
+      ctx.strokeStyle = st.owner >= 0 ? hexAlpha(color, 0.75) : 'rgba(255,255,255,0.45)';
+      ctx.lineWidth = t.center ? 2.5 : 1.8;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 佔領值（被奪時遞減）與中立點的佔領進度
+      if (st.owner >= 0 && st.hold < CONQUEST.captureTarget) arc(cx, cy, R - 4, st.hold / CONQUEST.captureTarget, color, 4);
+      if (st.capturer >= 0) arc(cx, cy, R + 4, (st.progress[st.capturer] ?? 0) / CONQUEST.captureTarget, teamColor(st.capturer), 4);
+      // 旗幟
+      const r = Math.max(7, tilePx * (t.center ? 1.05 : 0.8));
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#0b1220';
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = t.center ? 3 : 2;
+      ctx.stroke();
+      if (t.center) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + 3.5, 0, Math.PI * 2);
+        ctx.strokeStyle = hexAlpha(color, 0.6);
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+      drawIcon(ctx, 'flag', cx, cy, r * 1.3, color, 2);
+    });
   }
 
   private drawBuilding(b: BuildingFrame, vm: ViewModel, wx: (x: number) => number, wy: (y: number) => number, tilePx: number): void {
@@ -639,6 +697,19 @@ export class Renderer {
       m.beginPath();
       m.arc((vm.beacon.x / TILE_SIZE) * k, (vm.beacon.y / TILE_SIZE) * k, 7, 0, Math.PI * 2);
       m.stroke();
+    }
+    if (this.map.ruleset === 'conquest') {
+      this.map.towers.forEach((t, i) => {
+        const st = cur.towers[i];
+        if (st === undefined) return;
+        m.fillStyle = st.owner >= 0 ? teamColor(st.owner) : '#e5e7eb';
+        m.strokeStyle = '#000';
+        m.lineWidth = 1;
+        m.beginPath();
+        m.arc((t.x / TILE_SIZE) * k, (t.y / TILE_SIZE) * k, t.center ? 4.5 : 3.5, 0, Math.PI * 2);
+        m.fill();
+        m.stroke();
+      });
     }
     for (const h of vm.hotspots) {
       m.strokeStyle = 'rgba(250,204,21,0.9)';

@@ -1,6 +1,6 @@
 // 主執行緒與引擎 Worker 之間的訊息格式。
-import type { Command, GameEvent } from '../api/types.ts';
-import type { MatchMode } from '../config/index.ts';
+import type { Command, GameEvent, KnobValues } from '../api/types.ts';
+import type { MatchMode, Ruleset } from '../config/index.ts';
 import type { MatchResult } from '../core/match.ts';
 import type { ReplayFile } from '../replay/index.ts';
 import type { Hotspot } from '../view/broadcast.ts';
@@ -8,7 +8,7 @@ import type { ScoreRow } from '../view/scoreboard.ts';
 import type { FrameView, StaticMapView } from '../view/snapshot.ts';
 import type { Comment } from './commentary.ts';
 
-export type OpponentKind = 'baseline' | 'random' | 'dummy';
+export type OpponentKind = 'baseline' | 'random' | 'dummy' | 'conquest';
 
 export interface LiveSetup {
   readonly mode: MatchMode;
@@ -23,6 +23,10 @@ export interface LiveSetup {
   readonly tutorial: boolean;
   /** 非預設時限（教學） */
   readonly timeLimitTicks?: number;
+  /** 賽制（省略為傳統） */
+  readonly ruleset?: Ruleset;
+  /** 各座位的旋鈕（依 seats 順序，null 為預設） */
+  readonly knobs?: readonly (KnobValues | null)[];
 }
 
 export type ToWorker =

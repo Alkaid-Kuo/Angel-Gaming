@@ -17,6 +17,7 @@ export type IconName =
   | 'cancel'
   | 'back'
   | 'watchtower'
+  | 'flag'
   | 'tech'
   | 'income'
   | 'army'
@@ -48,6 +49,7 @@ const PATHS: Record<IconName, string> = {
   army: 'M5 19 L15.5 8.5 M14 4 L20 4 L20 10 Z M19 19 L8.5 8.5 M10 4 L4 4 L4 10 Z',
   tech: 'M6 13 L12 7 L18 13 M6 19 L12 13 L18 19',
   watchtower: 'M9 21 L10 10 H14 L15 21 Z M7.5 10 H16.5 L15.5 7 H8.5 Z M12 7 V2.5 L16.5 4.25 L12 6',
+  flag: 'M6 21 V3.5 M6 4 H17 L14.5 8 L17 12 H6',
   // 指令
   move: 'M4.5 12 H19.5 M13.5 6 L19.5 12 L13.5 18',
   attackMove: 'M12 2.5 V7 M12 17 V21.5 M2.5 12 H7 M17 12 H21.5 M12 8 A4 4 0 1 0 12.01 8',

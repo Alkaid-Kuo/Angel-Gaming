@@ -1,7 +1,7 @@
 // 自動解說（觀戰與回放）：依比賽狀態與事件產生口語播報與局勢評語。只讀狀態，不影響模擬。
 // 文字中的 {P0}、{P1}… 由畫面換成帶隊伍色的選手名稱。
 import type { GameEvent } from '../api/types.ts';
-import { DAMAGE_MULTIPLIER, MAP_MODES, RULES, TICKS_PER_SECOND, TILE_SIZE, UNIT_STATS, type BuildingType, type UnitType } from '../config/index.ts';
+import { CONQUEST, DAMAGE_MULTIPLIER, MAP_MODES, RULES, TICKS_PER_SECOND, TILE_SIZE, UNIT_STATS, type BuildingType, type UnitType } from '../config/index.ts';
 import type { MatchState } from '../core/state.ts';
 import { buildingCenterX, buildingCenterY } from '../core/world.ts';
 import { FIGHT_LEVEL, type CombatMeter } from '../view/broadcast.ts';
@@ -55,6 +55,10 @@ export class Commentator {
   private lastAny = 0;
   private lastTowerTick = -1;
   private warnedEnd = false;
+  /** 搶點模式：控制點名稱（依 id）與上一 tick 的壓制倒數 */
+  private pointName = new Map<number, string>();
+  private prevDomination: number[] = [];
+  private conquest = false;
 
   /** 開局或回放跳轉後：以目前狀態為起點，已經存在的東西不再播報 */
   prime(s: MatchState): void {
@@ -76,6 +80,26 @@ export class Commentator {
     this.lastAny = s.tick;
     this.lastTowerTick = -1;
     this.warnedEnd = s.tick >= s.timeLimitTicks - END_WARNING_TICKS;
+    this.conquest = s.ruleset === 'conquest';
+    this.prevDomination = s.players.map((p) => p.domination);
+    this.pointName = new Map();
+    if (this.conquest) {
+      // 控制點依建立順序對應非主礦區（見 Match 建構）；中央點最後
+      const areas = s.map.areas.filter((a) => a.kind !== 'main');
+      s.towers.forEach((t, k) => {
+        if (t.center) {
+          this.pointName.set(t.id, '中央控制點');
+          return;
+        }
+        const a = areas[k];
+        if (a === undefined) return;
+        if (a.kind === 'expansion' && a.slot !== null) this.pointName.set(t.id, `${P(this.slotOwner(s, a.slot))} 的分礦點`);
+        else {
+          const near = [...s.players].sort((x, y) => (x.startX - t.x) ** 2 + (x.startY - t.y) ** 2 - ((y.startX - t.x) ** 2 + (y.startY - t.y) ** 2))[0];
+          this.pointName.set(t.id, `${P(near.id)} 附近的富礦點`);
+        }
+      });
+    }
   }
 
   take(): Comment[] {
@@ -108,6 +132,16 @@ export class Commentator {
         this.say(ev.tick, `${P(pid)} 完成${RESEARCH_NAME[ev.research]} Lv${ev.level} 研究，部隊${ev.research === 'weapons' ? '攻擊' : '護甲'}再 +1`);
         break;
       case 'towerChanged':
+        if (this.conquest) {
+          // 搶點模式：同一點同一 tick 只播一次
+          const key = `point-${ev.towerId}-${ev.tick}`;
+          if (this.lastSaid.has(key)) break;
+          this.lastSaid.set(key, ev.tick);
+          const name = this.pointName.get(ev.towerId) ?? '控制點';
+          if (ev.owner === null) this.say(ev.tick, `${name}被打成中立`);
+          else this.say(ev.tick, `${P(ev.owner)} 拿下${name}`, name === '中央控制點');
+          break;
+        }
         if (ev.tick === this.lastTowerTick) break;
         this.lastTowerTick = ev.tick;
         if (ev.owner === null) this.say(ev.tick, '瞭望塔失守，現在無人佔領');
@@ -134,18 +168,47 @@ export class Commentator {
     const t = s.tick;
     if (t === 1) {
       const minutes = Math.round(s.timeLimitTicks / SEC / 60);
-      this.say(t, `比賽開始！${MAP_MODES[s.mode].players} 位選手，摧毀對手所有主堡即獲勝；${minutes} 分鐘內沒分出勝負就比資產分數`);
+      if (this.conquest) this.say(t, `比賽開始！搶點模式：地圖上 ${s.towers.length} 個控制點，同時控制超過半數就開始 ${CONQUEST.dominationTicks / SEC} 秒倒數，倒數完獲勝；${minutes} 分鐘內沒分出勝負就比勝利點`);
+      else this.say(t, `比賽開始！${MAP_MODES[s.mode].players} 位選手，摧毀對手所有主堡即獲勝；${minutes} 分鐘內沒分出勝負就比資產分數`);
     }
+    if (this.conquest) this.trackDomination(s);
     this.newBuildings(s);
     this.trackFight(s, meter);
     if (t % 10 === 0) this.trackPushes(s);
     if (t % 50 === 0) this.trackSupplyAndMines(s);
-    if (t >= 60 * SEC && t - this.lastAny >= STATUS_QUIET && t % STATUS_EVERY === 0) this.status(t, rows());
+    if (t >= 60 * SEC && t - this.lastAny >= STATUS_QUIET && t % STATUS_EVERY === 0) {
+      if (this.conquest) this.conquestStatus(t, rows());
+      else this.status(t, rows());
+    }
     if (!this.warnedEnd && t >= s.timeLimitTicks - END_WARNING_TICKS) {
       this.warnedEnd = true;
-      const alive = rows().filter((r) => r.alive).sort((a, b) => b.assets - a.assets);
-      if (alive.length >= 2) this.say(t, `剩 2 分鐘！時間到就比資產分數，目前 ${P(alive[0].id)} 領先（${alive[0].assets} 對 ${alive[1].assets}）`, true);
+      if (this.conquest) {
+        const alive = rows().filter((r) => r.alive).sort((a, b) => b.vp - a.vp);
+        if (alive.length >= 2) this.say(t, `剩 2 分鐘！沒人壓制成功就比勝利點，目前 ${P(alive[0].id)} 領先（${alive[0].vp} 對 ${alive[1].vp}）`, true);
+      } else {
+        const alive = rows().filter((r) => r.alive).sort((a, b) => b.assets - a.assets);
+        if (alive.length >= 2) this.say(t, `剩 2 分鐘！時間到就比資產分數，目前 ${P(alive[0].id)} 領先（${alive[0].assets} 對 ${alive[1].assets}）`, true);
+      }
     }
+  }
+
+  /** 搶點模式：壓制倒數開始、最後 15 秒、被打斷 */
+  private trackDomination(s: MatchState): void {
+    const half = Math.floor(s.towers.length / 2) + 1;
+    for (const p of s.players) {
+      const d = p.domination;
+      const prev = this.prevDomination[p.id] ?? 0;
+      if (d === 1) this.say(s.tick, `${P(p.id)} 控制過半（${half}/${s.towers.length}），${CONQUEST.dominationTicks / SEC} 秒壓制倒數開始！`, true);
+      if (d === CONQUEST.dominationTicks - 15 * SEC) this.say(s.tick, `${P(p.id)} 再撐 15 秒就獲勝！`, true);
+      if (d === 0 && prev > 0 && !s.over && p.alive) this.say(s.tick, `${P(p.id)} 的壓制倒數被打斷了（還差 ${Math.ceil((CONQUEST.dominationTicks - prev) / SEC)} 秒）！`, true);
+      this.prevDomination[p.id] = d;
+    }
+  }
+
+  private conquestStatus(t: number, rows: ScoreRow[]): void {
+    const alive = rows.filter((r) => r.alive).sort((a, b) => b.pointsHeld - a.pointsHeld || b.vp - a.vp);
+    if (alive.length < 2) return;
+    this.say(t, `局勢：控制點 ${alive.map((r) => `${P(r.id)} ${r.pointsHeld}`).join('、')}；勝利點 ${alive.map((r) => r.vp).join(' 對 ')}`);
   }
 
   private newBuildings(s: MatchState): void {
@@ -286,6 +349,18 @@ export class Commentator {
   }
 
   private placeName(s: MatchState, x: number, y: number): string {
+    if (this.conquest) {
+      let best: string | null = null;
+      let bestD = (7 * TILE_SIZE) ** 2;
+      for (const t of s.towers) {
+        const d = (t.x - x) ** 2 + (t.y - y) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = this.pointName.get(t.id) ?? null;
+        }
+      }
+      if (best !== null) return best;
+    }
     for (const p of s.players) if ((p.startX - x) ** 2 + (p.startY - y) ** 2 <= (16 * TILE_SIZE) ** 2) return `${P(p.id)} 的主基地`;
     const area = this.areaOf(s, x, y);
     if (area !== null) {

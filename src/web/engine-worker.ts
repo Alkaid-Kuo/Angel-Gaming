@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 // 引擎 Worker（批次模式）：人類對戰／觀戰時逐 tick 推進比賽；回放時以 ReplayCursor 重建。
 import baselineSource from '../../bots/baseline.js?raw';
+import conquestSource from '../../bots/conquest.js?raw';
 import dummySource from '../../bots/dummy.js?raw';
 import randomSource from '../../bots/random.js?raw';
 import type { GameEvent } from '../api/types.ts';
@@ -24,8 +25,9 @@ const compiled: Record<OpponentKind, CompiledBot> = {
   baseline: compileBot(baselineSource, 'baseline.js'),
   random: compileBot(randomSource, 'random.js'),
   dummy: compileBot(dummySource, 'dummy.js'),
+  conquest: compileBot(conquestSource, 'conquest.js'),
 };
-const OPPONENT_NAME: Record<OpponentKind, string> = { baseline: '基準 Bot', random: '隨機 Bot', dummy: '教學木樁' };
+const OPPONENT_NAME: Record<OpponentKind, string> = { baseline: '基準 Bot', random: '隨機 Bot', dummy: '教學木樁', conquest: '搶點 Bot' };
 
 /** 上帝視角只顯示的事件類型（擊殺只取建築） */
 const GOD_EVENTS = new Set<GameEvent['type']>(['playerEliminated', 'towerChanged', 'enemyKilled']);
@@ -112,9 +114,9 @@ async function startLive(setup: LiveSetup): Promise<void> {
       controllers.push(new BatchController(compiled[seat], `${seat}.js`));
     }
   }
-  const knobs = controllers.map((c) => (c instanceof HumanController ? {} : resolveKnobs(c.declaration, undefined, c.label)));
+  const knobs = controllers.map((c, i) => (c instanceof HumanController ? {} : resolveKnobs(c.declaration, setup.knobs?.[i] ?? undefined, c.label)));
   const unlimited = setup.seats.map((s) => s === 'human' && !setup.limitBudget);
-  driver = new MatchDriver({ mode: setup.mode, seed: setup.seed, controllers, knobs, record: true, unlimitedBudget: unlimited, ...(setup.timeLimitTicks !== undefined ? { timeLimitTicks: setup.timeLimitTicks } : {}) });
+  driver = new MatchDriver({ mode: setup.mode, seed: setup.seed, controllers, knobs, record: true, unlimitedBudget: unlimited, ...(setup.timeLimitTicks !== undefined ? { timeLimitTicks: setup.timeLimitTicks } : {}), ...(setup.ruleset !== undefined ? { ruleset: setup.ruleset } : {}) });
   await driver.init();
   cursor = null;
   ended = false;
