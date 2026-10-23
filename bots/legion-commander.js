@@ -2846,7 +2846,18 @@ export default class Commander extends LegionBase {
    * @param {Own[]} lights
    */
   screenControl(out, lights) {
+    const home = this.centroid(this.lineRegs()) || this.bp;
     lights.forEach((r, i) => {
+      // 挨箭（掉血又沒在近戰，多半是看不到的弓兵）：往自己主力撤，30 秒內不再往前偵察（被吃掉就是白送對方戰果）
+      const st = this.state(r.id);
+      if (st.hp !== undefined && r.hp < st.hp && !r.engaged) st.shotAt = this.obs.tick;
+      st.hp = r.hp;
+      const shot = this.obs.tick - (st.shotAt ?? -1000) < 300;
+      if (shot && !r.engaged && this.obs.tick - (st.shotAt ?? -1000) < 50 && this.dist(r, home) > 8 * TILE) {
+        const step = this.safeStep(r, home);
+        this.send(out, 8, { type: 'move', id: r.id, x: step.x, y: step.y }, '斥候中箭，撤回本陣', 20);
+        return;
+      }
       /** @type {Pt} */
       let watch;
       let name;
@@ -2875,11 +2886,11 @@ export default class Commander extends LegionBase {
         if (this.clusters.length === 0 && this.obs.tick > 300) watch = this.landBehind(this.at(92, ys[i % 2]), this.face(180));
         // 看到敵軍主力、但還有大批敵軍沒看到：繞到它側後方看看後面藏了什麼（騎兵要靠這個才敢衝）
         const c = this.engageTarget || this.clusters[0];
-        if (c && this.hiddenBig) {
+        if (c && this.hiddenBig && !shot) {
           const mc = this.centroid(this.lineRegs()) || this.bp;
           const deep = this.angle(mc, c);
           const q = this.offset(this.offset(c, deep, 10), deep + (i % 2 === 0 ? 90 : -90), 14);
-          if (q.x > 4 * TILE && q.y > 4 * TILE && q.x < this.W - 4 * TILE && q.y < this.H - 4 * TILE) {
+          if (q.x > 4 * TILE && q.y > 4 * TILE && q.x < this.W - 4 * TILE && q.y < this.H - 4 * TILE && this.archerHeat(q).pts === 0) {
             watch = this.landBehind(q, this.face(180));
             name = '敵軍後方';
           }
