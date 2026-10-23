@@ -339,6 +339,11 @@ export default class Commander extends LegionBase {
         posture = '迎擊';
         const at = capture ? home : this.dist(mc, home) < 12 * TILE ? home : mc;
         mission = { anchor: at, facing: this.angle(at, target), mode: 'hold', leash: 6, column: false };
+      } else if (!capture && this.quietTooLong() && attackEff >= this.fightEdge * 0.7) {
+        // 隔河對峙太久：選離敵軍主力遠的渡口過河壓上
+        posture = '進攻';
+        if (this.posture !== '進攻' || !this.attackCrossing) this.attackCrossing = this.pickCrossing(mc, target);
+        mission = this.advanceMission(mc, { x: target.x, y: target.y });
       } else if (attackEff >= this.fightEdge * 1.3 || (capture && this.standoff() && eff >= this.fightEdge * 0.8)) {
         posture = '決戰';
         mission = { anchor: this.stepToward(mc, target, 7), facing: face, mode: 'engage', leash: 12, column: wet && this.dist(mc, target) < 20 * TILE };
@@ -505,6 +510,12 @@ export default class Commander extends LegionBase {
     return false;
   }
 
+  /** 殲滅戰：太久沒交戰（開局到現在、或上次交戰後超過「耐心」秒數；時間剩不到 2 分鐘時減半） */
+  quietTooLong() {
+    const patience = (this.k.patience ?? 45) * 10 * (this.obs.timeLeft < 1200 ? 0.5 : 1);
+    return this.obs.tick - Math.max(0, this.lastFight) > patience && this.obs.tick > 300;
+  }
+
   /** 佔點：中央旗點被雙方爭奪（都站在圈內）、而且 20 秒沒有交戰：僵持中 */
   standoff() {
     const mf = this.mainFlag;
@@ -542,7 +553,8 @@ export default class Commander extends LegionBase {
     const d = this.dist(mc, target);
     const step = d > 9 * TILE ? this.offset(mc, this.angle(mc, target), 7) : target;
     const column = needCross && this.dist(mc, cr) < 14 * TILE;
-    return { anchor: step, facing: this.angle(mc, goal), mode: 'advance', leash: 8, column };
+    // 還沒過河：面向渡口（縱隊沿著走向排）；過河後面向目標
+    return { anchor: step, facing: this.angle(mc, needCross ? target : goal), mode: 'advance', leash: 8, column };
   }
 
   /**
@@ -794,10 +806,13 @@ export default class Commander extends LegionBase {
       return (dx * fx + dy * fy) / 1000 / TILE;
     };
     const anyEngaged = order.some((r) => r.engaged);
-    const slowest = Math.min(...order.map(progress));
+    // 縱隊（過河）本來就前後拉開，不等；最慢的一團沒在走（卡住）也不等
+    const laggard = order.reduce((a, b) => (progress(a) <= progress(b) ? a : b));
+    const slowest = progress(laggard);
+    const waitOk = !m.column && laggard.status === 'moving';
     for (const r of order) {
       const slot = slots.get(r.id) || m.anchor;
-      if (!anyEngaged && m.mode !== 'hold' && order.length > 1 && progress(r) - slowest > 4 && !r.engaged) {
+      if (waitOk && !anyEngaged && m.mode !== 'hold' && order.length > 1 && progress(r) - slowest > 4 && !r.engaged) {
         if (r.kind === 'spear' && this.spearGuard(out, r, false)) continue;
         if (r.status !== 'idle') this.send(out, 4, { type: 'hold', id: r.id }, '等戰線跟上', 15);
         continue;
@@ -1013,6 +1028,8 @@ export default class Commander extends LegionBase {
     if (this.approaching(best, r)) return null;
     const spot = this.highGround(this.landBehind(this.offset(best, this.angle(best, r), range - 2), this.angle(best, r)), 2, best);
     const danger = this.foes.some((e) => e !== best && !e.engaged && e.kind !== 'archer' && e.status !== 'walled' && e.status !== 'braced' && this.gap(spot, e) < 5);
+    // 不為了找目標離開高處（除非戰線正在決戰、目標已經被纏住）
+    if (this.h.heightAt(spot.x, spot.y) < r.height && !(this.line.mode === 'engage' && best.engaged)) return null;
     return danger ? null : spot;
   }
 

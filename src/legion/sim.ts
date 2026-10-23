@@ -1938,7 +1938,7 @@ export class LegionMatch {
 
   private counterStrike(s: Soldier, r: Regiment): boolean {
     if (this.tick < s.counterAt) return false;
-    const id = this.nearestEnemy(s, r.def.reach);
+    const id = this.nearestEnemy(s, RULES.brace.counterReach);
     if (id < 0) return false;
     const e = this.soldiers[id];
     if (!this.wasDashing(e)) return false;
@@ -1975,7 +1975,10 @@ export class LegionMatch {
       const circle = r.formation === 'circle' ? RULES.brace.circlePct : 100;
       if (e.spd > RULES.brace.speedThreshold) pct = idiv(pct * (100 + idiv(idiv((e.spd - RULES.brace.speedThreshold) * RULES.brace.speedCoef, RULES.brace.speedUnit) * circle, 100)), 100);
       cd = idiv(cd * 100, RULES.brace.attackSpeed);
-      if (this.wasDashing(e)) mom = idiv(RULES.brace.stab * circle, 100);
+      // 扣衝勁只算貼近的前排（迎擊距離內）：長槍觸及距離較長，但後排刺到的不擋衝勁，兩排槍林仍可被衝穿
+      const dx = e.x - s.x;
+      const dy = e.y - s.y;
+      if (this.wasDashing(e) && dx * dx + dy * dy <= RULES.brace.counterReach * RULES.brace.counterReach) mom = idiv(RULES.brace.stab * circle, 100);
     }
     if (s.firstHit) {
       pct = idiv(pct * RULES.dash.firstHit, 100);

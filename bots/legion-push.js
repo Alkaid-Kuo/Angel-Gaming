@@ -786,7 +786,9 @@ class LegionBase {
     const inRange = this.foes.some((e) => this.dist(r, e) / TILE - e.radius / TILE / 2 <= range + (r.height - e.height) - 1);
     const contested = this.foes.some((e) => e.kind !== 'archer' && e.kind !== 'light' && this.dist(e, post) < 7000);
     const settle = inRange && (contested || this.obs.tick - (s.kitedAt || -1000) < 200);
-    const far = this.dist(r, post) > (inRange ? 12000 : 2500);
+    // 陣地比較高、敵方近戰還遠：先走上去再射（高處射程更遠、傷害更高）
+    const higher = this.h.heightAt(post.x, post.y) > r.height && !this.foes.some((e) => e.kind !== 'archer' && this.gap(r, e) < 8);
+    const far = this.dist(r, post) > (inRange && !higher ? 12000 : 2500);
     if (far && !settle && !this.committed(r) && this.obs.tick - (s.kitedAt || -100) > 60) {
       this.send(out, 3, { type: 'move', id: r.id, x: post.x, y: post.y, facing: this.forward }, '進入射擊陣地', 30);
       return true;
