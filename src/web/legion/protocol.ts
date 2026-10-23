@@ -3,7 +3,7 @@ import type { LegionEvent, RegimentStatus } from '../../legion/api.ts';
 import type { DashKind, FormationKind, LegionMode, ShieldStance, UnitKind } from '../../legion/config.ts';
 import type { LegionResult } from '../../legion/sim.ts';
 
-export type BotKey = 'push' | 'ambush' | 'ranged' | 'commander';
+export type BotKey = 'push' | 'ambush' | 'ranged' | 'commander' | 'marshal';
 
 /** 玩家的陣容：場上、後備（佔點模式）各幾團 */
 export interface PlayerArmy {

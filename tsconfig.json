@@ -33,6 +33,7 @@
     "scripts"
   ],
   "exclude": [
-    "src/web"
+    "src/web",
+    "bots/legion-marshal.js"
   ]
 }
