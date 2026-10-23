@@ -14,7 +14,7 @@ export interface Pt {
 export const HOTKEYS: readonly [string, string][] = [
   ['左鍵', '選取（Shift 加選、拖曳框選）'],
   ['右鍵', '移動（拖曳＝指定朝向）／點敵軍攻擊'],
-  ['Q', '招牌技能，朝滑鼠：槍林、突擊、切入、衝鋒、齊射；盾兵開關盾牆'],
+  ['Q', '按住瞄準（顯示衝刺路線、會被地形擋下的位置、齊射落點），放開施放：槍林、突擊、切入、衝鋒、齊射；盾兵開關盾牆。按住時右鍵或 Esc 取消'],
   ['E', '收起槍林；盾兵切換舉盾／持盾'],
   ['A', '邊走邊打到滑鼠位置'],
   ['H', '堅守原地'],
@@ -39,6 +39,8 @@ export class PlayerControl {
   box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   /** 右鍵拖曳中：目的地與朝向點（世界座標） */
   order: { from: Pt; to: Pt } | null = null;
+  /** 按住 Q 瞄準中（放開才施放） */
+  aiming = false;
   private readonly r: LegionRenderer;
   private readonly sendCmds: (cmds: unknown[]) => void;
   private readonly toast: (text: string) => void;
@@ -152,7 +154,8 @@ export class PlayerControl {
       return true;
     }
     if (key === 'escape') {
-      this.selection.clear();
+      if (this.aiming) this.aiming = false;
+      else this.selection.clear();
       return true;
     }
     const sel = this.selected();
@@ -161,19 +164,9 @@ export class PlayerControl {
     const cmds: unknown[] = [];
     switch (key) {
       case 'q':
-        for (const r of sel) {
-          const kind = this.r.kindOf[r.id];
-          if (kind === 'spear') {
-            if (r.status === 'braced' || r.status === 'bracing') cmds.push({ type: 'unbrace', id: r.id, intent: '玩家：收槍林' });
-            else if (m) cmds.push({ type: 'brace', id: r.id, facing: deg(r, m), intent: '玩家：槍林' });
-          } else if (kind === 'shield') {
-            cmds.push({ type: 'shield', id: r.id, mode: r.status === 'walled' || r.status === 'walling' ? 'unwall' : 'wall', intent: '玩家：盾牆' });
-          } else if (m) {
-            const type = kind === 'archer' ? 'volley' : kind === 'sword' ? 'assault' : kind === 'light' ? 'infiltrate' : 'charge';
-            cmds.push({ type, id: r.id, x: Math.round(m.x), y: Math.round(m.y), intent: `玩家：${type === 'volley' ? '齊射' : type === 'assault' ? '突擊' : type === 'infiltrate' ? '切入' : '衝鋒'}` });
-          }
-        }
-        break;
+        // 按住瞄準（畫面顯示路線與落點），放開才施放（releaseSkill）
+        this.aiming = true;
+        return true;
       case 'e':
         for (const r of sel) {
           const kind = this.r.kindOf[r.id];
@@ -220,6 +213,26 @@ export class PlayerControl {
     }
     if (cmds.length > 0) this.sendCmds(cmds);
     return true;
+  }
+
+  /** 放開 Q：朝滑鼠施放各團的招牌技能 */
+  releaseSkill(m: Pt | null): void {
+    if (!this.aiming) return;
+    this.aiming = false;
+    const cmds: unknown[] = [];
+    for (const r of this.selected()) {
+      const kind = this.r.kindOf[r.id];
+      if (kind === 'spear') {
+        if (r.status === 'braced' || r.status === 'bracing') cmds.push({ type: 'unbrace', id: r.id, intent: '玩家：收槍林' });
+        else if (m) cmds.push({ type: 'brace', id: r.id, facing: deg(r, m), intent: '玩家：槍林' });
+      } else if (kind === 'shield') {
+        cmds.push({ type: 'shield', id: r.id, mode: r.status === 'walled' || r.status === 'walling' ? 'unwall' : 'wall', intent: '玩家：盾牆' });
+      } else if (m) {
+        const type = kind === 'archer' ? 'volley' : kind === 'sword' ? 'assault' : kind === 'light' ? 'infiltrate' : 'charge';
+        cmds.push({ type, id: r.id, x: Math.round(m.x), y: Math.round(m.y), intent: `玩家：${type === 'volley' ? '齊射' : type === 'assault' ? '突擊' : type === 'infiltrate' ? '切入' : '衝鋒'}` });
+      }
+    }
+    if (cmds.length > 0) this.sendCmds(cmds);
   }
 
   /** 名冊點後備：選了一團場上的就換兵，否則從出生點召喚 */

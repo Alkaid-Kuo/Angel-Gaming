@@ -219,6 +219,11 @@ export class LegionScreen {
         const rect = canvas.getBoundingClientRect();
         const px = me.clientX - rect.left;
         const py = me.clientY - rect.top;
+        if (me.button === 2 && this.control.aiming) {
+          // 瞄準中按右鍵：取消
+          this.control.aiming = false;
+          return;
+        }
         if (me.button === 0) this.boxStart = { x: px, y: py };
         else if (me.button === 2) this.rdrag = { from: this.r.toWorld(px, py), target: this.r.pick(px, py, this.viewer, this.alpha()) };
         else if (me.button === 1) {
@@ -294,7 +299,13 @@ export class LegionScreen {
       if (this.selected >= 0) this.focusReg(this.selected, 2.2);
     });
     on(window, 'keyup', (e) => {
-      this.keysDown.delete((e as KeyboardEvent).key.toLowerCase());
+      const k = (e as KeyboardEvent).key.toLowerCase();
+      this.keysDown.delete(k);
+      // 放開 Q：朝滑鼠施放（按住時是瞄準）
+      if (k === 'q' && this.control) this.control.releaseSkill(this.mouse ? this.r.toWorld(this.mouse.x, this.mouse.y) : null);
+    });
+    on(window, 'blur', () => {
+      if (this.control) this.control.aiming = false;
     });
     on(window, 'keydown', (e) => {
       const ke = e as KeyboardEvent;
@@ -789,7 +800,8 @@ export class LegionScreen {
       this.r.clamp();
     }
     const c = this.control;
-    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent, selection: c?.selection, box: c?.box, order: c?.order });
+    const aim = c && c.aiming && this.mouse ? { ids: [...c.selection], to: this.r.toWorld(this.mouse.x, this.mouse.y) } : null;
+    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent, selection: c?.selection, box: c?.box, order: c?.order, aim });
     if (this.toastUntil > 0 && now > this.toastUntil) {
       this.toastUntil = 0;
       this.el.toast.classList.add('hidden');
@@ -841,7 +853,8 @@ export class LegionScreen {
 
   private updateTip(a: number): void {
     const tip = this.el.tip;
-    if (this.mouse === null || this.drag?.moved) {
+    // 瞄準技能時不顯示提示框，免得蓋住路線與落點
+    if (this.mouse === null || this.drag?.moved || this.control?.aiming) {
       tip.classList.add('hidden');
       return;
     }

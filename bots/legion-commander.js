@@ -2141,8 +2141,11 @@ export default class Commander extends LegionBase {
             if (first && r.skillCooldown === 0 && !r.engaged && this.gap(r, first) >= 2.5 && this.gap(r, first) <= 18) {
               const p = this.predict(first, 8);
               const through = this.offset(p, this.angle(r, p), 4);
-              this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `衝鋒趕走偷${mine.name}的`, 20);
-              return;
+              // 旗點在橋與淺灘上：路線會碰到河、淺灘、樹林就不衝（衝鋒會在那裡停住）
+              if (this.clearLine(r, through, true)) {
+                this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `衝鋒趕走偷${mine.name}的`, 20);
+                return;
+              }
             }
             // 先進到圈內（中心離旗 4.5 格內，士兵都在圈裡）擋住對方的佔領進度，再打
             if (this.dist(r, mine) > this.data.capture.radius - 500) {
@@ -2155,10 +2158,10 @@ export default class Commander extends LegionBase {
               if (raider) {
                 const gap = this.gap(r, raider);
                 const away = this.angle(raider, r);
-                if (r.skillCooldown === 0) {
+                const p = this.predict(raider, 8);
+                const through = this.offset(p, this.angle(r, p), 4);
+                if (r.skillCooldown === 0 && (gap < 2.5 || r.engaged || this.clearLine(r, through, true))) {
                   if (gap >= 2.5 && !r.engaged) {
-                    const p = this.predict(raider, 8);
-                    const through = this.offset(p, this.angle(r, p), 4);
                     this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `衝鋒趕走偷${mine.name}的`, 20);
                   } else {
                     const back = this.landBehind(this.offset(r, away, 8), away);
