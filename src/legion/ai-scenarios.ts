@@ -359,6 +359,48 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       return { pass: stopped && cav <= 30 && c.A[0].slots.length > 0, detail: `${stopped ? '槍林擋下' : '沒擋下'}、敵重騎剩 ${cav}%、長槍剩 ${pct(c.A[0])}%、敵劍士剩 ${pct(c.B[1])}%` };
     },
   },
+  {
+    id: 'S16',
+    name: '佯攻誘敵：騙槍林轉向，騎兵衝側背',
+    expect: '敵方長槍對著我方重騎兵架好槍林、後面有弓兵；對手很天真（誰逼近就把槍林轉向誰）。派誘餌從側面逼近騙它轉向，騎兵再衝它的側背：90 秒內長槍損失五成以上、重騎損失三成以內，而且騎兵沒撞上槍林正面',
+    bot: [
+      { type: 'heavyCav', x: -16, y: 0, formation: 'wedge' },
+      { type: 'light', x: -12, y: 12 },
+    ],
+    foe: [
+      { type: 'spear', x: 0, y: 0, formation: 'square' },
+      { type: 'archer', x: 9, y: 0 },
+    ],
+    ticks: 900,
+    script: (c, t) => {
+      const sp = c.B[0];
+      if (sp.slots.length === 0) return [];
+      if (t === 0) return [{ type: 'brace', id: sp.id, facing: 180 }, { type: 'hold', id: c.B[1].id }];
+      if (t % 10 !== 0) return [];
+      // 天真的對手：12 格內最近、正在逼近的我方軍團，槍林就轉過去對著它
+      let near: Regiment | null = null;
+      let best = 12 * TILE;
+      for (const r of c.A) {
+        if (r.slots.length === 0 || r.order === 'hold' || r.order === 'idle') continue;
+        const d = Math.hypot(r.x - sp.x, r.y - sp.y);
+        if (d < best) {
+          best = d;
+          near = r;
+        }
+      }
+      if (near === null) return [];
+      const want = Math.round((Math.atan2(near.y - sp.y, near.x - sp.x) * 180) / Math.PI + 360) % 360;
+      const diff = Math.abs(((want - sp.facing + 540) % 360) - 180);
+      // 架著槍林不能直接轉：先收（2 秒）再朝新方向架
+      if (diff <= 40) return [];
+      if (sp.brace === 1 || sp.brace === 2) return [{ type: 'unbrace', id: sp.id }];
+      return sp.brace === 0 ? [{ type: 'brace', id: sp.id, facing: want }] : [];
+    },
+    judge: (c) => {
+      const intoFront = impacts(c, 0).filter((e) => e.target === c.B[0].id && e.braced).length;
+      return { pass: pct(c.B[0]) <= 50 && pct(c.A[0]) >= 70 && intoFront === 0, detail: `敵長槍剩 ${pct(c.B[0])}%、重騎剩 ${pct(c.A[0])}%、誘餌剩 ${pct(c.A[1])}%、撞上槍林正面 ${intoFront} 次` };
+    },
+  },
 ];
 
 /** 情境中心（格）：主戰區 24 × 8 格內全是同高度的平地，而且每一團的位置也都是同高度的平地 */

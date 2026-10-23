@@ -1038,6 +1038,7 @@ class LegionBase {
 /** @typedef {{ members: Memory[], x: number, y: number, pts: number, engaged: boolean, cav: number, spears: number }} Cluster */
 /** @typedef {'集結' | '固守' | '迎擊' | '決戰' | '收攏' | '進攻' | '搜敵'} Posture */
 /** @typedef {{ anchor: Pt, facing: number, mode: 'hold' | 'advance' | 'engage', leash: number, column: boolean }} LineMission */
+/** 佯攻：目標長槍、誘餌、騎兵、開始的 tick、誘餌從長槍哪一側（+90／-90）、開始時長槍的朝向、誘餌到側面的 tick @typedef {{ spear: number, bait: number, cav: number, since: number, side: number, facing0: number, at?: number }} Feint */
 
 export default class Commander extends LegionBase {
   constructor() {
@@ -1086,6 +1087,10 @@ export default class Commander extends LegionBase {
     this.raid = false;
     /** 搜敵找到目標後的接戰鎖定（tick）：在這之前打得過就直接打，不再顧慮看不到的敵軍 */
     this.huntLock = -1;
+    /** 進行中的佯攻 @type {Feint | null} */
+    this.feint = null;
+    /** 上一次佯攻結束的 tick（隔 20 秒才再發動） */
+    this.feintEnd = -1000;
   }
 
   /** @returns {Declaration} */
@@ -1763,6 +1768,7 @@ export default class Commander extends LegionBase {
   control(out) {
     this.rotate(out);
     this.coverSpears(out);
+    this.feintControl(out);
     const regs = this.obs.regiments.filter((r) => !r.routed && !this.busyIds.has(r.id));
     const archers = regs.filter((r) => r.kind === 'archer');
     this.guard(out, archers);
@@ -1895,10 +1901,93 @@ export default class Commander extends LegionBase {
     s.lastThreat = this.obs.tick;
     const f = this.angle(r, this.predict(cav, 10));
     const braced = r.status === 'braced' || r.status === 'bracing';
-    if (!braced || this.adiff(r.facing, f) > 50) {
-      this.send(out, 9, { type: 'brace', id: r.id, facing: f }, '架槍林擋騎兵', 30);
+    if (!braced) {
+      if (r.status !== 'unbracing') this.send(out, 9, { type: 'brace', id: r.id, facing: f }, '架槍林擋騎兵', 30);
+    } else if (this.adiff(r.facing, f) > 50 && !(cav.dashing === 'charge' && this.gap(r, cav) < 10)) {
+      // 架著的槍林不能直接轉：先收再朝新方向架（騎兵已經衝到 10 格內就來不及了，維持原樣）
+      this.send(out, 9, { type: 'unbrace', id: r.id }, '收槍林轉向騎兵', 20);
     }
     return true;
+  }
+
+  /**
+   * 佯攻誘敵：敵方長槍對著我方騎兵架槍林（騎兵在它正面衝不進去），派一團劍士或輕步兵繞到它側面 9 格、再逼上去打，騙它轉向；
+   * 它一開始收槍林（架著的槍林要先收 2 秒才能轉）或正面轉離我方騎兵，騎兵就衝。騎兵在槍尖 10 格外等；
+   * 它沒上當，誘餌就照樣打它側面（架著槍林的長槍側面沒有減免）。誘餌傷亡過半、騎兵或目標不在了、超過 40 秒就收手。
+   * @param {Pending[]} out
+   */
+  feintControl(out) {
+    const own = (/** @type {number} */ id) => this.obs.regiments.find((r) => r.id === id && !r.routed);
+    const f = this.feint;
+    if (f !== null) {
+      const sp = this.foes.find((e) => e.id === f.spear);
+      const bait = own(f.bait);
+      const cav = own(f.cav);
+      if (!sp || !bait || !cav || bait.men < bait.men0 * 0.5 || this.obs.tick - f.since > 400) {
+        this.feint = null;
+        this.feintEnd = this.obs.tick;
+        return;
+      }
+      this.busyIds.add(bait.id);
+      this.busyIds.add(cav.id);
+      // 騎兵：目標的正面離開我了（上當了）就衝；否則在它正面 12 格外等
+      if (!cav.dashing) {
+        // 上當了：它開始收槍林（收起中沒有減免、沒有迎擊），或正面已經轉離我
+        const braced = sp.status === 'braced' || sp.status === 'bracing';
+        const exposed = sp.formation !== 'circle' && (!braced || !this.inFront(sp, cav, 70));
+        const d = this.gap(cav, sp);
+        if (exposed && cav.skillCooldown === 0 && d >= 3 && d <= 22 && this.clearLine(cav, sp, true)) {
+          const p = this.predict(sp, Math.round((d * TILE) / 600));
+          const through = this.offset(p, this.angle(cav, p), 3);
+          this.send(out, 9, { type: 'charge', id: cav.id, x: through.x, y: through.y }, `佯攻得手：衝${this.units[sp.kind].name}側背`, 20);
+          this.feint = null;
+          this.feintEnd = this.obs.tick;
+          return;
+        }
+        if (d < 10) {
+          const back = this.landBehind(this.offset(cav, this.angle(sp, cav), 4), this.angle(sp, cav));
+          this.send(out, 6, { type: 'move', id: cav.id, x: back.x, y: back.y }, '佯攻：騎兵在槍尖外等', 15);
+        } else if (cav.status !== 'idle') this.send(out, 3, { type: 'hold', id: cav.id }, '佯攻：騎兵待機', 20);
+      }
+      // 誘餌：先到長槍側面 6 格，騙它轉向；12 秒沒上當就直接打它側面
+      if (!bait.dashing && !bait.engaged) {
+        const flank = this.landBehind(this.offset(sp, f.facing0 + f.side, 9), f.facing0 + f.side);
+        if (f.at === undefined && this.dist(bait, flank) < 2500) f.at = this.obs.tick;
+        if (f.at !== undefined) {
+          this.send(out, 7, { type: 'attack', id: bait.id, target: sp.id }, '佯攻：誘餌從側面逼上去', 20);
+        } else {
+          const step = this.safeStep(bait, flank, sp.id);
+          this.send(out, 6, { type: 'move', id: bait.id, x: step.x, y: step.y, facing: this.angle(flank, sp) }, `佯攻：誘餌繞到${this.units[sp.kind].name}側面`, 15);
+        }
+      }
+      return;
+    }
+    if (this.obs.tick - this.feintEnd < 200) return;
+    // 發動條件：我方有衝鋒好了的騎兵，正被一團架著槍林的敵方長槍擋在正面；附近有可以當誘餌的輕步兵或劍士
+    for (const cav of this.obs.regiments) {
+      if (!this.isCav(cav.kind) || cav.routed || cav.engaged || cav.dashing || cav.skillCooldown > 0 || this.busyIds.has(cav.id) || this.flagJob.has(cav.id)) continue;
+      const sp = this.nearestFoe(cav, (e) => e.kind === 'spear' && !e.engaged && e.formation !== 'circle' && (e.status === 'braced' || e.status === 'bracing') && this.inFront(e, cav, 70), 24);
+      if (!sp || this.gap(cav, sp) < 5) continue;
+      // 它旁邊還有沒被纏住的長槍：轉過來也還是有槍尖對著我，不值得
+      if (this.foes.some((o) => o !== sp && o.kind === 'spear' && !o.engaged && this.dist(o, sp) < 9 * TILE)) continue;
+      const bait = this.obs.regiments
+        .filter((r) => (r.kind === 'light' || r.kind === 'sword') && !r.routed && !r.engaged && !r.dashing && !this.busyIds.has(r.id) && !this.flagJob.has(r.id) && r.men >= r.men0 * 0.6 && this.dist(r, sp) < 30 * TILE)
+        .sort((a, b) => (a.kind === 'sword' ? 0 : 1) - (b.kind === 'sword' ? 0 : 1) || this.dist(a, sp) - this.dist(b, sp))[0];
+      if (!bait) continue;
+      // 誘餌從長槍的哪一側來：選能站、離誘餌近的那一側（要偏離騎兵的方向，長槍轉過去才會把騎兵露在側面）
+      const sides = [90, -90]
+        .map((a) => ({ a, p: this.offset(sp, sp.facing + a, 6) }))
+        .filter((c) => {
+          const t = this.h.terrainAt(c.p.x, c.p.y);
+          return t !== TR.river && t !== TR.building && t !== TR.wall;
+        })
+        .sort((x, y) => this.dist(bait, x.p) - this.dist(bait, y.p));
+      if (sides.length === 0) continue;
+      this.feint = { spear: sp.id, bait: bait.id, cav: cav.id, since: this.obs.tick, side: sides[0].a, facing0: sp.facing };
+      this.busyIds.add(bait.id);
+      this.busyIds.add(cav.id);
+      return;
+    }
   }
 
   /**
@@ -2287,11 +2376,13 @@ export default class Commander extends LegionBase {
       if (e.kind === 'spear' && !e.engaged && front) continue;
       // 附近有沒被纏住的敵方長槍：衝進去會被架槍林
       const spearNear = this.foes.some((o) => o !== e && o.kind === 'spear' && !o.engaged && this.dist(o, e) < 6 * TILE);
-      // 沒被纏住的目標：只有身邊沒有長槍、盾兵、劍士保護的弓兵、輕步兵或殘兵才值得衝
+      // 沒被纏住的目標：只有身邊沒有長槍、盾兵、劍士保護的弓兵、輕步兵或殘兵才值得衝；
+      // 側背對著我的長槍也值得（架著槍林轉不過來，沒架的也來不及架）
       if (!e.engaged) {
         const soft = e.kind === 'archer' || e.kind === 'light' || e.men / e.men0 < 0.35;
-        const guarded = this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'spear' || o.kind === 'shield' || o.kind === 'sword') && this.dist(o, e) < 8 * TILE);
-        if (!soft || guarded) continue;
+        const exposedSpear = e.kind === 'spear' && !front && e.formation !== 'circle';
+        const guarded = this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'spear' || o.kind === 'shield' || o.kind === 'sword') && this.dist(o, e) < 8 * TILE && (o.kind !== 'spear' || this.inFront(o, r, 70)));
+        if ((!soft && !exposedSpear) || guarded) continue;
       }
       let s = 30 - d;
       if (e.kind === 'archer') s += 25;
