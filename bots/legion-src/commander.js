@@ -1126,8 +1126,8 @@ export default class Commander extends LegionBase {
             if (first && r.skillCooldown === 0 && !r.engaged && this.gap(r, first) >= 2.5 && this.gap(r, first) <= 18) {
               const p = this.predict(first, 8);
               const through = this.offset(p, this.angle(r, p), 4);
-              // 旗點在橋與淺灘上：路線會碰到河、淺灘、樹林就不衝（衝鋒會在那裡停住）
-              if (this.clearLine(r, through, true)) {
+              // 旗點在橋與淺灘上：衝到目標之前會碰到河、淺灘、樹林就不衝（衝鋒會在那裡停住）
+              if (this.clearLine(r, p, true)) {
                 this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `衝鋒趕走偷${mine.name}的`, 20);
                 return;
               }
@@ -1145,13 +1145,15 @@ export default class Commander extends LegionBase {
                 const away = this.angle(raider, r);
                 const p = this.predict(raider, 8);
                 const through = this.offset(p, this.angle(r, p), 4);
-                if (r.skillCooldown === 0 && (gap < 2.5 || r.engaged || this.clearLine(r, through, true))) {
-                  if (gap >= 2.5 && !r.engaged) {
-                    this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `衝鋒趕走偷${mine.name}的`, 20);
-                  } else {
-                    const back = this.landBehind(this.offset(r, away, 8), away);
-                    this.send(out, 8, { type: 'move', id: r.id, x: back.x, y: back.y }, '拉開距離再衝', 15);
-                  }
+                const back = this.landBehind(this.offset(r, away, 8), away);
+                // 衝到目標之前（從現在的位置，或拉開之後的位置）會碰到河、淺灘、樹林就不衝，改用近戰或牽制；
+                // 拉開距離不能退出旗圈，否則對方的佔領進度又開始累積
+                const charge = r.skillCooldown === 0 && gap >= 2.5 && !r.engaged && this.clearLine(r, p, true);
+                const reposition = r.skillCooldown === 0 && !charge && this.dist(back, mine) < this.data.capture.radius - 500 && this.clearLine(back, p, true);
+                if (charge) {
+                  this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `衝鋒趕走偷${mine.name}的`, 20);
+                } else if (reposition) {
+                  this.send(out, 8, { type: 'move', id: r.id, x: back.x, y: back.y }, '拉開距離再衝', 15);
                 } else if (r.men * this.perMan(r.kind) >= pts * 1.3) {
                   this.send(out, 6, { type: 'attack', id: r.id, target: raider.id }, `趕走偷${mine.name}的${this.units[raider.kind].name}`, 20);
                 } else {
