@@ -267,7 +267,7 @@ class LegionBase {
    */
   cavalryReact(out, r, maxTiles) {
     if (r.status === 'charging') return true;
-    if (r.canCharge) {
+    if (r.skillCooldown === 0 && !r.dashing && r.terrain !== 2 && r.terrain !== 4) {
       /** @type {Enemy | null} */
       let best = null;
       let bestS = Infinity;

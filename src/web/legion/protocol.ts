@@ -1,6 +1,6 @@
 // 軍團戰觀戰：主執行緒與引擎 Worker 之間的訊息格式。
 import type { LegionEvent, RegimentStatus } from '../../legion/api.ts';
-import type { LegionMode, UnitKind } from '../../legion/config.ts';
+import type { DashKind, FormationKind, LegionMode, ShieldStance, UnitKind } from '../../legion/config.ts';
 import type { LegionResult } from '../../legion/sim.ts';
 
 export type BotKey = 'push' | 'ambush' | 'ranged';
@@ -38,6 +38,7 @@ export interface LegionMeta {
   readonly width: number;
   readonly height: number;
   readonly terrain: Uint8Array;
+  readonly heights: Uint8Array;
   readonly flags: readonly { readonly name: string; readonly x: number; readonly y: number }[];
   readonly deploy: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
   readonly mode: LegionMode;
@@ -71,7 +72,13 @@ export interface RegFrame {
   readonly halfW: number;
   readonly halfD: number;
   readonly kills: number;
-  readonly needDisengage: boolean;
+  readonly formation: FormationKind;
+  readonly stance: ShieldStance | null;
+  readonly dashing: DashKind | null;
+  /** 招牌技能還要冷卻幾個 tick */
+  readonly skillCd: number;
+  /** AI 意圖（最近 6 秒內下的） */
+  readonly intent: string;
 }
 
 export interface Caption {

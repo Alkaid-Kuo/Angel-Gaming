@@ -661,13 +661,13 @@ export class LegionRenderer {
       const u = UNITS[kind];
       if (u.range > 0) {
         ctx.beginPath();
-        ctx.arc(x, y, ((u.range + (this.terrainAt(p.x, p.y) === T.Hill ? RULES.terrain.hillRange : 0)) / TILE) * s, 0, Math.PI * 2);
+        ctx.arc(x, y, (u.range / TILE) * s, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(250,204,21,0.7)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
       ctx.beginPath();
-      ctx.arc(x, y, ((u.sight + (this.terrainAt(p.x, p.y) === T.Hill ? RULES.terrain.hillSight : 0)) / TILE) * s, 0, Math.PI * 2);
+      ctx.arc(x, y, ((u.sight + RULES.height.sightPerLevel * Math.max(0, this.heightAt(p.x, p.y) - 1)) / TILE) * s, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(148,163,184,0.45)';
       ctx.setLineDash([2, 5]);
       ctx.lineWidth = 1;
@@ -686,6 +686,13 @@ export class LegionRenderer {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+  }
+
+  private heightAt(x: number, y: number): number {
+    const tx = Math.floor(x / TILE);
+    const ty = Math.floor(y / TILE);
+    if (tx < 0 || ty < 0 || tx >= this.meta.width || ty >= this.meta.height) return 0;
+    return this.meta.heights[ty * this.meta.width + tx];
   }
 
   private terrainAt(x: number, y: number): number {

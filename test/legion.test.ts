@@ -124,37 +124,6 @@ describe('軍團戰：戰鬥規則', () => {
     expect(m.flankOf(a, side)).toBe('side');
   });
 
-  it('衝鋒：撞上已架陣長槍的正面幾乎沒有效果並被反彈；撞上劍士背後傷亡慘重', () => {
-    const charge = (target: Dep, brace: boolean): { m: LegionMatch; imp: LegionEvent | undefined } => {
-      const { m, events } = match([{ type: 'heavyCav', x: 15000, y: 50000, facing: 0 }], [target]);
-      // 把目標搬到騎兵前方 12 格（重騎兵視野 10 格，要看得到才能下令衝鋒）
-      const t = m.regiments[1];
-      const dx = 27000 - t.x;
-      t.x += dx;
-      for (const sid of t.slots) m.soldiers[sid].x += dx;
-      run(m, 1);
-      if (brace) {
-        m.applyCommands(1, [{ type: 'brace', id: 1 }]);
-        run(m, 40);
-      }
-      let sent = false;
-      run(m, 300, () => {
-        if (sent) return [];
-        sent = true;
-        return [[0, [{ type: 'charge', id: 0, target: 1 }]]];
-      });
-      const imp = events.find((e) => e.type === 'impact');
-      return { m, imp };
-    };
-    const braced = charge({ type: 'spear', x: 150000, y: 50000, facing: 180 }, true);
-    expect(braced.imp?.type === 'impact' && braced.imp.braced).toBe(true);
-    const rearHit = charge({ type: 'sword', x: 150000, y: 50000, facing: 0 }, false);
-    expect(rearHit.imp?.type === 'impact' && rearHit.imp.flank).toBe('rear');
-    const k1 = braced.imp?.type === 'impact' ? braced.imp.kills : 0;
-    const k2 = rearHit.imp?.type === 'impact' ? rearHit.imp.kills : 0;
-    expect(k2).toBeGreaterThan(k1 + 3);
-  });
-
   it('殘兵：人數低於 20% 就潰散、不能再指揮、往己方後方撤離', () => {
     // 0 號有兩團：只有一團潰散時比賽還沒結束
     const { m, events } = match(

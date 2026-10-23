@@ -1,5 +1,5 @@
 // 軍團戰地圖：以幾何形狀（橢圓、折線、河道）在格子上繪製地形；上半部繪製後，下半部以 180° 旋轉複製，保證雙方對稱。
-// 原型只有一張「河谷」。
+// 每一格另有高度階（0～5）：高度效果全部依高低差計算（規格書 v0.2 第七節）。原型只有一張「河谷」。
 import { hashInts } from '../shared/hash.ts';
 import { idiv } from '../shared/intmath.ts';
 import { T, TILE, walkable, RULES } from './config.ts';
@@ -27,6 +27,8 @@ export interface LegionMap {
   readonly width: number;
   readonly height: number;
   readonly terrain: Uint8Array;
+  /** 高度階（0～5） */
+  readonly heights: Uint8Array;
   /** 依 playerId */
   readonly deploy: readonly DeployZone[];
   /** 潰散時撤離的地圖邊緣（單位 x 座標）：依 playerId */
@@ -169,7 +171,25 @@ export function riverValley(): LegionMap {
   // 北橋（3 格寬）與中央淺灘
   for (let y = 20; y <= 22; y++) for (let x = 0; x < w; x++) if (terrain[y * w + x] === T.River) terrain[y * w + x] = T.Bridge;
   for (let y = 44; y < 50; y++) for (let x = 0; x < w; x++) if (terrain[y * w + x] === T.River) terrain[y * w + x] = T.Shallow;
+  // 高度：河道 0、河谷 1、兩岸高處 2、高地 3、高地頂 4
+  const heights = new Uint8Array(w * h);
+  const top = ellipse(95, 40, 4, 3, 6);
+  for (let y = 0; y < idiv(h, 2); y++) {
+    const xc2 = 159 + idiv(12 * isin(idiv(y * 180, 50)), 10000);
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const t = terrain[i];
+      if (t === T.River || t === T.Shallow) heights[i] = 0;
+      else if (t === T.Bridge) heights[i] = 1;
+      else if (t === T.Hill) heights[i] = top(x, y) ? 4 : 3;
+      else {
+        const d2 = Math.abs(2 * x + 1 - xc2);
+        heights[i] = d2 <= 2 * (22 + ((hashInts([x, y, 7]) >>> 0) % 3)) ? 1 : 2;
+      }
+    }
+  }
   rotateHalf(terrain);
+  rotateHalf(heights);
   const depth = RULES.deployDepthTiles;
   return {
     id: 'river-valley',
@@ -178,6 +198,7 @@ export function riverValley(): LegionMap {
     width: w,
     height: h,
     terrain,
+    heights,
     deploy: [
       { x0: 0, y0: 0, x1: depth, y1: h },
       { x0: w - depth, y0: 0, x1: w, y1: h },
@@ -210,8 +231,14 @@ export function riverValley(): LegionMap {
   };
 }
 
+/** 地圖不會變，產生一次後共用 */
+function once(make: () => LegionMap): () => LegionMap {
+  let cached: LegionMap | null = null;
+  return () => (cached ??= make());
+}
+
 export const MAPS: Readonly<Record<string, () => LegionMap>> = {
-  'river-valley': riverValley,
+  'river-valley': once(riverValley),
 };
 
 /**
@@ -229,4 +256,36 @@ export function terrainAt(map: LegionMap, x: number, y: number): number {
   const ty = tileCoord(y, map.height);
   if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return T.River;
   return map.terrain[ty * map.width + tx];
+}
+
+export function heightAt(map: LegionMap, x: number, y: number): number {
+  const tx = tileCoord(x, map.width);
+  const ty = tileCoord(y, map.height);
+  if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return 0;
+  return map.heights[ty * map.width + tx];
+}
+
+/** 建築與城牆擋視線的高度 */
+const BLOCK_HEIGHT = 9;
+
+/**
+ * 視線是否被地形擋住：沿兩點連線每格取樣，中間任何一格的地形高過視線（雙方眼睛在各自高度 + 0.5 階）就看不到。
+ * 樹林不擋視線（隱蔽另外計算）；建築、城牆擋視線。
+ */
+export function sightBlocked(map: LegionMap, ax: number, ay: number, bx: number, by: number): boolean {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const steps = idiv(Math.max(Math.abs(dx), Math.abs(dy)), TILE);
+  if (steps < 2) return false;
+  const ea = 2 * heightAt(map, ax, ay) + 1;
+  const eb = 2 * heightAt(map, bx, by) + 1;
+  for (let k = 1; k < steps; k++) {
+    const x = ax + idiv(dx * k, steps);
+    const y = ay + idiv(dy * k, steps);
+    const t = terrainAt(map, x, y);
+    const hgt = t === T.Building || t === T.Wall ? BLOCK_HEIGHT : heightAt(map, x, y);
+    // 2 × 地形高度 > 視線高度（半階單位，乘上 steps 避免除法）
+    if (2 * hgt * steps > ea * steps + (eb - ea) * k) return true;
+  }
+  return false;
 }

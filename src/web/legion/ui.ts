@@ -1,6 +1,6 @@
 // 軍團戰觀戰畫面：電競轉播風的計分條、雙方兵力名冊、解說字幕、開戰前陣容、結算、自動導播與操作。
 import type { RegimentStatus } from '../../legion/api.ts';
-import { MODE_NAMES, RULES, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, type UnitKind } from '../../legion/config.ts';
+import { FORMATION_NAMES, MODE_NAMES, RULES, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type UnitKind } from '../../legion/config.ts';
 import { unitSvg } from './icons.ts';
 import type { Caption, FromLegionWorker, LegionFrame, LegionMeta, ToLegionWorker } from './protocol.ts';
 import { LegionRenderer } from './render.ts';
@@ -11,9 +11,15 @@ const STATUS_NAME: Record<RegimentStatus, string> = {
   attacking: '進攻',
   engaged: '交戰中',
   charging: '衝鋒',
-  bracing: '架陣中',
-  braced: '已架陣',
+  assaulting: '突擊',
+  infiltrating: '切入',
+  bracing: '架槍林中',
+  braced: '槍林',
   unbracing: '收陣中',
+  walling: '盾牆架設中',
+  walled: '盾牆',
+  reforming: '換陣形',
+  volleying: '齊射',
   routed: '潰散',
 };
 const ORDER_NAME: Record<string, string> = { idle: '待命', move: '移動', attackMove: '邊走邊打', attack: '攻擊', hold: '堅守', charge: '衝鋒' };
@@ -366,7 +372,7 @@ export class LegionScreen {
           .filter(([, v]) => v! > 100)
           .map(([t, v]) => `${UNITS[t as UnitKind].name} ${pct(v!)}`)
           .join('、');
-        return `<tr><td>${unitSvg(k, 16)} ${u.name}</td><td>${u.cost}</td><td>${u.men}</td><td>${u.hp / 10}</td><td>${u.attack / 10}／${(u.cooldown / TPS).toFixed(1)} 秒</td><td>${u.range ? `${u.range / TILE} 格` : '近戰'}</td><td>${((u.speed * TPS) / TILE).toFixed(1)}${u.chargeSpeed ? `（衝鋒 ${((u.chargeSpeed * TPS) / TILE).toFixed(1)}）` : ''}</td><td>${good || '—'}</td></tr>`;
+        return `<tr><td>${unitSvg(k, 16)} ${u.name}</td><td>${u.cost}</td><td>${u.men}</td><td>${u.hp / 10}</td><td>${u.attack / 10}／${(u.cooldown / TPS).toFixed(1)} 秒</td><td>${u.range ? `${u.range / TILE} 格` : '近戰'}</td><td>${((u.speed * TPS) / TILE).toFixed(1)}${dashDefOf(k) ? `（${dashDefOf(k)!.kind === 'charge' ? '衝鋒' : dashDefOf(k)!.kind === 'assault' ? '突擊' : '切入'} ${((dashDefOf(k)!.speed * TPS) / TILE).toFixed(1)}）` : ''}</td><td>${good || '—'}</td></tr>`;
       })
       .join('');
     h.innerHTML = `<div class="lg-helpbox">
@@ -539,7 +545,9 @@ export class LegionScreen {
         <span>等級</span><b>${r.level} 級${r.level > 1 ? `（攻擊、血量 +${RULES.veteran.levels[r.level - 1].attack - 100}%）` : ''}</b>
         <span>擊殺</span><b>${r.kills}</b>
         <span>地形</span><b>${terrain}</b>
-        ${u.cavalry ? `<span>衝鋒</span><b>${r.needDisengage ? '撞擊後要先脫離 6 格' : '可以衝鋒'}</b>` : ''}
+        <span>陣形</span><b>${FORMATION_NAMES[r.formation]}${r.stance ? `・${r.stance === 'raise' ? '舉盾' : r.stance === 'wall' ? '盾牆' : '持盾'}` : ''}</b>
+        <span>招牌技能</span><b>${r.skillCd > 0 ? `冷卻 ${Math.ceil(r.skillCd / TPS)} 秒` : '可以使用'}</b>
+        ${r.intent ? `<span>意圖</span><b>${esc(r.intent)}</b>` : ''}
       </div>`
       }
       <div class="dt-stats small muted">攻擊 ${u.attack / 10}／${(u.cooldown / TPS).toFixed(1)} 秒・${u.range ? `射程 ${u.range / TILE} 格` : '近戰'}・速度 ${((u.speed * TPS) / TILE).toFixed(1)} 格／秒・視野 ${u.sight / TILE} 格${vs ? `<br>相剋：${vs}` : ''}</div>`;

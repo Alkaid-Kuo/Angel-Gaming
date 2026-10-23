@@ -1,8 +1,8 @@
-// 軍團戰選手 API 的公開型別：開局資料、布陣、觀察資料、指令、事件。
+// 軍團戰選手 API 的公開型別（規格書 v0.2）：開局資料、布陣、觀察資料、指令、事件。
 import type { KnobDef, KnobValues } from '../api/types.ts';
-import type { LegionMode, UnitKind } from './config.ts';
+import type { DashKind, FormationKind, LegionMode, ShieldStance, SkillKind, UnitKind } from './config.ts';
 
-export type { KnobDef, KnobValues, LegionMode, UnitKind };
+export type { DashKind, FormationKind, KnobDef, KnobValues, LegionMode, ShieldStance, SkillKind, UnitKind };
 
 export interface LegionDeclaration {
   readonly name: string;
@@ -19,15 +19,23 @@ export interface UnitInfo {
   readonly hp: number;
   readonly attack: number;
   readonly cooldown: number;
+  readonly meleeAttack: number;
   readonly range: number;
   readonly reach: number;
+  /** 移動速度（單位／tick）；盾兵是持盾的速度 */
   readonly speed: number;
-  readonly chargeSpeed: number;
   readonly sight: number;
-  readonly width: number;
+  readonly meleeDR: number;
+  readonly rangedDR: number;
+  readonly lineWidth: number;
+  readonly squareWidth: number;
   readonly spacingX: number;
   readonly spacingY: number;
   readonly cavalry: boolean;
+  readonly formations: readonly FormationKind[];
+  readonly skill: SkillKind;
+  /** 衝刺類技能的參數（沒有就是 null） */
+  readonly dash: { readonly kind: DashKind; readonly dist: number; readonly speed: number; readonly turn: number; readonly cooldown: number } | null;
 }
 
 export interface LegionInitData {
@@ -46,14 +54,16 @@ export interface LegionInitData {
     readonly name: string;
     readonly width: number;
     readonly height: number;
-    /** 列優先的地形代碼：0 平地、1 道路、2 樹林、3 高地、4 淺灘、5 河流、6 橋、7 建築、8 城牆 */
+    /** 列優先的地形代碼：0 平地、1 道路、2 樹林、3 高地（高度 3 階以上的平地）、4 淺灘、5 河流、6 橋、7 建築、8 城牆 */
     readonly terrain: readonly number[];
+    /** 列優先的高度階（0～5） */
+    readonly heights: readonly number[];
     /** 依 playerId 的布陣區（格座標，含 x0/y0、不含 x1/y1） */
     readonly deploy: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
     readonly flags: readonly { readonly id: number; readonly name: string; readonly x: number; readonly y: number }[];
   };
   readonly units: readonly UnitInfo[];
-  /** 相剋倍率（百分比）：versus[攻擊方][目標] */
+  /** 相剋加成（百分比）：versus[攻擊方][目標] */
   readonly versus: Readonly<Record<string, Readonly<Record<string, number>>>>;
 }
 
@@ -63,11 +73,29 @@ export interface Deployment {
   readonly y: number;
   /** 角度（度）：0 朝東（+x）、90 朝南（+y） */
   readonly facing?: number;
-  /** 橫寬（人） */
+  /** 橫寬（人）：橫陣、方陣 */
   readonly width?: number;
+  readonly formation?: FormationKind;
+  /** 盾兵姿態（持盾或舉盾） */
+  readonly stance?: ShieldStance;
 }
 
-export type RegimentStatus = 'idle' | 'moving' | 'attacking' | 'engaged' | 'charging' | 'bracing' | 'braced' | 'unbracing' | 'routed';
+export type RegimentStatus =
+  | 'idle'
+  | 'moving'
+  | 'attacking'
+  | 'engaged'
+  | 'charging'
+  | 'assaulting'
+  | 'infiltrating'
+  | 'bracing'
+  | 'braced'
+  | 'unbracing'
+  | 'walling'
+  | 'walled'
+  | 'reforming'
+  | 'volleying'
+  | 'routed';
 
 export interface OwnRegiment {
   readonly id: number;
@@ -76,6 +104,9 @@ export interface OwnRegiment {
   readonly y: number;
   readonly facing: number;
   readonly width: number;
+  readonly formation: FormationKind;
+  /** 盾兵姿態；其他兵種為 null */
+  readonly stance: ShieldStance | null;
   readonly men: number;
   readonly men0: number;
   /** 全團剩餘血量、上限 */
@@ -87,10 +118,16 @@ export interface OwnRegiment {
   readonly target: number | null;
   readonly level: number;
   readonly engaged: boolean;
-  readonly canCharge: boolean;
+  /** 招牌技能還要冷卻幾個 tick（0 = 可以用） */
+  readonly skillCooldown: number;
+  /** 衝刺中（突擊、切入、衝鋒）就是種類；否則 null */
+  readonly dashing: DashKind | null;
+  /** 正在倒地的人數 */
+  readonly down: number;
   readonly routed: boolean;
-  /** 所在地形代碼 */
+  /** 所在地形代碼與高度階 */
   readonly terrain: number;
+  readonly height: number;
   /** 半徑（單位）：中心到最遠士兵 */
   readonly radius: number;
 }
@@ -103,12 +140,16 @@ export interface EnemyRegiment {
   readonly y: number;
   readonly facing: number;
   readonly width: number;
+  readonly formation: FormationKind;
+  readonly stance: ShieldStance | null;
   readonly men: number;
   readonly men0: number;
   readonly status: RegimentStatus;
   readonly engaged: boolean;
+  readonly dashing: DashKind | null;
   readonly routed: boolean;
   readonly terrain: number;
+  readonly height: number;
   readonly radius: number;
 }
 
@@ -124,14 +165,18 @@ export interface FlagState {
   readonly capturer: number;
 }
 
+export type Flank = 'front' | 'side' | 'rear';
+
 export type LegionEvent =
   | { readonly type: 'deployRejected'; readonly tick: number; readonly player: number; readonly index: number; readonly reason: string }
-  | { readonly type: 'contact'; readonly tick: number; readonly a: number; readonly b: number; readonly flank: 'front' | 'side' | 'rear' }
-  | { readonly type: 'impact'; readonly tick: number; readonly reg: number; readonly target: number; readonly kills: number; readonly braced: boolean; readonly flank: 'front' | 'side' | 'rear' }
+  | { readonly type: 'contact'; readonly tick: number; readonly a: number; readonly b: number; readonly flank: Flank }
+  /** 衝刺結束：撞到的第一個敵團、擊殺、擊倒、是否被槍林擋下 */
+  | { readonly type: 'impact'; readonly tick: number; readonly reg: number; readonly kind: DashKind; readonly target: number; readonly kills: number; readonly downed: number; readonly braced: boolean; readonly flank: Flank }
   | { readonly type: 'ambush'; readonly tick: number; readonly reg: number }
   | { readonly type: 'routed'; readonly tick: number; readonly reg: number }
   | { readonly type: 'destroyed'; readonly tick: number; readonly reg: number; readonly escaped: boolean }
   | { readonly type: 'levelUp'; readonly tick: number; readonly reg: number; readonly level: number }
+  | { readonly type: 'skill'; readonly tick: number; readonly reg: number; readonly skill: string }
   | { readonly type: 'flag'; readonly tick: number; readonly flag: number; readonly owner: number }
   | { readonly type: 'domination'; readonly tick: number; readonly player: number; readonly started: boolean }
   | { readonly type: 'rejected'; readonly tick: number; readonly player: number; readonly command: string; readonly reason: string };
@@ -150,22 +195,42 @@ export interface LegionObservation {
   readonly events: readonly LegionEvent[];
 }
 
+/** 衝刺的方向：facing（度）、地點（x, y）或敵團（target，取它目前的位置）擇一 */
+interface DashAim {
+  readonly facing?: number;
+  readonly x?: number;
+  readonly y?: number;
+  readonly target?: number;
+}
+
+interface Base {
+  readonly id: number;
+  /** AI 意圖（選填，最多 20 字，觀戰畫面顯示） */
+  readonly intent?: string;
+}
+
 export type LegionCommand =
-  | { readonly type: 'move'; readonly id: number; readonly x: number; readonly y: number; readonly facing?: number }
-  | { readonly type: 'attackMove'; readonly id: number; readonly x: number; readonly y: number }
-  | { readonly type: 'attack'; readonly id: number; readonly target: number }
-  | { readonly type: 'charge'; readonly id: number; readonly target: number }
-  | { readonly type: 'brace'; readonly id: number }
-  | { readonly type: 'unbrace'; readonly id: number }
-  | { readonly type: 'hold'; readonly id: number }
-  | { readonly type: 'formation'; readonly id: number; readonly width: number }
-  | { readonly type: 'face'; readonly id: number; readonly facing: number };
+  | (Base & { readonly type: 'move'; readonly x: number; readonly y: number; readonly facing?: number })
+  | (Base & { readonly type: 'attackMove'; readonly x: number; readonly y: number })
+  | (Base & { readonly type: 'attack'; readonly target: number })
+  | (Base & { readonly type: 'hold' })
+  | (Base & { readonly type: 'face'; readonly facing: number })
+  | (Base & { readonly type: 'formation'; readonly formation?: FormationKind; readonly width?: number })
+  | (Base & { readonly type: 'follow'; readonly target: number; readonly forward?: number; readonly right?: number })
+  | (Base & { readonly type: 'brace'; readonly facing?: number })
+  | (Base & { readonly type: 'unbrace' })
+  | (Base & { readonly type: 'shield'; readonly mode: 'carry' | 'raise' | 'wall' | 'unwall' })
+  | (Base & { readonly type: 'volley'; readonly x: number; readonly y: number })
+  | (Base & DashAim & { readonly type: 'charge' | 'assault' | 'infiltrate' })
+  | (Base & { readonly type: 'steer'; readonly facing: number });
 
 export interface LegionHelpers {
   /** 確定性亂數 [0, 1) */
   random(): number;
   /** 單位座標的地形代碼（地圖外回傳 5 河流） */
   terrainAt(x: number, y: number): number;
+  /** 單位座標的高度階 */
+  heightAt(x: number, y: number): number;
   dist(ax: number, ay: number, bx: number, by: number): number;
   /** 從 a 指向 b 的角度（度） */
   angleTo(ax: number, ay: number, bx: number, by: number): number;
