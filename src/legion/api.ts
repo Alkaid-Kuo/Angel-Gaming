@@ -234,6 +234,8 @@ export interface LegionHelpers {
   dist(ax: number, ay: number, bx: number, by: number): number;
   /** 從 a 指向 b 的角度（度） */
   angleTo(ax: number, ay: number, bx: number, by: number): number;
+  /** 從 (x, y) 往 deg 方向走 dist 單位後的座標（整數三角函數，與平台無關） */
+  offset(x: number, y: number, deg: number, dist: number): [number, number];
 }
 
 export interface LegionBot {

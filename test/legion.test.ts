@@ -7,6 +7,7 @@ import { LegionMatch } from '../src/legion/sim.ts';
 import type { LegionEvent } from '../src/legion/api.ts';
 import { compileBot, type CompiledBot } from '../src/sandbox/compile.ts';
 import { resolveKnobs } from '../src/sandbox/controller.ts';
+import { LEGION_STRATEGIES, buildLegionBot } from '../scripts/build-legion-bots.ts';
 
 const W = 160000;
 const H = 100000;
@@ -200,6 +201,10 @@ describe('軍團戰：戰鬥規則', () => {
 });
 
 describe('軍團戰：基準 AI', () => {
+  it('bots/legion-*.js 與 bots/legion-src/ 的原始碼一致（改原始碼後要執行 scripts/build-legion-bots.ts）', () => {
+    for (const name of LEGION_STRATEGIES) expect(readFileSync(`bots/legion-${name}.js`, 'utf8').replaceAll('\r\n', '\n')).toBe(buildLegionBot(name));
+  });
+
   it('三隻基準 AI 都能載入、宣告 3～6 顆旋鈕、布陣不超過 500 點且全部出場', () => {
     for (const name of ['push', 'ambush', 'ranged']) {
       const c = new LegionBatchController(bot(name), name, map, 1, 0);

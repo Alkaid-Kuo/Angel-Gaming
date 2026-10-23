@@ -7,7 +7,7 @@ import { BotLoadError, type CompiledBot } from '../sandbox/compile.ts';
 import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
 import type { LegionBot, LegionDeclaration, LegionHelpers, LegionInitData, LegionObservation } from './api.ts';
 import { LEGION_ENGINE_VERSION, RULES, TILE, type LegionMode } from './config.ts';
-import { iatan2 } from './geom.ts';
+import { iatan2, offset } from './geom.ts';
 import { MAPS, heightAt, terrainAt, type LegionMap } from './map.ts';
 import { LegionMatch, legionInitData, type LegionResult } from './sim.ts';
 
@@ -54,6 +54,10 @@ export function legionHelpers(map: LegionMap, seed: number, playerId: number): L
     heightAt: (x, y) => heightAt(map, x, y),
     dist: (ax, ay, bx, by) => Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by)),
     angleTo: (ax, ay, bx, by) => iatan2(Math.round(by - ay), Math.round(bx - ax)),
+    offset: (x, y, deg, d) => {
+      const [ox, oy] = offset(Math.round(deg), Math.round(d));
+      return [Math.round(x) + ox, Math.round(y) + oy];
+    },
   };
 }
 
