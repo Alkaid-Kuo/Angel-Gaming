@@ -63,6 +63,8 @@ export interface LegionMeta {
   readonly rejected: readonly { readonly player: number; readonly reason: string }[];
   /** 玩家指揮的一方（-1 = 純觀戰） */
   readonly playerSide: number;
+  /** 重播剛才玩家打的那一場（照錄下來的指令重建） */
+  readonly replay: boolean;
 }
 
 export interface RegFrame {

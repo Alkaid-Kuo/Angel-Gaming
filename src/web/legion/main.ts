@@ -138,7 +138,11 @@ function launch(): void {
   w.onmessage = (ev: MessageEvent<FromLegionWorker>) => {
     const msg = ev.data;
     if (msg.type === 'meta') {
-      if (screen !== null) return;
+      // 重看：同一種畫面（觀戰／玩家）沿用；玩家打完改成重播（觀戰畫面）就換新的
+      if (screen !== null) {
+        if (screen.playerSide === msg.meta.playerSide && !msg.meta.replay) return;
+        screen.dispose();
+      }
       setupEl.classList.add('hidden');
       screen = new LegionScreen(gameEl, w, msg.meta, exitToMenu);
     } else if (msg.type === 'error') {

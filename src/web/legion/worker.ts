@@ -7,7 +7,7 @@ import rangedSource from '../../../bots/legion-ranged.js?raw';
 import type { LegionEvent } from '../../legion/api.ts';
 import { TPS, UNITS } from '../../legion/config.ts';
 import { MAPS } from '../../legion/map.ts';
-import { LegionBatchController, LegionDriver, type LegionController } from '../../legion/runner.ts';
+import { LegionBatchController, LegionDriver, LegionReplayCursor, type LegionController, type LegionReplay } from '../../legion/runner.ts';
 import type { LegionMatch } from '../../legion/sim.ts';
 import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
 import { resolveKnobs } from '../../sandbox/controller.ts';
@@ -39,7 +39,10 @@ let setup: LegionSetup | null = null;
 let player: PlayerController | null = null;
 /** 玩家指揮哪一方（-1 = 純觀戰） */
 let playerSide = -1;
-let driver: LegionDriver | null = null;
+/** 正在跑的比賽：AI／玩家對戰是 LegionDriver，重播是 LegionReplayCursor */
+let driver: { readonly match: LegionMatch; step(): void; readonly replay: LegionReplay | null } | null = null;
+/** 玩家剛打完（或正在打）的那一場的紀錄：「重看」照這份重播，不是重開一局 */
+let playerReplay: LegionReplay | null = null;
 let comm: LegionCommentator | null = null;
 let speed = 1;
 let paused = true;
@@ -61,23 +64,35 @@ function regName(m: LegionMatch): RegStatic[] {
   });
 }
 
-function begin(s: LegionSetup): void {
+/** 開一場：replay 有值時照紀錄重播（玩家打過的那一場，上帝視角） */
+function begin(s: LegionSetup, replay: LegionReplay | null = null): void {
   setup = s;
-  const map = MAPS['river-valley']();
   player = null;
-  playerSide = s.bots.indexOf('player');
-  const ctrls: LegionController[] = s.bots.map((b, i) => {
-    if (b !== 'player') return new LegionBatchController(compiled[b], `legion-${b}.js`, map, s.seed, i);
-    player = new PlayerController(s.army ?? { field: ['spear', 'spear', 'spear', 'sword', 'sword', 'archer', 'archer', 'shield', 'shield', 'heavyCav', 'light'], reserve: [] });
-    return player;
-  });
-  const knobs = ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label));
+  playerSide = replay !== null ? -1 : s.bots.indexOf('player');
   const rejected: { player: number; reason: string }[] = [];
-  driver = new LegionDriver({ seed: s.seed, mode: s.mode, controllers: ctrls, knobs, record: true });
-  const m = driver.match;
+  let players: PlayerMeta[];
+  let m: LegionMatch;
+  if (replay !== null) {
+    const cursor = new LegionReplayCursor(replay);
+    driver = cursor;
+    m = cursor.match;
+    players = replay.header.players.map((p, i) => ({ id: i, side: SIDES[i], color: COLORS[i], bot: p.bot, style: '（重播）', cost: m.players[i].cost, knobs: p.knobs }));
+  } else {
+    const map = MAPS['river-valley']();
+    const ctrls: LegionController[] = s.bots.map((b, i) => {
+      if (b !== 'player') return new LegionBatchController(compiled[b], `legion-${b}.js`, map, s.seed, i);
+      player = new PlayerController(s.army ?? { field: ['spear', 'spear', 'spear', 'sword', 'sword', 'archer', 'archer', 'shield', 'shield', 'heavyCav', 'light'], reserve: [] });
+      return player;
+    });
+    const knobs = ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label));
+    const d = new LegionDriver({ seed: s.seed, mode: s.mode, controllers: ctrls, knobs, record: true });
+    driver = d;
+    m = d.match;
+    if (playerSide >= 0) playerReplay = d.replay;
+    players = ctrls.map((c, i) => ({ id: i, side: SIDES[i], color: COLORS[i], bot: c.declaration.name, style: c.declaration.style, cost: m.players[i].cost, knobs: knobs[i] }));
+  }
   for (let p = 0; p < 2; p++) for (const e of m.observe(p).events) if (e.type === 'deployRejected') rejected.push({ player: p, reason: e.reason });
   const regs = regName(m);
-  const players: PlayerMeta[] = ctrls.map((c, i) => ({ id: i, side: SIDES[i], color: COLORS[i], bot: c.declaration.name, style: c.declaration.style, cost: m.players[i].cost, knobs: knobs[i] }));
   const meta: LegionMeta = {
     mapName: m.map.name,
     mapDescription: m.map.description,
@@ -97,6 +112,7 @@ function begin(s: LegionSetup): void {
     soldierCount: m.soldiers.length,
     rejected,
     playerSide,
+    replay: replay !== null,
   };
   comm = new LegionCommentator(regs, players, meta.playerSide);
   comm.start(m);
@@ -276,9 +292,13 @@ ctx.onmessage = (ev: MessageEvent<ToLegionWorker>) => {
         skip();
         break;
       case 'restart':
+        // 玩家打的那一場：照錄下來的指令重播；AI 對戰：同一組合、同一個種子重跑（結果一樣）
         if (setup !== null) {
-          begin(setup);
-          paused = false;
+          const s = setup;
+          const rp = s.bots.includes('player') && playerReplay !== null ? playerReplay : null;
+          begin(s, rp);
+          // 重播會換成觀戰畫面，等畫面上按「開戰」再開始
+          paused = rp !== null;
         }
         break;
       case 'replay':

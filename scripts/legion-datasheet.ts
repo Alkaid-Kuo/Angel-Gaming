@@ -102,6 +102,7 @@ dashRow('衝鋒（輕騎兵）', DASH.lightCav);
 dashRow('衝鋒（重騎兵）', DASH.heavyCav);
 p();
 const D = RULES.dash;
+p('- 地形各自判定：衝刺中的人碰到擋衝刺的地形（騎兵：樹林、淺灘、河流、建築、城牆；步兵：河流、建築、城牆）就停在邊上，其他人照樣衝；全部停下或距離用完才結束，結束後軍團位置歸到士兵實際所在的中心。');
 p(`- 楔形陣衝勁 ${x100(D.wedgeMomentum)}；每撞到一個士兵扣掉對方的阻擋值（一般 ${D.block / 100}、槍林正面 ${D.braceBlock / 100}）。`);
 p(`- 突擊：把人往兩側擠開 ${tiles(D.pushAside)} 格、接觸後 ${sec(D.penetrateTicks)}內可以擠進敵陣、每人第一擊 ${x100(D.firstHit)}。`);
 p(`- 騎兵撞到的人被擊倒 ${sec(RULES.knockdownTicks)}；輕騎兵衝鋒中 ${sec(D.interruptWindow)}內受到超過單兵血量 ${pct(D.interruptPct)} 的傷害就被打斷。`);

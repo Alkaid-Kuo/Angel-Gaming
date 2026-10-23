@@ -58,6 +58,11 @@ export class LegionScreen {
   private readonly root: HTMLElement;
   private readonly worker: Worker;
   private readonly meta: LegionMeta;
+
+  /** 玩家指揮的一方（-1 = 觀戰） */
+  get playerSide(): number {
+    return this.meta.playerSide;
+  }
   private readonly onExit: () => void;
   private readonly r: LegionRenderer;
   private readonly el: Record<string, HTMLElement> = {};
@@ -143,7 +148,7 @@ export class LegionScreen {
     <div class="lg-bug">
       ${team(0)}
       <div class="bar t0" title="剩餘兵力（點數 × 剩餘人數比例；潰散不算）"><i data-el="bar0" style="background:${p[0].color}"></i><span data-el="pct0"></span></div>
-      <div class="mid"><div class="clock" data-el="clock">0:00</div><div class="mode">${MODE_NAMES[this.meta.mode]}・${esc(this.meta.mapName)}</div><div class="pips" data-el="pips"></div><div class="score hidden" data-el="score"></div></div>
+      <div class="mid"><div class="clock" data-el="clock">0:00</div><div class="mode">${MODE_NAMES[this.meta.mode]}・${esc(this.meta.mapName)}${this.meta.replay ? '・重播' : ''}</div><div class="pips" data-el="pips"></div><div class="score hidden" data-el="score"></div></div>
       <div class="bar t1" title="剩餘兵力（點數 × 剩餘人數比例；潰散不算）"><span data-el="pct1"></span><i data-el="bar1" style="background:${p[1].color}"></i></div>
       ${team(1)}
     </div>
@@ -168,7 +173,7 @@ export class LegionScreen {
       <span class="sep"></span>
       <button data-act="help" title="規則說明（H）">說明</button>
       <button data-act="replay" title="下載這場比賽的回放檔">回放</button>
-      <button data-act="restart" title="同一組合重看一次">重看</button>
+      <button data-act="restart" title="${player || this.meta.replay ? '重播剛才玩家打的這一場' : '同一組合重看一次'}">重看</button>
       <button data-act="exit" title="回到選單">返回</button>
     </div>
     <div class="lg-overlay hidden" data-el="lineup"></div>

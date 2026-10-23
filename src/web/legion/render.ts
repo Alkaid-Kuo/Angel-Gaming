@@ -558,8 +558,8 @@ export class LegionRenderer {
   }
 
   /**
-   * 技能瞄準：衝刺類畫出整條預定路線（衝刺只看方向、一定衝滿距離；騎兵的助跑段畫虛線），
-   * 路線中心碰到擋衝鋒的地形（騎兵：樹林、淺灘、河流、建築；步兵：河流、建築）就在那裡打叉；
+   * 技能瞄準：衝刺類畫出隊形寬度的路線帶與中線（衝刺只看方向、衝滿距離；騎兵的助跑段畫虛線），
+   * 隊形裡會碰到擋衝刺地形（騎兵：樹林、淺灘、河流、建築；步兵：河流、建築）的位置打叉，那裡的人會停下；
    * 齊射畫落點圈（超出射程變紅）與射程圈；槍林畫正面扇形。冷卻中的畫成灰色並標出剩幾秒
    */
   private drawAim(aim: { ids: readonly number[]; to: { x: number; y: number } }, alpha: number): void {
@@ -587,21 +587,38 @@ export class LegionRenderer {
       const cy = this.sy(p.y);
       const dash = kind === 'sword' ? DASH.assault : kind === 'light' ? DASH.infiltrate : kind === 'lightCav' ? DASH.lightCav : kind === 'heavyCav' ? DASH.heavyCav : null;
       if (dash !== null) {
+        // 地形各自判定：隊形寬度內分成幾條路線，每條碰到擋衝刺的地形，那裡的人就停下（打叉），其他人照樣衝滿距離
         const cav = dash.kind === 'charge';
-        let len = dash.dist;
-        let stop = '';
-        for (let d = 250; d <= dash.dist; d += 250) {
-          const t = this.terrainAt(p.x + Math.cos(ang) * d, p.y + Math.sin(ang) * d);
-          if (cav ? stopsCavalry(t) : !walkable(t)) {
-            len = d - 250;
-            stop = TERRAIN_NAMES[t];
-            break;
+        const fx = Math.cos(ang);
+        const fy = Math.sin(ang);
+        const hw = Math.max(500, r.halfW);
+        const lanes = Math.max(3, Math.round((hw * 2) / 500) + 1);
+        const stops: { d: number; l: number; t: number }[] = [];
+        for (let i = 0; i < lanes; i++) {
+          const l = -hw + (2 * hw * i) / (lanes - 1);
+          for (let d = 250; d <= dash.dist; d += 250) {
+            const t = this.terrainAt(p.x + fx * d - fy * l, p.y + fy * d + fx * l);
+            if (cav ? stopsCavalry(t) : !walkable(t)) {
+              stops.push({ d, l, t });
+              break;
+            }
           }
         }
-        const at = (d: number): [number, number] => [cx + (Math.cos(ang) * d * s) / TILE, cy + (Math.sin(ang) * d * s) / TILE];
-        const run = Math.min(len, dash.runup);
-        const [rx, ry] = at(run);
-        const [ex, ey] = at(len);
+        const scr = (d: number, l: number): [number, number] => [this.sx(p.x + fx * d - fy * l), this.sy(p.y + fy * d + fx * l)];
+        // 路線帶（隊形寬度）
+        ctx.beginPath();
+        for (const [d, l] of [[0, -hw], [dash.dist, -hw], [dash.dist, hw], [0, hw]] as const) {
+          const [x, y] = scr(d, l);
+          if (d === 0 && l === -hw) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = cd ? 'rgba(148,163,184,0.1)' : 'rgba(253,230,138,0.1)';
+        ctx.fill();
+        // 中線：騎兵的助跑段畫虛線
+        const run = Math.min(dash.dist, dash.runup);
+        const [rx, ry] = scr(run, 0);
+        const [ex, ey] = scr(dash.dist, 0);
         ctx.lineCap = 'round';
         if (run > 0) {
           ctx.setLineDash([4, 5]);
@@ -619,25 +636,30 @@ export class LegionRenderer {
         ctx.moveTo(rx, ry);
         ctx.lineTo(ex, ey);
         ctx.stroke();
-        if (stop) {
-          const k = 7;
-          ctx.strokeStyle = '#f87171';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(ex - k, ey - k);
-          ctx.lineTo(ex + k, ey + k);
-          ctx.moveTo(ex + k, ey - k);
-          ctx.lineTo(ex - k, ey + k);
-          ctx.stroke();
-          label(ex, ey, `${stop}擋下（${(len / TILE).toFixed(0)} 格）`, '#fca5a5');
-        } else {
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.moveTo(ex + Math.cos(ang) * 10, ey + Math.sin(ang) * 10);
-          ctx.lineTo(ex + Math.cos(ang + 2.5) * 9, ey + Math.sin(ang + 2.5) * 9);
-          ctx.lineTo(ex + Math.cos(ang - 2.5) * 9, ey + Math.sin(ang - 2.5) * 9);
-          ctx.fill();
-          label(ex, ey, `${(len / TILE).toFixed(0)} 格`, color);
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(ex + fx * 10, ey + fy * 10);
+        ctx.lineTo(ex + Math.cos(ang + 2.5) * 9, ey + Math.sin(ang + 2.5) * 9);
+        ctx.lineTo(ex + Math.cos(ang - 2.5) * 9, ey + Math.sin(ang - 2.5) * 9);
+        ctx.fill();
+        label(ex, ey, `${(dash.dist / TILE).toFixed(0)} 格`, color);
+        // 會被擋下的位置
+        const k = 4;
+        ctx.strokeStyle = '#f87171';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (const st of stops) {
+          const [x, y] = scr(st.d, st.l);
+          ctx.moveTo(x - k, y - k);
+          ctx.lineTo(x + k, y + k);
+          ctx.moveTo(x + k, y - k);
+          ctx.lineTo(x - k, y + k);
+        }
+        ctx.stroke();
+        if (stops.length > 0) {
+          const first = stops.reduce((a, b) => (a.d <= b.d ? a : b));
+          const [x, y] = scr(first.d, first.l);
+          label(x, y, `約 ${Math.round((stops.length * 100) / lanes)}% 的人會被${TERRAIN_NAMES[first.t]}擋下`, '#fca5a5');
         }
         if (cd) label(cx, cy - 14, `冷卻 ${Math.ceil(r.skillCd / 10)} 秒`, '#cbd5e1');
       } else if (kind === 'archer') {

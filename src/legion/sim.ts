@@ -1104,6 +1104,33 @@ export class LegionMatch {
     if (d === null) return;
     r.dash = null;
     for (const sid of r.slots) this.soldiers[sid].dashing = false;
+    // 軍團位置歸到士兵實際所在的中心（衝刺中心可能已經穿進牆裡、河裡）；中心不能站就用離中心最近的士兵
+    if (r.slots.length > 0) {
+      let sx = 0;
+      let sy = 0;
+      for (const sid of r.slots) {
+        sx += this.soldiers[sid].x;
+        sy += this.soldiers[sid].y;
+      }
+      let cx = idiv(sx, r.slots.length);
+      let cy = idiv(sy, r.slots.length);
+      if (!walkable(this.terrainAt(cx, cy))) {
+        let best = r.slots[0];
+        let bestD = Infinity;
+        for (const sid of r.slots) {
+          const so = this.soldiers[sid];
+          const dd = (so.x - cx) * (so.x - cx) + (so.y - cy) * (so.y - cy);
+          if (dd < bestD) {
+            bestD = dd;
+            best = sid;
+          }
+        }
+        cx = this.soldiers[best].x;
+        cy = this.soldiers[best].y;
+      }
+      r.x = cx;
+      r.y = cy;
+    }
     if (d.contacted) this.emit({ type: 'impact', tick: this.tick, reg: r.id, kind: d.def.kind, target: d.firstTarget, kills: d.kills, downed: d.downed, braced: d.braced, flank: d.flank });
     r.path = [];
     const q = r.queued;
@@ -1297,11 +1324,10 @@ export class LegionMatch {
     const [ox, oy] = offset(r.facing, speed);
     const nx = r.x + ox;
     const ny = r.y + oy;
-    const t = this.terrainAt(nx, ny);
-    const blocked = d.def.kind === 'charge' ? stopsCavalry(t) : !walkable(t);
+    // 地形各自判定（moveSoldier）：碰到的那幾個士兵停下，其他人繼續；全部停下或距離用完才結束
     let anyone = false;
     for (const sid of r.slots) if (this.soldiers[sid].dashing) anyone = true;
-    if (blocked || d.left <= 0 || !anyone) {
+    if (d.left <= 0 || !anyone) {
       this.endDash(r);
       return;
     }
@@ -1633,7 +1659,11 @@ export class LegionMatch {
       const [px, py] = stepToward(x, y, gx, gy, speed);
       const sp = dashing ? speed : this.slope(speed, x, y, px, py);
       const [nx, ny] = sp === speed ? [px, py] : stepToward(x, y, gx, gy, sp);
-      [x, y] = this.slide(x, y, nx, ny);
+      const t = dashing && !r.dash!.aligning ? this.terrainAt(nx, ny) : T.Plain;
+      if (dashing && (r.dash!.def.kind === 'charge' ? stopsCavalry(t) : !walkable(t))) {
+        // 衝刺中碰到擋衝刺的地形（騎兵：樹林、淺灘、河流、建築、城牆；步兵：河流、建築、城牆）：這個人停在邊上，退出衝刺
+        s.dashing = false;
+      } else [x, y] = this.slide(x, y, nx, ny);
     }
     // 槍林、盾牆：原地不動、不被推開（霸體）；衝刺中、突擊擠進敵陣時不和敵兵互推
     const hold = r.brace === 2 || r.wall === 2;
