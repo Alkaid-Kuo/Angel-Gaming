@@ -253,6 +253,8 @@ export class LegionRenderer {
   private regById = new Map<number, RegFrame>();
   /** 在場上的軍團（不含後備） */
   private field: RegFrame[] = [];
+  /** 戰爭迷霧用的離屏畫布 */
+  private fogCanvas: HTMLCanvasElement | null = null;
   private prevRegById = new Map<number, RegFrame>();
   private kindOf: UnitKind[];
   private ownerOf: number[];
@@ -493,6 +495,7 @@ export class LegionRenderer {
     this.drawCorpses(now);
     this.drawTrails(now, opt);
     this.drawSkills(f, alpha, opt);
+    if (opt.viewer >= 0) this.drawFog(opt.viewer, alpha);
     if (opt.selected >= 0) this.drawSelection(opt.selected, alpha);
     this.drawSoldiers(alpha, opt);
     this.drawArrows(f, alpha);
@@ -688,6 +691,51 @@ export class LegionRenderer {
       }
       ctx.stroke();
     }
+  }
+
+  /**
+   * 戰爭迷霧（一方視角）：整張地圖蓋一層暗色，自己每團的視野範圍（含高地加成）挖亮、邊緣柔和；
+   * 看不到的敵軍本來就不畫。第一版不算地形擋視線。
+   */
+  private drawFog(viewer: number, alpha: number): void {
+    const cw = this.canvas.clientWidth;
+    const ch = this.canvas.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    let fc = this.fogCanvas;
+    if (fc === null) {
+      fc = document.createElement('canvas');
+      this.fogCanvas = fc;
+    }
+    if (fc.width !== Math.round(cw * dpr) || fc.height !== Math.round(ch * dpr)) {
+      fc.width = Math.round(cw * dpr);
+      fc.height = Math.round(ch * dpr);
+    }
+    const g = fc.getContext('2d')!;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, cw, ch);
+    g.fillStyle = 'rgba(6,9,16,0.62)';
+    g.fillRect(0, 0, cw, ch);
+    g.globalCompositeOperation = 'destination-out';
+    const s = this.cam.scale;
+    for (const r of this.field) {
+      if (this.ownerOf[r.id] !== viewer) continue;
+      const p = this.regAt(r.id, alpha);
+      if (p === null) continue;
+      const sight = UNITS[this.kindOf[r.id]].sight + RULES.height.sightPerLevel * Math.max(0, this.heightAt(p.x, p.y) - 1);
+      const x = this.sx(p.x);
+      const y = this.sy(p.y);
+      const R = ((sight + r.rad) / TILE) * s;
+      const grad = g.createRadialGradient(x, y, R * 0.82, x, y, R);
+      grad.addColorStop(0, 'rgba(0,0,0,1)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(x, y, R, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+    this.ctx.drawImage(fc, 0, 0, cw, ch);
   }
 
   /** 倒地的士兵：橫躺的橢圓（與朝向垂直）＋頭上暈眩的小點 */
