@@ -1087,6 +1087,10 @@ export default class Commander extends LegionBase {
     this.raid = false;
     /** 搜敵找到目標後的接戰鎖定（tick）：在這之前打得過就直接打，不再顧慮看不到的敵軍 */
     this.huntLock = -1;
+    /** 佔點：站進中央旗圈卡位的那一團 */
+    this.holderId = -1;
+    /** 佔點：中央被對方弓兵控住、又攻不上去時，改搶的旗（旗 id、到哪個 tick） @type {{ id: number, until: number } | null} */
+    this.focus = null;
     /** 正在壓上的對方弓兵陣位置（弓兵龜陣） @type {Pt | null} */
     this.assaultArchers = null;
     /** 進行中的佯攻 @type {Feint | null} */
@@ -1394,6 +1398,13 @@ export default class Commander extends LegionBase {
         const ac = this.centroid(foeArchers) || target;
         this.assaultArchers = ac;
         mission = { anchor: this.stepToward(mc, ac, 8), facing: this.angle(mc, ac), mode: 'engage', leash: 14, column: wet && this.dist(mc, ac) < 20 * TILE };
+      } else if (outgunned && capture && this.farFlag && this.farFlag.owner !== this.p && !this.focus && this.dist(target, this.mainFlag || target) < 16 * TILE && this.foes.filter((e) => this.farFlag && this.dist(e, this.farFlag) < 14 * TILE).reduce((t, e) => t + e.men * this.perMan(e.kind), 0) < this.ptsOf(line) * 0.8) {
+        // 中央被對方弓兵控住、攻不上去：改搶對方那座橋（兩座橋每秒 2 分，跟中央打平，接著比戰果）
+        const far = this.farFlag;
+        this.focus = { id: far.id, until: this.obs.tick + 900 };
+        this.attackCrossing = { x: far.x, y: far.y };
+        posture = '進攻';
+        mission = this.advanceMission(mc, far);
       } else if (outgunned) {
         posture = '收攏';
         const ac = this.centroid(foeArchers) || target;
@@ -1426,8 +1437,13 @@ export default class Commander extends LegionBase {
       this.engageTarget = target;
     } else if (capture) {
       posture = '固守';
-      const mf = this.mainFlag;
-      mission = { anchor: home, facing: mf ? this.angle(home, mf) : fwd, mode: 'hold', leash: 6, column: false };
+      const mf = this.homeFlag;
+      if (this.focus && this.obs.tick < this.focus.until && mf && this.dist(mc, mf) > 10 * TILE) {
+        // 轉攻中：前往改搶的那面旗
+        posture = '進攻';
+        this.attackCrossing = { x: mf.x, y: mf.y };
+        mission = this.advanceMission(mc, mf);
+      } else mission = { anchor: home, facing: mf ? this.angle(home, mf) : fwd, mode: 'hold', leash: 6, column: false };
       // 得分競賽：照目前的得分速度誰先到目標分；會輸就要改變局面
       const race = this.raceLosing();
       this.raid = race && this.ratio < 1.15;
@@ -1459,6 +1475,7 @@ export default class Commander extends LegionBase {
       }
     }
     if (near.length === 0) this.engageTarget = null;
+    if (this.focus && this.obs.tick >= this.focus.until) this.focus = null;
     this.posture = posture;
     this.line = mission;
     this.planText = this.describe();
@@ -1650,7 +1667,7 @@ export default class Commander extends LegionBase {
       case '集結':
         return `集結：主力到${where(this.bp)}列陣`;
       case '固守':
-        return capture ? `佔點：主力守${this.mainFlag?.name ?? '中央'}，分兵守旗襲擾` : `固守：在${where(this.bp)}等敵軍過河`;
+        return capture ? `佔點：主力守${this.homeFlag?.name ?? '中央'}，分兵守旗襲擾` : `固守：在${where(this.bp)}等敵軍過河`;
       case '迎擊':
         return '迎擊：戰線站穩，弓兵先射，等敵人上來';
       case '決戰':
@@ -1691,9 +1708,16 @@ export default class Commander extends LegionBase {
   // ───────── 佔點：分派各旗 ─────────
 
   /** 主力在中央旗的站位：中央旗往己方退 4 格的河岸（站在圈內但不下水） */
+  /** 主力要守的旗：平常是中央；轉攻時是改搶的那面 */
+  get homeFlag() {
+    const f = this.focus && this.obs.tick < this.focus.until ? this.flags.find((x) => x.id === this.focus?.id) : null;
+    return f || this.mainFlag;
+  }
+
   flagHome() {
-    const mf = this.mainFlag;
+    const mf = this.homeFlag;
     if (!mf) return this.bp;
+    // 主力守在旗圈旁的岸邊（對方要搶旗就得下水，換它挨淺灘的近戰加傷）；旗圈內交給卡位的那一團
     return this.landBehind(this.offset(mf, this.face(180), 4), this.face(180));
   }
 
@@ -1711,6 +1735,15 @@ export default class Commander extends LegionBase {
     this.farFlag = far;
     // 主力集中守中央；己方的橋交給斥候，被騷擾時由騎兵回防（不再固定派長槍駐守，避免中央兵力不足）
     this.flagJob.clear();
+    // 主力要守的旗（平常是中央）：派一團耐打的（盾兵優先，再來長槍、劍士）站進旗圈卡位——佔旗、擋住對方的佔領進度；主力在岸邊支援
+    const hf = this.homeFlag;
+    if (hf) {
+      const keep = this.obs.regiments.find((r) => r.id === this.holderId && !r.routed);
+      const pick = (/** @type {UnitKind} */ k) => this.obs.regiments.filter((r) => r.kind === k && !r.routed && r.men >= r.men0 * 0.5).sort((a, b) => this.dist(a, hf) - this.dist(b, hf))[0];
+      const holder = keep && keep.men >= keep.men0 * 0.3 ? keep : pick('shield') || pick('spear') || pick('sword');
+      this.holderId = holder ? holder.id : -1;
+      if (holder) this.flagJob.set(holder.id, hf.id);
+    }
   }
 
   // ───────── 戰鬥群 ─────────
@@ -1837,12 +1870,20 @@ export default class Commander extends LegionBase {
       if (!r || !f || r.routed) continue;
       this.busyIds.add(r.id);
       if (r.kind === 'spear' && this.spearGuard(out, r, true)) continue;
-      const foe = this.nearestFoe(f, (e) => !e.routed && this.dist(e, f) < this.data.capture.radius + 4 * TILE, 12);
+      if (r.kind === 'shield' && this.shieldReact(out, r, null)) continue;
+      // 卡位的（中央）只打進了旗圈的敵人，不追出去；其他守旗的打圈外 4 格內的
+      const reach = r.id === this.holderId ? this.data.capture.radius : this.data.capture.radius + 4 * TILE;
+      const foe = this.nearestFoe(f, (e) => !e.routed && this.dist(e, f) < reach, 12);
       if (foe && !(r.kind === 'spear' && this.isCav(foe.kind) && !foe.engaged)) {
         this.send(out, 6, { type: 'attack', id: r.id, target: foe.id }, `守旗：攔截${this.units[foe.kind].name}`, 20);
         continue;
       }
-      if (!r.engaged) this.takeFlag(out, r, f, 5);
+      if (r.engaged) continue;
+      if (r.id === this.holderId) {
+        // 站在旗圈內靠己方這一側（可以下水）
+        const post = this.landBehind(this.offset(f, this.face(180), 1.5), this.face(180), true);
+        if (this.dist(r, post) > 1500) this.send(out, 5, { type: 'move', id: r.id, x: post.x, y: post.y, facing: this.forward }, `卡位：守住${f.name}`, 30);
+      } else this.takeFlag(out, r, f, 5);
     }
   }
 
@@ -1864,7 +1905,7 @@ export default class Commander extends LegionBase {
     order.splice(mid, 0, ...spears);
     // 佔點守中央：正面不超過 18 格（太寬就排兩排），兵力集中在旗點圈附近
     const slots = m.column ? this.columnSlots(order, m.anchor, m.facing) : this.data.mode === 'capture' ? this.compactSlots(order, m.anchor, m.facing, 18) : this.lineSlots(order, m.anchor, m.facing, 1.5);
-    // 推進、縱隊過河時站位可以在淺灘裡（拉回岸上就永遠過不去）；站定、接敵時才退回岸上
+    // 推進、縱隊過河時站位可以在淺灘裡（拉回岸上就永遠過不去）；佔點時旗圈內的站位也可以（中央的旗在淺灘裡）；其餘站定、接敵時才退回岸上
     for (const [id, p] of slots) slots.set(id, this.pullIn(this.landBehind(p, m.facing + 180, m.column || m.mode === 'advance'), m.anchor));
     const targets = this.assignTargets(order, slots, m.leash, this.posture === '收攏');
     // 推進中（沒有任何一團接敵）：沿朝向的進度比最慢的一團多 4 格以上就等
@@ -2114,7 +2155,8 @@ export default class Commander extends LegionBase {
         // 步兵追不上沒被纏住、正在跑的騎兵
         if (this.isCav(e.kind) && !e.engaged && e.status !== 'idle' && d > 2) continue;
         // 不追下水：要涉水超過 2 格才打得到的不打（除非是主動過河進攻）
-        if (this.posture !== '進攻' && !(r.engaged && d < 1.5) && this.wetTiles(r, e) > 2) continue;
+        const inFlag = this.data.mode === 'capture' && !!this.mainFlag && this.dist(e, this.mainFlag) < this.data.capture.radius;
+        if (this.posture !== '進攻' && !inFlag && !(r.engaged && d < 1.5) && this.wetTiles(r, e) > 2) continue;
         const ed = this.edge(r.kind, e.kind);
         let s = 6 * (ed >= 1 ? ed - 1 : 1 - 1 / ed) - d;
         if (e.engaged) s += 6;
