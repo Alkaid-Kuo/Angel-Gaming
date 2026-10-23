@@ -1762,6 +1762,7 @@ export default class Commander extends LegionBase {
   /** @param {Pending[]} out */
   control(out) {
     this.rotate(out);
+    this.coverSpears(out);
     const regs = this.obs.regiments.filter((r) => !r.routed && !this.busyIds.has(r.id));
     const archers = regs.filter((r) => r.kind === 'archer');
     this.guard(out, archers);
@@ -1783,7 +1784,8 @@ export default class Commander extends LegionBase {
       const threat = this.nearestFoe(a, (e) => e.kind !== 'archer' && !e.engaged && !e.routed && e.status !== 'walled' && e.status !== 'walling' && e.status !== 'braced' && (this.approaching(e, a) || this.gap(a, e) < 1.2), 7);
       if (!threat) continue;
       const cav = this.isCav(threat.kind);
-      const pool = this.obs.regiments.filter((r) => !r.routed && !r.engaged && !r.dashing && !this.busyIds.has(r.id) && !this.flagJob.has(r.id) && (cav ? r.kind === 'spear' || r.kind === 'heavyCav' : r.kind === 'sword' || r.kind === 'spear' || r.kind === 'shield'));
+      // 對著騎兵架槍林的長槍不派去攔截步兵（那是佯攻要的效果）
+      const pool = this.obs.regiments.filter((r) => !r.routed && !r.engaged && !r.dashing && !this.busyIds.has(r.id) && !this.flagJob.has(r.id) && (cav ? r.kind === 'spear' || r.kind === 'heavyCav' : r.kind === 'sword' || r.kind === 'shield' || (r.kind === 'spear' && !this.cavThreat(r, 22))));
       const best = pool.sort((x, y) => this.dist(x, threat) - this.dist(y, threat))[0];
       if (!best || this.dist(best, threat) > 16 * TILE) continue;
       this.busyIds.add(best.id);
@@ -1885,9 +1887,9 @@ export default class Commander extends LegionBase {
    * @param {boolean} mayHold
    */
   spearGuard(out, r, mayHold) {
-    if (r.engaged) return this.spearReact(out, r, mayHold);
-    const reach = mayHold ? 26 : 14;
-    const cav = this.nearestFoe(r, (e) => this.isCav(e.kind) && !e.engaged && !e.routed && (e.dashing === 'charge' || this.gap(r, e) <= reach), 30);
+    // 接戰中也要顧騎兵：敵方步兵從側面打我、騎兵在附近等，就是要騙我轉向（佯攻）——守住騎兵的方向，側面交給劍士、盾兵
+    const reach = r.engaged ? 22 : mayHold ? 26 : 14;
+    const cav = this.cavThreat(r, reach);
     if (!cav) return this.spearReact(out, r, mayHold);
     const s = this.state(r.id);
     s.lastThreat = this.obs.tick;
@@ -1897,6 +1899,47 @@ export default class Commander extends LegionBase {
       this.send(out, 9, { type: 'brace', id: r.id, facing: f }, '架槍林擋騎兵', 30);
     }
     return true;
+  }
+
+  /**
+   * 對 r 有威脅的敵方騎兵：看得到的，或 30 秒內見過、推估位置在 tiles 格內的；衝鋒中的一律算（30 格內）
+   * @param {Pt} r
+   * @param {number} tiles
+   * @returns {Enemy | null}
+   */
+  cavThreat(r, tiles) {
+    const seen = this.nearestFoe(r, (e) => this.isCav(e.kind) && !e.engaged && (e.dashing === 'charge' || this.gap(r, e) <= tiles), 30);
+    if (seen) return seen;
+    const visible = new Set(this.obs.enemies.map((e) => e.id));
+    /** @type {Enemy | null} */
+    let best = null;
+    let bestD = tiles;
+    for (const e of this.remembered(300)) {
+      if (visible.has(e.id) || !this.isCav(e.kind) || e.engaged || e.routed) continue;
+      const d = this.gap(r, e);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * 掩護守著騎兵方向的長槍：敵方步兵從側面、背面打它時，就近派劍士或盾兵去打那團步兵（長槍不轉向）
+   * @param {Pending[]} out
+   */
+  coverSpears(out) {
+    for (const sp of this.obs.regiments) {
+      if (sp.kind !== 'spear' || sp.routed || !sp.engaged || !this.cavThreat(sp, 22)) continue;
+      const foe = this.nearestFoe(sp, (e) => !this.isCav(e.kind) && e.kind !== 'archer' && !this.inFront(sp, e, 60), 3);
+      if (!foe) continue;
+      const pool = this.obs.regiments.filter((o) => !o.routed && !o.dashing && !this.busyIds.has(o.id) && !this.flagJob.has(o.id) && (o.kind === 'sword' || o.kind === 'shield') && (!o.engaged || this.gap(o, foe) < 2));
+      const best = pool.sort((a, b) => this.dist(a, foe) - this.dist(b, foe))[0];
+      if (!best || this.dist(best, foe) > 18 * TILE) continue;
+      this.busyIds.add(best.id);
+      this.send(out, 8, { type: 'attack', id: best.id, target: foe.id }, `掩護長槍側面：打${this.units[foe.kind].name}`, 20);
+    }
   }
 
   /**
@@ -2288,6 +2331,19 @@ export default class Commander extends LegionBase {
         this.send(out, 6, { type: 'move', id: r.id, x: step.x, y: step.y }, `${name}繞到${this.units[best.kind].name}側背`, 20);
         return;
       }
+    }
+    // 衝鋒冷卻中（或衝不了）：近戰沒人保護的軟目標——弓兵（被貼身拉不開弓）、輕步兵、殘兵，不要在旁邊乾等
+    const prey = this.nearestFoe(r, (e) => {
+      if (this.isCav(e.kind) || e.dashing || this.spearWall(e, r)) return false;
+      const soft = e.kind === 'archer' || e.kind === 'light' || e.men / e.men0 < 0.3 || (e.engaged && !this.inFront(e, r, 70));
+      if (!soft) return false;
+      return !this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'spear' || o.kind === 'shield' || o.kind === 'sword') && this.dist(o, e) < 6 * TILE);
+    }, 16);
+    if (prey) {
+      const step = this.dist(r, prey) > 5000 ? this.safeStep(r, prey, prey.id) : prey;
+      if (step !== prey) this.send(out, 6, { type: 'move', id: r.id, x: step.x, y: step.y }, `${name}繞路去打${this.units[prey.kind].name}`, 15);
+      else this.send(out, 6, { type: 'attack', id: r.id, target: prey.id }, `${name}近戰${this.units[prey.kind].name}`, 20);
+      return;
     }
     if (this.dist(r, rally) > 3000) {
       const step = this.safeStep(r, rally);

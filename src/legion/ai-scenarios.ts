@@ -318,6 +318,47 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     script: (c, t) => (t === 0 ? [{ type: 'hold', id: c.B[0].id }, { type: 'attackMove', id: c.B[1].id, x: c.A[0].x, y: c.A[0].y }] : []),
     judge: (c) => ({ pass: c.m.over && c.m.result().winner === 0, detail: c.m.over ? `${Math.round(c.m.tick / 10)} 秒結束，${c.m.result().winner === 0 ? '找到並打垮' : '沒有獲勝'}` : `時間到還沒找到（弓兵剩 ${pct(c.B[0])}%）` }),
   },
+  {
+    id: 'S14',
+    name: '騎兵衝鋒冷卻中也打軟目標',
+    expect: '重騎兵剛衝過鋒（冷卻 40 秒）：附近有一團沒人保護、正在射我方劍士的弓兵，要直接上去近戰（弓兵被貼身拉不開弓），40 秒內弓兵損失六成以上',
+    bot: [
+      { type: 'heavyCav', x: -9, y: 0, formation: 'wedge' },
+      { type: 'sword', x: -2, y: 12 },
+    ],
+    foe: [{ type: 'archer', x: 6, y: 0 }],
+    ticks: 400,
+    setup: (c) => {
+      c.A[0].skillReadyAt = c.m.tick + 400;
+    },
+    script: (c, t) => (t % 20 === 0 ? [{ type: 'attack', id: c.B[0].id, target: c.A[1].id }] : []),
+    judge: (c) => ({ pass: pct(c.B[0]) <= 40, detail: `敵弓兵剩 ${pct(c.B[0])}%、重騎剩 ${pct(c.A[0])}%` }),
+  },
+  {
+    id: 'S15',
+    name: '不被佯攻騙：長槍守住騎兵的方向',
+    expect: '敵方重騎兵在 20 格外待機，敵方劍士從側面打我方長槍；15 秒後重騎兵衝長槍：長槍不能轉去打劍士而把側背露給騎兵（側面交給友軍），騎兵要撞上槍林正面、剩三成以下，長槍撐住沒被殲滅',
+    bot: [
+      { type: 'spear', x: 0, y: 0, formation: 'square' },
+      { type: 'sword', x: -6, y: 6 },
+      { type: 'archer', x: -9, y: 0 },
+    ],
+    foe: [
+      { type: 'heavyCav', x: 20, y: 0, formation: 'wedge' },
+      { type: 'sword', x: 0, y: -11, facing: 90 },
+    ],
+    ticks: 500,
+    script: (c, t) => {
+      if (t === 0) return [{ type: 'hold', id: c.B[0].id }, { type: 'attack', id: c.B[1].id, target: c.A[0].id }];
+      if (t === 150) return [{ type: 'charge', id: c.B[0].id, x: c.A[0].x, y: c.A[0].y }];
+      return [];
+    },
+    judge: (c) => {
+      const stopped = impacts(c, 1).some((e) => e.braced);
+      const cav = pct(c.B[0]);
+      return { pass: stopped && cav <= 30 && c.A[0].slots.length > 0, detail: `${stopped ? '槍林擋下' : '沒擋下'}、敵重騎剩 ${cav}%、長槍剩 ${pct(c.A[0])}%、敵劍士剩 ${pct(c.B[1])}%` };
+    },
+  },
 ];
 
 /** 情境中心（格）：主戰區 24 × 8 格內全是同高度的平地，而且每一團的位置也都是同高度的平地 */
