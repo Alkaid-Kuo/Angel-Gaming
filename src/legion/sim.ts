@@ -1589,7 +1589,9 @@ export class LegionMatch {
     if (dashing && r.dash!.speed > speed) speed = r.dash!.speed;
     let gx = s.sx;
     let gy = s.sy;
-    const chase = this.chaseRadius(r);
+    let chase = this.chaseRadius(r);
+    // 弓兵被貼身：拉不開弓，上前近戰（站著射箭的弓兵平常不追）
+    if (chase === 0 && r.def.range > 0 && r.nearEnemy && r.dash === null && r.order !== 'move' && r.order !== 'follow' && this.nearestEnemy(s, RULES.ranged.pinned) >= 0) chase = RULES.ranged.pinned;
     if (chase > 0) {
       let t = s.target >= 0 ? this.soldiers[s.target] : null;
       if (t === null || !t.alive || this.tick >= s.nextRetarget) {
@@ -1868,7 +1870,8 @@ export class LegionMatch {
           continue;
         }
       }
-      if (r.def.range > 0 && !r.moved && !r.routed) {
+      // 被貼身的弓兵拉不開弓（近戰在上面已經處理）
+      if (r.def.range > 0 && !r.moved && !r.routed && !(r.nearEnemy && this.nearestEnemy(s, RULES.ranged.pinned) >= 0)) {
         if (r.volley !== null) s.cd = this.volleyShot(s, r);
         else if (r.fireTarget >= 0) s.cd = this.shoot(s, r) ? r.def.cooldown : 3;
       }

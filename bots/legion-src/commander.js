@@ -1004,7 +1004,8 @@ export default class Commander extends LegionBase {
     shields.forEach((r, i) => {
       if (this.busyIds.has(r.id)) return;
       const sp = spears.length > 0 ? spears[i % spears.length] : null;
-      if (sp) this.shieldReact(out, r, sp, sp.formation === 'square' ? 2800 : 2000);
+      // 方陣每排 6 人，剛好站在盾兵各列的空隙，可以貼到 2.45 格；橫陣和盾兵同列，要隔開一點
+      if (sp) this.shieldReact(out, r, sp, sp.formation === 'square' ? 2450 : 1350);
       else this.shieldReact(out, r, archers[i % Math.max(1, n)] || null);
     });
   }

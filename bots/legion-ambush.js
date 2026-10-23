@@ -894,7 +894,7 @@ class LegionBase {
   }
 
   /**
-   * 輕步兵：偵察；敵方弓兵落單、而且打得過（已經在交戰，或人數不少於它的 3/4）就切入；被近戰盯上就退
+   * 輕步兵：偵察；敵方弓兵落單（被貼身的弓兵拉不開弓，近戰很弱）就切入，自己剩不到對方一半人才不打；被近戰盯上就退
    * @param {Pending[]} out
    * @param {Own} r
    * @param {Pt} watch 觀察點
@@ -907,7 +907,7 @@ class LegionBase {
       this.send(out, 8, { type: 'move', id: r.id, x: back.x, y: back.y }, '斥候後撤', 30);
       return true;
     }
-    const prey = this.nearestFoe(r, (e) => e.kind === 'archer' && (e.engaged || r.men >= e.men * 0.75) && !this.foes.some((o) => o !== e && o.kind !== 'archer' && this.dist(o, e) < 6000), 12);
+    const prey = this.nearestFoe(r, (e) => e.kind === 'archer' && (e.engaged || r.men * 2 >= e.men) && !this.foes.some((o) => o !== e && o.kind !== 'archer' && this.dist(o, e) < 6000), 12);
     if (prey) {
       if (r.skillCooldown === 0 && !r.dashing && this.gap(r, prey) > 2) {
         const p = this.predict(prey, 15);
