@@ -72,6 +72,8 @@ export default class Commander extends LegionBase {
     this.raid = false;
     /** 搜敵找到目標後的接戰鎖定（tick）：在這之前打得過就直接打，不再顧慮看不到的敵軍 */
     this.huntLock = -1;
+    /** 正在壓上的對方弓兵陣位置（弓兵龜陣） @type {Pt | null} */
+    this.assaultArchers = null;
     /** 進行中的佯攻 @type {Feint | null} */
     this.feint = null;
     /** 上一次佯攻結束的 tick（隔 20 秒才再發動） */
@@ -274,7 +276,7 @@ export default class Commander extends LegionBase {
     return out.sort((a, b) => b.pts - a.pts);
   }
 
-  /** @param {readonly Own[]} regs */
+  /** @param {readonly Pt[]} regs */
   centroid(regs) {
     if (regs.length === 0) return null;
     return { x: regs.reduce((s, r) => s + r.x, 0) / regs.length, y: regs.reduce((s, r) => s + r.y, 0) / regs.length };
@@ -345,6 +347,15 @@ export default class Commander extends LegionBase {
       const known = this.remembered(600).filter((e) => !e.routed).reduce((t, e) => t + e.men * this.perMan(e.kind), 0);
       const unseen = Math.max(0, this.enemyPts - known);
       const attackEff = (this.ptsOf(main) / Math.max(1, nearPts + unseen * 0.6)) * (eff / Math.max(1e-9, localRatio));
+      // 弓兵龜陣：對方弓兵比我強（站在射程裡對射只會乾耗）。近戰兵力夠就整條戰線壓上去（弓兵被貼身拉不開弓），不夠就退出射程
+      const foeArchers = target.members.filter((e) => e.kind === 'archer' && !e.routed);
+      const foeArcherPts = foeArchers.reduce((t, e) => t + e.men * this.perMan(e.kind), 0);
+      const myArcherPts = archers.reduce((t, r) => t + r.men * this.perMan(r.kind), 0);
+      const outgunned = foeArcherPts >= 40 && foeArcherPts > myArcherPts * 1.2;
+      const cavs = this.obs.regiments.filter((r) => !r.routed && this.isCav(r.kind));
+      const myMelee = this.ptsOf(line) + this.ptsOf(cavs);
+      const terrain = eff / Math.max(1e-9, localRatio);
+      this.assaultArchers = null;
       if (engaged && eff < this.fightEdge * 0.6 && localRatio < 0.65) {
         posture = '收攏';
         const away = this.angle(target, mc);
@@ -363,6 +374,17 @@ export default class Commander extends LegionBase {
         posture = '決戰';
         this.huntLock = this.obs.tick + 200;
         mission = { anchor: this.stepToward(mc, target, 7), facing: face, mode: 'engage', leash: 12, column: wet && this.dist(mc, target) < 20 * TILE };
+      } else if (outgunned && myMelee * terrain >= (target.pts - foeArcherPts) * 1.1) {
+        posture = '決戰';
+        const ac = this.centroid(foeArchers) || target;
+        this.assaultArchers = ac;
+        mission = { anchor: this.stepToward(mc, ac, 8), facing: this.angle(mc, ac), mode: 'engage', leash: 14, column: wet && this.dist(mc, ac) < 20 * TILE };
+      } else if (outgunned) {
+        posture = '收攏';
+        const ac = this.centroid(foeArchers) || target;
+        const away = this.angle(ac, mc);
+        const back = this.landBehind(this.offset(ac, away, this.units.archer.range / TILE + 4), away);
+        mission = { anchor: back, facing: this.angle(back, ac), mode: 'hold', leash: 4, column: false };
       } else if (coming) {
         posture = '迎擊';
         const at = capture ? home : this.dist(mc, home) < 12 * TILE ? home : mc;
@@ -617,7 +639,7 @@ export default class Commander extends LegionBase {
       case '迎擊':
         return '迎擊：戰線站穩，弓兵先射，等敵人上來';
       case '決戰':
-        return '決戰：戰線接敵，騎兵找側背';
+        return this.assaultArchers ? '壓上：對方弓兵比我強，整條戰線貼上去' : '決戰：戰線接敵，騎兵找側背';
       case '收攏':
         return `收攏：兵力不足，退回${capture ? '旗點' : where(this.bp)}重整`;
       case '進攻':
@@ -849,7 +871,7 @@ export default class Commander extends LegionBase {
         if (r.status !== 'idle') this.send(out, 4, { type: 'hold', id: r.id }, '等戰線跟上', 15);
         continue;
       }
-      if (r.kind === 'spear' && this.spearGuard(out, r, m.mode !== 'advance')) continue;
+      if (r.kind === 'spear' && this.spearGuard(out, r, m.mode === 'hold')) continue;
       const t = targets.get(r.id);
       if (t) {
         if (r.kind === 'sword' && this.swordAssault(out, r, t)) continue;
@@ -953,8 +975,9 @@ export default class Commander extends LegionBase {
       if (!this.isCav(cav.kind) || cav.routed || cav.engaged || cav.dashing || cav.skillCooldown > 0 || this.busyIds.has(cav.id) || this.flagJob.has(cav.id)) continue;
       const sp = this.nearestFoe(cav, (e) => e.kind === 'spear' && !e.engaged && e.formation !== 'circle' && (e.status === 'braced' || e.status === 'bracing') && this.inFront(e, cav, 70), 24);
       if (!sp || this.gap(cav, sp) < 5) continue;
-      // 它旁邊還有沒被纏住的長槍：轉過來也還是有槍尖對著我，不值得
+      // 它旁邊還有沒被纏住的長槍（轉過來也還是有槍尖對著我）、或有兩團以上的弓兵掩護（誘餌會被射爛）：不值得
       if (this.foes.some((o) => o !== sp && o.kind === 'spear' && !o.engaged && this.dist(o, sp) < 9 * TILE)) continue;
+      if (this.foes.filter((o) => o.kind === 'archer' && this.dist(o, sp) < 14 * TILE).reduce((t, o) => t + o.men * this.perMan(o.kind), 0) >= 60) continue;
       const bait = this.obs.regiments
         .filter((r) => (r.kind === 'light' || r.kind === 'sword') && !r.routed && !r.engaged && !r.dashing && !this.busyIds.has(r.id) && !this.flagJob.has(r.id) && r.men >= r.men0 * 0.6 && this.dist(r, sp) < 30 * TILE)
         .sort((a, b) => (a.kind === 'sword' ? 0 : 1) - (b.kind === 'sword' ? 0 : 1) || this.dist(a, sp) - this.dist(b, sp))[0];
@@ -1083,7 +1106,7 @@ export default class Commander extends LegionBase {
         if (!this.inFront(e, r, 60)) s += 5;
         if ((r.kind === 'sword' || r.kind === 'light') && this.spearWall(e, r)) s -= 25;
         if (this.shieldWall(e, r)) s -= 10;
-        if (e.kind === 'archer') s += 4;
+        if (e.kind === 'archer') s += this.assaultArchers ? 12 : 4;
         if (r.engaged && d < 1.5) s += 8;
         // 太不划算的對手（例如劍士對槍林正面）：除非已經貼身，不打
         if (s < -14 && !(r.engaged && d < 1.5)) continue;
@@ -1366,7 +1389,8 @@ export default class Commander extends LegionBase {
       if (!e.engaged) {
         const soft = e.kind === 'archer' || e.kind === 'light' || e.men / e.men0 < 0.35;
         const exposedSpear = e.kind === 'spear' && !front && e.formation !== 'circle';
-        const guarded = this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'spear' || o.kind === 'shield' || o.kind === 'sword') && this.dist(o, e) < 8 * TILE && (o.kind !== 'spear' || this.inFront(o, r, 70)));
+        // 盾兵擋不住騎兵，不算保護；長槍要正面對著我才算
+        const guarded = this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'spear' || o.kind === 'sword') && this.dist(o, e) < 8 * TILE && (o.kind !== 'spear' || this.inFront(o, r, 70)));
         if ((!soft && !exposedSpear) || guarded) continue;
       }
       let s = 30 - d;
@@ -1413,7 +1437,7 @@ export default class Commander extends LegionBase {
       if (this.isCav(e.kind) || e.dashing || this.spearWall(e, r)) return false;
       const soft = e.kind === 'archer' || e.kind === 'light' || e.men / e.men0 < 0.3 || (e.engaged && !this.inFront(e, r, 70));
       if (!soft) return false;
-      return !this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'spear' || o.kind === 'shield' || o.kind === 'sword') && this.dist(o, e) < 6 * TILE);
+      return !this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'sword' || (o.kind === 'spear' && this.inFront(o, r, 70))) && this.dist(o, e) < 6 * TILE);
     }, 16);
     if (prey) {
       const step = this.dist(r, prey) > 5000 ? this.safeStep(r, prey, prey.id) : prey;

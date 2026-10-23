@@ -401,6 +401,43 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       return { pass: pct(c.B[0]) <= 50 && pct(c.A[0]) >= 70 && intoFront === 0, detail: `敵長槍剩 ${pct(c.B[0])}%、重騎剩 ${pct(c.A[0])}%、誘餌剩 ${pct(c.A[1])}%、撞上槍林正面 ${intoFront} 次` };
     },
   },
+  {
+    id: 'S17',
+    name: '破弓兵龜陣',
+    expect: '敵方兩團弓兵躲在舉盾的盾兵後面（正面掩護 85%）、中間一團長槍架槍林、後方再一團弓兵，站著不動一直射。不能站在射程裡對射乾耗：要貼上去讓弓兵拉不開弓，或從側面打弓兵。150 秒內敵方弓兵損失七成以上，而且我方損失的點數比對方少',
+    bot: [
+      { type: 'spear', x: -16, y: -5, formation: 'square' },
+      { type: 'spear', x: -16, y: 5, formation: 'square' },
+      { type: 'sword', x: -16, y: -14 },
+      { type: 'sword', x: -16, y: 14 },
+      { type: 'archer', x: -22, y: 0 },
+      { type: 'heavyCav', x: -24, y: 12, formation: 'wedge' },
+      { type: 'light', x: -22, y: -12 },
+    ],
+    foe: [
+      { type: 'archer', x: 11, y: -6 },
+      { type: 'archer', x: 11, y: 6 },
+      { type: 'archer', x: 16, y: 0 },
+      { type: 'shield', x: 8, y: -6, stance: 'raise' },
+      { type: 'shield', x: 8, y: 6, stance: 'raise' },
+      { type: 'spear', x: 7, y: 0, formation: 'square' },
+    ],
+    ticks: 1500,
+    script: (c, t) => {
+      const [a1, a2, a3, s1, s2, sp] = c.B;
+      if (t === 0) return [...[a1, a2, a3, s1, s2].map((r): unknown => ({ type: 'hold', id: r.id })), { type: 'brace', id: sp.id, facing: 180 }];
+      return [];
+    },
+    judge: (c) => {
+      const archers = c.B.slice(0, 3);
+      const left = archers.reduce((t, r) => t + r.slots.length, 0);
+      const total = archers.reduce((t, r) => t + r.men0, 0);
+      const lost = (side: Regiment[]): number => side.reduce((t, r) => t + ((r.men0 - r.slots.length) * r.def.cost) / r.men0, 0);
+      const mine = lost(c.A);
+      const theirs = lost(c.B);
+      return { pass: left <= total * 0.3 && mine < theirs, detail: `敵弓兵剩 ${Math.round((left * 100) / total)}%、我方損失 ${Math.round(mine)} 點、敵方損失 ${Math.round(theirs)} 點` };
+    },
+  },
 ];
 
 /** 情境中心（格）：主戰區 24 × 8 格內全是同高度的平地，而且每一團的位置也都是同高度的平地 */
