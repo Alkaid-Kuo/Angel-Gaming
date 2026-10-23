@@ -28,6 +28,8 @@ const COLORS = ['#3b82f6', '#ef4444'];
 const MAX_STEPS_PER_LOOP = 40;
 /** 「跳到下一場交戰」最多快轉的 tick */
 const SKIP_LIMIT = 900;
+/** 「跳到下一場交戰」至少快轉的 tick */
+const SKIP_MIN = 30;
 
 let setup: LegionSetup | null = null;
 let driver: LegionDriver | null = null;
@@ -201,17 +203,25 @@ function loop(): void {
   if (steps > 0) sendFrame();
 }
 
-/** 快轉到下一個值得看的時刻（接戰、撞擊、埋伏、潰散） */
+/**
+ * 快轉到下一個值得看的時刻：新戰場的接戰（快轉開始時已在交戰的團之間的接觸不算）、衝鋒或突擊撞擊、埋伏、潰散、旗點易手；
+ * 至少快轉 SKIP_MIN tick，避免交戰中按一下只前進一點點
+ */
 function skip(): void {
   if (driver === null) return;
   const m = driver.match;
   const start = m.tick;
+  const busy = new Set(m.regiments.filter((r) => !r.destroyed && m.tick - r.lastMelee <= 10).map((r) => r.id));
   let hit: { x: number; y: number } | null = null;
   const before = m.eventTap;
   m.eventTap = (ev) => {
     before?.(ev);
-    if (hit !== null) return;
-    const id = ev.type === 'contact' ? ev.a : ev.type === 'impact' || ev.type === 'ambush' || ev.type === 'routed' ? ev.reg : -1;
+    if (hit !== null || m.tick - start < SKIP_MIN) return;
+    let id = -1;
+    if (ev.type === 'contact') id = busy.has(ev.a) || busy.has(ev.b) ? -1 : ev.a;
+    else if (ev.type === 'impact') id = ev.kind !== 'infiltrate' && ev.target >= 0 ? ev.reg : -1;
+    else if (ev.type === 'ambush' || ev.type === 'routed') id = ev.reg;
+    else if (ev.type === 'flag') hit = { x: m.flags[ev.flag].x, y: m.flags[ev.flag].y };
     if (id >= 0) hit = { x: m.regiments[id].x, y: m.regiments[id].y };
   };
   while (hit === null && m.tick - start < SKIP_LIMIT && stepOnce());

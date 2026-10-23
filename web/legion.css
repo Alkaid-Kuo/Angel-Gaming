@@ -119,6 +119,12 @@
 .lg-table th, .lg-table td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; white-space: nowrap; }
 .lg-table td:last-child { white-space: normal; }
 
+/* 畫面矮或窄：字幕只留最近 2 則、縮小，不要蓋住地圖 */
+@media (max-width: 900px), (max-height: 700px) {
+  .lg-feed { width: min(380px, calc(100% - 24px)); bottom: 58px; }
+  .lg-feed .cap { font-size: 12px; padding: 3px 8px; }
+  .lg-feed .cap:not(:nth-last-child(-n + 2)) { display: none; }
+}
 @media (max-width: 900px) {
   .lg { grid-template-columns: 1fr; grid-template-rows: 1fr 220px; }
   .lg-side { border-left: none; border-top: 1px solid var(--line); flex-direction: row; overflow-x: auto; }
