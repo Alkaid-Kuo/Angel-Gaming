@@ -76,6 +76,8 @@ function begin(s: LegionSetup): void {
     heights: m.map.heights,
     flags: m.map.flags,
     deploy: m.map.deploy,
+    spawns: m.mode === 'capture' ? m.map.spawns : [],
+    supplies: m.mode === 'capture' ? m.map.supplies : [],
     mode: m.mode,
     timeLimitTicks: m.timeLimitTicks,
     seed: s.seed,
@@ -115,7 +117,7 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
   for (const r of m.regiments) {
     if (r.destroyed) continue;
     let hp = 0;
-    for (const sid of r.slots) hp += m.soldiers[sid].hp;
+    for (const sid of r.reserve ? r.parked : r.slots) hp += m.soldiers[sid].hp;
     let seen = false;
     for (let p = 0; p < m.players.length; p++) if (p !== r.owner && m.visible[p][r.id] === 1) seen = true;
     regs.push({
@@ -123,9 +125,9 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
       x: r.x,
       y: r.y,
       facing: r.facing,
-      men: r.slots.length,
+      men: r.reserve ? r.parked.length : r.slots.length,
       hp,
-      hpMax: Math.floor((r.slots.length * r.def.hp * [100, 110, 120][r.level - 1]) / 100),
+      hpMax: Math.floor(((r.reserve ? r.parked.length : r.slots.length) * r.def.hp * [100, 110, 120][r.level - 1]) / 100),
       status: m.regimentStatus(r),
       order: r.dash !== null ? r.dash.def.kind : r.order,
       level: r.level,
@@ -146,6 +148,8 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
       switchLeft: Math.max(0, r.switchUntil - m.tick),
       skillCd: Math.max(0, r.skillReadyAt - m.tick),
       intent: m.tick - r.intentAt <= 60 ? r.intent : '',
+      reserve: r.reserve,
+      enterIn: r.reserve && r.enterAt >= 0 ? r.enterAt - m.tick : -1,
     });
   }
   const arrows = new Int32Array(m.projectiles.length * 6);

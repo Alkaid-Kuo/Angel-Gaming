@@ -63,6 +63,10 @@ class LegionBase {
     /** 己方視角座標的縮放：程式裡的格座標以 160 × 100 的地圖為準，換到實際地圖 */
     this.sx = 1;
     this.sy = 1;
+    /** 佔點模式：自己的後備（不在場上的團）；觀察資料的 regiments 只留場上的 @type {Own[]} */
+    this.reserves = [];
+    /** 場上沒滿時自動召喚後備（統帥自己管，會關掉） */
+    this.autoReinforce = true;
   }
 
   /**
@@ -258,10 +262,25 @@ class LegionBase {
    */
   deployFrom(entries) {
     this.plan = entries;
-    return entries.map((e) => {
+    /** @type {Deployment[]} */
+    const out = entries.map((e) => {
       const pos = this.deployAt(e);
       return { type: e.type, x: pos.x, y: pos.y, facing: this.face(e.facing || 0), ...(e.width ? { width: e.width } : {}), ...(e.formation ? { formation: e.formation } : {}), ...(e.stance ? { stance: e.stance } : {}) };
     });
+    // 佔點模式：剩下的點數照場上的陣容依序補成後備
+    if (this.data.mode === 'capture' && this.data.capture) {
+      let left = this.data.capture.budget - entries.reduce((t, e) => t + this.units[e.type].cost, 0);
+      for (let i = 0; entries.length > 0 && i < 200; i++) {
+        const e = entries[i % entries.length];
+        if (this.units[e.type].cost > left) {
+          if (entries.every((q) => this.units[q.type].cost > left)) break;
+          continue;
+        }
+        left -= this.units[e.type].cost;
+        out.push({ type: e.type, x: 0, y: 0, reserve: true, ...(e.formation ? { formation: e.formation } : {}) });
+      }
+    }
+    return out;
   }
 
   /**
@@ -270,7 +289,8 @@ class LegionBase {
    * @returns {{ type: UnitKind, role: string }[]}
    */
   buy(wish) {
-    let budget = this.data.budget;
+    // 佔點模式：先買場上的（上限 fieldCap），剩下的點數在 deployFrom 補成後備
+    let budget = this.data.mode === 'capture' && this.data.capture ? this.data.capture.fieldCap : this.data.budget;
     /** @type {{ type: UnitKind, role: string }[]} */
     const out = [];
     for (const [type, role] of wish) {
@@ -285,7 +305,10 @@ class LegionBase {
 
   /** @param {Observation} obs */
   update(obs) {
-    this.obs = obs;
+    // 後備不在場上：另外記，觀察資料只留場上的團（各流派的程式不用管後備）
+    this.reserves = obs.regiments.filter((r) => r.reserve);
+    this.obs = { ...obs, regiments: obs.regiments.filter((r) => !r.reserve) };
+    obs = this.obs;
     if (this.role.size === 0 && obs.regiments.length > 0) {
       /** @type {Set<number>} */
       const used = new Set();
@@ -305,6 +328,11 @@ class LegionBase {
           this.role.set(r.id, this.plan[best].role);
         }
       }
+    }
+    for (const r of obs.regiments) {
+      if (this.role.has(r.id)) continue;
+      const e = this.plan.find((q) => q.type === r.kind);
+      if (e) this.role.set(r.id, e.role);
     }
     // 交戰判定：有團在近戰、或上次決策後我方掉血、或看得到的敵軍掉了人
     const hp = obs.regiments.reduce((t, r) => t + r.hp, 0);
@@ -454,8 +482,20 @@ class LegionBase {
     return !!last && this.obs.tick < last.until;
   }
 
+  /**
+   * 佔點：場上沒滿就從出生點召喚後備（依序，一次一團）
+   * @param {Pending[]} out
+   */
+  reinforce(out) {
+    if (this.data.mode !== 'capture') return;
+    const room = this.obs.fieldCap - this.obs.fieldCost;
+    const r = this.reserves.find((q) => q.enterIn < 0 && this.units[q.kind].cost <= room);
+    if (r) this.send(out, 3, { type: 'summon', id: r.id }, '後備入場', 0);
+  }
+
   /** @param {Pending[]} out */
   flush(out) {
+    if (this.autoReinforce) this.reinforce(out);
     // 同一團只留最高優先的一個指令
     /** @type {Map<number, Pending>} */
     const best = new Map();
@@ -1528,9 +1568,81 @@ export default class Commander extends LegionBase {
 
   // ───────── 戰鬥群 ─────────
 
+  // ───────── 後備（佔點） ─────────
+
+  /**
+   * 召喚後備：場上沒滿時挑陣容最缺的兵種（戰線 4 團、弓兵 2 團、騎兵 1 團、斥候 1 團）
+   * @override
+   * @param {Pending[]} out
+   */
+  reinforce(out) {
+    if (this.data.mode !== 'capture') return;
+    const room = this.obs.fieldCap - this.obs.fieldCost;
+    const ready = this.reserves.filter((q) => q.enterIn < 0 && this.units[q.kind].cost <= room);
+    if (ready.length === 0) return;
+    const best = ready.sort((a, b) => this.need(b.kind) - this.need(a.kind) || b.men - a.men)[0];
+    this.send(out, 3, { type: 'summon', id: best.id }, '後備入場', 0);
+  }
+
+  /**
+   * 陣容缺口：這個兵種還差幾團（越大越缺）
+   * @param {UnitKind} kind
+   */
+  need(kind) {
+    const field = this.obs.regiments.filter((r) => !r.routed && r.men / r.men0 >= 0.4);
+    const n = (/** @type {(k: UnitKind) => boolean} */ f) => field.filter((r) => f(r.kind)).length;
+    if (kind === 'spear' || kind === 'sword') return 4 - n((k) => k === 'spear' || k === 'sword') + (kind === 'sword' ? 0.1 : 0);
+    if (kind === 'archer') return 2 - n((k) => k === 'archer');
+    if (kind === 'shield') return 1 - n((k) => k === 'shield');
+    if (this.isCav(kind)) return 1 - n((k) => this.isCav(k)) + (kind === 'heavyCav' ? 0.1 : 0);
+    return 1 - n((k) => k === 'light');
+  }
+
+  /** 自己可以換兵的地點：出生點、佔著的橋的補給站 */
+  depots() {
+    /** @type {Pt[]} */
+    const out = [this.data.map.spawns[this.p]];
+    for (const su of this.data.map.supplies) if (this.flags[su.flag]?.owner === this.p) out.push(su);
+    return out;
+  }
+
+  /**
+   * 輪替：場上滿了、有後備可換時，把剩不到四成、沒在交戰的團帶到最近的出生點或補給站換掉（同時最多兩團）
+   * @param {Pending[]} out
+   */
+  rotate(out) {
+    if (this.data.mode !== 'capture' || this.reserves.every((q) => q.enterIn >= 0)) return;
+    const cap = this.data.capture;
+    const going = this.obs.regiments.filter((r) => this.state(r.id).rotating === 1);
+    const weak = this.obs.regiments.filter((r) => !r.engaged && !r.dashing && r.men / r.men0 < 0.4 && this.state(r.id).rotating !== 1).sort((a, b) => a.men / a.men0 - b.men / b.men0);
+    for (const r of weak) {
+      if (going.length >= 2) break;
+      this.state(r.id).rotating = 1;
+      going.push(r);
+    }
+    for (const r of going) {
+      if (r.routed) continue;
+      this.busyIds.add(r.id);
+      const dep = this.depots().sort((a, b) => this.dist(a, r) - this.dist(b, r))[0];
+      const rad = dep === this.data.map.spawns[this.p] ? cap.spawnRadius : cap.supplyRadius;
+      if (this.dist(r, dep) > rad * 0.7) {
+        const step = this.safeStep(r, dep);
+        this.send(out, 6, { type: 'move', id: r.id, x: step.x, y: step.y }, '殘兵回去換兵', 20);
+        continue;
+      }
+      // 到了：換成最缺的後備；換不了（點數）就直接撤回
+      const room = this.obs.fieldCap - this.obs.fieldCost + this.units[r.kind].cost;
+      const sub = this.reserves.filter((q) => q.enterIn < 0 && this.units[q.kind].cost <= room).sort((a, b) => this.need(b.kind) - this.need(a.kind) || b.men - a.men)[0];
+      this.state(r.id).rotating = 0;
+      if (sub) this.send(out, 9, { type: 'swap', id: r.id, with: sub.id }, `換上${this.units[sub.kind].name}`, 0);
+      else this.send(out, 9, { type: 'withdraw', id: r.id }, '撤回後備休整', 0);
+    }
+  }
+
   /** @param {Pending[]} out */
   control(out) {
-    const regs = this.obs.regiments.filter((r) => !r.routed);
+    this.rotate(out);
+    const regs = this.obs.regiments.filter((r) => !r.routed && !this.busyIds.has(r.id));
     const archers = regs.filter((r) => r.kind === 'archer');
     this.guard(out, archers);
     this.garrison(out);
@@ -1880,21 +1992,54 @@ export default class Commander extends LegionBase {
       const side = i % 2 === 0 ? 1 : -1;
       const rally = this.landBehind(this.offset(this.offset(lineC, m.facing + 90 * side, 14), m.facing + 180, 6), m.facing + 180);
       if (this.data.mode === 'capture' && this.posture !== '決戰' && !r.dashing) {
-        // 回防：己方的旗被小股敵軍騷擾（附近沒有敵方主力）
-        const mine = this.flags.find((f) => f.owner === this.p && f.contested && f !== this.mainFlag);
+        // 回防：己方的旗被小股敵軍騷擾（附近沒有敵方主力）；處理完 20 秒內守在旗旁（黏著期）
+        const st = this.state(r.id);
+        const sticky = this.flags.find((f) => f.id === st.guardFlag && this.obs.tick < (st.guardUntil || 0) && f.owner === this.p);
+        const mine = this.flags.find((f) => f.owner === this.p && f.contested && f !== this.mainFlag) || sticky;
         if (mine && (!r.engaged || this.dist(r, mine) < this.data.capture.radius + 3 * TILE)) {
+          if (mine.contested) {
+            st.guardFlag = mine.id;
+            st.guardUntil = this.obs.tick + 200;
+          }
           const raiders = this.foes.filter((e) => this.dist(e, mine) < this.data.capture.radius + 3 * TILE);
           const pts = raiders.reduce((t, e) => t + e.men * this.perMan(e.kind), 0);
           // 看不到是誰在偷（旗點被爭奪是公開資訊）：也派騎兵去看
           if (pts <= r.men * this.perMan(r.kind) * 1.3 && !raiders.some((e) => e.kind === 'spear')) {
-            // 先站進圈內擋住對方的佔領進度，再打
-            if (this.dist(r, mine) > this.data.capture.radius * 0.6) {
+            // 衝鋒好了、跟偷旗的拉開了距離：直接衝穿它（不管在不在圈內）
+            const first = raiders.slice().sort((a, b) => this.dist(a, r) - this.dist(b, r))[0];
+            if (first && r.skillCooldown === 0 && !r.engaged && this.gap(r, first) >= 2.5 && this.gap(r, first) <= 18) {
+              const p = this.predict(first, 8);
+              const through = this.offset(p, this.angle(r, p), 4);
+              this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `衝鋒趕走偷${mine.name}的`, 20);
+              return;
+            }
+            // 先進到圈內（中心離旗 4.5 格內，士兵都在圈裡）擋住對方的佔領進度，再打
+            if (this.dist(r, mine) > this.data.capture.radius - 500) {
               const step = this.safeStep(r, mine);
               this.send(out, 6, { type: 'move', id: r.id, x: step.x, y: step.y }, `回防${mine.name}`, 20);
             } else {
-              // 在圈內：直接近戰纏住偷旗的（不繞側背、不衝穿出圈）
+              // 在圈內：騎兵靠衝鋒殺人，不要站著肉搏。衝鋒好了就直接衝穿偷旗的（太近先拉開）；
+              // 冷卻中：人數佔優才近戰，否則站在圈內離它最遠的一側，維持爭奪讓它佔不下來
               const raider = raiders.sort((a, b) => this.dist(a, r) - this.dist(b, r))[0];
-              if (raider) this.send(out, 6, { type: 'attack', id: r.id, target: raider.id }, `趕走偷${mine.name}的${this.units[raider.kind].name}`, 20);
+              if (raider) {
+                const gap = this.gap(r, raider);
+                const away = this.angle(raider, r);
+                if (r.skillCooldown === 0) {
+                  if (gap >= 2.5 && !r.engaged) {
+                    const p = this.predict(raider, 8);
+                    const through = this.offset(p, this.angle(r, p), 4);
+                    this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `衝鋒趕走偷${mine.name}的`, 20);
+                  } else {
+                    const back = this.landBehind(this.offset(r, away, 8), away);
+                    this.send(out, 8, { type: 'move', id: r.id, x: back.x, y: back.y }, '拉開距離再衝', 15);
+                  }
+                } else if (r.men * this.perMan(r.kind) >= pts * 1.3) {
+                  this.send(out, 6, { type: 'attack', id: r.id, target: raider.id }, `趕走偷${mine.name}的${this.units[raider.kind].name}`, 20);
+                } else {
+                  const hover = this.landBehind(this.offset(mine, away, 3.5), away);
+                  if (this.dist(r, hover) > 1500) this.send(out, 6, { type: 'move', id: r.id, x: hover.x, y: hover.y }, `在${mine.name}圈內牽制`, 15);
+                }
+              } else if (r.status !== 'idle' && !r.engaged) this.send(out, 3, { type: 'hold', id: r.id }, `守住${mine.name}`, 20);
             }
             return;
           }
@@ -1915,7 +2060,9 @@ export default class Commander extends LegionBase {
             return;
           }
           const mf = this.mainFlag;
-          const post = this.landBehind(mf ? this.offset(near, this.angle(near, mf), 8) : near, this.face(180));
+          // 兩座橋都是我的：待在中央後方（到兩座橋一樣近，哪邊被偷都來得及）；否則守在己方的橋往中央 8 格
+          const both = far0 && far0.owner === this.p;
+          const post = this.landBehind(mf && both ? this.offset(mf, this.face(180), 10) : mf ? this.offset(near, this.angle(near, mf), 8) : near, this.face(180));
           this.hammer(out, r, post);
           return;
         }

@@ -161,8 +161,15 @@ export interface Regiment {
   /** 突擊接觸後可以擠進敵陣到這個 tick */
   penetrateUntil: number;
   volley: { x: number; y: number; until: number } | null;
+  /** v0.3 起拿掉潰散：一律 false（保留欄位相容舊程式） */
   routed: boolean;
   destroyed: boolean;
+  /** 佔點模式：在後備（不在場上，士兵暫存在 parked）；排定入場的 tick（-1 = 沒有）與入場位置 */
+  reserve: boolean;
+  parked: number[];
+  enterAt: number;
+  enterX: number;
+  enterY: number;
   level: number;
   dmgDealt: number;
   revealedUntil: number;
@@ -363,7 +370,11 @@ export class LegionMatch {
     const zone = this.map.deploy[p];
     const base = this.soldiers.length;
     const regBase = this.regiments.length;
+    const capture = this.mode === 'capture';
+    const budget = capture ? RULES.capture.budget : RULES.budget;
+    const cap = capture ? RULES.capture.fieldCap : RULES.budget;
     let spent = 0;
+    let onField = 0;
     const placed: Regiment[] = [];
     raw.forEach((d: unknown, i) => {
       if (typeof d !== 'object' || d === null) return reject(i, '不是物件');
@@ -371,7 +382,23 @@ export class LegionMatch {
       const kind = o.type as UnitKind;
       if (!UNIT_KINDS.includes(kind)) return reject(i, `沒有兵種 ${String(o.type)}`);
       const def = UNITS[kind];
-      if (spent + def.cost > RULES.budget) return reject(i, `點數超過 ${RULES.budget}`);
+      if (spent + def.cost > budget) return reject(i, `點數超過 ${budget}`);
+      // 後備：佔點模式才有；自己標成後備、或場上已經超過上限的
+      if (o.reserve === true && !capture) return reject(i, '只有佔點模式有後備');
+      if (capture && (o.reserve === true || onField + def.cost > cap)) {
+        const formation = typeof o.formation === 'string' && def.formations.includes(o.formation as FormationKind) ? (o.formation as FormationKind) : def.formations[0];
+        const sp = this.map.spawns[p];
+        const reg = this.newRegiment(p, kind, sp.x, sp.y, p === 0 ? 0 : 180, this.regiments.length - regBase, formation, null);
+        reg.reserve = true;
+        spent += def.cost;
+        this.regiments.push(reg);
+        for (let k = 0; k < def.men; k++) {
+          const id = this.soldiers.length;
+          this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x: sp.x, y: sp.y, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: false, ord: k, sx: sp.x, sy: sp.y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0 });
+          reg.parked.push(id);
+        }
+        return undefined;
+      }
       if (typeof o.x !== 'number' || typeof o.y !== 'number' || !Number.isFinite(o.x) || !Number.isFinite(o.y)) return reject(i, '座標不合法');
       const x = roundHalfEven(o.x);
       const y = roundHalfEven(o.y);
@@ -389,6 +416,7 @@ export class LegionMatch {
         if (d2 < lim * lim) return reject(i, `與第 ${placed.indexOf(q)} 個軍團重疊`);
       }
       spent += def.cost;
+      onField += def.cost;
       placed.push(reg);
       this.regiments.push(reg);
       for (let k = 0; k < def.men; k++) {
@@ -463,6 +491,11 @@ export class LegionMatch {
       volley: null,
       routed: false,
       destroyed: false,
+      reserve: false,
+      parked: [],
+      enterAt: -1,
+      enterX: x,
+      enterY: y,
       level: 1,
       dmgDealt: 0,
       revealedUntil: -1,
@@ -510,6 +543,7 @@ export class LegionMatch {
   }
 
   regimentStatus(r: Regiment): RegimentStatus {
+    if (r.reserve) return r.enterAt >= 0 ? 'entering' : 'reserve';
     if (r.routed) return 'routed';
     if (r.dash !== null) return r.dash.def.kind === 'charge' ? 'charging' : r.dash.def.kind === 'assault' ? 'assaulting' : 'infiltrating';
     if (r.brace === 1) return 'bracing';
@@ -541,6 +575,15 @@ export class LegionMatch {
     const enemies: EnemyRegiment[] = [];
     for (const r of this.regiments) {
       if (r.destroyed) continue;
+      if (r.reserve) {
+        if (r.owner !== p) continue;
+        let hp = 0;
+        for (const sid of r.parked) hp += this.soldiers[sid].hp;
+        const x = r.enterAt >= 0 ? r.enterX : this.map.spawns[p].x;
+        const y = r.enterAt >= 0 ? r.enterY : this.map.spawns[p].y;
+        regiments.push({ id: r.id, kind: r.kind, x, y, facing: r.facing, width: r.formation === 'square' ? r.shape.files : r.width, formation: r.formation, stance: r.stance, men: r.parked.length, men0: r.men0, hp, hpMax: this.hpMaxOf(r, r.parked.length), status: this.regimentStatus(r), order: 'idle', target: null, level: r.level, engaged: false, skillCooldown: 0, dashing: null, down: 0, routed: false, terrain: this.terrainAt(x, y), height: this.heightOf(x, y), radius: r.rad, reserve: true, enterIn: r.enterAt >= 0 ? r.enterAt - this.tick : -1 });
+        continue;
+      }
       if (r.owner === p) {
         let hp = 0;
         let down = 0;
@@ -561,7 +604,7 @@ export class LegionMatch {
           men: r.slots.length,
           men0: r.men0,
           hp,
-          hpMax: idiv(r.slots.length * r.def.hp * RULES.veteran.levels[r.level - 1].hp, 100),
+          hpMax: this.hpMaxOf(r, r.slots.length),
           status: this.regimentStatus(r),
           order: r.dash !== null ? r.dash.def.kind : r.order,
           target: r.target >= 0 ? r.target : null,
@@ -574,6 +617,8 @@ export class LegionMatch {
           terrain: this.terrainAt(r.x, r.y),
           height: this.heightOf(r.x, r.y),
           radius: r.rad,
+          reserve: false,
+          enterIn: -1,
         });
       } else if (this.visible[p][r.id] === 1) {
         enemies.push({
@@ -608,8 +653,27 @@ export class LegionMatch {
       enemies,
       flags: this.flags.map((f): FlagState => ({ id: f.id, name: f.name, x: f.x, y: f.y, owner: f.owner, capturer: f.capturer, progress: f.progress, contested: f.contested, points: f.points })),
       score: this.players.map((q) => this.scoreOf(q.id)),
+      fieldCost: this.fieldCost(p),
+      fieldCap: this.mode === 'capture' ? RULES.capture.fieldCap : RULES.budget,
       events,
     };
+  }
+
+  /** n 人時的血量上限（含老兵加成） */
+  private hpMaxOf(r: Regiment, n: number): number {
+    return idiv(n * r.def.hp * RULES.veteran.levels[r.level - 1].hp, 100);
+  }
+
+  /** 場上（含準備入場中）的點數：算全額 */
+  fieldCost(p: number): number {
+    let c = 0;
+    for (const r of this.regiments) if (r.owner === p && !r.destroyed && (!r.reserve || r.enterAt >= 0)) c += r.def.cost;
+    return c;
+  }
+
+  /** 不在場上：已覆滅或在後備（含準備入場中） */
+  private gone(r: Regiment): boolean {
+    return r.destroyed || r.reserve;
   }
 
   // ───────── 指令 ─────────
@@ -633,6 +697,159 @@ export class LegionMatch {
     }
   }
 
+  // ───────── 後備（佔點模式） ─────────
+
+  /** r 所在的出生點（-1）或自己的補給站 id；都不在就是 null */
+  private depotOf(r: Regiment): number | null {
+    const sp = this.map.spawns[r.owner];
+    const sr = RULES.capture.spawnRadius;
+    if ((r.x - sp.x) * (r.x - sp.x) + (r.y - sp.y) * (r.y - sp.y) <= sr * sr) return -1;
+    const rr = RULES.capture.supplyRadius;
+    for (let i = 0; i < this.map.supplies.length; i++) {
+      const su = this.map.supplies[i];
+      if (this.flags[su.flag]?.owner !== r.owner) continue;
+      if ((r.x - su.x) * (r.x - su.x) + (r.y - su.y) * (r.y - su.y) <= rr * rr) return i;
+    }
+    return null;
+  }
+
+  private reserveCommand(p: number, r: Regiment, type: string, c: Record<string, unknown>): void {
+    if (this.mode !== 'capture') return this.rejectCmd(p, type, '只有佔點模式有後備');
+    const cap = RULES.capture.fieldCap;
+    if (type === 'summon') {
+      if (!r.reserve || r.enterAt >= 0) return this.rejectCmd(p, type, '不是待命的後備');
+      if (this.fieldCost(p) + r.def.cost > cap) return this.rejectCmd(p, type, `場上超過 ${cap} 點，要在出生點或補給站換兵`);
+      const sp = this.map.spawns[p];
+      const [x, y] = this.freeSpot(p, sp.x, sp.y, r);
+      this.scheduleEnter(r, x, y);
+      return;
+    }
+    // swap、withdraw：場上的團要在出生點或自己的補給站，而且沒在交戰、沒在衝刺
+    if (r.reserve) return this.rejectCmd(p, type, '在後備');
+    const at = this.depotOf(r);
+    if (at === null) return this.rejectCmd(p, type, '不在出生點或自己的補給站');
+    if (this.tick - r.lastMelee <= 30 || r.dash !== null) return this.rejectCmd(p, type, '交戰中不能撤回');
+    if (type === 'swap') {
+      const w = typeof c.with === 'number' ? this.regiments[c.with] : undefined;
+      if (w === undefined || w.owner !== p || w.destroyed || !w.reserve || w.enterAt >= 0) return this.rejectCmd(p, type, '要換上的不是待命的後備');
+      if (this.fieldCost(p) - r.def.cost + w.def.cost > cap) return this.rejectCmd(p, type, `換上後超過 ${cap} 點`);
+      const x = r.x;
+      const y = r.y;
+      this.withdraw(r, at);
+      this.scheduleEnter(w, x, y);
+      return;
+    }
+    this.withdraw(r, at);
+  }
+
+  /** 撤回後備：血量補滿、人數不變 */
+  private withdraw(r: Regiment, at: number): void {
+    const full = idiv(r.def.hp * RULES.veteran.levels[r.level - 1].hp, 100);
+    for (const sid of r.slots) {
+      const so = this.soldiers[sid];
+      so.hp = full;
+      so.alive = false;
+    }
+    r.parked = r.slots;
+    r.slots = [];
+    r.reserve = true;
+    r.enterAt = -1;
+    this.resetOrders(r);
+    this.emit({ type: 'withdraw', tick: this.tick, reg: r.id, at });
+  }
+
+  private scheduleEnter(r: Regiment, x: number, y: number): void {
+    r.enterAt = this.tick + RULES.capture.enterTicks;
+    r.enterX = x;
+    r.enterY = y;
+  }
+
+  private resetOrders(r: Regiment): void {
+    r.order = 'idle';
+    r.target = -1;
+    r.fireTarget = -1;
+    r.followId = -1;
+    r.brace = 0;
+    r.wall = 0;
+    r.volley = null;
+    r.pending = null;
+    r.queued = null;
+    r.path = [];
+    r.tFacing = -1;
+    r.lastMelee = -1000;
+  }
+
+  /** 入場位置：從 (x, y) 開始往兩側找，避開自己場上與準備入場的團 */
+  private freeSpot(p: number, x: number, y: number, me: Regiment): [number, number] {
+    const offsets = [0, 8, -8, 16, -16, 24, -24, 32, -32];
+    for (const oy of offsets) {
+      for (const ox of [0, p === 0 ? 7 : -7]) {
+        const cx = x + ox * TILE;
+        const cy = y + (p === 0 ? oy : -oy) * TILE;
+        if (cy < TILE || cy > this.map.height * TILE - TILE || !walkable(this.terrainAt(cx, cy))) continue;
+        let ok = true;
+        for (const o of this.regiments) {
+          if (o === me || o.owner !== p || o.destroyed || (o.reserve && o.enterAt < 0)) continue;
+          const qx = o.reserve ? o.enterX : o.x;
+          const qy = o.reserve ? o.enterY : o.y;
+          const lim = o.rad + me.rad;
+          if ((qx - cx) * (qx - cx) + (qy - cy) * (qy - cy) < lim * lim) ok = false;
+        }
+        if (ok) return [cx, cy];
+      }
+    }
+    return [x, y];
+  }
+
+  /** 準備好的後備入場；出生點、自己的補給站裡沒受傷一陣子的團回血 */
+  private stepReserves(): void {
+    for (const r of this.regiments) {
+      if (r.destroyed || !r.reserve || r.enterAt < 0 || this.tick < r.enterAt) continue;
+      r.reserve = false;
+      r.enterAt = -1;
+      r.x = r.enterX;
+      r.y = r.enterY;
+      r.px = r.x;
+      r.py = r.y;
+      r.facing = r.owner === 0 ? 0 : 180;
+      r.pf = r.facing;
+      r.tx = r.x;
+      r.ty = r.y;
+      r.slots = r.parked;
+      r.parked = [];
+      this.resetOrders(r);
+      r.slots.forEach((sid, i) => {
+        const so = this.soldiers[sid];
+        so.alive = true;
+        so.ord = i;
+        so.cd = 0;
+        so.target = -1;
+        so.downUntil = -1;
+        so.dashing = false;
+        so.mom = 0;
+        so.struck = [];
+      });
+      this.layout(r, true);
+      for (const sid of r.slots) {
+        const so = this.soldiers[sid];
+        so.x = so.sx;
+        so.y = so.sy;
+      }
+      const at = this.depotOf(r);
+      this.emit({ type: 'enter', tick: this.tick, reg: r.id, at: at ?? -1 });
+    }
+    if (this.tick % TPS !== 0) return;
+    for (const r of this.regiments) {
+      if (this.gone(r) || this.tick - r.lastHit <= RULES.capture.healQuietTicks || this.depotOf(r) === null) continue;
+      const full = idiv(r.def.hp * RULES.veteran.levels[r.level - 1].hp, 100);
+      const add = Math.max(1, idiv(full * RULES.capture.healPct, 100));
+      for (const sid of r.slots) {
+        const so = this.soldiers[sid];
+        so.hp = Math.min(full, so.hp + add);
+      }
+    }
+  }
+
   private rejectCmd(p: number, cmd: string, reason: string): void {
     this.emit({ type: 'rejected', tick: this.tick, player: p, command: cmd, reason });
   }
@@ -648,6 +865,8 @@ export class LegionMatch {
       r.intent = c.intent.slice(0, RULES.intentMax);
       r.intentAt = this.tick;
     }
+    if (type === 'summon' || type === 'swap' || type === 'withdraw') return this.reserveCommand(p, r, type, c);
+    if (r.reserve) return this.rejectCmd(p, type, '在後備，要先入場');
     const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? roundHalfEven(v) : null);
     // 衝刺中：只接受微調方向，其他指令等衝完再執行
     if (r.dash !== null) {
@@ -663,7 +882,7 @@ export class LegionMatch {
     const enemy = (): Regiment | null => {
       const t = num(c.target);
       const tr = t === null ? undefined : this.regiments[t];
-      if (tr === undefined || tr.owner === p || tr.destroyed || this.visible[p][tr.id] !== 1) return null;
+      if (tr === undefined || tr.owner === p || this.gone(tr) || this.visible[p][tr.id] !== 1) return null;
       return tr;
     };
     // 槍林、盾牆中：先收起，收完再執行（槍林、盾兵姿態、陣形、意圖例外）
@@ -723,7 +942,7 @@ export class LegionMatch {
       case 'follow': {
         const t = num(c.target);
         const tr = t === null ? undefined : this.regiments[t];
-        if (tr === undefined || tr.owner !== p || tr.destroyed || tr.id === r.id) return this.rejectCmd(p, type, '跟隨的對象必須是自己的另一團');
+        if (tr === undefined || tr.owner !== p || this.gone(tr) || tr.id === r.id) return this.rejectCmd(p, type, '跟隨的對象必須是自己的另一團');
         r.order = 'follow';
         r.followId = tr.id;
         r.followFwd = num(c.forward) ?? 0;
@@ -910,8 +1129,9 @@ export class LegionMatch {
       r.py = r.y;
       r.pf = r.facing;
     }
-    for (const r of this.regiments) if (!r.destroyed) this.think(r);
-    for (const r of this.regiments) if (!r.destroyed) this.layout(r, false);
+    if (this.mode === 'capture') this.stepReserves();
+    for (const r of this.regiments) if (!this.gone(r)) this.think(r);
+    for (const r of this.regiments) if (!this.gone(r)) this.layout(r, false);
     this.computeNear();
     this.grid.build(this.soldiers);
     const sol = this.soldiers;
@@ -948,7 +1168,7 @@ export class LegionMatch {
 
   private alive(id: number): Regiment | null {
     const r = id >= 0 ? this.regiments[id] : undefined;
-    return r === undefined || r.destroyed ? null : r;
+    return r === undefined || this.gone(r) ? null : r;
   }
 
   /** 平常的移動速度（盾兵依姿態） */
@@ -1217,7 +1437,7 @@ export class LegionMatch {
     let best = -1;
     let bestD = Infinity;
     for (const t of this.regiments) {
-      if (t.destroyed || t.owner === r.owner || this.visible[r.owner][t.id] !== 1) continue;
+      if (this.gone(t) || t.owner === r.owner || this.visible[r.owner][t.id] !== 1) continue;
       const lim = r.def.range > 0 ? this.rangeTo(r, t.px, t.py) : range;
       const d = isqrt((t.px - r.x) * (t.px - r.x) + (t.py - r.y) * (t.py - r.y)) - idiv(t.rad, 2);
       if (d <= lim && d < bestD) {
@@ -1300,10 +1520,10 @@ export class LegionMatch {
     for (const r of regs) r.nearEnemy = false;
     for (let i = 0; i < regs.length; i++) {
       const a = regs[i];
-      if (a.destroyed) continue;
+      if (this.gone(a)) continue;
       for (let j = i + 1; j < regs.length; j++) {
         const b = regs[j];
-        if (b.destroyed || b.owner === a.owner) continue;
+        if (this.gone(b) || b.owner === a.owner) continue;
         const lim = a.rad + b.rad + 4000;
         if ((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) <= lim * lim) {
           a.nearEnemy = true;
@@ -1540,7 +1760,7 @@ export class LegionMatch {
   /** 有舉盾或盾牆的友軍盾兵罩著（不疊加） */
   private shieldedBy(e: Soldier): boolean {
     for (const sh of this.regiments) {
-      if (sh.destroyed || sh.routed || sh.kind !== 'shield' || sh.owner !== e.owner) continue;
+      if (this.gone(sh) || sh.routed || sh.kind !== 'shield' || sh.owner !== e.owner) continue;
       if (sh.stance !== 'raise' && sh.wall !== 2) continue;
       const lim = sh.rad + RULES.shield.auraRange;
       if ((sh.x - e.x) * (sh.x - e.x) + (sh.y - e.y) * (sh.y - e.y) <= lim * lim) return true;
@@ -1863,7 +2083,7 @@ export class LegionMatch {
   private cleanup(): void {
     const lvls = RULES.veteran.levels;
     for (const r of this.regiments) {
-      if (r.destroyed) continue;
+      if (this.gone(r)) continue;
       // 補位：死者的位置由最後一位補上
       const slots = r.slots;
       let dirty = false;
@@ -1901,22 +2121,6 @@ export class LegionMatch {
         this.emit({ type: 'destroyed', tick: this.tick, reg: r.id, escaped: r.escaped > 0 });
         continue;
       }
-      if (!r.routed && r.slots.length * 100 < r.men0 * RULES.routPercent) {
-        if (r.dash !== null) this.endDash(r);
-        r.routed = true;
-        r.order = 'idle';
-        r.target = -1;
-        r.fireTarget = -1;
-        r.brace = 0;
-        r.wall = 0;
-        r.volley = null;
-        r.pending = null;
-        r.queued = null;
-        r.path = [];
-        r.tFacing = -1;
-        if (r.formation === 'circle') r.formation = r.def.formations[0] === 'circle' ? 'line' : r.def.formations[0];
-        this.emit({ type: 'routed', tick: this.tick, reg: r.id });
-      }
       // 老兵升級
       while (r.level < lvls.length && r.dmgDealt * 100 >= r.men0 * r.def.hp * lvls[r.level].threshold) {
         const before = lvls[r.level - 1].hp;
@@ -1939,17 +2143,17 @@ export class LegionMatch {
       const vis = this.visible[p];
       for (const t of this.regiments) {
         if (t.owner === p) {
-          vis[t.id] = t.destroyed ? 0 : 1;
+          vis[t.id] = this.gone(t) ? 0 : 1;
           continue;
         }
-        if (t.destroyed) {
+        if (this.gone(t)) {
           vis[t.id] = 0;
           continue;
         }
         const conc = this.concealed(t);
         let v = 0;
         for (const o of this.regiments) {
-          if (o.owner !== p || o.destroyed) continue;
+          if (o.owner !== p || this.gone(o)) continue;
           const d = isqrt((o.x - t.x) * (o.x - t.x) + (o.y - t.y) * (o.y - t.y));
           if (conc) {
             const det = o.kind === 'light' ? RULES.vision.concealDetectLight : RULES.vision.concealDetect;
@@ -1964,7 +2168,7 @@ export class LegionMatch {
       }
     }
     for (const r of this.regiments) {
-      if (r.destroyed) continue;
+      if (this.gone(r)) continue;
       let seen = false;
       for (let p = 0; p < this.players.length; p++) if (p !== r.owner && this.visible[p][r.id] === 1) seen = true;
       if (!seen) r.spottedSince = -1;
@@ -2035,8 +2239,8 @@ export class LegionMatch {
   strength(p: number): number {
     let s = 0;
     for (const r of this.regiments) {
-      if (r.owner !== p || r.destroyed || r.routed) continue;
-      s += idiv(r.def.cost * 100 * r.slots.length, r.men0);
+      if (r.owner !== p || r.destroyed) continue;
+      s += idiv(r.def.cost * 100 * (r.reserve ? r.parked.length : r.slots.length), r.men0);
     }
     return s;
   }
@@ -2052,7 +2256,7 @@ export class LegionMatch {
     const n = this.players.length;
     for (const p of this.players) {
       p.active = false;
-      for (const r of this.regiments) if (r.owner === p.id && !r.destroyed && !r.routed) p.active = true;
+      for (const r of this.regiments) if (r.owner === p.id && !r.destroyed) p.active = true;
     }
     const strength = this.players.map((p) => this.strength(p.id));
     const flagsHeld = this.players.map((p) => this.flagsHeld(p.id));
@@ -2061,7 +2265,6 @@ export class LegionMatch {
       this.over = true;
       this.resultValue = { winner, reason, durationTicks: this.tick, strength, flagsHeld, score };
     };
-    for (const p of this.players) if (p.active && strength[p.id] < p.cost * RULES.collapsePercent) p.active = false;
     const active = this.players.filter((p) => p.active);
     if (active.length < n) {
       finish(active.length === 1 ? active[0].id : null, 'annihilation');
@@ -2118,6 +2321,8 @@ export class LegionMatch {
       case 'skill':
         return mineOrSeen(ev.reg);
       case 'levelUp':
+      case 'enter':
+      case 'withdraw':
         return this.regiments[ev.reg]?.owner === p;
       case 'flag':
         return true;
@@ -2135,7 +2340,7 @@ export class LegionMatch {
     for (const r of this.regiments) {
       h.int(r.x).int(r.y).int(r.facing).str(r.formation).int(r.width).int(r.depth).int(r.switchUntil).int(r.corridor).int(r.slots.length).int(r.target).int(r.fireTarget);
       h.int(r.brace).int(r.braceTimer).int(r.wall).int(r.wallTimer).str(r.stance ?? '').int(r.skillReadyAt).int(r.penetrateUntil).int(r.level).int(r.dmgDealt);
-      h.bool(r.routed).bool(r.destroyed).int(r.revealedUntil).int(r.spottedSince).int(r.lastHidden).str(r.order).int(r.followId);
+      h.bool(r.routed).bool(r.destroyed).bool(r.reserve).int(r.enterAt).int(r.enterX).int(r.enterY).int(r.parked.length).int(r.revealedUntil).int(r.spottedSince).int(r.lastHidden).str(r.order).int(r.followId);
       if (r.dash !== null) h.int(r.dash.dir).int(r.dash.left).int(r.dash.speed).int(r.dash.boost).bool(r.dash.aligning);
       if (r.volley !== null) h.int(r.volley.x).int(r.volley.y).int(r.volley.until);
     }
@@ -2152,7 +2357,7 @@ export function legionInitData(m: LegionMap, mode: LegionMode, p: number, knobs:
     playerId: p,
     mode,
     knobs,
-    budget: RULES.budget,
+    budget: mode === 'capture' ? RULES.capture.budget : RULES.budget,
     timeLimitTicks,
     ticksPerSecond: 10,
     decisionInterval: RULES.decisionInterval,
@@ -2167,8 +2372,21 @@ export function legionInitData(m: LegionMap, mode: LegionMode, p: number, knobs:
       heights: Array.from(m.heights),
       deploy: m.deploy.map((z) => ({ x0: z.x0, y0: z.y0, x1: z.x1, y1: z.y1 })),
       flags: m.flags.map((f, i) => ({ id: i, name: f.name, x: f.x, y: f.y, points: f.points })),
+      spawns: m.spawns.map((q) => ({ x: q.x, y: q.y })),
+      supplies: m.supplies.map((q, i) => ({ id: i, x: q.x, y: q.y, flag: q.flag })),
     },
-    capture: { radius: RULES.capture.radius, captureTicks: RULES.capture.captureTicks, scoreTarget: RULES.capture.scoreTarget },
+    capture: {
+      radius: RULES.capture.radius,
+      captureTicks: RULES.capture.captureTicks,
+      scoreTarget: RULES.capture.scoreTarget,
+      budget: RULES.capture.budget,
+      fieldCap: RULES.capture.fieldCap,
+      enterTicks: RULES.capture.enterTicks,
+      spawnRadius: RULES.capture.spawnRadius,
+      supplyRadius: RULES.capture.supplyRadius,
+      healPct: RULES.capture.healPct,
+      healQuietTicks: RULES.capture.healQuietTicks,
+    },
     units: UNIT_KINDS.map((k) => {
       const u = UNITS[k];
       const d = dashDefOf(k);

@@ -42,6 +42,9 @@ export interface LegionMeta {
   /** 旗點（佔點模式）：points = 佔領後每秒得幾分 */
   readonly flags: readonly { readonly name: string; readonly x: number; readonly y: number; readonly points: number }[];
   readonly deploy: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
+  /** 佔點模式：依 playerId 的出生點、補給站（歸 flag 那面旗的佔領者） */
+  readonly spawns: readonly { readonly x: number; readonly y: number }[];
+  readonly supplies: readonly { readonly x: number; readonly y: number; readonly flag: number }[];
   readonly mode: LegionMode;
   readonly timeLimitTicks: number;
   readonly seed: number;
@@ -88,6 +91,9 @@ export interface RegFrame {
   readonly skillCd: number;
   /** AI 意圖（最近 6 秒內下的） */
   readonly intent: string;
+  /** 佔點模式：在後備（不畫在地圖上）；還要幾個 tick 入場（-1 = 沒有排定） */
+  readonly reserve: boolean;
+  readonly enterIn: number;
 }
 
 export interface Caption {

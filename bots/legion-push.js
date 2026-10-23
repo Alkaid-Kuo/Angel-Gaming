@@ -58,6 +58,10 @@ class LegionBase {
     /** 己方視角座標的縮放：程式裡的格座標以 160 × 100 的地圖為準，換到實際地圖 */
     this.sx = 1;
     this.sy = 1;
+    /** 佔點模式：自己的後備（不在場上的團）；觀察資料的 regiments 只留場上的 @type {Own[]} */
+    this.reserves = [];
+    /** 場上沒滿時自動召喚後備（統帥自己管，會關掉） */
+    this.autoReinforce = true;
   }
 
   /**
@@ -253,10 +257,25 @@ class LegionBase {
    */
   deployFrom(entries) {
     this.plan = entries;
-    return entries.map((e) => {
+    /** @type {Deployment[]} */
+    const out = entries.map((e) => {
       const pos = this.deployAt(e);
       return { type: e.type, x: pos.x, y: pos.y, facing: this.face(e.facing || 0), ...(e.width ? { width: e.width } : {}), ...(e.formation ? { formation: e.formation } : {}), ...(e.stance ? { stance: e.stance } : {}) };
     });
+    // 佔點模式：剩下的點數照場上的陣容依序補成後備
+    if (this.data.mode === 'capture' && this.data.capture) {
+      let left = this.data.capture.budget - entries.reduce((t, e) => t + this.units[e.type].cost, 0);
+      for (let i = 0; entries.length > 0 && i < 200; i++) {
+        const e = entries[i % entries.length];
+        if (this.units[e.type].cost > left) {
+          if (entries.every((q) => this.units[q.type].cost > left)) break;
+          continue;
+        }
+        left -= this.units[e.type].cost;
+        out.push({ type: e.type, x: 0, y: 0, reserve: true, ...(e.formation ? { formation: e.formation } : {}) });
+      }
+    }
+    return out;
   }
 
   /**
@@ -265,7 +284,8 @@ class LegionBase {
    * @returns {{ type: UnitKind, role: string }[]}
    */
   buy(wish) {
-    let budget = this.data.budget;
+    // 佔點模式：先買場上的（上限 fieldCap），剩下的點數在 deployFrom 補成後備
+    let budget = this.data.mode === 'capture' && this.data.capture ? this.data.capture.fieldCap : this.data.budget;
     /** @type {{ type: UnitKind, role: string }[]} */
     const out = [];
     for (const [type, role] of wish) {
@@ -280,7 +300,10 @@ class LegionBase {
 
   /** @param {Observation} obs */
   update(obs) {
-    this.obs = obs;
+    // 後備不在場上：另外記，觀察資料只留場上的團（各流派的程式不用管後備）
+    this.reserves = obs.regiments.filter((r) => r.reserve);
+    this.obs = { ...obs, regiments: obs.regiments.filter((r) => !r.reserve) };
+    obs = this.obs;
     if (this.role.size === 0 && obs.regiments.length > 0) {
       /** @type {Set<number>} */
       const used = new Set();
@@ -300,6 +323,11 @@ class LegionBase {
           this.role.set(r.id, this.plan[best].role);
         }
       }
+    }
+    for (const r of obs.regiments) {
+      if (this.role.has(r.id)) continue;
+      const e = this.plan.find((q) => q.type === r.kind);
+      if (e) this.role.set(r.id, e.role);
     }
     // 交戰判定：有團在近戰、或上次決策後我方掉血、或看得到的敵軍掉了人
     const hp = obs.regiments.reduce((t, r) => t + r.hp, 0);
@@ -449,8 +477,20 @@ class LegionBase {
     return !!last && this.obs.tick < last.until;
   }
 
+  /**
+   * 佔點：場上沒滿就從出生點召喚後備（依序，一次一團）
+   * @param {Pending[]} out
+   */
+  reinforce(out) {
+    if (this.data.mode !== 'capture') return;
+    const room = this.obs.fieldCap - this.obs.fieldCost;
+    const r = this.reserves.find((q) => q.enterIn < 0 && this.units[q.kind].cost <= room);
+    if (r) this.send(out, 3, { type: 'summon', id: r.id }, '後備入場', 0);
+  }
+
   /** @param {Pending[]} out */
   flush(out) {
+    if (this.autoReinforce) this.reinforce(out);
     // 同一團只留最高優先的一個指令
     /** @type {Map<number, Pending>} */
     const best = new Map();

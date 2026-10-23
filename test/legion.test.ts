@@ -149,25 +149,18 @@ describe('軍團戰：戰鬥規則', () => {
     expect(m.flankOf(a, side)).toBe('side');
   });
 
-  it('殘兵：人數低於 20% 就潰散、不能再指揮、往己方後方撤離', () => {
-    // 0 號有兩團：只有一團潰散時比賽還沒結束
-    const { m, events } = match(
-      [
-        { type: 'spear', x: 15000, y: 50000 },
-        { type: 'spear', x: 15000, y: 30000 },
-      ],
-      [{ type: 'spear', x: 145000, y: 50000 }],
-    );
+  it('沒有潰散、沒有全軍潰敗：只剩幾個人也照常指揮，比賽要打光才結束', () => {
+    const { m, events } = match([{ type: 'spear', x: 15000, y: 50000 }], [{ type: 'spear', x: 145000, y: 50000 }]);
     const r = m.regiments[0];
-    for (const sid of r.slots.slice(0, 33)) m.soldiers[sid].alive = false;
+    for (const sid of r.slots.slice(0, 38)) m.soldiers[sid].alive = false;
     run(m, 1);
-    expect(r.routed).toBe(true);
-    expect(events.some((e) => e.type === 'routed' && e.reg === 0)).toBe(true);
-    m.applyCommands(0, [{ type: 'move', id: 0, x: 80000, y: 50000 }]);
-    expect(m.observe(0).events.some((e) => e.type === 'rejected' && e.reason.includes('潰散'))).toBe(true);
+    expect(r.routed).toBe(false);
+    expect(m.over).toBe(false);
+    expect(events.some((e) => e.type === 'routed')).toBe(false);
+    m.applyCommands(0, [{ type: 'move', id: 0, x: 40000, y: 50000 }]);
     const x0 = r.x;
     run(m, 30);
-    expect(r.x).toBeLessThan(x0);
+    expect(r.x).toBeGreaterThan(x0);
   });
 
   it('老兵：累積傷害達門檻升級，血量上限提高', () => {
@@ -274,6 +267,84 @@ describe('軍團戰：戰鬥規則', () => {
       run(m, 20);
       expect(f.contested).toBe(false);
       expect(m.scoreOf(1)).toBe(2);
+    });
+
+    it('後備：總點數 1500、場上最多 500（超過的自動轉後備）；後備不在場上、看得到自己的後備', () => {
+      const sw = (n: number): object[] => Array.from({ length: n }, (_, i) => ({ type: 'sword', x: 10000, y: 10000 + i * 12000 }));
+      // 9 團劍士 540 點：前 8 團 480 點上場，第 9 團超過上限轉後備；再加兩團標成後備
+      const m = new LegionMatch({ seed: 7, mode: 'capture', deployments: [[...sw(9), { type: 'archer', reserve: true }, { type: 'heavyCav', reserve: true }], [{ type: 'spear', x: G.width * 1000 - 10000, y: 20000 }]] });
+      const mine = m.regiments.filter((r) => r.owner === 0);
+      expect(mine.length).toBe(11);
+      expect(mine.filter((r) => r.reserve).map((r) => r.kind)).toEqual(['sword', 'archer', 'heavyCav']);
+      expect(m.fieldCost(0)).toBe(480);
+      expect(m.strength(0)).toBe((540 + 55 + 80) * 100);
+      const obs = m.observe(0);
+      expect(obs.fieldCap).toBe(C.fieldCap);
+      expect(obs.regiments.filter((r) => r.reserve).length).toBe(3);
+      expect(m.observe(1).enemies.some((e) => mine.find((r) => r.id === e.id)?.reserve)).toBe(false);
+    });
+
+    it('後備入場：場上沒滿可以從出生點召喚（準備 10 秒）；滿了就被拒絕', () => {
+      const m = new LegionMatch({ seed: 7, mode: 'capture', deployments: [[{ type: 'sword', x: 10000, y: 20000 }, { type: 'heavyCav', reserve: true }, { type: 'sword', reserve: true }], [{ type: 'spear', x: G.width * 1000 - 10000, y: 20000 }]] });
+      const [, cav, sword2] = m.regiments.filter((r) => r.owner === 0);
+      m.applyCommands(0, [{ type: 'summon', id: cav.id }]);
+      expect(m.fieldCost(0)).toBe(140);
+      run(m, C.enterTicks - 1);
+      expect(cav.reserve).toBe(true);
+      run(m, 2);
+      expect(cav.reserve).toBe(false);
+      expect(cav.slots.length).toBe(12);
+      const sp = G.spawns[0];
+      expect(Math.abs(cav.x - sp.x) + Math.abs(cav.y - sp.y)).toBeLessThan(C.spawnRadius * 2);
+      // 場上已經 480 點：再召喚一團 60 點的劍士會超過 500，被拒絕
+      const fill = new LegionMatch({ seed: 7, mode: 'capture', deployments: [[...Array.from({ length: 8 }, (_, i) => ({ type: 'sword', x: 10000, y: 8000 + i * 13000 })), { type: 'sword', reserve: true }], [{ type: 'spear', x: G.width * 1000 - 10000, y: 20000 }]] });
+      const extra = fill.regiments.find((r) => r.owner === 0 && r.reserve)!;
+      fill.applyCommands(0, [{ type: 'summon', id: extra.id }]);
+      expect(extra.enterAt).toBe(-1);
+      expect(fill.observe(0).events.some((e) => e.type === 'rejected' && e.command === 'summon')).toBe(true);
+      expect(sword2.reserve).toBe(true);
+    });
+
+    it('換兵：在出生點或自己的補給站換下一團（血量補滿、人數不變），換上的在原地準備入場；沒佔那座橋就不能用它的補給站', () => {
+      const m = new LegionMatch({ seed: 7, mode: 'capture', deployments: [[{ type: 'sword', x: 10000, y: 20000 }, { type: 'spear', reserve: true }], [{ type: 'spear', x: G.width * 1000 - 10000, y: 20000 }]] });
+      const [sw, sp] = m.regiments.filter((r) => r.owner === 0);
+      for (const sid of sw.slots.slice(0, 10)) m.soldiers[sid].alive = false;
+      for (const sid of sw.slots) m.soldiers[sid].hp = 300;
+      run(m, 1);
+      // 不在出生點、補給站：不能換
+      m.applyCommands(0, [{ type: 'swap', id: sw.id, with: sp.id }]);
+      expect(sw.reserve).toBe(false);
+      // 南橋的補給站：南橋不是我的就不能用
+      const su = G.supplies[1];
+      teleport(m, sw, su.x, su.y);
+      m.applyCommands(0, [{ type: 'swap', id: sw.id, with: sp.id }]);
+      expect(sw.reserve).toBe(false);
+      m.flags[su.flag].owner = 0;
+      m.applyCommands(0, [{ type: 'swap', id: sw.id, with: sp.id }]);
+      expect(sw.reserve).toBe(true);
+      expect(sw.parked.length).toBe(20);
+      expect(sw.parked.every((sid) => m.soldiers[sid].hp === UNITS.sword.hp)).toBe(true);
+      run(m, C.enterTicks + 1);
+      expect(sp.reserve).toBe(false);
+      expect(Math.abs(sp.x - su.x) + Math.abs(sp.y - su.y)).toBeLessThan(C.supplyRadius * 2);
+      // 撤回的那團之後也能再召喚（人數不變）
+      m.applyCommands(0, [{ type: 'summon', id: sw.id }]);
+      run(m, C.enterTicks + 1);
+      expect(sw.reserve).toBe(false);
+      expect(sw.slots.length).toBe(20);
+    });
+
+    it('回血：在出生點、沒受傷一陣子的團每秒回血（不超過上限，人數不變）', () => {
+      const { m, a } = setup();
+      const sp = G.spawns[0];
+      teleport(m, a, sp.x, sp.y);
+      for (const sid of a.slots) m.soldiers[sid].hp = 500;
+      run(m, 30);
+      const hp = m.soldiers[a.slots[0]].hp;
+      expect(hp).toBeGreaterThan(500);
+      expect(hp).toBeLessThanOrEqual(UNITS.spear.hp);
+      run(m, 600);
+      expect(m.soldiers[a.slots[0]].hp).toBe(UNITS.spear.hp);
     });
 
     it('先到目標分獲勝', () => {

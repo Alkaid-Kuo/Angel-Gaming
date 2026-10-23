@@ -20,6 +20,13 @@ export interface FlagPoint {
   readonly y: number;
 }
 
+/** 補給站：歸 flag 那面旗的佔領者使用 */
+export interface SupplyPoint {
+  readonly x: number;
+  readonly y: number;
+  readonly flag: number;
+}
+
 export interface CaptureFlag extends FlagPoint {
   /** 佔領後每秒得幾分 */
   readonly points: number;
@@ -39,6 +46,10 @@ export interface LegionMap {
   /** 潰散時撤離的地圖邊緣（單位 x 座標）：依 playerId */
   readonly rearX: readonly number[];
   readonly flags: readonly CaptureFlag[];
+  /** 依 playerId：出生點（佔點模式的後備從這裡入場），單位座標 */
+  readonly spawns: readonly { readonly x: number; readonly y: number }[];
+  /** 補給站（佔點模式） */
+  readonly supplies: readonly SupplyPoint[];
   /** 地標（解說用的地名），單位座標 */
   readonly landmarks: readonly FlagPoint[];
   /** 不可通行格 → 最近的可通行格（可通行格對應自己） */
@@ -209,6 +220,11 @@ export function riverValley(): LegionMap {
       { x0: w - depth, y0: 0, x1: w, y1: h },
     ],
     rearX: [0, w * TILE],
+    spawns: [
+      { x: 10000, y: (h * TILE) / 2 },
+      { x: w * TILE - 10000, y: (h * TILE) / 2 },
+    ],
+    supplies: [],
     flags: [
       { name: '西南高地', x: 64500, y: 59500, points: 1 },
       { name: '中央淺灘', x: 80000, y: 50000, points: 2 },
@@ -304,6 +320,15 @@ export function grandValley(): LegionMap {
       { x0: w - depth, y0: 0, x1: w, y1: h },
     ],
     rearX: [0, W],
+    spawns: [
+      { x: 10000, y: H / 2 },
+      { x: W - 10000, y: H / 2 },
+    ],
+    // 補給站：各座橋的旗往東（北橋）、往西（南橋）9 格的岸上，歸佔著那座橋的一方
+    supplies: [
+      { x: north.x + 9000, y: north.y, flag: 0 },
+      { x: W - north.x - 9000, y: H - north.y, flag: 2 },
+    ],
     flags: [
       { name: '北橋', x: north.x, y: north.y, points: 1 },
       { name: '中央淺灘', x: W / 2, y: H / 2, points: 2 },

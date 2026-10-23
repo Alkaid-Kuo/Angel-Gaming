@@ -259,7 +259,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'S11',
     name: '佔點：旗被偷襲要回防',
-    expect: '三面旗都是我方的，敵方輕步兵摸進北橋：要派兵趕走，90 秒後北橋還是我方的、被爭奪不超過 30 秒',
+    expect: '三面旗都是我方的，敵方輕步兵從北橋東邊 24 格外摸過來：要派兵趕走，90 秒後北橋還是我方的、被爭奪不超過 30 秒',
     mode: 'capture',
     abs: true,
     bot: [
@@ -269,7 +269,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       { type: 'archer', x: 105, y: 75 },
       { type: 'spear', x: 110, y: 120 },
     ],
-    foe: [{ type: 'light', x: 136, y: 27 }],
+    foe: [{ type: 'light', x: 150, y: 27 }],
     ticks: 900,
     setup: (c) => {
       for (const f of c.m.flags) f.owner = 0;

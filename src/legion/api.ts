@@ -62,9 +62,26 @@ export interface LegionInitData {
     readonly deploy: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
     /** 旗點（佔點模式）：points = 佔領後每秒得幾分 */
     readonly flags: readonly { readonly id: number; readonly name: string; readonly x: number; readonly y: number; readonly points: number }[];
+    /** 依 playerId 的出生點；補給站（歸 flag 那面旗的佔領者） */
+    readonly spawns: readonly { readonly x: number; readonly y: number }[];
+    readonly supplies: readonly { readonly id: number; readonly x: number; readonly y: number; readonly flag: number }[];
   };
-  /** 佔點規則：圈的半徑（單位）、從零佔滿要幾個 tick、目標分數 */
-  readonly capture: { readonly radius: number; readonly captureTicks: number; readonly scoreTarget: number };
+  /**
+   * 佔點規則：圈的半徑（單位）、從零佔滿要幾個 tick、目標分數；
+   * 後備：總點數 budget、場上上限 fieldCap（算全額點數）、入場準備 enterTicks、出生點與補給站範圍、回血（每秒 healPct %，受傷後 healQuietTicks 內不回）
+   */
+  readonly capture: {
+    readonly radius: number;
+    readonly captureTicks: number;
+    readonly scoreTarget: number;
+    readonly budget: number;
+    readonly fieldCap: number;
+    readonly enterTicks: number;
+    readonly spawnRadius: number;
+    readonly supplyRadius: number;
+    readonly healPct: number;
+    readonly healQuietTicks: number;
+  };
   readonly units: readonly UnitInfo[];
   /** 相剋加成（百分比）：versus[攻擊方][目標] */
   readonly versus: Readonly<Record<string, Readonly<Record<string, number>>>>;
@@ -81,6 +98,8 @@ export interface Deployment {
   readonly formation?: FormationKind;
   /** 盾兵姿態（持盾或舉盾） */
   readonly stance?: ShieldStance;
+  /** 佔點模式：放在後備（不用給位置）。場上超過上限的也會自動轉成後備 */
+  readonly reserve?: boolean;
 }
 
 export type RegimentStatus =
@@ -98,6 +117,10 @@ export type RegimentStatus =
   | 'walled'
   | 'reforming'
   | 'volleying'
+  /** 佔點模式：在後備、準備入場中 */
+  | 'reserve'
+  | 'entering'
+  /** v0.3 起拿掉潰散，不會再出現 */
   | 'routed';
 
 export interface OwnRegiment {
@@ -133,6 +156,9 @@ export interface OwnRegiment {
   readonly height: number;
   /** 半徑（單位）：中心到最遠士兵 */
   readonly radius: number;
+  /** 佔點模式：在後備（不在場上；位置是出生點）；還要幾個 tick 入場（-1 = 沒有排定） */
+  readonly reserve: boolean;
+  readonly enterIn: number;
 }
 
 export interface EnemyRegiment {
@@ -186,6 +212,9 @@ export type LegionEvent =
   | { readonly type: 'skill'; readonly tick: number; readonly reg: number; readonly skill: string }
   /** 旗點易手（佔領成功） */
   | { readonly type: 'flag'; readonly tick: number; readonly flag: number; readonly owner: number }
+  /** 佔點模式：後備入場、撤回後備（at = 出生點 -1 或補給站 id） */
+  | { readonly type: 'enter'; readonly tick: number; readonly reg: number; readonly at: number }
+  | { readonly type: 'withdraw'; readonly tick: number; readonly reg: number; readonly at: number }
   | { readonly type: 'rejected'; readonly tick: number; readonly player: number; readonly command: string; readonly reason: string };
 
 export interface LegionObservation {
@@ -198,6 +227,9 @@ export interface LegionObservation {
   readonly flags: readonly FlagState[];
   /** 依 playerId：佔點分數（佔點模式；殲滅戰都是 0） */
   readonly score: readonly number[];
+  /** 自己場上的點數（含準備入場中的，算全額）與上限 */
+  readonly fieldCost: number;
+  readonly fieldCap: number;
   /** 自上次決策後與自己有關的事件 */
   readonly events: readonly LegionEvent[];
 }
@@ -230,6 +262,12 @@ export type LegionCommand =
   | (Base & { readonly type: 'volley'; readonly x: number; readonly y: number })
   | (Base & DashAim & { readonly type: 'charge' | 'assault' | 'infiltrate' })
   | (Base & { readonly type: 'steer'; readonly facing: number })
+  /** 佔點模式：後備從出生點入場（場上點數 + 它 ≤ 上限）；入場要準備 enterTicks */
+  | (Base & { readonly type: 'summon' })
+  /** 佔點模式：場上的這一團在出生點或自己的補給站，換成後備的 with（撤回的血量補滿、人數不變；with 在原地準備入場） */
+  | (Base & { readonly type: 'swap'; readonly with: number })
+  /** 佔點模式：在出生點或自己的補給站撤回後備 */
+  | (Base & { readonly type: 'withdraw' })
   /** 整體戰略意圖（不對某一團；最多 30 字，觀戰畫面顯示在計分條；不佔指令額度） */
   | { readonly type: 'plan'; readonly text: string };
 

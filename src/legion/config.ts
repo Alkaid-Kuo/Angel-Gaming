@@ -241,9 +241,6 @@ export const RULES = {
   backStep: 3000,
   /** 新的移動指令與目前目的地相距這個距離內，視為同一個目的地（單位） */
   sameGoal: 1500,
-  routPercent: 20,
-  /** 全軍潰敗（原型新增，待確認） */
-  collapsePercent: 20,
   ambushHiddenTicks: 80,
   ambushTicks: 50,
   routSpeed: 110,
@@ -263,6 +260,16 @@ export const RULES = {
     captureTicks: 15 * TPS,
     scoreTarget: 400,
     timeLimitTicks: 8 * 60 * TPS,
+    /** 後備兵力（規格書 v0.3）：總點數、場上同時最多幾點（算全額點數）；後備入場要準備幾個 tick */
+    budget: 1500,
+    fieldCap: 500,
+    enterTicks: 10 * TPS,
+    /** 出生點、補給站的範圍（單位）：範圍內可以換兵、撤回後備，沒受傷一陣子會回血 */
+    spawnRadius: 8000,
+    supplyRadius: 6000,
+    /** 回血：每秒補單兵血量上限的幾 %；最近 quietTicks 內受過傷就不回 */
+    healPct: 2,
+    healQuietTicks: 5 * TPS,
   },
 } as const;
 

@@ -251,6 +251,8 @@ export class LegionRenderer {
   private corpses: Corpse[] = [];
   private trails = new Map<number, Trail>();
   private regById = new Map<number, RegFrame>();
+  /** 在場上的軍團（不含後備） */
+  private field: RegFrame[] = [];
   private prevRegById = new Map<number, RegFrame>();
   private kindOf: UnitKind[];
   private ownerOf: number[];
@@ -302,9 +304,10 @@ export class LegionRenderer {
     this.prevRegById = this.regById;
     this.cur = f;
     this.regById = new Map(f.regs.map((r) => [r.id, r]));
+    this.field = f.regs.filter((r) => !r.reserve);
     for (const ev of f.events) this.effectFor(ev, now);
     // 衝刺軌跡：衝刺中每格記一點；結束後開始淡出
-    for (const r of f.regs) {
+    for (const r of this.field) {
       if (r.dashing === null || r.dash === null || r.dash.aligning) continue;
       let t = this.trails.get(r.id);
       if (t === undefined || t.end > 0) {
@@ -424,7 +427,7 @@ export class LegionRenderer {
   regAt(id: number, alpha: number): { x: number; y: number; facing: number } | null {
     const a = this.prevRegById.get(id);
     const b = this.regById.get(id);
-    if (b === undefined) return null;
+    if (b === undefined || b.reserve) return null;
     if (a === undefined) return { x: b.x, y: b.y, facing: b.facing };
     let df = b.facing - a.facing;
     if (df > 180) df -= 360;
@@ -445,7 +448,7 @@ export class LegionRenderer {
     const w = this.toWorld(px, py);
     let best = -1;
     let bestD = Infinity;
-    for (const r of this.cur.regs) {
+    for (const r of this.field) {
       if (!this.shown(r.id, viewer)) continue;
       const p = this.regAt(r.id, alpha);
       if (p === null) continue;
@@ -483,7 +486,10 @@ export class LegionRenderer {
         ctx.fillRect(this.sx(z.x0 * TILE), this.sy(z.y0 * TILE), (z.x1 - z.x0) * s, (z.y1 - z.y0) * s);
       });
     }
-    if (this.meta.mode === 'capture') this.drawFlags(f, now);
+    if (this.meta.mode === 'capture') {
+      this.drawDepots(f);
+      this.drawFlags(f, now);
+    }
     this.drawCorpses(now);
     this.drawTrails(now, opt);
     this.drawSkills(f, alpha, opt);
@@ -492,6 +498,59 @@ export class LegionRenderer {
     this.drawArrows(f, alpha);
     this.drawBanners(alpha, opt);
     this.drawEffects(now);
+  }
+
+  /** 出生點（隊伍色的帳篷）與補給站（補給十字，顏色＝佔著那座橋的一方，沒人佔是灰色） */
+  private drawDepots(f: LegionFrame): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    const font = getComputedStyle(document.body).fontFamily;
+    const k = Math.max(0.8, s / 8);
+    const mark = (x: number, y: number, radius: number, color: string, fill: string, label: string, icon: 'tent' | 'cross'): void => {
+      ctx.beginPath();
+      ctx.arc(x, y, (radius / TILE) * s, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.setLineDash([2, 4]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const r = 7 * k;
+      ctx.fillStyle = 'rgba(8,12,20,0.85)';
+      ctx.beginPath();
+      ctx.roundRect(x - r, y - r, r * 2, r * 2, 3 * k);
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (icon === 'tent') {
+        ctx.moveTo(x, y - r * 0.65);
+        ctx.lineTo(x + r * 0.7, y + r * 0.55);
+        ctx.lineTo(x - r * 0.7, y + r * 0.55);
+        ctx.closePath();
+      } else {
+        const a = r * 0.22;
+        const b = r * 0.65;
+        ctx.rect(x - a, y - b, a * 2, b * 2);
+        ctx.rect(x - b, y - a, b * 2, a * 2);
+      }
+      ctx.fill();
+      ctx.font = `600 ${Math.round(10 * Math.min(1.3, k))}px ${font}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillText(label, x + 1, y + r + 8 * k + 1);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillText(label, x, y + r + 8 * k);
+    };
+    this.meta.spawns.forEach((sp, p) => mark(this.sx(sp.x), this.sy(sp.y), RULES.capture.spawnRadius, TEAM[p], p === 0 ? 'rgba(59,130,246,0.08)' : 'rgba(239,68,68,0.08)', '出生點', 'tent'));
+    for (const su of this.meta.supplies) {
+      const owner = f.flags[su.flag]?.owner ?? -1;
+      mark(this.sx(su.x), this.sy(su.y), RULES.capture.supplyRadius, owner >= 0 ? TEAM[owner] : '#94a3b8', owner === 0 ? 'rgba(59,130,246,0.08)' : owner === 1 ? 'rgba(239,68,68,0.08)' : 'rgba(148,163,184,0.06)', '補給站', 'cross');
+    }
   }
 
   /** 旗點：圈（佔領者的顏色；被爭奪時黃色閃爍）、佔領進度環（正在佔領的一方的顏色）、旗、名稱與每秒分數 */
@@ -694,7 +753,7 @@ export class LegionRenderer {
   private drawSkills(f: LegionFrame, alpha: number, opt: DrawOptions): void {
     const ctx = this.ctx;
     const s = this.cam.scale;
-    for (const r of f.regs) {
+    for (const r of this.field) {
       if (r.status === 'routed' || !this.shown(r.id, opt.viewer)) continue;
       const p = this.regAt(r.id, alpha);
       if (p === null) continue;
@@ -990,7 +1049,6 @@ export class LegionRenderer {
   }
 
   private drawBanners(alpha: number, opt: DrawOptions): void {
-    const f = this.cur!;
     const ctx = this.ctx;
     const s = this.cam.scale;
     const k = Math.max(0.75, Math.min(1.25, s / 9));
@@ -998,7 +1056,7 @@ export class LegionRenderer {
     const w = 46 * k;
     const h = 15 * k;
     // 先排好每個旗標的位置：與已放好的重疊就往上移，選中的軍團優先
-    const order = [...f.regs].sort((a, b) => (b.id === opt.selected ? 1 : 0) - (a.id === opt.selected ? 1 : 0) || b.y - a.y);
+    const order = [...this.field].sort((a, b) => (b.id === opt.selected ? 1 : 0) - (a.id === opt.selected ? 1 : 0) || b.y - a.y);
     // AI 意圖：放大到一定程度才顯示；滑鼠指著或選中的一律顯示；一方視角只看得到自己的
     const zoomed = opt.showIntent && s >= this.fitScale * 1.6;
     const intentOf = (r: RegFrame): string =>
@@ -1021,7 +1079,7 @@ export class LegionRenderer {
       placed.push([bx, by, bh]);
       spot.set(r.id, [bx, by, by0]);
     }
-    for (const r of f.regs) {
+    for (const r of this.field) {
       const sp = spot.get(r.id);
       if (sp === undefined) continue;
       const p = this.regAt(r.id, alpha)!;

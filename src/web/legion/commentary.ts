@@ -130,6 +130,17 @@ export class LegionCommentator {
         else this.say(t, `${this.name(r.id)} ${dash}撞進 ${target}${flank}，${hit}！`, ev.kills >= 4 || ev.flank !== 'front', r);
         return;
       }
+      case 'enter':
+      case 'withdraw': {
+        const r = reg(ev.reg);
+        if (r === undefined) return;
+        const key = `${r.owner}:${ev.type}`;
+        if (t - (this.lastSkill.get(key) ?? -SKILL_GAP) < SKILL_GAP) return;
+        this.lastSkill.set(key, t);
+        const where = ev.at < 0 ? '出生點' : '補給站';
+        this.say(t, ev.type === 'enter' ? `${this.name(r.id)} 從${where}入場` : `${this.name(r.id)} 在${where}撤回後備休整`, false, r);
+        return;
+      }
       case 'skill': {
         const r = reg(ev.reg);
         if (r === undefined) return;

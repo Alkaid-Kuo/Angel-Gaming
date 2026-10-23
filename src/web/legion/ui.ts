@@ -20,6 +20,8 @@ const STATUS_NAME: Record<RegimentStatus, string> = {
   walled: '盾牆',
   reforming: '換陣形',
   volleying: '齊射',
+  reserve: '後備',
+  entering: '入場準備',
   routed: '潰散',
 };
 const ORDER_NAME: Record<string, string> = { idle: '待命', move: '移動', attackMove: '邊走邊打', attack: '攻擊', hold: '堅守', charge: '衝鋒' };
@@ -402,10 +404,11 @@ export class LegionScreen {
     h.innerHTML = `<div class="lg-helpbox">
       <button class="ghost close" data-act="closeHelp">✕</button>
       <h2>軍團戰怎麼看</h2>
-      <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。計分條下方是 AI 的戰略意圖、旗標下方的小字是各團的意圖（放大時顯示），<kbd>I</kbd> 開關。</p>
+      <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>（佔點模式 ${RULES.capture.budget} 點，場上最多 ${RULES.capture.fieldCap} 點）選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。計分條下方是 AI 的戰略意圖、旗標下方的小字是各團的意圖（放大時顯示），<kbd>I</kbd> 開關。</p>
       <h3>勝利條件</h3>
-      <ul><li><b>殲滅戰</b>：對手全軍陣亡或潰散；剩餘兵力低於開場 ${RULES.collapsePercent}% 視為全軍潰敗。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比剩餘兵力。</li>
-      <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比兵力。</li></ul>
+      <ul><li><b>殲滅戰</b>：打光對手全軍。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比剩餘兵力。</li>
+      <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比兵力（含後備）。</li>
+      <li><b>後備兵力</b>（佔點）：總共 ${RULES.capture.budget} 點，場上同時最多 ${RULES.capture.fieldCap} 點（算全額，不管剩幾人），其餘是後備。場上沒滿時，後備可以從<b>出生點</b>入場（準備 ${RULES.capture.enterTicks / TPS} 秒）；滿了就要把一團帶到出生點或<b>自己的補給站</b>（兩座橋旁，歸佔著那座橋的一方）換下來。撤回的團血量補滿、人數不變；團站在出生點或自己的補給站、${RULES.capture.healQuietTicks / TPS} 秒沒受傷就會回血（每秒 ${RULES.capture.healPct}%）。</li></ul>
       <h3>傷害</h3>
       <ul><li><b>沒有攻擊削弱，只有傷害減免</b>：各兵種有近戰、遠程減免（下表），和姿態、地形、盾兵掩護的減免相乘。</li>
       <li><b>側擊 ×${RULES.flank.side / 100}、背擊 ×${RULES.flank.rear / 100}</b>：看攻擊方在目標陣形的哪一面（旗標旁的小白箭頭是正面；楔形陣正面較窄，圓陣沒有側背）。</li></ul>
@@ -423,7 +426,7 @@ export class LegionScreen {
       <ul><li><b>高度</b>：河 0 階、河岸 1 階、平地 2 階、山丘 3 階、山頂 4 階（地圖上一層層的疊板，滑鼠指著看高度）。${HEIGHT_TIP}；往下衝刺更快更猛、往上變慢。較高的地形與建築擋住視線。</li>
       <li><b>接觸前迷霧</b>：地形公開，但敵軍要進入視野才看得到；<b>樹林中隱蔽</b>，攻擊後曝光 ${sec(RULES.vision.revealTicks)}。</li>
       <li><b>老兵</b>：累積傷害達本團血量的 50%、120% 升級，攻擊與血量 +10%、+20%（旗標上的 ★）。</li>
-      <li><b>殘兵潰散</b>：人數低於 ${RULES.routPercent}% 就失控，往己方後方撤離，只在被近身時反擊；潰散視同陣亡。</li></ul>
+      <li><b>沒有潰散</b>：每一團都打到最後一人；殘兵要不要撤回由 AI 決定。</li></ul>
       <h3>兵種</h3>
       <table class="lg-table"><tr><th>兵種</th><th>點數</th><th>人數</th><th>血量</th><th>攻擊</th><th>射程</th><th>速度（格／秒）</th><th>減免（近／遠）</th><th>招牌技能</th><th>剋制</th></tr>${rows}</table>
       <table class="lg-table">${TERRAIN_NAMES.map((n, i) => (TERRAIN_TIP[i] ? `<tr><td>${n}</td><td>${TERRAIN_TIP[i]}</td></tr>` : '')).join('')}</table>
@@ -523,7 +526,7 @@ export class LegionScreen {
 
   private renderRosters(f: LegionFrame): void {
     const byId = new Map(f.regs.map((r) => [r.id, r]));
-    const sig = f.regs.map((r) => `${r.id}:${r.men}:${r.status}:${r.level}:${r.concealed ? 1 : 0}`).join(',') + `|${this.selected}`;
+    const sig = f.regs.map((r) => `${r.id}:${r.men}:${r.status}:${r.level}:${r.concealed ? 1 : 0}:${Math.ceil(r.enterIn / TPS)}`).join(',') + `|${this.selected}`;
     if (sig === this.rosterSig) return;
     this.rosterSig = sig;
     for (const i of [0, 1]) {
@@ -539,7 +542,7 @@ export class LegionScreen {
             const r = byId.get(s.id);
             const men = r?.men ?? 0;
             const frac = men / s.men0;
-            const st = r === undefined ? '覆滅' : STATUS_NAME[r.status] + (r.concealed ? '・埋伏中' : '');
+            const st = r === undefined ? '覆滅' : r.status === 'entering' ? `入場 ${Math.ceil(r.enterIn / TPS)} 秒` : STATUS_NAME[r.status] + (r.concealed ? '・埋伏中' : '');
             const cls = r === undefined ? 'dead' : r.status === 'routed' ? 'routed' : r.status === 'engaged' || r.dashing !== null ? 'hot' : '';
             return `<div class="rr ${cls}${this.selected === s.id ? ' sel' : ''}" data-reg="${s.id}">
               <span class="ic" style="background:${r === undefined || r.status === 'routed' ? '#475569' : p.color}">${unitSvg(s.kind, 16, '#fff')}</span>
