@@ -106,6 +106,7 @@ const loss = (r: Regiment): number => 100 - Math.round((r.slots.length * 100) / 
 /** 血量損失（％）：箭的傷害分散在很多人身上，人數不一定少 */
 const hpLoss = (m: LegionMatch, r: Regiment): number => 100 - Math.round((r.slots.reduce((s, sid) => s + m.soldiers[sid].hp, 0) * 100) / (r.men0 * r.def.hp));
 const lostPct = (r: Regiment): string => `${loss(r)}%`;
+/** 沒有潰散之後，「崩潰」就是整團被殲滅 */
 const broke = (r: Regiment): boolean => r.routed || r.destroyed;
 
 function brace(r: Run, reg: Regiment, facing: number): void {
@@ -225,7 +226,7 @@ export const SCENARIOS: readonly Scenario[] = [
       brace(r, r.B[0], 180);
       cmd(r, r.A[0], { type: 'assault', facing: 0 });
       run(r, 600, undefined, () => broke(r.A[0]) || broke(r.B[0]));
-      return { pass: broke(r.A[0]) && !broke(r.B[0]), detail: `劍士損失 ${lostPct(r.A[0])}${broke(r.A[0]) ? '（崩潰）' : ''}、長槍損失 ${lostPct(r.B[0])}` };
+      return { pass: broke(r.A[0]) && !broke(r.B[0]), detail: `劍士損失 ${lostPct(r.A[0])}${broke(r.A[0]) ? '（殲滅）' : ''}、長槍損失 ${lostPct(r.B[0])}` };
     },
   },
   {
@@ -239,7 +240,7 @@ export const SCENARIOS: readonly Scenario[] = [
       run(r, 900, undefined, () => broke(r.A[0]) || broke(r.B[0]));
       const a = 100 - loss(r.A[0]);
       const b = 100 - loss(r.B[0]);
-      return { pass: !broke(r.B[0]) && b >= a - 15, detail: `劍士剩 ${a}%${broke(r.A[0]) ? '（崩潰）' : ''}、長槍剩 ${b}%${broke(r.B[0]) ? '（崩潰）' : ''}` };
+      return { pass: !broke(r.B[0]) && b >= a - 15, detail: `劍士剩 ${a}%${broke(r.A[0]) ? '（殲滅）' : ''}、長槍剩 ${b}%${broke(r.B[0]) ? '（殲滅）' : ''}` };
     },
   },
   {
@@ -280,11 +281,11 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     id: '9',
     name: '重騎兵衝劍士背後',
-    expect: '劍士損失 ≥ 50% 並崩潰；重騎損失 < 15%',
+    expect: '劍士損失 ≥ 50% 並被殲滅；重騎損失 < 15%',
     run: () => {
       const r = setup([{ type: 'heavyCav', formation: 'wedge' }], [{ type: 'sword', facing: 'away' }], 16);
       charge(r, r.A[0], 20);
-      return { pass: loss(r.B[0]) >= 50 && broke(r.B[0]) && loss(r.A[0]) < 15, detail: `劍士損失 ${lostPct(r.B[0])}${broke(r.B[0]) ? '（崩潰）' : ''}、重騎損失 ${lostPct(r.A[0])}` };
+      return { pass: loss(r.B[0]) >= 50 && broke(r.B[0]) && loss(r.A[0]) < 15, detail: `劍士損失 ${lostPct(r.B[0])}${broke(r.B[0]) ? '（殲滅）' : ''}、重騎損失 ${lostPct(r.A[0])}` };
     },
   },
   {
@@ -357,7 +358,7 @@ export const SCENARIOS: readonly Scenario[] = [
       const dash = hpLoss(r2.m, r2.A[0]);
       cmd(r2, r2.A[0], { type: 'attackMove', x: r2.B[0].x, y: r2.B[0].y });
       run(r2, 900, undefined, () => broke(r2.A[0]) || broke(r2.B[0]));
-      return { pass: dash * 2 <= Math.max(1, walk) && broke(r2.B[0]), detail: `走過去血量損失 ${walk}%、切入血量損失 ${dash}%；之後弓兵${broke(r2.B[0]) ? '崩潰' : '沒有崩潰'}（輕步兵剩 ${100 - loss(r2.A[0])}%）` };
+      return { pass: dash * 2 <= Math.max(1, walk) && broke(r2.B[0]), detail: `走過去血量損失 ${walk}%、切入血量損失 ${dash}%；之後弓兵${broke(r2.B[0]) ? '被殲滅' : '沒有被殲滅'}（輕步兵剩 ${100 - loss(r2.A[0])}%）` };
     },
   },
   {
