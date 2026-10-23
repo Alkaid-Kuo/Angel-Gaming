@@ -66,7 +66,7 @@ export default class ArrowRain extends LegionBase {
     for (let i = 0; i < (k.archers ?? 4); i++) wish.push(['archer', 'archer']);
     for (let i = 0; i < (k.shields ?? 2); i++) wish.push(['shield', 'shield']);
     wish.push(['heavyCav', 'cav'], ['sword', 'spear'], ['light', 'scout']);
-    const list = this.buy(wish);
+    const list = this.buy(wish, [['archer', 'archer'], ['spear', 'spear']]);
     let ai = 0;
     let si = 0;
     let pi = 0;

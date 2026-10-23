@@ -133,8 +133,13 @@ export class LegionScreen {
     const team = (i: number): string =>
       `<div class="team t${i}"><span class="sw" style="background:${p[i].color}"></span><span class="nm">${esc(p[i].side)}</span><span class="bot">${esc(p[i].bot)}</span></div>`;
     return `<div class="lg">
+  <aside class="lg-side s0">
+    <section class="roster" data-el="roster0"></section>
+    ${player ? `<details class="keys small" open><summary>快捷鍵</summary>${HOTKEYS.map(([k, d]) => `<div><kbd>${k}</kbd> ${d}</div>`).join('')}</details>` : ''}
+  </aside>
   <div class="lg-stage">
     <canvas data-el="canvas" class="lg-canvas"></canvas>
+    <div class="lg-top">
     <div class="lg-bug">
       ${team(0)}
       <div class="bar t0" title="剩餘兵力（點數 × 剩餘人數比例；潰散不算）"><i data-el="bar0" style="background:${p[0].color}"></i><span data-el="pct0"></span></div>
@@ -144,6 +149,8 @@ export class LegionScreen {
     </div>
     <div class="lg-plans"><div class="pl t0" data-el="plan0"></div><div class="pl t1" data-el="plan1"></div></div>
     <div class="lg-big hidden" data-el="big"></div>
+    </div>
+    <section class="detail lg-card hidden" data-el="detail"></section>
     <div class="lg-feed" data-el="feed"></div>
     <div class="lg-tip hidden" data-el="tip"></div>
     <div class="lg-toast hidden" data-el="toast"></div>
@@ -168,11 +175,8 @@ export class LegionScreen {
     <div class="lg-overlay hidden" data-el="result"></div>
     <div class="lg-overlay hidden" data-el="help"></div>
   </div>
-  <aside class="lg-side">
-    <section class="roster" data-el="roster0"></section>
+  <aside class="lg-side s1">
     <section class="roster" data-el="roster1"></section>
-    <section class="detail" data-el="detail"><div class="muted small">${player ? '左鍵選取自己的軍團、右鍵下指令。' : '點地圖上的軍團或名冊查看詳細資訊。滾輪縮放、拖曳平移。'}</div></section>
-    ${player ? `<section class="keys small">${HOTKEYS.map(([k, d]) => `<div><kbd>${k}</kbd> ${d}</div>`).join('')}</section>` : ''}
   </aside>
 </div>`;
   }
@@ -527,8 +531,8 @@ export class LegionScreen {
       <h2>軍團戰怎麼看</h2>
       <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>（佔點模式 ${RULES.capture.budget} 點，場上最多 ${RULES.capture.fieldCap} 點）選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。計分條下方是 AI 的戰略意圖、旗標下方的小字是各團的意圖（放大時顯示），<kbd>I</kbd> 開關。</p>
       <h3>勝利條件</h3>
-      <ul><li><b>殲滅戰</b>：打光對手全軍。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比剩餘兵力。</li>
-      <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比兵力（含後備）。</li>
+      <ul><li><b>殲滅戰</b>：打光對手全軍。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比戰果（擊殺敵兵的點數價值）。</li>
+      <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比戰果。</li>
       <li><b>後備兵力</b>（佔點）：總共 ${RULES.capture.budget} 點，場上同時最多 ${RULES.capture.fieldCap} 點（算全額，不管剩幾人），其餘是後備。場上沒滿時，後備可以從<b>出生點</b>入場（準備 ${RULES.capture.enterTicks / TPS} 秒）；滿了就要把一團帶到出生點或<b>自己的補給站</b>（兩座橋旁，歸佔著那座橋的一方）換下來。撤回的團血量補滿、人數不變；團站在出生點或自己的補給站、${RULES.capture.healQuietTicks / TPS} 秒沒受傷就會回血（每秒 ${RULES.capture.healPct}%）。</li></ul>
       <h3>傷害</h3>
       <ul><li><b>沒有攻擊削弱，只有傷害減免</b>：各兵種有近戰、遠程減免（下表），和姿態、地形、盾兵掩護的減免相乘。</li>
@@ -536,7 +540,8 @@ export class LegionScreen {
       <h3>招牌技能（地圖上的標示）</h3>
       <ul><li><b>槍林</b>（長槍，淡色扇形＋槍尖）：${sec(B.setTicks)}架好，朝指定方向；正面再減免 ${B.frontDR}%、攻速 ×${B.attackSpeed / 100}，正面衝來的敵人越快傷害越高，並擋下任何衝刺；架著時不會被撞倒或推開、不能移動。槍林要厚才擋得住，太薄會被衝穿；圓陣是全方向但效果減半。</li>
       <li><b>突擊</b>（劍士，黃色箭頭）：朝指定方向短衝 ${DASH.assault.dist / TILE} 格擠進敵陣，第一擊 ×${RULES.dash.firstHit / 100}；冷卻 ${sec(DASH.assault.cooldown)}。</li>
-      <li><b>盾兵三種姿態</b>：持盾（正常速度）；舉盾（移動 ×${S.raise.speed / S.carry.speed}，虛線圈內的友軍遠程傷害 −${S.auraDR}%）；盾牆（白色粗線，站定，正面近戰 −${S.wall.meleeDR}%、遠程 −${S.wall.rangedDR}%，完全擋下步兵的突擊與切入，但擋不住騎兵衝鋒）。</li>
+      <li><b>盾兵三種姿態</b>：持盾（正常速度）；舉盾（移動 ×${Math.round((S.raise.speed / S.carry.speed) * 100) / 100}）；盾牆（白色粗線，站定，正面近戰 −${S.wall.meleeDR}%、遠程 −${S.wall.rangedDR}%，完全擋下步兵的突擊與切入，但擋不住騎兵衝鋒）。</li>
+      <li><b>盾兵掩護區</b>（盾兵正後方的虛線長方形，往後 ${S.cover.depth / TILE} 格）：友軍站在裡面，從盾兵正面來的攻擊就減免——持盾遠程 −${S.cover.carry.rangedDR}%；舉盾遠程 −${S.cover.raise.rangedDR}%、近戰 −${S.cover.raise.meleeDR}%；盾牆遠程 −${S.cover.wall.rangedDR}%、近戰 −${S.cover.wall.meleeDR}%。從側面打進來的不算。長槍可以越過盾兵刺人。</li>
       <li><b>齊射</b>（弓兵，落點圈）：對半徑 ${RULES.volley.radius / TILE} 格的區域密集射擊 ${sec(RULES.volley.duration)}（射速 ×${RULES.volley.rateDiv}），箭可以越過友軍；冷卻 ${sec(RULES.volley.cooldown)}。</li>
       <li><b>切入</b>（輕步兵，綠色箭頭）：快速衝進敵陣亂戰，途中只有 ${RULES.evadeHitChance}% 的箭射得中；冷卻 ${sec(DASH.infiltrate.cooldown)}。</li>
       <li><b>衝鋒</b>（騎兵，橘色箭頭與軌跡）：助跑 ${DASH.heavyCav.runup / TILE} 格後高速直衝，撞擊傷害另算，撞到沒死的會被擊倒 ${sec(RULES.knockdownTicks)}（倒地的士兵橫躺、頭上冒星星）。輕騎兵衝 ${DASH.lightCav.dist / TILE} 格、轉向較靈活，受到重擊會被打斷；重騎兵衝 ${DASH.heavyCav.dist / TILE} 格、幾乎不能轉彎、衝鋒中霸體。樹林、淺灘、牆擋得住衝鋒。冷卻 ${sec(DASH.lightCav.cooldown)}／${sec(DASH.heavyCav.cooldown)}。</li>
@@ -667,9 +672,7 @@ export class LegionScreen {
         return x !== undefined && x.status !== 'routed';
       }).length;
       const cnt = ps >= 0 && i !== ps ? `看得到 ${regs.length} 團` : `${alive}/${all.length} 團`;
-      this.el[`roster${i}`].innerHTML = `<h3 style="border-color:${p.color}"><span class="sw" style="background:${p.color}"></span>${esc(p.side)}<span class="bot">${esc(p.bot)}</span><span class="cnt">${cnt}・擊殺 ${f.kills[i]}</span></h3>
-        ${regs
-          .map((s) => {
+      const row = (s: (typeof regs)[number]): string => {
             const r = byId.get(s.id);
             const men = r?.men ?? 0;
             const frac = men / s.men0;
@@ -682,17 +685,24 @@ export class LegionScreen {
               <span class="mb"><i style="width:${Math.round(frac * 100)}%;background:${frac > 0.5 ? '#4ade80' : frac > 0.25 ? '#facc15' : '#f87171'}"></i></span>
               <span class="mn">${men}</span>
             </div>`;
-          })
-          .join('')}`;
+      };
+      // 出戰：在場上的、正在入場的、已覆滅的；備戰：還在後備的（佔點模式）
+      const benched = (s: (typeof regs)[number]): boolean => byId.get(s.id)?.status === 'reserve';
+      const field = regs.filter((s) => !benched(s));
+      const bench = regs.filter(benched);
+      const fieldCost = field.reduce((t, s) => (byId.get(s.id) ? t + s.cost : t), 0);
+      const capture = this.meta.mode === 'capture';
+      this.el[`roster${i}`].innerHTML = `<h3 style="border-color:${p.color}"><span class="sw" style="background:${p.color}"></span>${esc(p.side)}<span class="bot">${esc(p.bot)}</span><span class="cnt">${cnt}・擊殺 ${f.kills[i]} 人・戰果 ${f.killValue[i]} 點</span></h3>
+        <div class="rs-h">出戰${capture && !(ps >= 0 && i !== ps) ? `<span>${fieldCost} / ${RULES.capture.fieldCap} 點</span>` : ''}</div>
+        ${field.map(row).join('')}
+        ${capture && bench.length > 0 ? `<div class="rs-h">備戰<span>${bench.length} 團</span></div>${bench.map(row).join('')}` : ''}`;
     }
   }
 
   private renderDetail(): void {
     const id = this.selected;
-    if (id < 0) {
-      this.el.detail.innerHTML = '<div class="muted small">點地圖上的軍團或名冊查看詳細資訊。滾輪縮放、拖曳平移。</div>';
-      return;
-    }
+    this.el.detail.classList.toggle('hidden', id < 0);
+    if (id < 0) return;
     const s = this.meta.regs[id];
     const r = this.r.reg(id);
     const p = this.meta.players[s.owner];

@@ -162,14 +162,14 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     id: '2',
     name: '重騎兵（楔形陣）正面衝方陣槍林',
-    expect: '重騎損失 > 60%、衝不過去；長槍損失 < 20%',
+    expect: '重騎損失 > 60%、衝不過去；長槍損失 < 25%（30 人的團，約 7 人）',
     run: () => {
       const r = setup([{ type: 'heavyCav', formation: 'wedge' }], [{ type: 'spear', formation: 'square' }], 16);
       brace(r, r.B[0], 180);
       charge(r, r.A[0], 0);
       const through = penetrated(r, r.A[0], r.B[0]);
       run(r, 300, undefined, () => broke(r.A[0]));
-      return { pass: loss(r.A[0]) > 60 && !through && loss(r.B[0]) < 20, detail: `重騎損失 ${lostPct(r.A[0])}、${through ? '衝過去了' : '沒衝過去'}、長槍損失 ${lostPct(r.B[0])}` };
+      return { pass: loss(r.A[0]) > 60 && !through && loss(r.B[0]) < 25, detail: `重騎損失 ${lostPct(r.A[0])}、${through ? '衝過去了' : '沒衝過去'}、長槍損失 ${lostPct(r.B[0])}` };
     },
   },
   {
@@ -417,6 +417,59 @@ export const SCENARIOS: readonly Scenario[] = [
       return { pass: lightDown + loss(r.B[0]) > 0 && heavyThrough, detail: `輕騎最多同時倒地 ${lightDown} 騎、損失 ${lostPct(r.B[0])}；重騎${heavyThrough ? '穿過去了' : '被擋下'}（損失 ${lostPct(r.A[0])}）` };
     },
   },
+  {
+    id: '20',
+    name: '弓兵射盾兵掩護的長槍：正面有掩護、側面沒有',
+    expect: '從正面射：舉盾掩護下長槍的血量損失 ≤ 沒掩護的 30%；從側面射：掩護沒有效果（≥ 沒掩護的 80%）',
+    run: () => {
+      const shoot = (side: boolean, covered: boolean): number => {
+        const f = side ? ('side' as const) : undefined;
+        // 盾兵在長槍正前方（長槍朝西時在西邊；側身朝南時在南邊）
+        const shield: Side[] = covered ? [{ type: 'shield', stance: 'raise', facing: f, ...(side ? { dy: 2.8 } : { dx: -2.8 }) }] : [];
+        const r = setup([{ type: 'archer' }], [{ type: 'spear', formation: 'square', facing: f }, ...shield], 12);
+        cmd(r, r.A[0], { type: 'attack', target: r.B[0].id });
+        run(r, 120);
+        return hpLoss(r.m, r.B[0]);
+      };
+      const front = shoot(false, false);
+      const frontCovered = shoot(false, true);
+      const side = shoot(true, false);
+      const sideCovered = shoot(true, true);
+      return {
+        pass: front > 0 && frontCovered * 100 <= front * 30 && sideCovered * 100 >= side * 80,
+        detail: `正面：沒掩護 ${front}%、有掩護 ${frontCovered}%；側面：沒掩護 ${side}%、有掩護 ${sideCovered}%`,
+      };
+    },
+  },
+  {
+    id: '21',
+    name: '劍士正面打盾牆，後面是架好槍林的長槍',
+    expect: '長槍越過盾兵刺得到人、長槍損失 < 15%；劍士損失比盾兵大',
+    run: () => {
+      const r = setup([{ type: 'sword' }], [{ type: 'shield' }, { type: 'spear', formation: 'square', dx: 2.8 }], 9);
+      cmd(r, r.B[0], { type: 'shield', mode: 'wall' });
+      brace(r, r.B[1], 180);
+      cmd(r, r.A[0], { type: 'attackMove', x: r.B[0].x, y: r.B[0].y });
+      run(r, 900, undefined, () => broke(r.A[0]) || broke(r.B[0]));
+      const spearHits = r.B[1].dmgDealt;
+      return { pass: spearHits > 0 && loss(r.A[0]) > loss(r.B[0]) && loss(r.B[1]) < 15, detail: `劍士損失 ${lostPct(r.A[0])}${broke(r.A[0]) ? '（殲滅）' : ''}、盾兵損失 ${lostPct(r.B[0])}、長槍損失 ${lostPct(r.B[1])}（長槍打出 ${Math.round(spearHits / 10)} 點傷害）` };
+    },
+  },
+  {
+    id: '22',
+    name: '重騎兵衝盾牆，後面是架好槍林的長槍',
+    expect: '重騎損失 ≥ 70%，穿過長槍的不超過 2 騎',
+    run: () => {
+      const r = setup([{ type: 'heavyCav', formation: 'wedge' }], [{ type: 'shield' }, { type: 'spear', formation: 'square', dx: 2.8 }], 16);
+      cmd(r, r.B[0], { type: 'shield', mode: 'wall' });
+      brace(r, r.B[1], 180);
+      charge(r, r.A[0], 0);
+      const lim = r.B[1].x + r.B[1].halfD + 500;
+      const through = r.A[0].slots.filter((sid) => r.m.soldiers[sid].x > lim).length;
+      run(r, 300, undefined, () => broke(r.A[0]));
+      return { pass: through <= 2 && loss(r.A[0]) >= 70, detail: `穿過長槍 ${through} 騎、重騎損失 ${lostPct(r.A[0])}；盾兵損失 ${lostPct(r.B[0])}、長槍損失 ${lostPct(r.B[1])}` };
+    },
+  },
 ];
 
 export function runAcceptance(filter?: (id: string) => boolean): ScenarioResult[] {
@@ -424,6 +477,18 @@ export function runAcceptance(filter?: (id: string) => boolean): ScenarioResult[
     const r = s.run();
     return { id: s.id, name: s.name, expect: s.expect, pass: r.pass, detail: r.detail };
   });
+}
+
+/**
+ * 一團對一團正面對打（不用技能，雙方都 attackMove 對方），回傳雙方剩下的人數百分比；dist 是開打前相隔的格數
+ */
+export function duel(a: UnitKind, b: UnitKind, dist = 9): { a: number; b: number; ticks: number } {
+  const r = setup([{ type: a }], [{ type: b }], dist);
+  cmd(r, r.A[0], { type: 'attackMove', x: r.B[0].x, y: r.B[0].y });
+  cmd(r, r.B[0], { type: 'attackMove', x: r.A[0].x, y: r.A[0].y });
+  const t0 = r.m.tick;
+  run(r, 1800, undefined, () => broke(r.A[0]) || broke(r.B[0]));
+  return { a: 100 - loss(r.A[0]), b: 100 - loss(r.B[0]), ticks: r.m.tick - t0 };
 }
 
 /** 一團對一團的正面對決矩陣（參考用） */

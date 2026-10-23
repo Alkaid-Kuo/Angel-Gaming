@@ -68,7 +68,7 @@ function begin(s: LegionSetup): void {
   playerSide = s.bots.indexOf('player');
   const ctrls: LegionController[] = s.bots.map((b, i) => {
     if (b !== 'player') return new LegionBatchController(compiled[b], `legion-${b}.js`, map, s.seed, i);
-    player = new PlayerController(s.army ?? { field: ['spear', 'spear', 'sword', 'sword', 'archer', 'archer', 'shield', 'heavyCav', 'light'], reserve: [] });
+    player = new PlayerController(s.army ?? { field: ['spear', 'spear', 'spear', 'sword', 'sword', 'archer', 'archer', 'shield', 'shield', 'heavyCav', 'light'], reserve: [] });
     return player;
   });
   const knobs = ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label));
@@ -178,6 +178,7 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
     plans: m.players.map((p) => (playerSide < 0 || p.id === playerSide ? p.plan : '')),
     strength: m.players.map((p) => m.strength(p.id)),
     kills: m.players.map((p) => p.kills),
+    killValue: m.players.map((p) => Math.round(p.killValue / 1000)),
     visible,
     events,
     captions,

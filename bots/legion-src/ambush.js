@@ -68,7 +68,7 @@ export default class ForestAmbush extends LegionBase {
     const wish = [['spear', 'main'], ['spear', 'main'], ['archer', 'archer'], ['shield', 'shield']];
     for (let i = 0; i < n; i++) wish.push(['sword', 'ambush']);
     wish.push(['heavyCav', 'cav'], ['light', 'scout'], ['lightCav', 'cav'], ['spear', 'main']);
-    const list = this.buy(wish);
+    const list = this.buy(wish, [['spear', 'main'], ['sword', 'ambush']]);
     let mi = 0;
     let wi = 0;
     let ci = 0;

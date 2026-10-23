@@ -46,6 +46,8 @@ class LegionBase {
     this.units = {};
     /** 敵情記憶 @type {Map<number, Memory>} */
     this.seen = new Map();
+    /** 每個敵團最後出現的位置（不會過期；搜敵時到了那裡還沒找到才刪） @type {Map<number, { x: number, y: number, kind: UnitKind }>} */
+    this.lastSeenAt = new Map();
     /** 最近送出的指令（承諾：一段時間內不改） @type {Map<number, { key: string, tick: number, until: number }>} */
     this.sent = new Map();
     /** 軍團 id → 角色 @type {Map<number, string>} */
@@ -262,9 +264,18 @@ class LegionBase {
    */
   deployFrom(entries) {
     this.plan = entries;
+    /** @type {{ x: number, y: number, rad: number }[]} */
+    const placed = [];
     /** @type {Deployment[]} */
     const out = entries.map((e) => {
-      const pos = this.deployAt(e);
+      const rad = this.radiusOf(e.type, e.formation, e.width);
+      let pos = this.deployAt(e);
+      // 跟已經排好的團重疊（引擎的限制：中心距離 < 兩團半徑和的 55%）就沿著 y 往兩側錯開
+      for (let k = 1; k < 60 && placed.some((q) => this.dist(q, pos) < (q.rad + rad) * 0.62); k++) {
+        const ty = e.ty + (k % 2 === 1 ? 1 : -1) * Math.ceil(k / 2) * 2;
+        if (ty >= 4 && ty <= 96) pos = this.deployAt({ ...e, ty });
+      }
+      placed.push({ x: pos.x, y: pos.y, rad });
       return { type: e.type, x: pos.x, y: pos.y, facing: this.face(e.facing || 0), ...(e.width ? { width: e.width } : {}), ...(e.formation ? { formation: e.formation } : {}), ...(e.stance ? { stance: e.stance } : {}) };
     });
     // 佔點模式：剩下的點數照場上的陣容依序補成後備
@@ -284,11 +295,12 @@ class LegionBase {
   }
 
   /**
-   * 依兵種與預算挑兵（依序，買不起就跳過）
+   * 依兵種與預算挑兵（依序，買不起就跳過）；預算還有剩就照 extra 依序補到買不起為止
    * @param {[UnitKind, string][]} wish
+   * @param {[UnitKind, string][]} [extra]
    * @returns {{ type: UnitKind, role: string }[]}
    */
-  buy(wish) {
+  buy(wish, extra = []) {
     // 佔點模式：先買場上的（上限 fieldCap），剩下的點數在 deployFrom 補成後備
     let budget = this.data.mode === 'capture' && this.data.capture ? this.data.capture.fieldCap : this.data.budget;
     /** @type {{ type: UnitKind, role: string }[]} */
@@ -298,7 +310,47 @@ class LegionBase {
       budget -= this.units[type].cost;
       out.push({ type, role });
     }
+    for (let i = 0; extra.length > 0 && i < 40; i++) {
+      if (extra.every(([t]) => this.units[t].cost > budget)) break;
+      const [type, role] = extra[i % extra.length];
+      if (this.units[type].cost > budget) continue;
+      budget -= this.units[type].cost;
+      out.push({ type, role });
+    }
     return out;
+  }
+
+  /**
+   * 陣形的外接圓半徑（同引擎的算法；布陣時用來避開重疊）
+   * @param {UnitKind} type
+   * @param {FormationKind} [formation]
+   * @param {number} [width]
+   */
+  radiusOf(type, formation, width) {
+    const u = this.units[type];
+    const f = formation || u.formations[0];
+    const n = u.men;
+    let files = 1;
+    let ranks;
+    if (f === 'line') {
+      files = Math.max(1, Math.min(width || u.lineWidth, n));
+      if (n >= 2 && Math.ceil(n / files) < 2) files = Math.ceil(n / 2);
+      ranks = Math.ceil(n / files);
+    } else if (f === 'square') {
+      ranks = Math.max(2, Math.ceil(n / u.squareWidth));
+      files = Math.ceil(n / ranks);
+    } else if (f === 'wedge') {
+      ranks = 0;
+      for (let left = n, r = 0; left > 0; r++) {
+        const c = Math.min(left, 2 * r + 1);
+        files = Math.max(files, c);
+        left -= c;
+        ranks += 1;
+      }
+    } else return (n * u.spacingX) / 6283 + u.spacingX;
+    const hw = (files * u.spacingX) / 2;
+    const hd = (ranks * u.spacingY) / 2;
+    return Math.sqrt(hw * hw + hd * hd);
   }
 
   // ───────── 每次決策 ─────────
@@ -350,8 +402,12 @@ class LegionBase {
       const vx = old && obs.tick - old.tick <= 20 ? (e.x - old.x) / dt : 0;
       const vy = old && obs.tick - old.tick <= 20 ? (e.y - old.y) / dt : 0;
       this.seen.set(e.id, { ...e, tick: obs.tick, vx, vy });
+      if (e.routed) this.lastSeenAt.delete(e.id);
+      else this.lastSeenAt.set(e.id, { x: e.x, y: e.y, kind: e.kind });
     }
     for (const [id, e] of this.seen) if (obs.tick - e.tick > 400 || e.routed) this.seen.delete(id);
+    // 看到覆滅的敵團：從最後位置的記錄劃掉（搜敵不用再去那裡找）
+    for (const ev of obs.events) if (ev.type === 'destroyed') this.lastSeenAt.delete(ev.reg);
   }
 
   /** @param {string} role */
@@ -810,8 +866,9 @@ class LegionBase {
    * @param {Pending[]} out
    * @param {Own} r
    * @param {Own | null} ward 要保護的友軍
+   * @param {number} [forward] 站在 ward 前方多遠（單位）：友軍要落在盾兵正後方的掩護區裡
    */
-  shieldReact(out, r, ward) {
+  shieldReact(out, r, ward, forward = 3500) {
     const s = this.state(r.id);
     const archers = this.nearestFoe(r, (e) => e.kind === 'archer', 18);
     // 盾兵對盾兵架盾牆只會互相僵持：只對會打人的步兵架
@@ -834,14 +891,14 @@ class LegionBase {
       return true;
     }
     if (ward && r.order !== 'follow') {
-      this.send(out, 3, { type: 'follow', id: r.id, target: ward.id, forward: 3500 }, `護送${this.units[ward.kind].name}`, 30);
+      this.send(out, 3, { type: 'follow', id: r.id, target: ward.id, forward }, `護送${this.units[ward.kind].name}`, 30);
       return true;
     }
     return false;
   }
 
   /**
-   * 輕步兵：偵察；敵方弓兵落單就切入；被近戰盯上就退
+   * 輕步兵：偵察；敵方弓兵落單、而且打得過（已經在交戰，或人數不少於它的 3/4）就切入；被近戰盯上就退
    * @param {Pending[]} out
    * @param {Own} r
    * @param {Pt} watch 觀察點
@@ -854,7 +911,7 @@ class LegionBase {
       this.send(out, 8, { type: 'move', id: r.id, x: back.x, y: back.y }, '斥候後撤', 30);
       return true;
     }
-    const prey = this.nearestFoe(r, (e) => e.kind === 'archer' && !this.foes.some((o) => o !== e && o.kind !== 'archer' && this.dist(o, e) < 6000), 12);
+    const prey = this.nearestFoe(r, (e) => e.kind === 'archer' && (e.engaged || r.men >= e.men * 0.75) && !this.foes.some((o) => o !== e && o.kind !== 'archer' && this.dist(o, e) < 6000), 12);
     if (prey) {
       if (r.skillCooldown === 0 && !r.dashing && this.gap(r, prey) > 2) {
         const p = this.predict(prey, 15);
@@ -864,8 +921,20 @@ class LegionBase {
       this.send(out, 6, { type: 'attack', id: r.id, target: prey.id }, '襲擊敵方弓兵', 20);
       return true;
     }
-    if (this.dist(r, watch) > 2000) {
-      this.send(out, 1, { type: 'move', id: r.id, x: watch.x, y: watch.y }, `偵察${watchName}`, 30);
+    // 打不過的弓兵（看得到的、或最後出現的位置）：停在它的射程外監視（多留 3 格給高地加成）；觀察點在射程內也一樣，不要一直走進去挨箭
+    const bow = (this.units.archer.range / TILE + 3) * TILE;
+    const archers = [...this.lastSeenAt.values()].filter((e) => e.kind === 'archer');
+    const inRange = (/** @type {Pt} */ p) => archers.find((e) => this.dist(e, p) < bow);
+    const near = inRange(r);
+    if (near && !r.engaged) {
+      const safe = this.offset(near, this.angle(near, r), bow / TILE + 2);
+      this.send(out, 7, { type: 'move', id: r.id, x: safe.x, y: safe.y }, '避開弓兵射程', 30);
+      return true;
+    }
+    const risky = inRange(watch);
+    const post = risky ? this.offset(risky, this.angle(risky, r), bow / TILE + 2) : watch;
+    if (this.dist(r, post) > 2000) {
+      this.send(out, 1, { type: 'move', id: r.id, x: post.x, y: post.y }, `偵察${watchName}`, 30);
       return true;
     }
     return false;
@@ -893,6 +962,20 @@ class LegionBase {
       }
     }
     if (best) return best;
+    // 追丟了：先去最近一個敵團最後出現的地方；到了還沒看到就劃掉
+    for (let guard = 0; guard < 50 && this.lastSeenAt.size > 0; guard++) {
+      let id = -1;
+      let near = Infinity;
+      for (const [k, p] of this.lastSeenAt) {
+        const d = this.dist(c, p);
+        if (d < near) {
+          near = d;
+          id = k;
+        }
+      }
+      if (near > 6 * TILE) return this.lastSeenAt.get(id) || null;
+      this.lastSeenAt.delete(id);
+    }
     const sweep = [this.at(128, 50), this.at(110, 24), this.at(110, 76), this.at(86, 50)];
     return sweep[Math.floor(this.obs.tick / 300) % sweep.length];
   }
@@ -1001,6 +1084,8 @@ export default class Commander extends LegionBase {
     this.attackCrossing = null;
     /** 佔點：得分競賽落後、兵力又不夠主攻時，派騎兵騷擾對方的橋 */
     this.raid = false;
+    /** 搜敵找到目標後的接戰鎖定（tick）：在這之前打得過就直接打，不再顧慮看不到的敵軍 */
+    this.huntLock = -1;
   }
 
   /** @returns {Declaration} */
@@ -1014,6 +1099,7 @@ export default class Commander extends LegionBase {
         { key: 'patience', name: '耐心', description: '在戰場位置等敵人來的時間（秒），之後主動進攻', min: 10, max: 180, default: 45, integer: true },
         { key: 'cavalry', name: '騎兵', description: '騎兵團數', min: 0, max: 2, default: 1, integer: true },
         { key: 'archers', name: '弓兵', description: '弓兵團數', min: 0, max: 3, default: 2, integer: true },
+        { key: 'shieldWard', name: '盾兵護誰', description: '0 擋在弓兵前面擋箭；1 擋在長槍前面（盾槍陣：盾兵在前擋傷害，長槍越過盾兵刺人）', min: 0, max: 1, default: 0, integer: true },
       ],
     };
   }
@@ -1032,13 +1118,13 @@ export default class Commander extends LegionBase {
     /** @type {[UnitKind, string][]} */
     const wish = [['spear', 'line'], ['spear', 'line'], ['sword', 'line']];
     for (let i = 0; i < arch; i++) wish.push(['archer', 'fire']);
-    if (arch > 0) wish.push(['shield', 'escort']);
+    if (arch > 0 || k.shieldWard === 1) wish.push(['shield', 'escort']);
     if (cav >= 1) wish.push(['heavyCav', 'strike']);
     if (cav >= 2) wish.push(['lightCav', 'strike']);
     wish.push(['light', 'screen']);
     wish.push(['sword', 'line']);
     wish.push(['sword', 'line'], ['light', 'screen'], ['spear', 'line']);
-    const list = this.buy(wish);
+    const list = this.buy(wish, [['spear', 'line'], ['sword', 'line']]);
     let li = 0;
     let ai = 0;
     let ci = 0;
@@ -1089,15 +1175,30 @@ export default class Commander extends LegionBase {
    * 落在可站的陸地上：在河裡就往 back 方向退，最多 10 格
    * @param {Pt} p
    * @param {number} back 世界角度
+   * @param {boolean} [wade] 可以站在淺灘裡（縱隊過淺灘時）
    */
-  landBehind(p, back) {
+  landBehind(p, back, wade = false) {
     let q = p;
     for (let i = 0; i < 10; i++) {
       const t = this.h.terrainAt(q.x, q.y);
-      if (t !== TR.river && t !== TR.building && t !== TR.wall && t !== TR.shallow) return q;
+      if (t !== TR.river && t !== TR.building && t !== TR.wall && (wade || t !== TR.shallow)) return q;
       q = this.offset(q, back, 1);
     }
     return q;
+  }
+
+  /**
+   * 站位落在河裡、建築上（退回岸上也不行，例如沿著河岸推進時靠河的那一團）：往戰線中心收攏，找最近可站的點
+   * @param {Pt} p
+   * @param {Pt} anchor
+   */
+  pullIn(p, anchor) {
+    for (let i = 0; i <= 10; i++) {
+      const q = { x: p.x + ((anchor.x - p.x) * i) / 10, y: p.y + ((anchor.y - p.y) * i) / 10 };
+      const t = this.h.terrainAt(q.x, q.y);
+      if (t !== TR.river && t !== TR.building && t !== TR.wall) return q;
+    }
+    return anchor;
   }
 
   // ───────── 每次決策 ─────────
@@ -1267,6 +1368,11 @@ export default class Commander extends LegionBase {
         const away = this.angle(target, mc);
         const back = this.behind(mc, home, target) ? home : this.landBehind(this.offset(mc, away, 12), away);
         mission = { anchor: back, facing: this.angle(back, target), mode: 'hold', leash: 4, column: false };
+      } else if ((this.posture === '搜敵' || this.obs.tick < this.huntLock) && eff >= this.fightEdge) {
+        // 搜敵找到了、局部打得過：直接打（主力既然沒出現，看不到的敵軍就不算在附近）
+        posture = '決戰';
+        this.huntLock = this.obs.tick + 200;
+        mission = { anchor: this.stepToward(mc, target, 7), facing: face, mode: 'engage', leash: 12, column: wet && this.dist(mc, target) < 20 * TILE };
       } else if (coming) {
         posture = '迎擊';
         const at = capture ? home : this.dist(mc, home) < 12 * TILE ? home : mc;
@@ -1728,7 +1834,8 @@ export default class Commander extends LegionBase {
     order.splice(mid, 0, ...spears);
     // 佔點守中央：正面不超過 18 格（太寬就排兩排），兵力集中在旗點圈附近
     const slots = m.column ? this.columnSlots(order, m.anchor, m.facing) : this.data.mode === 'capture' ? this.compactSlots(order, m.anchor, m.facing, 18) : this.lineSlots(order, m.anchor, m.facing, 1.5);
-    for (const [id, p] of slots) slots.set(id, this.landBehind(p, m.facing + 180));
+    // 推進、縱隊過河時站位可以在淺灘裡（拉回岸上就永遠過不去）；站定、接敵時才退回岸上
+    for (const [id, p] of slots) slots.set(id, this.pullIn(this.landBehind(p, m.facing + 180, m.column || m.mode === 'advance'), m.anchor));
     const targets = this.assignTargets(order, slots, m.leash, this.posture === '收攏');
     // 推進中（沒有任何一團接敵）：沿朝向的進度比最慢的一團多 4 格以上就等
     const progress = (/** @type {Own} */ r) => {
@@ -1907,9 +2014,13 @@ export default class Commander extends LegionBase {
       }
       this.archerReact(out, r, spot || this.highGround(base, 5, tgt, front, range - 2));
     });
+    // 盾兵：護弓兵（站在弓兵前方 3.5 格），或擋在長槍前面（緊貼長槍正面，長槍才刺得到盾兵前面的敵人）
+    const spears = this.k.shieldWard === 1 ? this.lineRegs().filter((r) => r.kind === 'spear') : [];
     shields.forEach((r, i) => {
       if (this.busyIds.has(r.id)) return;
-      this.shieldReact(out, r, archers[i % Math.max(1, n)] || null);
+      const sp = spears.length > 0 ? spears[i % spears.length] : null;
+      if (sp) this.shieldReact(out, r, sp, sp.formation === 'square' ? 2800 : 2000);
+      else this.shieldReact(out, r, archers[i % Math.max(1, n)] || null);
     });
   }
 

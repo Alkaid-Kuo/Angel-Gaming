@@ -1,7 +1,7 @@
-// 軍團戰的規則數值（規格書 v0.2）。所有數值都是整數：座標單位 1 格 = 1000、時間單位 tick（每秒 10 tick）、
-// 血量與攻擊 ×10、倍率與減免為百分比。對照規格書：docs/軍團戰 規格書 v0.2（草案）.md。
+// 軍團戰的規則數值（規格書 v0.4）。所有數值都是整數：座標單位 1 格 = 1000、時間單位 tick（每秒 10 tick）、
+// 血量與攻擊 ×10、倍率與減免為百分比。對照規格書：docs/軍團戰 規格書 v0.4（草案）.md。
 
-export const LEGION_ENGINE_VERSION = '0.2.1';
+export const LEGION_ENGINE_VERSION = '0.3.0';
 export const TPS = 10;
 export const TILE = 1000;
 
@@ -60,11 +60,11 @@ export interface UnitDef {
 }
 
 export const UNITS: Readonly<Record<UnitKind, UnitDef>> = {
-  spear: { name: '長槍方陣', men: 40, cost: 50, hp: 1000, attack: 100, cooldown: 20, meleeAttack: 100, range: 0, reach: 2500, speed: spd(1.2), sight: 14000, meleeDR: 15, rangedDR: 15, lineWidth: 20, squareWidth: 8, spacingX: 700, spacingY: 800, turn: 6, cavalry: false, formations: ['square', 'line', 'circle'], skill: 'brace' },
-  sword: { name: '劍士', men: 30, cost: 60, hp: 1200, attack: 140, cooldown: 10, meleeAttack: 140, range: 0, reach: 1500, speed: spd(1.4), sight: 14000, meleeDR: 30, rangedDR: 15, lineWidth: 10, squareWidth: 6, spacingX: 700, spacingY: 800, turn: 8, cavalry: false, formations: ['line', 'square', 'wedge'], skill: 'assault' },
-  shield: { name: '盾兵', men: 30, cost: 50, hp: 1400, attack: 60, cooldown: 12, meleeAttack: 60, range: 0, reach: 1000, speed: spd(1.0), sight: 14000, meleeDR: 30, rangedDR: 50, lineWidth: 10, squareWidth: 6, spacingX: 700, spacingY: 800, turn: 6, cavalry: false, formations: ['line', 'square', 'circle'], skill: 'shield' },
-  archer: { name: '弓兵', men: 30, cost: 55, hp: 700, attack: 150, cooldown: 15, meleeAttack: 40, range: 16000, reach: 1000, speed: spd(1.4), sight: 18000, meleeDR: 0, rangedDR: 15, lineWidth: 15, squareWidth: 6, spacingX: 800, spacingY: 900, turn: 9, cavalry: false, formations: ['line', 'square'], skill: 'volley' },
-  light: { name: '輕步兵', men: 25, cost: 30, hp: 700, attack: 80, cooldown: 9, meleeAttack: 80, range: 0, reach: 1500, speed: spd(2.0), sight: 18000, meleeDR: 0, rangedDR: 15, lineWidth: 13, squareWidth: 5, spacingX: 1000, spacingY: 1000, turn: 12, cavalry: false, formations: ['line', 'wedge'], skill: 'infiltrate' },
+  spear: { name: '長槍方陣', men: 30, cost: 38, hp: 1000, attack: 100, cooldown: 20, meleeAttack: 100, range: 0, reach: 2500, speed: spd(1.2), sight: 14000, meleeDR: 15, rangedDR: 15, lineWidth: 15, squareWidth: 6, spacingX: 700, spacingY: 800, turn: 6, cavalry: false, formations: ['square', 'line', 'circle'], skill: 'brace' },
+  sword: { name: '劍士', men: 24, cost: 48, hp: 1200, attack: 140, cooldown: 10, meleeAttack: 140, range: 0, reach: 1500, speed: spd(1.4), sight: 14000, meleeDR: 30, rangedDR: 15, lineWidth: 12, squareWidth: 5, spacingX: 700, spacingY: 800, turn: 8, cavalry: false, formations: ['line', 'square', 'wedge'], skill: 'assault' },
+  shield: { name: '盾兵', men: 30, cost: 50, hp: 1400, attack: 60, cooldown: 12, meleeAttack: 60, range: 0, reach: 1000, speed: spd(1.1), sight: 14000, meleeDR: 30, rangedDR: 50, lineWidth: 15, squareWidth: 6, spacingX: 700, spacingY: 800, turn: 6, cavalry: false, formations: ['line', 'square', 'circle'], skill: 'shield' },
+  archer: { name: '弓兵', men: 24, cost: 44, hp: 700, attack: 150, cooldown: 15, meleeAttack: 40, range: 16000, reach: 1000, speed: spd(1.4), sight: 18000, meleeDR: 0, rangedDR: 15, lineWidth: 12, squareWidth: 6, spacingX: 800, spacingY: 900, turn: 9, cavalry: false, formations: ['line', 'square'], skill: 'volley' },
+  light: { name: '輕步兵', men: 16, cost: 19, hp: 700, attack: 80, cooldown: 9, meleeAttack: 80, range: 0, reach: 1500, speed: spd(2.0), sight: 18000, meleeDR: 0, rangedDR: 15, lineWidth: 8, squareWidth: 5, spacingX: 1200, spacingY: 1500, turn: 12, cavalry: false, formations: ['line', 'wedge'], skill: 'infiltrate' },
   lightCav: { name: '輕騎兵', men: 16, cost: 60, hp: 1100, attack: 100, cooldown: 10, meleeAttack: 100, range: 0, reach: 1500, speed: spd(3.5), sight: 18000, meleeDR: 15, rangedDR: 15, lineWidth: 8, squareWidth: 4, spacingX: 1200, spacingY: 1600, turn: 8, cavalry: true, formations: ['line', 'wedge'], skill: 'charge' },
   heavyCav: { name: '重騎兵', men: 12, cost: 80, hp: 1800, attack: 140, cooldown: 12, meleeAttack: 140, range: 0, reach: 1800, speed: spd(2.8), sight: 12000, meleeDR: 45, rangedDR: 45, lineWidth: 6, squareWidth: 3, spacingX: 1300, spacingY: 1700, turn: 6, cavalry: true, formations: ['wedge', 'line'], skill: 'charge' },
 };
@@ -140,7 +140,7 @@ export const RULES = {
     unsetTicks: 20,
     /** 正面額外減免、正面攻速（百分比） */
     frontDR: 50,
-    attackSpeed: 160,
+    attackSpeed: 170,
     /** 速度加成：目標速度超過門檻後，每多規格刻度 1 格／秒，傷害 +coef% */
     speedThreshold: spd(1.5),
     speedUnit: spd(1.0),
@@ -159,13 +159,21 @@ export const RULES = {
     switchTicks: 10,
     wallSetTicks: 20,
     wallUnsetTicks: 10,
-    carry: { speed: spd(1.0), meleeDR: 30, rangedDR: 50 },
-    raise: { speed: spd(0.7), meleeDR: 30, rangedDR: 80 },
+    carry: { speed: spd(1.1), meleeDR: 30, rangedDR: 50 },
+    raise: { speed: spd(0.8), meleeDR: 30, rangedDR: 80 },
     /** 盾牆：只算正面 */
     wall: { meleeDR: 75, rangedDR: 90 },
-    /** 舉盾、盾牆時周圍友軍的遠程減免與範圍（自盾兵隊形邊緣起算） */
-    auraDR: 75,
-    auraRange: 3000,
+    /**
+     * 掩護區：盾兵隊形正後方、同寬、往後 depth 的長方形。友軍士兵站在裡面，而且攻擊來自盾兵正面（±frontHalf），
+     * 就依盾兵姿態減免（不疊加，取最好的一團）
+     */
+    cover: {
+      depth: 4000,
+      frontHalf: 60,
+      carry: { rangedDR: 50, meleeDR: 0 },
+      raise: { rangedDR: 85, meleeDR: 30 },
+      wall: { rangedDR: 90, meleeDR: 50 },
+    },
   },
   /** 弓兵：齊射 */
   volley: {

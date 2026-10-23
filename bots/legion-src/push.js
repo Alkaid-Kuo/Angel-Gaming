@@ -57,7 +57,7 @@ export default class IronPush extends LegionBase {
     for (let i = 0; i < (k.archers ?? 2); i++) wish.push(['archer', 'archer']);
     wish.push(['shield', 'shield']);
     for (const t of /** @type {import('./base.js').UnitKind[]} */ (['sword', 'spear', 'spear', 'sword', 'spear', 'sword'])) wish.push([t, 'line']);
-    const list = this.buy(wish);
+    const list = this.buy(wish, [['spear', 'line'], ['sword', 'line']]);
     const y0 = ROUTES[this.route].y;
     const lineYs = [0, -8, 8, -16, 16, -24];
     let li = 0;

@@ -131,6 +131,8 @@ export interface LegionFrame {
   readonly plans: readonly string[];
   readonly strength: readonly number[];
   readonly kills: readonly number[];
+  /** 戰果：擊殺敵兵的點數價值（時間到的判定依據） */
+  readonly killValue: readonly number[];
   /** 依 playerId：看得到的軍團（軍團 id 為索引） */
   readonly visible: readonly Uint8Array[];
   readonly events: readonly LegionEvent[];

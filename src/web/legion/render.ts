@@ -862,7 +862,7 @@ export class LegionRenderer {
       const y = this.sy(p.y);
       if (r.volley !== null) this.drawVolley(r, x, y, f.tick, owner);
       if (kind === 'spear' && (r.status === 'braced' || r.status === 'bracing' || r.status === 'unbracing')) this.drawBrace(r, x, y, owner);
-      if (kind === 'shield' && (r.stance === 'raise' || r.status === 'walled' || r.status === 'walling')) this.drawShield(r, x, y, p.facing, owner);
+      if (kind === 'shield') this.drawShield(r, x, y, p.facing, owner);
       if (r.dash !== null && r.dashing !== null) {
         // 衝刺的預定路線：沿目前方向剩下的距離（對準方向中是虛點）
         const a = (r.dash.dir * Math.PI) / 180;
@@ -959,17 +959,30 @@ export class LegionRenderer {
     ctx.stroke();
   }
 
-  /** 盾兵：舉盾或盾牆時周圍友軍的擋箭範圍；盾牆在正面畫一道牆 */
+  /** 盾兵：正後方的掩護區（持盾淡、舉盾與盾牆較明顯）；盾牆在正面畫一道牆 */
   private drawShield(r: RegFrame, x: number, y: number, facing: number, owner: number): void {
     const ctx = this.ctx;
     const s = this.cam.scale;
-    if (r.stance === 'raise' || r.status === 'walled') {
+    {
+      const strong = r.stance === 'raise' || r.status === 'walled';
+      const a = (facing * Math.PI) / 180;
+      const fx = Math.cos(a);
+      const fy = Math.sin(a);
+      const hw = (r.halfW / TILE) * s;
+      const f0 = -(r.halfD / TILE) * s;
+      const f1 = f0 - (RULES.shield.cover.depth / TILE) * s;
+      const pt = (f: number, l: number): [number, number] => [x + fx * f - fy * l, y + fy * f + fx * l];
       ctx.beginPath();
-      ctx.arc(x, y, ((r.rad + RULES.shield.auraRange) / TILE) * s, 0, Math.PI * 2);
-      ctx.fillStyle = owner === 0 ? 'rgba(191,219,254,0.07)' : 'rgba(254,202,202,0.07)';
+      for (const [f, l] of [[f0, -hw], [f0, hw], [f1, hw], [f1, -hw]] as const) {
+        const [px, py] = pt(f, l);
+        if (f === f0 && l === -hw) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = owner === 0 ? `rgba(191,219,254,${strong ? 0.1 : 0.04})` : `rgba(254,202,202,${strong ? 0.1 : 0.04})`;
       ctx.fill();
       ctx.setLineDash([3, 4]);
-      ctx.strokeStyle = owner === 0 ? 'rgba(191,219,254,0.55)' : 'rgba(254,202,202,0.55)';
+      ctx.strokeStyle = owner === 0 ? `rgba(191,219,254,${strong ? 0.55 : 0.25})` : `rgba(254,202,202,${strong ? 0.55 : 0.25})`;
       ctx.lineWidth = 1.2;
       ctx.stroke();
       ctx.setLineDash([]);

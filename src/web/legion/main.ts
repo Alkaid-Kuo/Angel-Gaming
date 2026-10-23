@@ -29,8 +29,10 @@ function exitToMenu(): void {
 
 // ───── 玩家的軍隊（藍方選「玩家」時） ─────
 const KINDS: UnitKind[] = ['spear', 'sword', 'shield', 'archer', 'light', 'lightCav', 'heavyCav'];
-const DEFAULT_FIELD: Record<UnitKind, number> = { spear: 2, sword: 2, shield: 1, archer: 2, light: 1, lightCav: 0, heavyCav: 1 };
-const army = { field: { ...DEFAULT_FIELD }, reserve: { ...DEFAULT_FIELD } };
+// 預設陣容：場上 497 點；後備是場上的兩倍（佔點共 1491 點）
+const DEFAULT_FIELD: Record<UnitKind, number> = { spear: 3, sword: 2, shield: 2, archer: 2, light: 1, lightCav: 0, heavyCav: 1 };
+const DEFAULT_RESERVE: Record<UnitKind, number> = { spear: 6, sword: 4, shield: 4, archer: 4, light: 2, lightCav: 0, heavyCav: 2 };
+const army = { field: { ...DEFAULT_FIELD }, reserve: { ...DEFAULT_RESERVE } };
 const armyEl = document.getElementById('army')!;
 const rowsEl = document.getElementById('army-rows')!;
 const totalEl = document.getElementById('army-total')!;
@@ -86,7 +88,7 @@ rowsEl.addEventListener('click', (e) => {
 });
 document.getElementById('army-reset')!.addEventListener('click', () => {
   army.field = { ...DEFAULT_FIELD };
-  army.reserve = { ...DEFAULT_FIELD };
+  army.reserve = { ...DEFAULT_RESERVE };
   renderArmy();
 });
 /** 地圖卡片跟著模式換（殲滅戰：河谷；佔點：大河谷） */

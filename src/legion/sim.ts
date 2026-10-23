@@ -230,6 +230,8 @@ export interface PlayerState {
   active: boolean;
   kills: number;
   losses: number;
+  /** 戰果：擊殺敵兵的點數價值（×1000；每人 ＝ 兵種點數 ÷ 滿編人數） */
+  killValue: number;
 }
 
 export interface LegionResult {
@@ -242,6 +244,8 @@ export interface LegionResult {
   readonly flagsHeld: readonly number[];
   /** 佔點分數 */
   readonly score: readonly number[];
+  /** 戰果：擊殺敵兵的點數價值（時間到的判定依據） */
+  readonly killValue: readonly number[];
 }
 
 export interface LegionSetup {
@@ -348,7 +352,7 @@ export class LegionMatch {
     for (let p = 0; p < n; p++) this.inbox.push([]);
     for (let p = 0; p < n; p++) {
       const cost = this.deploy(p, setup.deployments[p]);
-      this.players.push({ id: p, cost, score: 0, plan: '', planAt: -1, active: true, kills: 0, losses: 0 });
+      this.players.push({ id: p, cost, score: 0, plan: '', planAt: -1, active: true, kills: 0, losses: 0, killValue: 0 });
     }
     for (let p = 0; p < n; p++) this.visible.push(new Uint8Array(this.regiments.length));
     if (this.mode === 'capture') this.map.flags.forEach((f, i) => this.flags.push({ id: i, name: f.name, x: f.x, y: f.y, points: f.points, owner: -1, capturer: -1, progress: 0, contested: false }));
@@ -1738,7 +1742,7 @@ export class LegionMatch {
   }
 
   /** 受到傷害的百分比（所有減免相乘）；fl = 攻擊方在目標的哪一面 */
-  private takenPct(e: Soldier, t: Regiment, fl: Flank, ranged: boolean): number {
+  private takenPct(e: Soldier, t: Regiment, fl: Flank, ranged: boolean, ax: number, ay: number): number {
     let dr: number;
     if (t.kind === 'shield') {
       if (this.walledFront(t, fl)) dr = ranged ? RULES.shield.wall.rangedDR : RULES.shield.wall.meleeDR;
@@ -1752,20 +1756,37 @@ export class LegionMatch {
     const terrain = this.terrainAt(e.x, e.y);
     if (ranged) {
       if (terrain === T.Forest) pct = idiv(pct * (100 - RULES.terrain.forestRangedDR), 100);
-      if (t.kind !== 'shield' && this.shieldedBy(e)) pct = idiv(pct * (100 - RULES.shield.auraDR), 100);
     } else if (terrain === T.Shallow) pct = idiv(pct * RULES.terrain.shallowMeleeTaken, 100);
+    if (t.kind !== 'shield') {
+      const cover = this.coverDR(e, ranged, ax, ay);
+      if (cover > 0) pct = idiv(pct * (100 - cover), 100);
+    }
     return pct;
   }
 
-  /** 有舉盾或盾牆的友軍盾兵罩著（不疊加） */
-  private shieldedBy(e: Soldier): boolean {
+  /**
+   * 盾兵掩護區的減免（不疊加，取最好的一團）：e 站在友軍盾兵隊形正後方、同寬、往後 cover.depth 的長方形裡，
+   * 而且攻擊者在盾兵的正面方向（從 e 看過去與盾兵朝向相差 ±frontHalf 內）
+   */
+  private coverDR(e: Soldier, ranged: boolean, ax: number, ay: number): number {
+    const C = RULES.shield.cover;
+    let best = 0;
     for (const sh of this.regiments) {
-      if (this.gone(sh) || sh.routed || sh.kind !== 'shield' || sh.owner !== e.owner) continue;
-      if (sh.stance !== 'raise' && sh.wall !== 2) continue;
-      const lim = sh.rad + RULES.shield.auraRange;
-      if ((sh.x - e.x) * (sh.x - e.x) + (sh.y - e.y) * (sh.y - e.y) <= lim * lim) return true;
+      if (this.gone(sh) || sh.routed || sh.kind !== 'shield' || sh.owner !== e.owner || sh.slots.length === 0) continue;
+      const st = sh.wall === 2 ? C.wall : sh.stance === 'raise' ? C.raise : C.carry;
+      const dr = ranged ? st.rangedDR : st.meleeDR;
+      if (dr <= best) continue;
+      const c = icos(sh.facing);
+      const n = isin(sh.facing);
+      const dx = e.x - sh.x;
+      const dy = e.y - sh.y;
+      const fwd = tdiv(dx * c + dy * n, 10000);
+      const lat = tdiv(-dx * n + dy * c, 10000);
+      if (Math.abs(lat) > sh.halfW || fwd > -sh.halfD + 300 || fwd < -sh.halfD - C.depth) continue;
+      if ((ax === e.x && ay === e.y) || Math.abs(angleDiff(iatan2(ay - e.y, ax - e.x), sh.facing)) > C.frontHalf) continue;
+      best = dr;
     }
-    return false;
+    return best;
   }
 
   private heightPct(ax: number, ay: number, bx: number, by: number, per: number): number {
@@ -1793,6 +1814,7 @@ export class LegionMatch {
       e.target = -1;
       by.kills += 1;
       this.players[by.owner].kills += 1;
+      this.players[by.owner].killValue += idiv(t.def.cost * 1000, t.men0);
       this.players[e.owner].losses += 1;
       if (by.dash !== null) by.dash.kills += 1;
     }
@@ -1921,7 +1943,7 @@ export class LegionMatch {
       let pct = idiv(idiv(this.vetPct(r) * vs, 100) * FLANK_PCT[fl], 100);
       pct = idiv(pct * this.heightPct(s.x, s.y, e.x, e.y, RULES.height.meleePerLevel), 100);
       pct = idiv(pct * d.boost, 100);
-      const dmg = idiv(idiv(d.def.impact * ratio, 100) * idiv(pct * this.takenPct(e, t, fl, false), 100), 100);
+      const dmg = idiv(idiv(d.def.impact * ratio, 100) * idiv(pct * this.takenPct(e, t, fl, false, s.x, s.y), 100), 100);
       this.queue(e, dmg, r, immune ? 0 : px, immune ? 0 : py, !immune, 0);
     } else if (d.def.kind === 'assault' && !immune) {
       this.queue(e, 0, r, px, py, false, 0);
@@ -1984,7 +2006,7 @@ export class LegionMatch {
       pct = idiv(pct * RULES.dash.firstHit, 100);
       s.firstHit = false;
     }
-    const dmg = idiv(idiv(r.def.meleeAttack * pct, 100) * this.takenPct(e, t, fl, false), 100);
+    const dmg = idiv(idiv(r.def.meleeAttack * pct, 100) * this.takenPct(e, t, fl, false, s.x, s.y), 100);
     this.queue(e, Math.max(1, dmg), r, 0, 0, false, mom);
     this.revealOnAttack(r);
     r.lastMelee = this.tick;
@@ -2075,7 +2097,7 @@ export class LegionMatch {
       const t = this.regiments[e.reg];
       const fl = this.flankOf(by, t);
       const vs = VERSUS[by.kind][t.kind] ?? 100;
-      const pct = idiv(idiv(vs * FLANK_PCT[fl], 100) * this.takenPct(e, t, fl, true), 100);
+      const pct = idiv(idiv(vs * FLANK_PCT[fl], 100) * this.takenPct(e, t, fl, true, p.x0, p.y0), 100);
       this.damage(e, Math.max(1, idiv(p.dmg * pct, 100)), by);
     }
     this.projectiles = keep;
@@ -2266,7 +2288,7 @@ export class LegionMatch {
     const score = this.players.map((p) => this.scoreOf(p.id));
     const finish = (winner: number | null, reason: LegionResult['reason']): void => {
       this.over = true;
-      this.resultValue = { winner, reason, durationTicks: this.tick, strength, flagsHeld, score };
+      this.resultValue = { winner, reason, durationTicks: this.tick, strength, flagsHeld, score, killValue: this.players.map((p) => idiv(p.killValue, 1000)) };
     };
     const active = this.players.filter((p) => p.active);
     if (active.length < n) {
@@ -2284,13 +2306,14 @@ export class LegionMatch {
       }
     }
     if (this.tick >= this.timeLimitTicks) {
-      // 時間到：佔點先比分數、再比剩餘兵力；殲滅戰比剩餘兵力
+      // 時間到：佔點先比分數、再比戰果；殲滅戰比戰果（擊殺敵兵的點數價值）
+      const kv = this.players.map((p) => p.killValue);
       const order = this.players
         .map((p) => p.id)
-        .sort((a, b) => (this.mode === 'capture' ? this.players[b].score - this.players[a].score : 0) || strength[b] - strength[a]);
+        .sort((a, b) => (this.mode === 'capture' ? this.players[b].score - this.players[a].score : 0) || kv[b] - kv[a]);
       const a = order[0];
       const b = order[1];
-      const tie = (this.mode !== 'capture' || this.players[a].score === this.players[b].score) && strength[a] === strength[b];
+      const tie = (this.mode !== 'capture' || this.players[a].score === this.players[b].score) && kv[a] === kv[b];
       finish(tie ? null : a, 'time');
     }
   }

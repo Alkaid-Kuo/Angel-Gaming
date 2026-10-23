@@ -306,16 +306,16 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'S13',
     name: '搜敵：找出躲起來的敵人',
-    expect: '殲滅戰、敵方只剩一團弓兵躲在北橋東側的樹林：150 秒內找到並打垮它',
+    expect: '殲滅戰、敵方一團輕步兵衝過來被打光後，只剩一團弓兵躲在北橋東側的樹林：150 秒內找到並打垮它',
     abs: true,
     bot: [
       { type: 'sword', x: 30, y: 45 },
       { type: 'sword', x: 30, y: 55 },
       { type: 'light', x: 30, y: 35 },
     ],
-    foe: [{ type: 'archer', x: 101, y: 13 }],
+    foe: [{ type: 'archer', x: 101, y: 13 }, { type: 'light', x: 90, y: 50 }],
     ticks: 1500,
-    script: (c, t) => (t === 0 ? [{ type: 'hold', id: c.B[0].id }] : []),
+    script: (c, t) => (t === 0 ? [{ type: 'hold', id: c.B[0].id }, { type: 'attackMove', id: c.B[1].id, x: c.A[0].x, y: c.A[0].y }] : []),
     judge: (c) => ({ pass: c.m.over && c.m.result().winner === 0, detail: c.m.over ? `${Math.round(c.m.tick / 10)} 秒結束，${c.m.result().winner === 0 ? '找到並打垮' : '沒有獲勝'}` : `時間到還沒找到（弓兵剩 ${pct(c.B[0])}%）` }),
   },
 ];
