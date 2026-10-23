@@ -254,10 +254,13 @@ export const RULES = {
     leash: 6000,
     retarget: 10,
   },
+  /** 佔點：有人在圈內（且沒有敵人）進度條就增加，滿了才佔領成功；沒佔成前離開，進度倒退到零。
+   * 佔領後每秒得旗點的分數（圈內有敵人時暫停）；先到目標分獲勝 */
   capture: {
-    radius: 4000,
-    target: 100,
-    dominationTicks: 45 * TPS,
+    radius: 5000,
+    captureTicks: 15 * TPS,
+    scoreTarget: 400,
+    timeLimitTicks: 8 * 60 * TPS,
   },
 } as const;
 

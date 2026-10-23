@@ -36,6 +36,11 @@
 .lg-bug .pips { display: flex; gap: 5px; margin-top: 3px; }
 .lg-bug .pips:empty { display: none; }
 .lg-bug .pips i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid; display: block; }
+.lg-bug .pips i.contested { animation: lgPulse 0.7s ease-in-out infinite; box-shadow: 0 0 0 2px #facc15; }
+.lg-bug .score { margin-top: 2px; display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
+.lg-bug .score b { font-size: 15px; font-weight: 800; }
+.lg-bug .score span { color: var(--muted); }
+.lg-bug .score i { font-style: normal; font-size: 11px; color: var(--muted); margin-left: 2px; }
 .lg-bug .dom { margin-top: 3px; padding: 1px 10px; border-radius: 999px; color: #fff; font-weight: 700; font-size: 12px; animation: lgPulse 1s ease-in-out infinite; }
 @keyframes lgPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
 

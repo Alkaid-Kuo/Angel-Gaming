@@ -60,8 +60,11 @@ export interface LegionInitData {
     readonly heights: readonly number[];
     /** 依 playerId 的布陣區（格座標，含 x0/y0、不含 x1/y1） */
     readonly deploy: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
-    readonly flags: readonly { readonly id: number; readonly name: string; readonly x: number; readonly y: number }[];
+    /** 旗點（佔點模式）：points = 佔領後每秒得幾分 */
+    readonly flags: readonly { readonly id: number; readonly name: string; readonly x: number; readonly y: number; readonly points: number }[];
   };
+  /** 佔點規則：圈的半徑（單位）、從零佔滿要幾個 tick、目標分數 */
+  readonly capture: { readonly radius: number; readonly captureTicks: number; readonly scoreTarget: number };
   readonly units: readonly UnitInfo[];
   /** 相剋加成（百分比）：versus[攻擊方][目標] */
   readonly versus: Readonly<Record<string, Readonly<Record<string, number>>>>;
@@ -158,11 +161,15 @@ export interface FlagState {
   readonly name: string;
   readonly x: number;
   readonly y: number;
-  /** -1 = 中立 */
+  /** 佔領者；-1 = 還沒有人佔領 */
   readonly owner: number;
-  /** 佔領值 0～100（中立時是 capturer 的進度） */
-  readonly value: number;
+  /** 正在佔領的一方（-1 = 沒有）與進度（0～captureTicks，滿了就換成它佔領） */
   readonly capturer: number;
+  readonly progress: number;
+  /** 佔領者的圈內有敵人：暫停得分 */
+  readonly contested: boolean;
+  /** 佔領後每秒得幾分 */
+  readonly points: number;
 }
 
 export type Flank = 'front' | 'side' | 'rear';
@@ -177,8 +184,8 @@ export type LegionEvent =
   | { readonly type: 'destroyed'; readonly tick: number; readonly reg: number; readonly escaped: boolean }
   | { readonly type: 'levelUp'; readonly tick: number; readonly reg: number; readonly level: number }
   | { readonly type: 'skill'; readonly tick: number; readonly reg: number; readonly skill: string }
+  /** 旗點易手（佔領成功） */
   | { readonly type: 'flag'; readonly tick: number; readonly flag: number; readonly owner: number }
-  | { readonly type: 'domination'; readonly tick: number; readonly player: number; readonly started: boolean }
   | { readonly type: 'rejected'; readonly tick: number; readonly player: number; readonly command: string; readonly reason: string };
 
 export interface LegionObservation {
@@ -189,8 +196,8 @@ export interface LegionObservation {
   /** 只有看得到的敵軍 */
   readonly enemies: readonly EnemyRegiment[];
   readonly flags: readonly FlagState[];
-  /** 依 playerId：連續控制過半旗點的 tick 數 */
-  readonly domination: readonly number[];
+  /** 依 playerId：佔點分數（佔點模式；殲滅戰都是 0） */
+  readonly score: readonly number[];
   /** 自上次決策後與自己有關的事件 */
   readonly events: readonly LegionEvent[];
 }

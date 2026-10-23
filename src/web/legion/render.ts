@@ -483,7 +483,7 @@ export class LegionRenderer {
         ctx.fillRect(this.sx(z.x0 * TILE), this.sy(z.y0 * TILE), (z.x1 - z.x0) * s, (z.y1 - z.y0) * s);
       });
     }
-    if (this.meta.mode === 'capture') this.drawFlags(f);
+    if (this.meta.mode === 'capture') this.drawFlags(f, now);
     this.drawCorpses(now);
     this.drawTrails(now, opt);
     this.drawSkills(f, alpha, opt);
@@ -494,10 +494,13 @@ export class LegionRenderer {
     this.drawEffects(now);
   }
 
-  private drawFlags(f: LegionFrame): void {
+  /** 旗點：圈（佔領者的顏色；被爭奪時黃色閃爍）、佔領進度環（正在佔領的一方的顏色）、旗、名稱與每秒分數 */
+  private drawFlags(f: LegionFrame, now: number): void {
     const ctx = this.ctx;
     const s = this.cam.scale;
     const rad = (RULES.capture.radius / TILE) * s;
+    const font = getComputedStyle(document.body).fontFamily;
+    const blink = Math.floor(now / 350) % 2 === 0;
     this.meta.flags.forEach((fl, i) => {
       const st = f.flags[i];
       const x = this.sx(fl.x);
@@ -506,18 +509,17 @@ export class LegionRenderer {
       ctx.arc(x, y, rad, 0, Math.PI * 2);
       ctx.fillStyle = st.owner >= 0 ? (st.owner === 0 ? 'rgba(59,130,246,0.16)' : 'rgba(239,68,68,0.16)') : 'rgba(226,232,240,0.07)';
       ctx.fill();
-      ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = st.owner >= 0 ? TEAM[st.owner] : 'rgba(226,232,240,0.55)';
-      ctx.lineWidth = 1.5;
+      ctx.setLineDash(st.contested ? [] : [4, 4]);
+      ctx.strokeStyle = st.contested ? (blink ? '#facc15' : 'rgba(250,204,21,0.45)') : st.owner >= 0 ? TEAM[st.owner] : 'rgba(226,232,240,0.55)';
+      ctx.lineWidth = st.contested ? 2.5 : 1.5;
       ctx.stroke();
       ctx.setLineDash([]);
       // 佔領進度環
-      const who = st.owner >= 0 ? st.owner : st.capturer;
-      if (who >= 0 && st.value > 0) {
+      if (st.capturer >= 0 && st.progress > 0) {
         ctx.beginPath();
-        ctx.arc(x, y, rad, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * st.value) / RULES.capture.target);
-        ctx.strokeStyle = TEAM[who];
-        ctx.lineWidth = 4;
+        ctx.arc(x, y, rad + 3, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * st.progress) / RULES.capture.captureTicks);
+        ctx.strokeStyle = TEAM[st.capturer];
+        ctx.lineWidth = 5;
         ctx.stroke();
       }
       // 旗桿與旗
@@ -534,12 +536,13 @@ export class LegionRenderer {
       ctx.lineTo(x + 11 * k, y - 10 * k);
       ctx.lineTo(x, y - 6 * k);
       ctx.fill();
-      ctx.font = `600 ${Math.round(11 * Math.min(1.4, k))}px ${getComputedStyle(document.body).fontFamily}`;
+      const label = `${fl.name}・每秒 ${fl.points} 分${st.contested ? '・爭奪中' : ''}`;
+      ctx.font = `600 ${Math.round(11 * Math.min(1.4, k))}px ${font}`;
       ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillText(fl.name, x + 1, y + 20 * k + 1);
-      ctx.fillStyle = '#f1f5f9';
-      ctx.fillText(fl.name, x, y + 20 * k);
+      ctx.fillText(label, x + 1, y + 20 * k + 1);
+      ctx.fillStyle = st.contested ? '#fde047' : '#f1f5f9';
+      ctx.fillText(label, x, y + 20 * k);
     });
   }
 

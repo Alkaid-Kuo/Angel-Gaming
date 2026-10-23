@@ -12,6 +12,8 @@ const STATUS_EVERY = 35 * SEC;
 const FRONT_CONTACT_GAP = 10 * SEC;
 /** 同一種招牌技能的解說最短間隔 */
 const SKILL_GAP = 12 * SEC;
+/** 同一面旗「開始佔領／遭到攻擊」的解說最短間隔 */
+const FLAG_GAP = 15 * SEC;
 const DASH_NAME: Readonly<Record<DashKind, string>> = { charge: '衝鋒', assault: '突擊', infiltrate: '切入' };
 
 export class LegionCommentator {
@@ -25,6 +27,8 @@ export class LegionCommentator {
   private warned = false;
   private routs: number[] = [];
   private lastSkill = new Map<string, number>();
+  private flagPrev: { capturer: number; contested: boolean; said: number }[] = [];
+  private scoreSaid = new Set<number>();
 
   private readonly regs: readonly RegStatic[];
   private readonly players: readonly PlayerMeta[];
@@ -73,7 +77,7 @@ export class LegionCommentator {
     this.say(0, `比賽開始！${MODE_NAMES[m.mode]}・${m.map.name}。${a.side}「${a.bot}」對${b.side}「${b.bot}」`, true);
     this.say(0, `${a.side}陣容：${army(a)}（${a.cost} 點）`);
     this.say(0, `${b.side}陣容：${army(b)}（${b.cost} 點）`);
-    if (m.mode === 'capture') this.say(0, `佔點模式：地圖上 ${m.flags.length} 面旗，同時控制過半 ${RULES.capture.dominationTicks / SEC} 秒就獲勝；也可以直接殲滅對手`);
+    if (m.mode === 'capture') this.say(0, `佔點模式：${m.flags.map((f) => `${f.name}（每秒 ${f.points} 分）`).join('、')}三面旗，佔領後每秒得分，先到 ${RULES.capture.scoreTarget} 分獲勝；也可以直接殲滅對手`);
     else this.say(0, '殲滅戰：打垮對手全軍（潰散也算），或時間到時比剩餘兵力');
   }
 
@@ -159,22 +163,50 @@ export class LegionCommentator {
       }
       case 'flag': {
         const f = m.flags[ev.flag];
-        if (ev.owner < 0) this.say(t, `${f.name}的旗被打成中立`);
-        else this.say(t, `${this.players[ev.owner].side}拿下${f.name}的旗`, f.name === '中央淺灘');
+        const held = m.flags.filter((x) => x.owner === ev.owner).length;
+        this.say(t, `${this.players[ev.owner].side}佔領了${f.name}！每秒 +${f.points} 分（目前握有 ${held} 面旗）`, f.points > 1 || held >= 2);
         return;
       }
-      case 'domination':
-        if (ev.started) this.say(t, `${this.players[ev.player].side}控制過半旗點，${RULES.capture.dominationTicks / SEC} 秒倒數開始！`, true);
-        else if (!m.over) this.say(t, `${this.players[ev.player].side}的壓制倒數被打斷了！`, true);
-        return;
       default:
         return;
+    }
+  }
+
+  /** 佔點：開始佔領、旗點遭到攻擊、分數接近目標 */
+  private watchFlags(m: LegionMatch): void {
+    const t = m.tick;
+    m.flags.forEach((f, i) => {
+      const prev = this.flagPrev[i] ?? { capturer: -1, contested: false, said: -FLAG_GAP };
+      const quiet = t - prev.said >= FLAG_GAP;
+      if (f.capturer >= 0 && f.capturer !== prev.capturer && quiet) {
+        prev.said = t;
+        const by = f.owner >= 0 ? `，要從${this.players[f.owner].side}手上奪走` : '';
+        this.say(t, `${this.players[f.capturer].side}開始佔領${f.name}${by}`, false);
+      }
+      if (f.contested && !prev.contested && f.owner >= 0 && quiet) {
+        prev.said = t;
+        this.say(t, `${this.players[f.owner].side}的${f.name}遭到攻擊，暫停得分`, false);
+      }
+      this.flagPrev[i] = { capturer: f.capturer, contested: f.contested, said: prev.said };
+    });
+    for (const p of m.players) {
+      const sc = m.scoreOf(p.id);
+      const goal = RULES.capture.scoreTarget;
+      for (const pct of [50, 75, 90]) {
+        const key = p.id * 1000 + pct;
+        if (sc * 100 >= goal * pct && !this.scoreSaid.has(key)) {
+          this.scoreSaid.add(key);
+          const other = m.scoreOf(1 - p.id);
+          this.say(t, `${this.players[p.id].side}拿到 ${sc} 分（對手 ${other} 分），再 ${goal - sc} 分就獲勝！`, pct >= 75);
+        }
+      }
     }
   }
 
   /** 每 tick 結束後呼叫：發現敵軍、時間提醒、局勢 */
   afterTick(m: LegionMatch): void {
     const t = m.tick;
+    if (m.mode === 'capture') this.watchFlags(m);
     for (let p = 0; p < this.players.length; p++) {
       const vis = m.visible[p];
       for (const r of m.regiments) {
@@ -190,20 +222,22 @@ export class LegionCommentator {
     }
     if (!this.warned && m.timeLimitTicks - t === 60 * SEC) {
       this.warned = true;
-      const s = m.players.map((p) => m.strength(p.id));
-      const lead = s[0] === s[1] ? '雙方兵力相當' : `${this.players[s[0] > s[1] ? 0 : 1].side}兵力領先`;
-      this.say(t, `剩 1 分鐘！${m.mode === 'capture' ? '時間到先比旗點、再比兵力' : '時間到比剩餘兵力'}，目前${lead}`, true);
+      const s = m.mode === 'capture' ? m.players.map((p) => m.scoreOf(p.id)) : m.players.map((p) => m.strength(p.id));
+      const what = m.mode === 'capture' ? '分數' : '兵力';
+      const lead = s[0] === s[1] ? `雙方${what}相當` : `${this.players[s[0] > s[1] ? 0 : 1].side}${what}領先`;
+      this.say(t, `剩 1 分鐘！${m.mode === 'capture' ? '時間到先比分數、再比兵力' : '時間到比剩餘兵力'}，目前${lead}`, true);
     }
     if (this.firstSight.some((x) => x) && t - this.lastAny >= 15 * SEC && t - this.lastStatus >= STATUS_EVERY) {
       this.lastStatus = t;
       const pct = m.players.map((p) => Math.floor(m.strength(p.id) / Math.max(1, p.cost)));
-      this.say(t, `局勢：剩餘兵力 ${this.players.map((p, i) => `${p.side} ${pct[i]}%`).join('，')}`);
+      const score = m.mode === 'capture' ? `；分數 ${this.players.map((p) => `${p.side} ${m.scoreOf(p.id)}`).join('，')}` : '';
+      this.say(t, `局勢：剩餘兵力 ${this.players.map((p, i) => `${p.side} ${pct[i]}%`).join('，')}${score}`);
     }
   }
 
   end(m: LegionMatch): void {
     const r = m.result();
-    const why = r.reason === 'domination' ? '控制過半旗點撐完倒數' : r.reason === 'annihilation' ? '打垮了對手全軍' : '時間到，比較剩餘兵力';
+    const why = r.reason === 'score' ? `先拿到 ${RULES.capture.scoreTarget} 分（${r.score[0]}：${r.score[1]}）` : r.reason === 'annihilation' ? '打垮了對手全軍' : m.mode === 'capture' ? '時間到，比較分數' : '時間到，比較剩餘兵力';
     if (r.winner === null) this.say(m.tick, `比賽結束，平手！（${why}）`, true);
     else this.say(m.tick, `${this.players[r.winner].side}「${this.players[r.winner].bot}」獲勝！${why}`, true);
   }

@@ -54,6 +54,9 @@ export class LegionBase {
     this.busy = false;
     this.lastFight = -1;
     this.myHp = -1;
+    /** 己方視角座標的縮放：程式裡的格座標以 160 × 100 的地圖為準，換到實際地圖 */
+    this.sx = 1;
+    this.sy = 1;
   }
 
   /**
@@ -66,6 +69,8 @@ export class LegionBase {
     this.p = data.playerId;
     this.W = data.map.width * TILE;
     this.H = data.map.height * TILE;
+    this.sx = data.map.width / 160;
+    this.sy = data.map.height / 100;
     this.k = data.knobs;
     for (const u of data.units) this.units[u.kind] = u;
     this.geo = {
@@ -118,24 +123,35 @@ export class LegionBase {
   // ───────── 座標：己方視角（0 號在左、往 +x 進攻） ─────────
 
   /**
-   * 己方視角的格座標 → 世界座標
+   * 己方視角的格座標（以 160 × 100 的地圖為準，依實際地圖縮放）→ 世界座標
    * @param {number} tx
    * @param {number} ty
    * @returns {Pt}
    */
   at(tx, ty) {
-    const x = Math.round(tx * TILE);
-    const y = Math.round(ty * TILE);
+    const x = Math.round(tx * this.sx * TILE);
+    const y = Math.round(ty * this.sy * TILE);
     return this.p === 0 ? { x, y } : { x: this.W - x, y: this.H - y };
   }
 
   /**
-   * 世界座標 → 己方視角的格座標
+   * 布陣位置：布陣區的深度固定（不隨地圖縮放），所以 x 不縮放、y 依地圖高度縮放
+   * @param {{ tx: number, ty: number }} e
+   * @returns {Pt}
+   */
+  deployAt(e) {
+    return this.at(e.tx / this.sx, e.ty);
+  }
+
+  /**
+   * 世界座標 → 己方視角的格座標（以 160 × 100 的地圖為準）
    * @param {Pt} o
    * @returns {Pt}
    */
   loc(o) {
-    return this.p === 0 ? { x: o.x / TILE, y: o.y / TILE } : { x: (this.W - o.x) / TILE, y: (this.H - o.y) / TILE };
+    const x = this.p === 0 ? o.x : this.W - o.x;
+    const y = this.p === 0 ? o.y : this.H - o.y;
+    return { x: x / TILE / this.sx, y: y / TILE / this.sy };
   }
 
   /** @param {number} deg 己方視角的角度 → 世界角度 */
@@ -226,7 +242,7 @@ export class LegionBase {
   deployFrom(entries) {
     this.plan = entries;
     return entries.map((e) => {
-      const pos = this.at(e.tx, e.ty);
+      const pos = this.deployAt(e);
       return { type: e.type, x: pos.x, y: pos.y, facing: this.face(e.facing || 0), ...(e.width ? { width: e.width } : {}), ...(e.formation ? { formation: e.formation } : {}), ...(e.stance ? { stance: e.stance } : {}) };
     });
   }
@@ -261,7 +277,7 @@ export class LegionBase {
         let bestD = Infinity;
         this.plan.forEach((e, i) => {
           if (used.has(i) || e.type !== r.kind) return;
-          const d = this.dist(this.at(e.tx, e.ty), r);
+          const d = this.dist(this.deployAt(e), r);
           if (d < bestD) {
             bestD = d;
             best = i;
@@ -823,6 +839,52 @@ export class LegionBase {
     if (best) return best;
     const sweep = [this.at(128, 50), this.at(110, 24), this.at(110, 76), this.at(86, 50)];
     return sweep[Math.floor(this.obs.tick / 300) % sweep.length];
+  }
+
+  // ───────── 佔點 ─────────
+
+  /** 佔點模式的旗（殲滅戰是空的） */
+  get flags() {
+    return this.obs.flags;
+  }
+
+  /** 中央的旗（分數最高的） */
+  get mainFlag() {
+    return this.flags.reduce((/** @type {import('../../src/legion/api.ts').FlagState | null} */ b, f) => (b === null || f.points > b.points ? f : b), null);
+  }
+
+  /**
+   * 兩側的旗中，離 from 最近、還不是我的（或被爭奪中）的一面；except 是別人已經負責的旗
+   * @param {Pt} from
+   * @param {number} [except]
+   */
+  sideFlagFor(from, except = -1) {
+    const main = this.mainFlag;
+    let best = null;
+    let bestD = Infinity;
+    for (const f of this.flags) {
+      if (f === main || f.id === except) continue;
+      const d = this.dist(from, f) * (f.owner === this.p && !f.contested ? 3 : 1);
+      if (d < bestD) {
+        bestD = d;
+        best = f;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * 去佔領（或守住）旗點：站進圈內；佔下來後留在圈內
+   * @param {Pending[]} out
+   * @param {Own} r
+   * @param {import('../../src/legion/api.ts').FlagState} f
+   * @param {number} prio
+   */
+  takeFlag(out, r, f, prio) {
+    if (this.dist(r, f) <= this.data.capture.radius * 0.5) return false;
+    const why = f.owner === this.p ? (f.contested ? `守住${f.name}` : `回防${f.name}`) : `佔領${f.name}`;
+    this.send(out, prio, { type: 'move', id: r.id, x: f.x, y: f.y }, why, 30);
+    return true;
   }
 
   /** 我方剩餘人數 vs 記得的敵方人數 */

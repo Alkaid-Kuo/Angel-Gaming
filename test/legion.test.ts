@@ -14,6 +14,18 @@ const H = 100000;
 type Dep = { type: string; x: number; y: number; facing?: number; width?: number };
 const rot = (d: Dep): Dep => ({ ...d, x: W - d.x, y: H - d.y, facing: ((d.facing ?? 0) + 180) % 360 });
 
+/** 把整團瞬間移到 (x, y)（測試用） */
+function teleport(m: LegionMatch, r: LegionMatch['regiments'][number], x: number, y: number): void {
+  const dx = x - r.x;
+  const dy = y - r.y;
+  r.x = x;
+  r.y = y;
+  for (const sid of r.slots) {
+    m.soldiers[sid].x += dx;
+    m.soldiers[sid].y += dy;
+  }
+}
+
 function match(a: Dep[], b: Dep[], mode: 'annihilation' | 'capture' = 'annihilation'): { m: LegionMatch; events: LegionEvent[] } {
   const m = new LegionMatch({ seed: 7, mode, deployments: [a, b] });
   const events: LegionEvent[] = [];
@@ -40,6 +52,18 @@ describe('軍團戰：地圖', () => {
     expect(map.flags[0].x).toBe(W - map.flags[2].x);
     expect(map.flags[0].y).toBe(H - map.flags[2].y);
     expect(terrainAt(map, map.flags[1].x, map.flags[1].y)).toBe(T.Shallow);
+  });
+
+  it('大河谷：旋轉 180° 對稱（地形與高度）、三個渡口', () => {
+    const g = MAPS['grand-valley']();
+    const n = g.terrain.length;
+    for (let i = 0; i < n; i++) {
+      expect(g.terrain[i]).toBe(g.terrain[n - 1 - i]);
+      expect(g.heights[i]).toBe(g.heights[n - 1 - i]);
+    }
+    expect(g.width * g.height).toBe(240 * 150);
+    expect(g.terrain.filter((t) => t === T.Bridge).length).toBeGreaterThan(30);
+    expect(g.terrain.filter((t) => t === T.Shallow).length).toBeGreaterThan(60);
   });
 });
 
@@ -162,16 +186,7 @@ describe('軍團戰：戰鬥規則', () => {
     const forest = { type: 'sword', x: 64000, y: 12000 };
     const { m } = match([{ type: 'light', x: 15000, y: 50000 }], [{ type: 'spear', x: 145000, y: 50000 }]);
     const hide = m.regiments[1];
-    const move = (r: (typeof m.regiments)[number], x: number, y: number): void => {
-      const dx = x - r.x;
-      const dy = y - r.y;
-      r.x = x;
-      r.y = y;
-      for (const sid of r.slots) {
-        m.soldiers[sid].x += dx;
-        m.soldiers[sid].y += dy;
-      }
-    };
+    const move = (r: (typeof m.regiments)[number], x: number, y: number): void => teleport(m, r, x, y);
     move(hide, forest.x, forest.y);
     // 22 格：在輕步兵 16 格視野內，但樹林中要邊緣 5 格內才看得到
     move(m.regiments[0], forest.x - 22000, forest.y);
@@ -188,15 +203,87 @@ describe('軍團戰：戰鬥規則', () => {
     expect(m.visible[0][hide.id]).toBe(1);
   });
 
-  it('佔點：控制超過半數旗點 45 秒獲勝', () => {
-    const { m } = match([{ type: 'spear', x: 15000, y: 50000 }], [{ type: 'spear', x: 145000, y: 30000 }], 'capture');
-    m.flags[0].owner = 1;
-    m.flags[0].value = RULES.capture.target;
-    m.flags[2].owner = 1;
-    m.flags[2].value = RULES.capture.target;
-    run(m, RULES.capture.dominationTicks + 5);
-    expect(m.over).toBe(true);
-    expect(m.result()).toMatchObject({ winner: 1, reason: 'domination' });
+  describe('佔點（大河谷）', () => {
+    const G = MAPS['grand-valley']();
+    const C = RULES.capture;
+    /** 雙方各一團長槍在自己的布陣區，回傳比賽與兩團 */
+    const setup = (): { m: LegionMatch; a: LegionMatch['regiments'][number]; b: LegionMatch['regiments'][number] } => {
+      const m = new LegionMatch({ seed: 7, mode: 'capture', deployments: [[{ type: 'spear', x: 10000, y: 20000 }], [{ type: 'spear', x: G.width * 1000 - 10000, y: 20000 }]] });
+      return { m, a: m.regiments[0], b: m.regiments[1] };
+    };
+
+    it('預設用大河谷、8 分鐘；三面旗對稱，中央淺灘 2 分、兩座橋 1 分', () => {
+      const { m } = setup();
+      expect(m.map.id).toBe('grand-valley');
+      expect(m.timeLimitTicks).toBe(C.timeLimitTicks);
+      expect(m.flags.map((f) => f.points)).toEqual([1, 2, 1]);
+      expect(m.flags[0].x).toBe(G.width * 1000 - m.flags[2].x);
+      expect(m.flags[0].y).toBe(G.height * 1000 - m.flags[2].y);
+      expect(terrainAt(G, m.flags[0].x, m.flags[0].y)).toBe(T.Bridge);
+      expect(terrainAt(G, m.flags[1].x, m.flags[1].y)).toBe(T.Shallow);
+    });
+
+    it('一方單獨在圈內：進度條滿了才佔領；佔領後每秒得分', () => {
+      const { m, a } = setup();
+      const f = m.flags[1];
+      teleport(m, a, f.x, f.y);
+      run(m, C.captureTicks - 1);
+      expect(f.owner).toBe(-1);
+      expect(f.capturer).toBe(0);
+      run(m, 1);
+      expect(f.owner).toBe(0);
+      run(m, 50);
+      expect(m.scoreOf(0)).toBe(10);
+      expect(m.observe(0).score).toEqual([10, 0]);
+    });
+
+    it('沒佔滿就離開：進度倒退到零；圈內有敵人：進度不增加', () => {
+      const { m, a, b } = setup();
+      const f = m.flags[0];
+      teleport(m, a, f.x - 2000, f.y);
+      run(m, 60);
+      expect(f.progress).toBe(60);
+      teleport(m, a, 10000, 20000);
+      run(m, 20);
+      expect(f.progress).toBe(40);
+      teleport(m, a, f.x - 2000, f.y);
+      teleport(m, b, f.x + 2000, f.y);
+      run(m, 30);
+      expect(f.progress).toBe(40);
+      teleport(m, a, 10000, 20000);
+      run(m, 40);
+      expect(f.progress).toBe(0);
+      expect(f.capturer).toBe(-1);
+      run(m, 5);
+      expect(f.capturer).toBe(1);
+    });
+
+    it('已佔領的旗：敵人進圈就暫停得分，敵人單獨佔滿就易手', () => {
+      const { m, a, b } = setup();
+      const f = m.flags[2];
+      f.owner = 0;
+      teleport(m, b, f.x, f.y);
+      run(m, 30);
+      expect(f.contested).toBe(true);
+      expect(m.scoreOf(0)).toBe(0);
+      expect(f.capturer).toBe(1);
+      run(m, C.captureTicks - 30);
+      expect(f.owner).toBe(1);
+      teleport(m, b, G.width * 1000 - 10000, 20000);
+      teleport(m, a, 10000, 20000);
+      run(m, 20);
+      expect(f.contested).toBe(false);
+      expect(m.scoreOf(1)).toBe(2);
+    });
+
+    it('先到目標分獲勝', () => {
+      const { m } = setup();
+      m.flags[1].owner = 1;
+      m.players[1].score = (C.scoreTarget - 1) * 10;
+      run(m, 6);
+      expect(m.over).toBe(true);
+      expect(m.result()).toMatchObject({ winner: 1, reason: 'score' });
+    });
   });
 });
 

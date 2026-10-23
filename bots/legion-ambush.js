@@ -56,6 +56,9 @@ class LegionBase {
     this.busy = false;
     this.lastFight = -1;
     this.myHp = -1;
+    /** 己方視角座標的縮放：程式裡的格座標以 160 × 100 的地圖為準，換到實際地圖 */
+    this.sx = 1;
+    this.sy = 1;
   }
 
   /**
@@ -68,6 +71,8 @@ class LegionBase {
     this.p = data.playerId;
     this.W = data.map.width * TILE;
     this.H = data.map.height * TILE;
+    this.sx = data.map.width / 160;
+    this.sy = data.map.height / 100;
     this.k = data.knobs;
     for (const u of data.units) this.units[u.kind] = u;
     this.geo = {
@@ -120,24 +125,35 @@ class LegionBase {
   // ───────── 座標：己方視角（0 號在左、往 +x 進攻） ─────────
 
   /**
-   * 己方視角的格座標 → 世界座標
+   * 己方視角的格座標（以 160 × 100 的地圖為準，依實際地圖縮放）→ 世界座標
    * @param {number} tx
    * @param {number} ty
    * @returns {Pt}
    */
   at(tx, ty) {
-    const x = Math.round(tx * TILE);
-    const y = Math.round(ty * TILE);
+    const x = Math.round(tx * this.sx * TILE);
+    const y = Math.round(ty * this.sy * TILE);
     return this.p === 0 ? { x, y } : { x: this.W - x, y: this.H - y };
   }
 
   /**
-   * 世界座標 → 己方視角的格座標
+   * 布陣位置：布陣區的深度固定（不隨地圖縮放），所以 x 不縮放、y 依地圖高度縮放
+   * @param {{ tx: number, ty: number }} e
+   * @returns {Pt}
+   */
+  deployAt(e) {
+    return this.at(e.tx / this.sx, e.ty);
+  }
+
+  /**
+   * 世界座標 → 己方視角的格座標（以 160 × 100 的地圖為準）
    * @param {Pt} o
    * @returns {Pt}
    */
   loc(o) {
-    return this.p === 0 ? { x: o.x / TILE, y: o.y / TILE } : { x: (this.W - o.x) / TILE, y: (this.H - o.y) / TILE };
+    const x = this.p === 0 ? o.x : this.W - o.x;
+    const y = this.p === 0 ? o.y : this.H - o.y;
+    return { x: x / TILE / this.sx, y: y / TILE / this.sy };
   }
 
   /** @param {number} deg 己方視角的角度 → 世界角度 */
@@ -228,7 +244,7 @@ class LegionBase {
   deployFrom(entries) {
     this.plan = entries;
     return entries.map((e) => {
-      const pos = this.at(e.tx, e.ty);
+      const pos = this.deployAt(e);
       return { type: e.type, x: pos.x, y: pos.y, facing: this.face(e.facing || 0), ...(e.width ? { width: e.width } : {}), ...(e.formation ? { formation: e.formation } : {}), ...(e.stance ? { stance: e.stance } : {}) };
     });
   }
@@ -263,7 +279,7 @@ class LegionBase {
         let bestD = Infinity;
         this.plan.forEach((e, i) => {
           if (used.has(i) || e.type !== r.kind) return;
-          const d = this.dist(this.at(e.tx, e.ty), r);
+          const d = this.dist(this.deployAt(e), r);
           if (d < bestD) {
             bestD = d;
             best = i;
@@ -827,6 +843,52 @@ class LegionBase {
     return sweep[Math.floor(this.obs.tick / 300) % sweep.length];
   }
 
+  // ───────── 佔點 ─────────
+
+  /** 佔點模式的旗（殲滅戰是空的） */
+  get flags() {
+    return this.obs.flags;
+  }
+
+  /** 中央的旗（分數最高的） */
+  get mainFlag() {
+    return this.flags.reduce((/** @type {import('../src/legion/api.ts').FlagState | null} */ b, f) => (b === null || f.points > b.points ? f : b), null);
+  }
+
+  /**
+   * 兩側的旗中，離 from 最近、還不是我的（或被爭奪中）的一面；except 是別人已經負責的旗
+   * @param {Pt} from
+   * @param {number} [except]
+   */
+  sideFlagFor(from, except = -1) {
+    const main = this.mainFlag;
+    let best = null;
+    let bestD = Infinity;
+    for (const f of this.flags) {
+      if (f === main || f.id === except) continue;
+      const d = this.dist(from, f) * (f.owner === this.p && !f.contested ? 3 : 1);
+      if (d < bestD) {
+        bestD = d;
+        best = f;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * 去佔領（或守住）旗點：站進圈內；佔下來後留在圈內
+   * @param {Pending[]} out
+   * @param {Own} r
+   * @param {import('../src/legion/api.ts').FlagState} f
+   * @param {number} prio
+   */
+  takeFlag(out, r, f, prio) {
+    if (this.dist(r, f) <= this.data.capture.radius * 0.5) return false;
+    const why = f.owner === this.p ? (f.contested ? `守住${f.name}` : `回防${f.name}`) : `佔領${f.name}`;
+    this.send(out, prio, { type: 'move', id: r.id, x: f.x, y: f.y }, why, 30);
+    return true;
+  }
+
   /** 我方剩餘人數 vs 記得的敵方人數 */
   strengthRatio() {
     const mine = this.obs.regiments.filter((r) => !r.routed).reduce((s, r) => s + r.men * this.units[r.kind].cost / this.units[r.kind].men, 0);
@@ -924,11 +986,11 @@ export default class ForestAmbush extends LegionBase {
     if (this.fought < 0 && obs.tick > (k.patience ?? 60) * 10 * this.patienceScale) this.allIn = true;
     if (!this.sprung && this.fought >= 0 && obs.tick - this.fought > 600) this.sprung = true;
     const forward = this.forward;
-    const flags = this.data.map.flags;
     const hunt = this.huntPoint();
     if (hunt) this.allIn = true;
-    const goal = hunt || (capture && flags[1] ? { x: flags[1].x, y: flags[1].y } : this.at(140, 50));
-    const hold = this.at(capture ? 74 : 68, 50);
+    const main0 = capture ? this.mainFlag : null;
+    const goal = hunt || (main0 ? { x: main0.x, y: main0.y } : this.at(140, 50));
+    const hold = main0 ? { x: main0.x, y: main0.y } : this.at(68, 50);
     /** @type {Map<number, number>} */
     const load = new Map();
 
@@ -947,10 +1009,11 @@ export default class ForestAmbush extends LegionBase {
       const slot = slots.get(r.id) || anchor;
       if (this.dist(r, slot) > 2500) this.send(out, 2, { type: 'move', id: r.id, x: slot.x, y: slot.y, facing: forward }, hunt ? '搜索敵軍' : this.allIn ? '全軍進攻' : '守住淺灘後方', 30);
     }
+    // 佔點：最後一團長槍去佔離它最近的兩側旗
     if (capture && main.length >= 2) {
-      const own = flags[this.p === 0 ? 0 : 2];
       const holder = main[main.length - 1];
-      if (own && !holder.engaged && this.dist(holder, own) > 3000) this.send(out, 6, { type: 'move', id: holder.id, x: own.x, y: own.y, facing: forward }, '守住己方旗點', 40);
+      const sf = this.sideFlagFor(holder);
+      if (sf && !holder.engaged) this.takeFlag(out, holder, sf, 6);
     }
     // 弓兵與盾兵
     const archers = this.mine('archer');
@@ -988,6 +1051,8 @@ export default class ForestAmbush extends LegionBase {
     // 騎兵：接觸後繞橋偷襲，否則在高地後方待命
     const raid = (k.raid ?? 1) === 1 && (this.fought >= 0 || obs.tick > 500);
     for (const r of this.mine('cav')) {
+      const sf = capture ? this.sideFlagFor(r) : null;
+      if (sf && !r.engaged && !r.dashing && !this.nearestFoe(r, (e) => e.kind !== 'light', 10) && this.takeFlag(out, r, sf, 4)) continue;
       const me = this.loc(r);
       if (raid && me.x < 88 && !r.engaged) {
         const by = this.raidRoute === 0 ? 78 : 22;

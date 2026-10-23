@@ -99,7 +99,6 @@ export default class ArrowRain extends LegionBase {
     this.lastTick = obs.tick;
     if (this.advance) this.pushed = Math.min(48, this.pushed + (busy ? (this.strengthRatio() >= 1 ? dt / 40 : 0) : dt / 15));
     const forward = this.forward;
-    const flags = this.data.map.flags;
     // 陣地：高地；往前壓時陣地往前移（交戰時不往回縮）；太久沒打就去找敵人（陣地在敵軍前方 9 格）
     const hunt = this.huntPoint();
     if (hunt) this.advance = true;
@@ -131,15 +130,21 @@ export default class ArrowRain extends LegionBase {
       const w = wings[i % wings.length];
       if (this.dist(r, w) > 2500) this.send(out, 2, { type: 'move', id: r.id, x: w.x, y: w.y, facing: forward }, hunt ? '搜索敵軍' : this.advance ? '往前推進' : '守高地側翼', 30);
     });
-    // 佔點：長槍守中央旗點旁
-    if (capture && flags[1]) {
+    // 佔點：一團長槍守中央旗，斥候各去佔一面兩側的旗
+    const mf = capture ? this.mainFlag : null;
+    if (mf) {
       const sp = this.mine('spear').find((r) => r.kind === 'spear');
-      if (sp && !sp.engaged && this.dist(sp, flags[1]) > 4500) this.send(out, 6, { type: 'move', id: sp.id, x: flags[1].x, y: flags[1].y, facing: forward }, '守中央旗點', 40);
+      if (sp && !sp.engaged) this.takeFlag(out, sp, mf, 6);
     }
     // 騎兵：高地後方待命
     for (const r of this.mine('cav')) this.cavalryCycle(out, r, this.offset(this.offset(post, this.face(180), 8), this.face(90), 12), 22);
     // 斥候：北邊、南邊的橋
-    this.mine('scout').forEach((r, i) => this.scoutReact(out, r, this.at(68, i === 0 ? 24 : 76), i === 0 ? '北橋' : '南橋'));
+    let taken = -1;
+    this.mine('scout').forEach((r, i) => {
+      const sf = capture ? this.sideFlagFor(r, taken) : null;
+      if (sf) taken = sf.id;
+      this.scoutReact(out, r, sf ? { x: sf.x, y: sf.y } : this.at(68, i === 0 ? 24 : 76), sf ? sf.name : i === 0 ? '北橋' : '南橋');
+    });
     return this.flush(out);
   }
 }

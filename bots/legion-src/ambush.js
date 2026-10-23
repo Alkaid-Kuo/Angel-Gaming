@@ -102,11 +102,11 @@ export default class ForestAmbush extends LegionBase {
     if (this.fought < 0 && obs.tick > (k.patience ?? 60) * 10 * this.patienceScale) this.allIn = true;
     if (!this.sprung && this.fought >= 0 && obs.tick - this.fought > 600) this.sprung = true;
     const forward = this.forward;
-    const flags = this.data.map.flags;
     const hunt = this.huntPoint();
     if (hunt) this.allIn = true;
-    const goal = hunt || (capture && flags[1] ? { x: flags[1].x, y: flags[1].y } : this.at(140, 50));
-    const hold = this.at(capture ? 74 : 68, 50);
+    const main0 = capture ? this.mainFlag : null;
+    const goal = hunt || (main0 ? { x: main0.x, y: main0.y } : this.at(140, 50));
+    const hold = main0 ? { x: main0.x, y: main0.y } : this.at(68, 50);
     /** @type {Map<number, number>} */
     const load = new Map();
 
@@ -125,10 +125,11 @@ export default class ForestAmbush extends LegionBase {
       const slot = slots.get(r.id) || anchor;
       if (this.dist(r, slot) > 2500) this.send(out, 2, { type: 'move', id: r.id, x: slot.x, y: slot.y, facing: forward }, hunt ? '搜索敵軍' : this.allIn ? '全軍進攻' : '守住淺灘後方', 30);
     }
+    // 佔點：最後一團長槍去佔離它最近的兩側旗
     if (capture && main.length >= 2) {
-      const own = flags[this.p === 0 ? 0 : 2];
       const holder = main[main.length - 1];
-      if (own && !holder.engaged && this.dist(holder, own) > 3000) this.send(out, 6, { type: 'move', id: holder.id, x: own.x, y: own.y, facing: forward }, '守住己方旗點', 40);
+      const sf = this.sideFlagFor(holder);
+      if (sf && !holder.engaged) this.takeFlag(out, holder, sf, 6);
     }
     // 弓兵與盾兵
     const archers = this.mine('archer');
@@ -166,6 +167,8 @@ export default class ForestAmbush extends LegionBase {
     // 騎兵：接觸後繞橋偷襲，否則在高地後方待命
     const raid = (k.raid ?? 1) === 1 && (this.fought >= 0 || obs.tick > 500);
     for (const r of this.mine('cav')) {
+      const sf = capture ? this.sideFlagFor(r) : null;
+      if (sf && !r.engaged && !r.dashing && !this.nearestFoe(r, (e) => e.kind !== 'light', 10) && this.takeFlag(out, r, sf, 4)) continue;
       const me = this.loc(r);
       if (raid && me.x < 88 && !r.engaged) {
         const by = this.raidRoute === 0 ? 78 : 22;

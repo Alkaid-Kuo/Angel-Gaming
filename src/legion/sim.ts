@@ -8,6 +8,7 @@ import type { EnemyRegiment, Flank, FlagState, LegionCommand, LegionEvent, Legio
 import {
   RULES,
   T,
+  TPS,
   TILE,
   UNIT_KINDS,
   UNITS,
@@ -26,7 +27,7 @@ import {
 } from './config.ts';
 import { formationShape, grid, type FormationShape } from './formation.ts';
 import { angleDiff, iatan2, icos, isin, normDeg, offset, stepToward, turnToward } from './geom.ts';
-import { MAPS, heightAt, sightBlocked, tileCoord, type LegionMap } from './map.ts';
+import { MAPS, defaultMapId, defaultTimeLimit, heightAt, sightBlocked, tileCoord, type LegionMap } from './map.ts';
 import { clearLine, findPath, snapPoint } from './path.ts';
 
 export type { Flank };
@@ -204,15 +205,18 @@ export interface FlagRuntime {
   readonly name: string;
   readonly x: number;
   readonly y: number;
+  readonly points: number;
   owner: number;
-  value: number;
   capturer: number;
+  progress: number;
+  contested: boolean;
 }
 
 export interface PlayerState {
   readonly id: number;
   readonly cost: number;
-  domination: number;
+  /** 佔點分數（分 × TPS：每 tick 加旗點的分數） */
+  score: number;
   active: boolean;
   kills: number;
   losses: number;
@@ -221,11 +225,13 @@ export interface PlayerState {
 export interface LegionResult {
   /** null = 平手 */
   readonly winner: number | null;
-  readonly reason: 'annihilation' | 'domination' | 'time';
+  readonly reason: 'annihilation' | 'score' | 'time';
   readonly durationTicks: number;
   /** 剩餘兵力（點數 × 剩餘人數比例） */
   readonly strength: readonly number[];
   readonly flagsHeld: readonly number[];
+  /** 佔點分數 */
+  readonly score: readonly number[];
 }
 
 export interface LegionSetup {
@@ -321,22 +327,22 @@ export class LegionMatch {
   private dash0 = new Uint8Array(0);
 
   constructor(setup: LegionSetup) {
-    const mapFactory = MAPS[setup.mapId ?? 'river-valley'];
+    const mapFactory = MAPS[setup.mapId ?? defaultMapId(setup.mode)];
     if (mapFactory === undefined) throw new Error(`沒有地圖 ${setup.mapId}`);
     this.map = mapFactory();
     this.mode = setup.mode;
     this.seed = setup.seed;
-    this.timeLimitTicks = setup.timeLimitTicks ?? RULES.timeLimitTicks;
+    this.timeLimitTicks = setup.timeLimitTicks ?? defaultTimeLimit(setup.mode);
     this.rng = Prng.fromInts(setup.seed, 0x1e9);
     this.grid = new Grid(this.map.width, this.map.height);
     const n = setup.deployments.length;
     for (let p = 0; p < n; p++) this.inbox.push([]);
     for (let p = 0; p < n; p++) {
       const cost = this.deploy(p, setup.deployments[p]);
-      this.players.push({ id: p, cost, domination: 0, active: true, kills: 0, losses: 0 });
+      this.players.push({ id: p, cost, score: 0, active: true, kills: 0, losses: 0 });
     }
     for (let p = 0; p < n; p++) this.visible.push(new Uint8Array(this.regiments.length));
-    if (this.mode === 'capture') this.map.flags.forEach((f, i) => this.flags.push({ id: i, name: f.name, x: f.x, y: f.y, owner: -1, value: 0, capturer: -1 }));
+    if (this.mode === 'capture') this.map.flags.forEach((f, i) => this.flags.push({ id: i, name: f.name, x: f.x, y: f.y, points: f.points, owner: -1, capturer: -1, progress: 0, contested: false }));
     for (const r of this.regiments) this.layout(r, true);
     this.computeVision();
     this.checkVictory();
@@ -599,8 +605,8 @@ export class LegionMatch {
       me: p,
       regiments,
       enemies,
-      flags: this.flags.map((f): FlagState => ({ id: f.id, name: f.name, x: f.x, y: f.y, owner: f.owner, value: f.value, capturer: f.capturer })),
-      domination: this.players.map((q) => q.domination),
+      flags: this.flags.map((f): FlagState => ({ id: f.id, name: f.name, x: f.x, y: f.y, owner: f.owner, capturer: f.capturer, progress: f.progress, contested: f.contested, points: f.points })),
+      score: this.players.map((q) => this.scoreOf(q.id)),
       events,
     };
   }
@@ -1957,6 +1963,7 @@ export class LegionMatch {
   private stepFlags(): void {
     const n = this.players.length;
     const r2 = RULES.capture.radius * RULES.capture.radius;
+    const full = RULES.capture.captureTicks;
     const present = new Array<number>(n);
     for (const f of this.flags) {
       present.fill(0);
@@ -1972,40 +1979,37 @@ export class LegionMatch {
           count += 1;
         }
       }
-      if (count !== 1) continue;
-      const target = RULES.capture.target;
-      if (f.owner === who) f.value = Math.min(target, f.value + 1);
-      else if (f.owner >= 0) {
-        f.value -= 1;
-        if (f.value <= 0) {
-          f.owner = -1;
-          f.value = 0;
-          f.capturer = -1;
-          this.emit({ type: 'flag', tick: this.tick, flag: f.id, owner: -1 });
-        }
-      } else if (f.capturer === who || f.capturer === -1 || f.value === 0) {
-        f.capturer = who;
-        f.value += 1;
-        if (f.value >= target) {
-          f.owner = who;
-          f.capturer = -1;
-          this.emit({ type: 'flag', tick: this.tick, flag: f.id, owner: who });
-        }
-      } else {
-        f.value -= 1;
+      // 只有一方在圈內、而且不是佔領者：它的進度增加（別人留下的進度要先倒退到零）；滿了就換它佔領
+      if (count === 1 && who !== f.owner) {
+        if (f.capturer === who || f.capturer < 0) {
+          f.capturer = who;
+          f.progress += 1;
+          if (f.progress >= full) {
+            f.owner = who;
+            f.capturer = -1;
+            f.progress = 0;
+            this.emit({ type: 'flag', tick: this.tick, flag: f.id, owner: who });
+          }
+        } else this.decayFlag(f);
+      } else if (count === 0 || (count === 1 && who === f.owner)) this.decayFlag(f);
+      // 雙方都在圈內：進度不動
+      f.contested = false;
+      if (f.owner >= 0) {
+        for (let p = 0; p < n; p++) if (p !== f.owner && present[p] === 1) f.contested = true;
+        if (!f.contested) this.players[f.owner].score += f.points;
       }
     }
-    for (const p of this.players) {
-      let held = 0;
-      for (const f of this.flags) if (f.owner === p.id) held += 1;
-      if (held * 2 > this.flags.length) {
-        if (p.domination === 0) this.emit({ type: 'domination', tick: this.tick, player: p.id, started: true });
-        p.domination += 1;
-      } else if (p.domination > 0) {
-        this.emit({ type: 'domination', tick: this.tick, player: p.id, started: false });
-        p.domination = 0;
-      }
-    }
+  }
+
+  /** 沒人在佔：進度倒退，到零就清掉正在佔領的一方 */
+  private decayFlag(f: FlagRuntime): void {
+    if (f.progress > 0) f.progress -= 1;
+    if (f.progress === 0) f.capturer = -1;
+  }
+
+  /** 佔點分數（分） */
+  scoreOf(p: number): number {
+    return idiv(this.players[p].score, TPS);
   }
 
   strength(p: number): number {
@@ -2032,9 +2036,10 @@ export class LegionMatch {
     }
     const strength = this.players.map((p) => this.strength(p.id));
     const flagsHeld = this.players.map((p) => this.flagsHeld(p.id));
+    const score = this.players.map((p) => this.scoreOf(p.id));
     const finish = (winner: number | null, reason: LegionResult['reason']): void => {
       this.over = true;
-      this.resultValue = { winner, reason, durationTicks: this.tick, strength, flagsHeld };
+      this.resultValue = { winner, reason, durationTicks: this.tick, strength, flagsHeld, score };
     };
     for (const p of this.players) if (p.active && strength[p.id] < p.cost * RULES.collapsePercent) p.active = false;
     const active = this.players.filter((p) => p.active);
@@ -2043,19 +2048,23 @@ export class LegionMatch {
       return;
     }
     if (this.mode === 'capture') {
-      const dom = this.players.find((p) => p.domination >= RULES.capture.dominationTicks);
-      if (dom !== undefined) {
-        finish(dom.id, 'domination');
+      // 先到目標分獲勝（同一 tick 一起到：分數高的贏，一樣高就平手）
+      const done = this.players.filter((p) => score[p.id] >= RULES.capture.scoreTarget);
+      if (done.length > 0) {
+        const best = Math.max(...done.map((p) => p.score));
+        const top = done.filter((p) => p.score === best);
+        finish(top.length === 1 ? top[0].id : null, 'score');
         return;
       }
     }
     if (this.tick >= this.timeLimitTicks) {
+      // 時間到：佔點先比分數、再比剩餘兵力；殲滅戰比剩餘兵力
       const order = this.players
         .map((p) => p.id)
-        .sort((a, b) => (this.mode === 'capture' ? flagsHeld[b] - flagsHeld[a] : 0) || strength[b] - strength[a]);
+        .sort((a, b) => (this.mode === 'capture' ? this.players[b].score - this.players[a].score : 0) || strength[b] - strength[a]);
       const a = order[0];
       const b = order[1];
-      const tie = (this.mode !== 'capture' || flagsHeld[a] === flagsHeld[b]) && strength[a] === strength[b];
+      const tie = (this.mode !== 'capture' || this.players[a].score === this.players[b].score) && strength[a] === strength[b];
       finish(tie ? null : a, 'time');
     }
   }
@@ -2091,7 +2100,6 @@ export class LegionMatch {
       case 'levelUp':
         return this.regiments[ev.reg]?.owner === p;
       case 'flag':
-      case 'domination':
         return true;
     }
   }
@@ -2112,8 +2120,8 @@ export class LegionMatch {
       if (r.volley !== null) h.int(r.volley.x).int(r.volley.y).int(r.volley.until);
     }
     for (const p of this.projectiles) h.int(p.t1).int(p.target).int(p.dmg).int(p.x1).int(p.y1);
-    for (const f of this.flags) h.int(f.owner).int(f.value).int(f.capturer);
-    for (const p of this.players) h.int(p.domination);
+    for (const f of this.flags) h.int(f.owner).int(f.capturer).int(f.progress).int(f.contested ? 1 : 0);
+    for (const p of this.players) h.int(p.score);
     return h.digest();
   }
 }
@@ -2138,8 +2146,9 @@ export function legionInitData(m: LegionMap, mode: LegionMode, p: number, knobs:
       terrain: Array.from(m.terrain),
       heights: Array.from(m.heights),
       deploy: m.deploy.map((z) => ({ x0: z.x0, y0: z.y0, x1: z.x1, y1: z.y1 })),
-      flags: m.flags.map((f, i) => ({ id: i, name: f.name, x: f.x, y: f.y })),
+      flags: m.flags.map((f, i) => ({ id: i, name: f.name, x: f.x, y: f.y, points: f.points })),
     },
+    capture: { radius: RULES.capture.radius, captureTicks: RULES.capture.captureTicks, scoreTarget: RULES.capture.scoreTarget },
     units: UNIT_KINDS.map((k) => {
       const u = UNITS[k];
       const d = dashDefOf(k);

@@ -114,7 +114,7 @@ export class LegionScreen {
     <div class="lg-bug">
       ${team(0)}
       <div class="bar t0" title="剩餘兵力（點數 × 剩餘人數比例；潰散不算）"><i data-el="bar0" style="background:${p[0].color}"></i><span data-el="pct0"></span></div>
-      <div class="mid"><div class="clock" data-el="clock">0:00</div><div class="mode">${MODE_NAMES[this.meta.mode]}・${esc(this.meta.mapName)}</div><div class="pips" data-el="pips"></div><div class="dom hidden" data-el="dom"></div></div>
+      <div class="mid"><div class="clock" data-el="clock">0:00</div><div class="mode">${MODE_NAMES[this.meta.mode]}・${esc(this.meta.mapName)}</div><div class="pips" data-el="pips"></div><div class="score hidden" data-el="score"></div></div>
       <div class="bar t1" title="剩餘兵力（點數 × 剩餘人數比例；潰散不算）"><span data-el="pct1"></span><i data-el="bar1" style="background:${p[1].color}"></i></div>
       ${team(1)}
     </div>
@@ -404,7 +404,7 @@ export class LegionScreen {
       <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。旗標下方的小字是 AI 的意圖（放大時顯示，<kbd>I</kbd> 開關）。</p>
       <h3>勝利條件</h3>
       <ul><li><b>殲滅戰</b>：對手全軍陣亡或潰散；剩餘兵力低於開場 ${RULES.collapsePercent}% 視為全軍潰敗。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比剩餘兵力。</li>
-      <li><b>佔點</b>：同時控制超過半數的旗點 ${RULES.capture.dominationTicks / TPS} 秒（被奪回就歸零）；或殲滅對手。時間到先比旗點、再比兵力。</li></ul>
+      <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比兵力。</li></ul>
       <h3>傷害</h3>
       <ul><li><b>沒有攻擊削弱，只有傷害減免</b>：各兵種有近戰、遠程減免（下表），和姿態、地形、盾兵掩護的減免相乘。</li>
       <li><b>側擊 ×${RULES.flank.side / 100}、背擊 ×${RULES.flank.rear / 100}</b>：看攻擊方在目標陣形的哪一面（旗標旁的小白箭頭是正面；楔形陣正面較窄，圓陣沒有側背）。</li></ul>
@@ -481,16 +481,13 @@ export class LegionScreen {
       this.el.pips.innerHTML = f.flags
         .map((fl, i) => {
           const c = fl.owner >= 0 ? this.meta.players[fl.owner].color : 'transparent';
-          return `<i title="${esc(this.meta.flags[i].name)}" style="background:${c};border-color:${fl.owner >= 0 ? c : 'rgba(255,255,255,0.55)'}"></i>`;
+          return `<i title="${esc(this.meta.flags[i].name)}" class="${fl.contested ? 'contested' : ''}" style="background:${c};border-color:${fl.owner >= 0 ? c : 'rgba(255,255,255,0.55)'}"></i>`;
         })
         .join('');
-      const d = f.domination.findIndex((x) => x > 0);
-      if (d >= 0) {
-        const left = Math.ceil((RULES.capture.dominationTicks - f.domination[d]) / TPS);
-        this.el.dom.textContent = `${this.meta.players[d].side}壓制中・${left} 秒`;
-        this.el.dom.style.background = this.meta.players[d].color;
-        this.el.dom.classList.remove('hidden');
-      } else this.el.dom.classList.add('hidden');
+      // 分數：藍 123 : 87 紅（目標 400）
+      const p = this.meta.players;
+      this.el.score.innerHTML = `<b style="color:${p[0].color}">${f.score[0]}</b><span>:</span><b style="color:${p[1].color}">${f.score[1]}</b><i>／${RULES.capture.scoreTarget}</i>`;
+      this.el.score.classList.remove('hidden');
     }
     for (const c of f.captions) this.caption(c);
     this.renderRosters(f);
@@ -609,9 +606,9 @@ export class LegionScreen {
       const routed = regs.filter((r) => byId.get(r.id) === undefined || byId.get(r.id)!.status === 'routed').length;
       const p = this.meta.players[i];
       return `<div class="rs-side${res.winner === i ? ' win' : ''}" style="border-color:${p.color}"><div class="lu-head"><span class="sw" style="background:${p.color}"></span><b>${esc(p.side)}</b><span class="bot">${esc(p.bot)}</span>${res.winner === i ? '<span class="crown">勝</span>' : ''}</div>
-        <div class="dt-grid"><span>剩餘兵力</span><b>${Math.floor(res.strength[i] / Math.max(1, p.cost))}%</b><span>存活士兵</span><b>${men} / ${men0}</b><span>擊殺</span><b>${f.kills[i]}</b><span>潰散或覆滅</span><b>${routed} / ${regs.length} 團</b>${this.meta.mode === 'capture' ? `<span>旗點</span><b>${res.flagsHeld[i]}</b>` : ''}</div></div>`;
+        <div class="dt-grid"><span>剩餘兵力</span><b>${Math.floor(res.strength[i] / Math.max(1, p.cost))}%</b><span>存活士兵</span><b>${men} / ${men0}</b><span>擊殺</span><b>${f.kills[i]}</b><span>潰散或覆滅</span><b>${routed} / ${regs.length} 團</b>${this.meta.mode === 'capture' ? `<span>分數</span><b>${res.score[i]}</b><span>旗點</span><b>${res.flagsHeld[i]}</b>` : ''}</div></div>`;
     };
-    const why = res.reason === 'domination' ? '控制過半旗點撐完倒數' : res.reason === 'annihilation' ? '打垮對手全軍' : '時間到，比較剩餘兵力';
+    const why = res.reason === 'score' ? `先拿到 ${RULES.capture.scoreTarget} 分` : res.reason === 'annihilation' ? '打垮對手全軍' : this.meta.mode === 'capture' ? '時間到，比較分數' : '時間到，比較剩餘兵力';
     const title = res.winner === null ? '平手' : `${this.meta.players[res.winner].side}「${esc(this.meta.players[res.winner].bot)}」獲勝`;
     this.el.result.innerHTML = `<div class="lu"><h2>${title}</h2><p class="muted">${why}・比賽時間 ${clock(res.durationTicks)}</p><div class="lu-cols">${stat(0)}<div class="lu-vs">VS</div>${stat(1)}</div>
       <div class="lu-foot"><button class="primary" data-act="restart">重看一次</button><button data-act="replay">下載回放</button><button data-act="exit">換組合</button><button data-act="closeResult">看戰場</button></div></div>`;
@@ -700,8 +697,10 @@ export class LegionScreen {
         const flag = this.meta.flags.findIndex((fl) => Math.hypot(fl.x - w.x, fl.y - w.y) <= RULES.capture.radius);
         if (this.meta.mode === 'capture' && flag >= 0) {
           const st = this.r.frame?.flags[flag];
-          const own = st === undefined || st.owner < 0 ? '中立' : this.meta.players[st.owner].side;
-          html = `<b>旗點：${esc(this.meta.flags[flag].name)}</b>　目前：${own}<br><span class="muted">只有一方的士兵在圈內就會慢慢佔領；同時控制過半旗點 ${RULES.capture.dominationTicks / TPS} 秒獲勝</span>`;
+          const fl = this.meta.flags[flag];
+          const own = st === undefined || st.owner < 0 ? '沒人佔領' : `${this.meta.players[st.owner].side}佔領${st.contested ? '（爭奪中，暫停得分）' : ''}`;
+          const cap = st !== undefined && st.capturer >= 0 ? `<br>${this.meta.players[st.capturer].side}佔領中：${Math.floor((st.progress * 100) / RULES.capture.captureTicks)}%` : '';
+          html = `<b>旗點：${esc(fl.name)}</b>　每秒 ${fl.points} 分<br>目前：${own}${cap}<br><span class="muted">圈內有我方、沒有敵方，進度才會增加；${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領，沒佔滿就離開會倒退</span>`;
         } else {
           const hgt = this.meta.heights[ty * this.meta.width + tx];
           const tip = [TERRAIN_TIP[t], t === T.River || t === T.Building || t === T.Wall ? '' : HEIGHT_TIP].filter((x) => x !== '').join('<br>');

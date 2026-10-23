@@ -39,7 +39,8 @@ export interface LegionMeta {
   readonly height: number;
   readonly terrain: Uint8Array;
   readonly heights: Uint8Array;
-  readonly flags: readonly { readonly name: string; readonly x: number; readonly y: number }[];
+  /** 旗點（佔點模式）：points = 佔領後每秒得幾分 */
+  readonly flags: readonly { readonly name: string; readonly x: number; readonly y: number; readonly points: number }[];
   readonly deploy: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
   readonly mode: LegionMode;
   readonly timeLimitTicks: number;
@@ -106,8 +107,10 @@ export interface LegionFrame {
   readonly regs: readonly RegFrame[];
   /** [x0, y0, x1, y1, t0, t1] × n：飛行中的箭 */
   readonly arrows: Int32Array;
-  readonly flags: readonly { readonly owner: number; readonly value: number; readonly capturer: number }[];
-  readonly domination: readonly number[];
+  /** 旗點：佔領者、正在佔領的一方與進度（tick）、佔領者的圈內有敵人 */
+  readonly flags: readonly { readonly owner: number; readonly capturer: number; readonly progress: number; readonly contested: boolean }[];
+  /** 佔點分數 */
+  readonly score: readonly number[];
   readonly strength: readonly number[];
   readonly kills: readonly number[];
   /** 依 playerId：看得到的軍團（軍團 id 為索引） */

@@ -6,9 +6,9 @@ import { Prng } from '../shared/prng.ts';
 import { BotLoadError, type CompiledBot } from '../sandbox/compile.ts';
 import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
 import type { LegionBot, LegionDeclaration, LegionHelpers, LegionInitData, LegionObservation } from './api.ts';
-import { LEGION_ENGINE_VERSION, RULES, TILE, type LegionMode } from './config.ts';
+import { LEGION_ENGINE_VERSION, TILE, type LegionMode } from './config.ts';
 import { iatan2, offset } from './geom.ts';
-import { MAPS, heightAt, terrainAt, type LegionMap } from './map.ts';
+import { MAPS, defaultMapId, defaultTimeLimit, heightAt, terrainAt, type LegionMap } from './map.ts';
 import { LegionMatch, legionInitData, type LegionResult } from './sim.ts';
 
 export interface LegionReplay {
@@ -67,9 +67,16 @@ export class LegionBatchController implements LegionController {
   readonly declaration: LegionDeclaration;
   private readonly bot: LegionBot;
   private helpers: LegionHelpers | null = null;
+  private readonly seed: number;
+  private readonly playerId: number;
+  private mapId: string;
 
+  /** map 只是預設；init 時依實際的地圖重建 helpers */
   constructor(compiled: CompiledBot, label: string, map: LegionMap, seed: number, playerId: number) {
     this.label = label;
+    this.seed = seed;
+    this.playerId = playerId;
+    this.mapId = map.id;
     const Cls = compiled.createClass() as unknown as new () => LegionBot;
     this.bot = new Cls();
     if (typeof this.bot.deploy !== 'function' || typeof this.bot.decide !== 'function') throw new BotLoadError(`${label}：軍團戰選手必須有 deploy() 與 decide()`);
@@ -100,6 +107,10 @@ export class LegionBatchController implements LegionController {
 
   init(data: LegionInitData): CallOutcome<null> {
     const bot = this.bot;
+    if (data.map.id !== this.mapId && MAPS[data.map.id] !== undefined) {
+      this.mapId = data.map.id;
+      this.helpers = legionHelpers(MAPS[data.map.id](), this.seed, this.playerId);
+    }
     return this.call(() => {
       bot.init?.(data, this.helpers!);
       return null;
@@ -143,9 +154,9 @@ export class LegionDriver {
   private readonly idle: boolean[];
 
   constructor(opts: LegionRunOptions) {
-    const mapId = opts.mapId ?? 'river-valley';
+    const mapId = opts.mapId ?? defaultMapId(opts.mode);
     const map = MAPS[mapId]();
-    const limit = opts.timeLimitTicks ?? RULES.timeLimitTicks;
+    const limit = opts.timeLimitTicks ?? defaultTimeLimit(opts.mode);
     this.controllers = opts.controllers;
     this.runtime = opts.controllers.map(() => ({ decisions: 0, exceptions: 0, killed: false, decideMsTotal: 0, decideMsMax: 0, errors: [] }));
     this.idle = opts.controllers.map(() => false);

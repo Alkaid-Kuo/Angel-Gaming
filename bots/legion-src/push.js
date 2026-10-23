@@ -96,7 +96,7 @@ export default class IronPush extends LegionBase {
     // 戰線錨點：還沒過河就停在 lineX；過河後一路往前（每次最多比最慢的一團前 6 格，維持戰線）
     const goalX = this.crossing ? 140 : lineX;
     const anchorX = Math.round(Math.min(goalX, front + 6) / 3) * 3;
-    const centerFlag = this.data.map.flags[1];
+    const centerFlag = this.mainFlag;
     const anchorY = this.crossing ? 50 : route.y;
     let anchor = this.at(anchorX, anchorY);
     if (capture && this.crossing && centerFlag) anchor = { x: centerFlag.x, y: centerFlag.y };
@@ -132,12 +132,7 @@ export default class IronPush extends LegionBase {
         this.send(out, 2, { type: 'move', id: r.id, x: slot.x, y: slot.y, facing: this.forward }, why, 30);
       }
     }
-    // 佔點：一團長槍守己方高地旗點
-    if (capture) {
-      const own = this.data.map.flags[this.p === 0 ? 0 : 2];
-      const holder = line.find((r) => r.kind === 'spear');
-      if (own && holder && !holder.engaged && this.dist(holder, own) > 3000) this.send(out, 6, { type: 'move', id: holder.id, x: own.x, y: own.y, facing: this.forward }, '守住己方旗點', 40);
-    }
+    // 佔點：戰線壓中央旗（見上方錨點）；騎兵與斥候各去佔一面兩側的旗
     // 弓兵：戰線後方 7 格
     const archers = this.mine('archer');
     archers.forEach((r, i) => {
@@ -147,13 +142,22 @@ export default class IronPush extends LegionBase {
     // 盾兵：護送第一團弓兵
     for (const r of this.mine('shield')) this.shieldReact(out, r, archers[0] || null);
     // 重騎兵：戰線的側翼待命，找機會衝鋒
+    let cavFlag = -1;
     for (const r of this.mine('cav')) {
+      const sf = capture ? this.sideFlagFor(r) : null;
+      if (sf && !r.engaged && !r.dashing && !this.nearestFoe(r, (e) => e.kind !== 'light', 10)) {
+        cavFlag = sf.id;
+        if (this.takeFlag(out, r, sf, 4)) continue;
+      }
       const side = this.loc(r).y < 50 ? -1 : 1;
       const rally = this.offset(this.offset(anchor, this.face(90), side * 20), this.face(180), 4);
       this.cavalryCycle(out, r, rally, 26);
     }
     // 斥候：戰線前方
-    for (const r of this.mine('scout')) this.scoutReact(out, r, this.at(Math.min(84, anchorX + 12), route.y), route.name);
+    for (const r of this.mine('scout')) {
+      const sf = capture ? this.sideFlagFor(r, cavFlag) : null;
+      this.scoutReact(out, r, sf ? { x: sf.x, y: sf.y } : this.at(Math.min(84, anchorX + 12), route.y), sf ? sf.name : route.name);
+    }
     return this.flush(out);
   }
 }
