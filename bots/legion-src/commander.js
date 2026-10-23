@@ -7,6 +7,7 @@
 //     斥候（偵察、獵落單弓兵、搶空旗）、護衛（敵人逼近弓兵時就近派兵攔截）、守旗。
 //   兵種動作：沿用共用函式庫（槍林、突擊、弓兵後撤與集火、盾牆、斥候）。
 import { LegionBase, TILE, TR } from './base.js';
+import { estimateCharge, estimateFight } from './estimate.js';
 
 /** @typedef {import('./base.js').Own} Own */
 /** @typedef {import('./base.js').Enemy} Enemy */
@@ -72,8 +73,13 @@ export default class Commander extends LegionBase {
     this.raid = false;
     /** 搜敵找到目標後的接戰鎖定（tick）：在這之前打得過就直接打，不再顧慮看不到的敵軍 */
     this.huntLock = -1;
-    /** 佔點：站進中央旗圈卡位的那一團 */
+    /** 最近一次戰力預估的優勢（-1～1，觀察用）與平滑後的值（附近沒敵人時清掉） */
+    this.lastForecast = 0;
+    /** @type {number | null} */
+    this.advSmooth = null;
+    /** 佔點：站進中央旗圈卡位的那一團、駐守己方橋的那一團 */
     this.holderId = -1;
+    this.nearGuardId = -1;
     /** 佔點：中央被對方弓兵控住、又攻不上去時，改搶的旗（旗 id、到哪個 tick） @type {{ id: number, until: number } | null} */
     this.focus = null;
     /** 正在壓上的對方弓兵陣位置（弓兵龜陣） @type {Pt | null} */
@@ -82,6 +88,8 @@ export default class Commander extends LegionBase {
     this.feint = null;
     /** 上一次佯攻結束的 tick（隔 20 秒才再發動） */
     this.feintEnd = -1000;
+    /** 看不到的敵軍點數（總預算推估減去記得的） */
+    this.hiddenPts = 0;
   }
 
   /** @returns {Declaration} */
@@ -229,6 +237,8 @@ export default class Commander extends LegionBase {
 
   assess() {
     const obs = this.obs;
+    // 看到覆滅的敵團就從記憶裡劃掉（不然最多 40 秒內還會被當成附近的敵軍，兵力比會算錯）
+    for (const ev of obs.events) if (ev.type === 'destroyed') this.seen.delete(ev.reg);
     for (const e of obs.enemies) {
       const prev = this.lastMen.get(e.id);
       if (prev !== undefined && e.men < prev) this.killedPts += (prev - e.men) * this.perMan(e.kind);
@@ -251,6 +261,48 @@ export default class Commander extends LegionBase {
     this.lastHp = hp;
     this.lastTick = obs.tick;
     this.clusters = this.cluster(this.remembered(250).filter((e) => !e.routed), 12);
+    this.hiddenPts = Math.max(0, this.enemyPts - known);
+  }
+
+  /**
+   * p 在多少敵方弓兵（最後看到的位置）的射程內：點數與它們的重心。
+   * except 是不算的那一團；hit 是衝鋒的目標位置：擠在它 5 格內的弓兵會一起被衝到、被纏住，不算威脅
+   * @param {Pt} p
+   * @param {number} [except]
+   * @param {Pt | null} [hit]
+   * @returns {{ pts: number, x: number, y: number }}
+   */
+  archerHeat(p, except = -1, hit = null) {
+    const bow = (this.units.archer.range / TILE + 3) * TILE;
+    let pts = 0;
+    let x = 0;
+    let y = 0;
+    for (const [id, e] of this.lastSeenAt) {
+      if (e.kind !== 'archer' || id === except || this.dist(e, p) >= bow || (hit && this.dist(e, hit) < 5 * TILE)) continue;
+      const v = (this.lastMen.get(id) ?? 24) * this.perMan('archer');
+      pts += v;
+      x += e.x * v;
+      y += e.y * v;
+    }
+    return pts > 0 ? { pts, x: x / pts, y: y / pts } : { pts: 0, x: p.x, y: p.y };
+  }
+
+  /** 還有相當多的敵軍沒看到（可能是躲在後面的弓兵） */
+  get hiddenBig() {
+    return this.hiddenPts > Math.max(80, this.enemyPts * 0.2);
+  }
+
+  /**
+   * 騎兵衝鋒會一路衝完整段距離：衝到底的地方在兩團以上敵方弓兵（記得的位置，不算擠在目標旁一起被衝到的）的射程裡，就是送死
+   * @param {Own} r
+   * @param {Pt} toward
+   * @param {number} [exceptId] 衝的目標本身
+   * @param {Pt | null} [hit] 目標位置
+   */
+  chargeSafe(r, toward, exceptId = -1, hit = null) {
+    const dash = r.kind === 'heavyCav' ? 30 : 25;
+    const end = this.offset(r, this.angle(r, toward), Math.max(dash - 6, this.dist(r, toward) / TILE));
+    return this.archerHeat(end, exceptId, hit).pts < 80;
   }
 
   /**
@@ -352,14 +404,39 @@ export default class Commander extends LegionBase {
       const unseen = Math.max(0, this.enemyPts - known);
       const attackEff = (this.ptsOf(main) / Math.max(1, nearPts + unseen * 0.6)) * (eff / Math.max(1e-9, localRatio));
       // 弓兵龜陣：對方弓兵比我強（站在射程裡對射只會乾耗）。近戰兵力夠就整條戰線壓上去（弓兵被貼身拉不開弓），不夠就退出射程
-      const foeArchers = target.members.filter((e) => e.kind === 'archer' && !e.routed);
+      // 弓兵常站著不動、看到一下又消失：記憶過期了也照最後看到的位置算（射得到目標或我方主力的）
+      const fresh = new Set(this.remembered(300).map((e) => e.id));
+      const reach = (this.units.archer.range / TILE + 8) * TILE;
+      /** @type {Memory[]} */
+      const ghosts = [];
+      for (const [id, e] of this.lastSeenAt) {
+        if (e.kind !== 'archer' || fresh.has(id) || (this.dist(e, target) > reach && this.dist(e, mc) > reach)) continue;
+        const men = this.lastMen.get(id) ?? this.units.archer.men;
+        ghosts.push(/** @type {Memory} */ ({ id, owner: 1 - this.p, kind: 'archer', x: e.x, y: e.y, facing: this.angle(e, mc), width: 0, formation: 'line', stance: null, men, men0: this.units.archer.men, status: 'idle', engaged: false, dashing: null, routed: false, terrain: 0, height: 0, radius: 0, tick: 0, vx: 0, vy: 0 }));
+      }
+      // 弓兵不一定跟目標同一群（常站在旁邊的高地上）：附近各群裡射得到我方主力的都算
+      const foeArchers = [...near.flatMap((c) => c.members), ...ghosts].filter((e) => e.kind === 'archer' && !e.routed && (target.members.includes(e) || this.dist(e, mc) < (this.units.archer.range / TILE + 6) * TILE || this.dist(e, target) < 20 * TILE));
       const foeArcherPts = foeArchers.reduce((t, e) => t + e.men * this.perMan(e.kind), 0);
       const myArcherPts = archers.reduce((t, r) => t + r.men * this.perMan(r.kind), 0);
-      const outgunned = foeArcherPts >= 40 && foeArcherPts > myArcherPts * 1.2;
+      // 看到的弓兵已經跟我差不多、又還有大批敵軍沒看到（多半還有弓兵躲在後面）：當成比我強
+      const outgunned = foeArcherPts >= 40 && (foeArcherPts > myArcherPts * 1.2 || (this.hiddenBig && foeArcherPts >= myArcherPts * 0.9));
       const cavs = this.obs.regiments.filter((r) => !r.routed && this.isCav(r.kind));
       const myMelee = this.ptsOf(line) + this.ptsOf(cavs);
       const terrain = eff / Math.max(1e-9, localRatio);
       this.assaultArchers = null;
+      // 戰力預估：我方主力＋騎兵，對目標附近 25 格內所有看得到或記得的敵軍（旁邊高地上的弓兵也算）；接觸前弓兵先射（距離 ÷ 每秒 2 格）
+      const foesNear = [...this.remembered(300).filter((e) => !e.routed && (this.dist(e, target) < 25 * TILE || this.dist(e, mc) < 25 * TILE)), ...ghosts];
+      // 高低差要有正負：我方站在高處也要算進去（up 只算敵方比我高）
+      const rise = Math.max(-3, Math.min(3, this.h.heightAt(target.x, target.y) - this.h.heightAt(mc.x, mc.y)));
+      const fc = this.forecast([...main, ...cavs], foesNear.length ? foesNear : target.members, { wet, up: rise, approach: Math.max(0, this.dist(mc, target) / TILE - 4) / 2 });
+      const raw = (fc.theirLost - fc.ourLost) / Math.max(40, Math.min(fc.ourValue, fc.theirValue));
+      // 平滑：每 2 秒重算一次，數字一跳就改主意會在決戰與收攏之間反覆
+      this.advSmooth = this.advSmooth === null ? raw : this.advSmooth * 0.5 + raw * 0.5;
+      const adv = this.advSmooth;
+      // 騎兵已經在敵軍側後方待命、衝鋒好了：步兵就上去纏住，給騎兵製造一擊的機會（只看預估，捨得交換）
+      // 其餘的進退仍照兵力比：預估對站定防守的對手太樂觀（架好的槍林、先射的弓兵、反衝的騎兵），拿來決定進退會打不過會守的對手
+      const hammerReady = !outgunned && cavs.some((c) => c.skillCooldown === 0 && !c.engaged && this.adiff(this.angle(target, c), this.angle(target, mc)) > 70 && this.dist(c, target) < 24 * TILE);
+      this.lastForecast = adv;
       if (engaged && eff < this.fightEdge * 0.6 && localRatio < 0.65) {
         posture = '收攏';
         const away = this.angle(target, mc);
@@ -396,6 +473,10 @@ export default class Commander extends LegionBase {
         const away = this.angle(ac, mc);
         const back = this.landBehind(this.offset(ac, away, this.units.archer.range / TILE + 4), away);
         mission = { anchor: back, facing: this.angle(back, ac), mode: 'hold', leash: 4, column: false };
+      } else if (hammerReady && adv >= -0.05 && ((this.ptsOf(main) + this.ptsOf(cavs)) / Math.max(1, nearPts)) * terrain >= this.fightEdge * 0.9) {
+        // 交換：騎兵已經在敵軍側後方待命、衝鋒好了，步兵就算預估稍微吃虧也上去纏住，給騎兵製造一擊的機會
+        posture = '決戰';
+        mission = { anchor: this.stepToward(mc, target, 7), facing: face, mode: 'engage', leash: 12, column: wet && this.dist(mc, target) < 20 * TILE };
       } else if (coming) {
         posture = '迎擊';
         const at = capture ? home : this.dist(mc, home) < 12 * TILE ? home : mc;
@@ -459,7 +540,10 @@ export default class Commander extends LegionBase {
         mission = { anchor: this.bp, facing: target ? this.angle(this.bp, target) : fwd, mode: atBp ? 'hold' : 'advance', leash: atBp ? 6 : 4, column: false };
       }
     }
-    if (near.length === 0) this.engageTarget = null;
+    if (near.length === 0) {
+      this.engageTarget = null;
+      this.advSmooth = null;
+    }
     if (this.focus && this.obs.tick >= this.focus.until) this.focus = null;
     this.posture = posture;
     this.line = mission;
@@ -693,6 +777,62 @@ export default class Commander extends LegionBase {
   // ───────── 佔點：分派各旗 ─────────
 
   /** 主力在中央旗的站位：中央旗往己方退 4 格的河岸（站在圈內但不下水） */
+  /**
+   * 預估這一仗（戰力預估模型）：我方 ours 對敵方 theirs，打 40 秒後雙方各損失多少點。
+   * 衝鋒好了的騎兵先各衝一次最划算的目標（被纏住、或側背對著它的算從側背衝；架著槍林正面的不衝）——
+   * 這樣「步兵上去拖住、騎兵從背後一擊」會被算成划算，單看步兵打不贏也值得上
+   * @param {readonly Own[]} ours
+   * @param {readonly (Enemy | Memory)[]} theirs
+   * @param {{ wet?: boolean, theirWet?: boolean, up?: number, approach?: number }} [opt] wet：我方要下水打；up：敵方比我方高幾階；approach：接觸前弓兵能先射幾秒
+   */
+  forecast(ours, theirs, opt = {}) {
+    const c0 = this.centroid(ours) || { x: 0, y: 0 };
+    const c1 = this.centroid(theirs) || { x: 0, y: 0 };
+    const unit = (/** @type {Own | Enemy} */ r, /** @type {Pt} */ foe) => {
+      const u = this.units[r.kind];
+      const front = this.inFront(r, foe, 70);
+      return {
+        kind: r.kind,
+        hp: 'hpMax' in r ? r.hp : r.men * u.hp,
+        hpMax: r.men0 * u.hp,
+        cost: u.cost,
+        braced: r.kind === 'spear' && (r.status === 'braced' || r.status === 'bracing') && front,
+        walled: r.kind === 'shield' && (r.status === 'walled' || r.status === 'walling') && front,
+      };
+    };
+    const a = ours.map((r) => unit(r, c1));
+    const b = theirs.map((e) => unit(e, c0));
+    const val = (/** @type {{ hp: number, hpMax: number, cost: number }[]} */ us) => us.reduce((t, u) => t + (u.hp / u.hpMax) * u.cost, 0);
+    const a0 = val(a);
+    const b0 = val(b);
+    ours.forEach((r, i) => {
+      if (!this.isCav(r.kind) || r.skillCooldown > 0 || r.engaged || r.dashing) return;
+      let best = -1;
+      let bestV = 0;
+      let rear = false;
+      theirs.forEach((e, j) => {
+        if (b[j].hp <= 0 || this.isCav(e.kind) || this.spearWall(e, r)) return;
+        // 目標旁邊有正面對著我的長槍：衝不進去
+        if (theirs.some((o) => o !== e && o.kind === 'spear' && !o.engaged && this.inFront(o, r, 70) && this.dist(o, e) < 8 * TILE)) return;
+        const back = e.engaged || !this.inFront(e, r, 70);
+        const v = estimateCharge(a[i], b[j], back).dealt;
+        if (v > bestV) {
+          bestV = v;
+          best = j;
+          rear = back;
+        }
+      });
+      if (best < 0) return;
+      // 衝鋒不一定每次都衝得到（目標移動、路線被擋），打 6 折
+      const c = estimateCharge(a[i], b[best], rear);
+      b[best].hp = Math.max(0, b[best].hp - ((c.dealt * 0.6) / b[best].cost) * b[best].hpMax);
+      a[i].hp = Math.max(0, a[i].hp - (c.taken / a[i].cost) * a[i].hpMax);
+    });
+    const covered = theirs.some((e) => e.kind === 'shield' && (e.stance === 'raise' || e.status === 'walled')) ? 0.5 : 0;
+    const est = estimateFight(a, b, { a: { wet: opt.wet }, b: { wet: opt.theirWet, height: opt.up || 0, covered }, approach: opt.approach || 0, seconds: 40 });
+    return { ourLost: a0 - est.aLeft, theirLost: b0 - est.bLeft, ourValue: a0, theirValue: b0 };
+  }
+
   /** 主力要守的旗：平常是中央；轉攻時是改搶的那面 */
   get homeFlag() {
     const f = this.focus && this.obs.tick < this.focus.until ? this.flags.find((x) => x.id === this.focus?.id) : null;
@@ -728,6 +868,15 @@ export default class Commander extends LegionBase {
       const holder = keep && keep.men >= keep.men0 * 0.3 ? keep : pick('shield') || pick('spear') || pick('sword');
       this.holderId = holder ? holder.id : -1;
       if (holder) this.flagJob.set(holder.id, hf.id);
+    }
+    // 己方的橋：派一團長槍（或劍士）駐守卡位——只靠斥候守，對方分一團步兵過來就丟了；場上至少要有 6 團才分
+    const field = this.obs.regiments.filter((r) => !r.routed);
+    if (near && near !== hf && field.length >= 6) {
+      const keepN = this.obs.regiments.find((r) => r.id === this.nearGuardId && !r.routed && r.id !== this.holderId);
+      const pickN = (/** @type {UnitKind} */ k) => field.filter((r) => r.kind === k && r.id !== this.holderId && r.men >= r.men0 * 0.5).sort((a, b) => this.dist(a, near) - this.dist(b, near))[0];
+      const g = keepN && keepN.men >= keepN.men0 * 0.3 ? keepN : pickN('spear') || pickN('sword');
+      this.nearGuardId = g ? g.id : -1;
+      if (g) this.flagJob.set(g.id, near.id);
     }
   }
 
@@ -971,7 +1120,8 @@ export default class Commander extends LegionBase {
       const sp = this.foes.find((e) => e.id === f.spear);
       const bait = own(f.bait);
       const cav = own(f.cav);
-      if (!sp || !bait || !cav || bait.men < bait.men0 * 0.5 || this.obs.tick - f.since > 400) {
+      const covered = sp ? this.foes.filter((o) => o.kind === 'archer' && this.dist(o, sp) < 14 * TILE).reduce((t, o) => t + o.men * this.perMan(o.kind), 0) >= 60 : false;
+      if (!sp || !bait || !cav || covered || bait.men < bait.men0 * 0.5 || this.obs.tick - f.since > 400) {
         this.feint = null;
         this.feintEnd = this.obs.tick;
         return;
@@ -1303,7 +1453,8 @@ export default class Commander extends LegionBase {
     const lineC = this.centroid(lineRegs.length ? lineRegs : this.obs.regiments.filter((o) => o.kind === 'archer' && !o.routed)) || m.anchor;
     cavs.forEach((r, i) => {
       const side = i % 2 === 0 ? 1 : -1;
-      const rally = this.landBehind(this.offset(this.offset(lineC, m.facing + 90 * side, 14), m.facing + 180, 6), m.facing + 180);
+      // 交戰前就繞到敵軍側後方待命（步兵一纏住它就從側背衝）；找不到合適的待命點才留在自己戰線的側翼
+      const rally = this.flankStage(r, i) || this.landBehind(this.offset(this.offset(lineC, m.facing + 90 * side, 14), m.facing + 180, 6), m.facing + 180);
       if (this.data.mode === 'capture' && this.posture !== '決戰' && !r.dashing) {
         // 回防：己方的旗被小股敵軍騷擾（附近沒有敵方主力）；處理完 20 秒內守在旗旁（黏著期）
         const st = this.state(r.id);
@@ -1396,6 +1547,33 @@ export default class Commander extends LegionBase {
   }
 
   /**
+   * 騎兵繞背的待命點：要接戰（決戰、迎擊）的敵軍集團側面 16 格、再往它後方 5 格。
+   * 兩側選：沒有沒被纏住、正面對著那裡的長槍，不在敵方弓兵射程裡，能站、不用涉水，離騎兵近的那一側（第二團騎兵選另一側）
+   * @param {Own} r
+   * @param {number} i 第幾團騎兵
+   * @returns {Pt | null}
+   */
+  flankStage(r, i) {
+    const tgt = this.engageTarget;
+    if (!tgt || (this.posture !== '決戰' && this.posture !== '迎擊') || r.engaged) return null;
+    const mc = this.centroid(this.lineRegs()) || r;
+    const toUs = this.angle(tgt, mc);
+    const cands = [90, -90]
+      .map((a) => this.offset(this.offset(tgt, toUs + a, 16), toUs + 180, 5))
+      .filter((q) => {
+        const t = this.h.terrainAt(q.x, q.y);
+        if (t === TR.river || t === TR.building || t === TR.wall || t === TR.forest || t === TR.shallow) return false;
+        if (this.waterBetween(r, q)) return false;
+        // 不能站在敵方弓兵射程裡等（射程 16 格＋高地加成，多留 3 格）
+        if ([...this.lastSeenAt.values()].some((e) => e.kind === 'archer' && this.dist(e, q) < (this.units.archer.range / TILE + 5) * TILE)) return false;
+        return !this.foes.some((e) => e.kind === 'spear' && !e.engaged && this.inFront(e, q, 70) && this.dist(e, q) < 14 * TILE);
+      })
+      .sort((a, b) => this.dist(r, a) - this.dist(r, b));
+    if (cands.length === 0) return null;
+    return cands[Math.min(i, cands.length - 1) % cands.length];
+  }
+
+  /**
    * 騎兵的錘：只衝被纏住、露出側背的敵人或弓兵、輕步兵、潰兵；繞到側背再衝；衝完拉開重整
    * @param {Pending[]} out
    * @param {Own} r
@@ -1414,12 +1592,22 @@ export default class Commander extends LegionBase {
       }
       return;
     }
+    // 站在兩團以上敵方弓兵的射程裡（又沒在打）：先退出箭雨
+    const heat = this.archerHeat(r);
+    if (heat.pts >= 80) {
+      const away = this.offset(r, this.angle(heat, r), 10);
+      const step = this.safeStep(r, this.landBehind(away, this.angle(heat, r)));
+      this.send(out, 8, { type: 'move', id: r.id, x: step.x, y: step.y }, `${name}退出箭雨`, 20);
+      return;
+    }
     /** @type {Enemy | null} */
     let best = null;
     let bestS = -Infinity;
     for (const e of this.foes) {
       const d = this.gap(r, e);
       if (d > 28 || this.isCav(e.kind) || e.dashing) continue;
+      // 目標在敵方弓兵陣裡（不算它自己）：衝進去、繞過去都會被射爛
+      if (this.archerHeat(e, e.id, e).pts >= 80) continue;
       const front = this.inFront(e, r, 65);
       const bracedFront = e.kind === 'spear' && (e.status === 'braced' || e.status === 'bracing') && (e.formation === 'circle' || front);
       if (bracedFront) continue;
@@ -1427,10 +1615,11 @@ export default class Commander extends LegionBase {
       // 附近有沒被纏住的敵方長槍：衝進去會被架槍林
       const spearNear = this.foes.some((o) => o !== e && o.kind === 'spear' && !o.engaged && this.dist(o, e) < 6 * TILE);
       // 沒被纏住的目標：只有身邊沒有長槍、盾兵、劍士保護的弓兵、輕步兵或殘兵才值得衝；
-      // 側背對著我的長槍也值得（架著槍林轉不過來，沒架的也來不及架）
+      // 側背對著我、架著槍林轉不過來的長槍也值得
       if (!e.engaged) {
         const soft = e.kind === 'archer' || e.kind === 'light' || e.men / e.men0 < 0.35;
-        const exposedSpear = e.kind === 'spear' && !front && e.formation !== 'circle';
+        // 只衝架著槍林、轉不過來的長槍；沒架的還能轉身架起來，衝過去會撞上槍尖
+        const exposedSpear = e.kind === 'spear' && !front && e.formation !== 'circle' && (e.status === 'braced' || e.status === 'bracing');
         // 盾兵擋不住騎兵，不算保護；長槍要正面對著我才算
         const guarded = this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'spear' || o.kind === 'sword') && this.dist(o, e) < 8 * TILE && (o.kind !== 'spear' || this.inFront(o, r, 70)));
         if ((!soft && !exposedSpear) || guarded) continue;
@@ -1455,15 +1644,23 @@ export default class Commander extends LegionBase {
       if (exposed && d >= 3 && d <= 20) {
         const p = this.predict(best, Math.round((d * TILE) / (heavy ? 600 : 680)));
         const through = this.offset(p, this.angle(r, p), 3);
-        if (this.clearLine(r, through, true) && !this.pathBlocked(r, p, best.id)) {
+        if (this.clearLine(r, through, true) && !this.pathBlocked(r, p, best.id) && this.chargeSafe(r, through, best.id, best)) {
           this.send(out, 9, { type: 'charge', id: r.id, x: through.x, y: through.y }, `${name}衝${best.engaged ? '側背' : ''}${this.units[best.kind].name}`, 20);
           return;
         }
       }
+      // 已經在硬目標的側背、但貼太近衝不起來（衝鋒要 3 格以上的助跑）：往後拉開再衝（軟目標直接近戰）
+      if (exposed && !soft && d < 3) {
+        const away = this.angle(best, r);
+        const back = this.landBehind(this.offset(r, away, 6), away);
+        this.send(out, 7, { type: 'move', id: r.id, x: back.x, y: back.y }, `${name}拉開距離再衝`, 15);
+        return;
+      }
       // 繞到側背：目標背後或側面 11 格，挑離敵方長槍最遠、能走的點
+      const tid = best.id;
       const cands = [180, 110, -110].map((a) => this.offset(best, best.facing + a, 11)).filter((q) => {
         const t = this.h.terrainAt(q.x, q.y);
-        return t !== TR.river && t !== TR.building && t !== TR.wall && t !== TR.forest;
+        return t !== TR.river && t !== TR.building && t !== TR.wall && t !== TR.forest && this.archerHeat(q, tid, best).pts < 44;
       });
       const spears = this.foes.filter((o) => o.kind === 'spear' && !o.engaged);
       const score = (/** @type {Pt} */ q) => Math.min(30 * TILE, ...spears.map((o) => this.dist(o, q))) - this.dist(r, q) * 0.5;
@@ -1477,8 +1674,9 @@ export default class Commander extends LegionBase {
     // 衝鋒冷卻中（或衝不了）：近戰沒人保護的軟目標——弓兵（被貼身拉不開弓）、輕步兵、殘兵，不要在旁邊乾等
     const prey = this.nearestFoe(r, (e) => {
       if (this.isCav(e.kind) || e.dashing || this.spearWall(e, r)) return false;
-      const soft = e.kind === 'archer' || e.kind === 'light' || e.men / e.men0 < 0.3 || (e.engaged && !this.inFront(e, r, 70));
-      if (!soft) return false;
+      // 騎兵肉搏很弱：只打弓兵、輕步兵、殘兵（其他的交給衝鋒）
+      const soft = e.kind === 'archer' || e.kind === 'light' || e.men / e.men0 < 0.3 || (e.engaged && !this.inFront(e, r, 70) && e.kind !== 'shield' && e.kind !== 'spear');
+      if (!soft || this.archerHeat(e, e.id, e).pts >= 80) return false;
       return !this.foes.some((o) => o !== e && !o.engaged && (o.kind === 'sword' || (o.kind === 'spear' && this.inFront(o, r, 70))) && this.dist(o, e) < 6 * TILE);
     }, 16);
     if (prey) {
@@ -1526,6 +1724,17 @@ export default class Commander extends LegionBase {
         name = i % 2 === 0 ? '北橋' : '南橋';
         // 沒有敵情又沒交戰：往前偵察
         if (this.clusters.length === 0 && this.obs.tick > 300) watch = this.landBehind(this.at(92, ys[i % 2]), this.face(180));
+        // 看到敵軍主力、但還有大批敵軍沒看到：繞到它側後方看看後面藏了什麼（騎兵要靠這個才敢衝）
+        const c = this.engageTarget || this.clusters[0];
+        if (c && this.hiddenBig) {
+          const mc = this.centroid(this.lineRegs()) || this.bp;
+          const deep = this.angle(mc, c);
+          const q = this.offset(this.offset(c, deep, 10), deep + (i % 2 === 0 ? 90 : -90), 14);
+          if (q.x > 4 * TILE && q.y > 4 * TILE && q.x < this.W - 4 * TILE && q.y < this.H - 4 * TILE) {
+            watch = this.landBehind(q, this.face(180));
+            name = '敵軍後方';
+          }
+        }
       }
       this.scoutReact(out, r, watch, name);
     });

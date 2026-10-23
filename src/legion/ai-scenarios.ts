@@ -8,6 +8,8 @@ import { heightAt, terrainAt } from './map.ts';
 import { LegionBatchController } from './runner.ts';
 import { LegionMatch, legionInitData, type Regiment } from './sim.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
+import { distSq, isqrt } from '../shared/intmath.ts';
+import { angleOf } from '../shared/trig.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 
 interface Unit {
@@ -382,14 +384,14 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       let best = 12 * TILE;
       for (const r of c.A) {
         if (r.slots.length === 0 || r.order === 'hold' || r.order === 'idle') continue;
-        const d = Math.hypot(r.x - sp.x, r.y - sp.y);
+        const d = isqrt(distSq(r.x, r.y, sp.x, sp.y));
         if (d < best) {
           best = d;
           near = r;
         }
       }
       if (near === null) return [];
-      const want = Math.round((Math.atan2(near.y - sp.y, near.x - sp.x) * 180) / Math.PI + 360) % 360;
+      const want = angleOf(near.x - sp.x, near.y - sp.y);
       const diff = Math.abs(((want - sp.facing + 540) % 360) - 180);
       // 架著槍林不能直接轉：先收（2 秒）再朝新方向架
       if (diff <= 40) return [];
@@ -436,6 +438,30 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       const mine = lost(c.A);
       const theirs = lost(c.B);
       return { pass: left <= total * 0.3 && mine < theirs, detail: `敵弓兵剩 ${Math.round((left * 100) / total)}%、我方損失 ${Math.round(mine)} 點、敵方損失 ${Math.round(theirs)} 點` };
+    },
+  },
+  {
+    id: 'S18',
+    name: '主動錘砧：步兵纏住、騎兵事先繞到側後方衝',
+    expect: '敵方兩團劍士、一團長槍（沒架槍林）站著防守不動；我方步兵兵力略少，加一團重騎兵。要主動接戰：步兵上去纏住，騎兵先繞到側後方、從側背衝。120 秒內至少一次從側背的衝鋒，而且我方損失的點數比對方少',
+    bot: [
+      { type: 'spear', x: -14, y: -5, formation: 'square' },
+      { type: 'sword', x: -14, y: 5 },
+      { type: 'heavyCav', x: -22, y: 0, formation: 'wedge' },
+    ],
+    foe: [
+      { type: 'sword', x: 6, y: -6 },
+      { type: 'sword', x: 6, y: 6 },
+      { type: 'spear', x: 6, y: 0, formation: 'square' },
+    ],
+    ticks: 1200,
+    script: (c, t) => (t % 50 === 0 ? c.B.filter((r) => r.slots.length > 0 && r.order === 'idle').map((r) => ({ type: 'hold', id: r.id })) : []),
+    judge: (c) => {
+      const flankHits = impacts(c, 0).filter((e) => e.kind === 'charge' && e.flank !== 'front').length;
+      const lost = (side: Regiment[]): number => side.reduce((t, r) => t + ((r.men0 - r.slots.length) * r.def.cost) / r.men0, 0);
+      const mine = lost(c.A);
+      const theirs = lost(c.B);
+      return { pass: flankHits > 0 && mine < theirs, detail: `側背衝鋒 ${flankHits} 次、我方損失 ${Math.round(mine)} 點、敵方損失 ${Math.round(theirs)} 點` };
     },
   },
 ];
