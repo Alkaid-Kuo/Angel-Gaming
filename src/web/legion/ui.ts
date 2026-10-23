@@ -4,6 +4,7 @@ import { DASH, FORMATION_NAMES, MODE_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, 
 import { unitSvg } from './icons.ts';
 import type { Caption, FromLegionWorker, LegionFrame, LegionMeta, ToLegionWorker } from './protocol.ts';
 import { LegionRenderer } from './render.ts';
+import { HOTKEYS, PlayerControl, type Pt } from './control.ts';
 
 const STATUS_NAME: Record<RegimentStatus, string> = {
   idle: '待命',
@@ -39,6 +40,10 @@ const TERRAIN_TIP = [
 const SKILL_NAME: Record<SkillKind, string> = { brace: '槍林', assault: '突擊', shield: '持盾／舉盾／盾牆', volley: '齊射', infiltrate: '切入', charge: '衝鋒' };
 const HEIGHT_TIP = `每高 1 階：視野 +${RULES.height.sightPerLevel / TILE} 格、弓兵射程 +${RULES.height.rangePerLevel / TILE} 格、打較低的敵人傷害 +${RULES.height.rangedPerLevel}%（高低差最多算 ${RULES.height.clamp} 階）・上坡移動 ×${RULES.height.uphillSpeed / 100}、下坡 ×${RULES.height.downhillSpeed / 100}`;
 const SPEEDS = [1, 2, 4, 8];
+/** 玩家指揮時的速度（多一檔慢動作） */
+const PLAYER_SPEEDS = [0.5, 1, 2, 4];
+/** 被拒絕的指令名稱（玩家提示） */
+const CMD_NAME: Record<string, string> = { move: '移動', attack: '攻擊', attackMove: '邊走邊打', hold: '堅守', face: '轉向', formation: '變陣', follow: '跟隨', brace: '槍林', unbrace: '收槍林', shield: '盾兵姿態', volley: '齊射', charge: '衝鋒', assault: '突擊', infiltrate: '切入', steer: '微調方向', summon: '後備入場', swap: '換兵', withdraw: '撤回' };
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -75,15 +80,31 @@ export class LegionScreen {
   private rosterSig = '';
   private ended = false;
   private readonly disposers: (() => void)[] = [];
+  /** 玩家指揮（null = 純觀戰） */
+  private readonly control: PlayerControl | null = null;
+  private readonly speeds: number[];
+  /** 玩家：框選起點（螢幕）、右鍵起點（世界）與當時指著的團、中鍵平移、WASD */
+  private boxStart: { x: number; y: number } | null = null;
+  private rdrag: { from: Pt; target: number } | null = null;
+  private pan: { x: number; y: number; cx: number; cy: number } | null = null;
+  private readonly keysDown = new Set<string>();
+  private lastTick = 0;
+  private toastUntil = 0;
 
   constructor(root: HTMLElement, worker: Worker, meta: LegionMeta, onExit: () => void) {
     this.root = root;
     this.worker = worker;
     this.meta = meta;
     this.onExit = onExit;
+    this.speeds = meta.playerSide >= 0 ? PLAYER_SPEEDS : SPEEDS;
     root.innerHTML = this.layout();
     for (const n of root.querySelectorAll<HTMLElement>('[data-el]')) this.el[n.dataset.el!] = n;
     this.r = new LegionRenderer(this.el.canvas as HTMLCanvasElement, meta);
+    if (meta.playerSide >= 0) {
+      this.control = new PlayerControl(this.r, meta.playerSide, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t));
+      this.viewer = meta.playerSide;
+      this.director = false;
+    }
     root.classList.remove('hidden');
     requestAnimationFrame(() => {
       this.r.fit();
@@ -108,6 +129,7 @@ export class LegionScreen {
 
   private layout(): string {
     const p = this.meta.players;
+    const player = this.meta.playerSide >= 0;
     const team = (i: number): string =>
       `<div class="team t${i}"><span class="sw" style="background:${p[i].color}"></span><span class="nm">${esc(p[i].side)}</span><span class="bot">${esc(p[i].bot)}</span></div>`;
     return `<div class="lg">
@@ -124,15 +146,16 @@ export class LegionScreen {
     <div class="lg-big hidden" data-el="big"></div>
     <div class="lg-feed" data-el="feed"></div>
     <div class="lg-tip hidden" data-el="tip"></div>
+    <div class="lg-toast hidden" data-el="toast"></div>
     <div class="lg-ctrl">
       <button data-act="play" data-el="play" title="播放／暫停（空白鍵）">▶</button>
-      ${SPEEDS.map((s) => `<button data-act="speed" data-speed="${s}" class="${s === 1 ? 'active' : ''}" title="播放速度（${SPEEDS.indexOf(s) + 1}）">${s}×</button>`).join('')}
-      <button data-act="skip" title="快轉到下一個交戰、衝鋒或埋伏（N）">⏭ 下一場</button>
+      ${this.speeds.map((s) => `<button data-act="speed" data-speed="${s}" class="${s === 1 ? 'active' : ''}" title="播放速度（${this.speeds.indexOf(s) + 1}）">${s}×</button>`).join('')}
+      ${player ? '' : '<button data-act="skip" title="快轉到下一個交戰、衝鋒或埋伏（N）">⏭ 下一場</button>'}
       <span class="sep"></span>
-      <select data-el="viewer" title="視角：上帝視角看得到全部；選一方只顯示那一方看得到的敵軍">
+      <select data-el="viewer" class="${player ? 'hidden' : ''}" title="視角：上帝視角看得到全部；選一方只顯示那一方看得到的敵軍">
         <option value="-1">上帝視角</option><option value="0">${esc(p[0].side)}視角</option><option value="1">${esc(p[1].side)}視角</option>
       </select>
-      <button data-act="director" data-el="director" class="active" title="自動導播：鏡頭跟著主要戰場（F）">導播</button>
+      <button data-act="director" data-el="director" class="${player ? '' : 'active'}" title="自動導播：鏡頭跟著主要戰場${player ? '' : '（F）'}">導播</button>
       <button data-act="intent" data-el="intent" class="active" title="放大時在軍團旗標下顯示 AI 意圖（I）；滑鼠指著或選中的軍團一律顯示">意圖</button>
       <button data-act="fit" title="看全圖（Home）">全圖</button>
       <span class="sep"></span>
@@ -148,7 +171,8 @@ export class LegionScreen {
   <aside class="lg-side">
     <section class="roster" data-el="roster0"></section>
     <section class="roster" data-el="roster1"></section>
-    <section class="detail" data-el="detail"><div class="muted small">點地圖上的軍團或名冊查看詳細資訊。滾輪縮放、拖曳平移。</div></section>
+    <section class="detail" data-el="detail"><div class="muted small">${player ? '左鍵選取自己的軍團、右鍵下指令。' : '點地圖上的軍團或名冊查看詳細資訊。滾輪縮放、拖曳平移。'}</div></section>
+    ${player ? `<section class="keys small">${HOTKEYS.map(([k, d]) => `<div><kbd>${k}</kbd> ${d}</div>`).join('')}</section>` : ''}
   </aside>
 </div>`;
   }
@@ -182,14 +206,39 @@ export class LegionScreen {
       this.r.cam.y += (before.y - after.y) / TILE;
       this.r.clamp();
     });
+    on(canvas, 'contextmenu', (e) => {
+      if (this.control) e.preventDefault();
+    });
     on(canvas, 'mousedown', (e) => {
       const me = e as MouseEvent;
+      if (this.control) {
+        const rect = canvas.getBoundingClientRect();
+        const px = me.clientX - rect.left;
+        const py = me.clientY - rect.top;
+        if (me.button === 0) this.boxStart = { x: px, y: py };
+        else if (me.button === 2) this.rdrag = { from: this.r.toWorld(px, py), target: this.r.pick(px, py, this.viewer, this.alpha()) };
+        else if (me.button === 1) {
+          me.preventDefault();
+          this.pan = { x: me.clientX, y: me.clientY, cx: this.r.cam.x, cy: this.r.cam.y };
+        }
+        return;
+      }
       this.drag = { x: me.clientX, y: me.clientY, cx: this.r.cam.x, cy: this.r.cam.y, moved: false };
     });
     on(window, 'mousemove', (e) => {
       const me = e as MouseEvent;
       const rect = canvas.getBoundingClientRect();
       this.mouse = { x: me.clientX - rect.left, y: me.clientY - rect.top };
+      if (this.control) {
+        if (this.boxStart && (me.buttons & 1) === 1 && Math.abs(this.mouse.x - this.boxStart.x) + Math.abs(this.mouse.y - this.boxStart.y) > 4) this.control.box = { x0: this.boxStart.x, y0: this.boxStart.y, x1: this.mouse.x, y1: this.mouse.y };
+        if (this.rdrag) this.control.order = { from: this.rdrag.from, to: this.r.toWorld(this.mouse.x, this.mouse.y) };
+        if (this.pan && (me.buttons & 4) === 4) {
+          this.r.cam.x = this.pan.cx - (me.clientX - this.pan.x) / this.r.cam.scale;
+          this.r.cam.y = this.pan.cy - (me.clientY - this.pan.y) / this.r.cam.scale;
+          this.r.clamp();
+        }
+        return;
+      }
       if (this.drag !== null && (me.buttons & 1) === 1) {
         const dx = me.clientX - this.drag.x;
         const dy = me.clientY - this.drag.y;
@@ -206,6 +255,28 @@ export class LegionScreen {
     });
     on(window, 'mouseup', (e) => {
       const me = e as MouseEvent;
+      const c = this.control;
+      if (c) {
+        const rect = canvas.getBoundingClientRect();
+        const px = me.clientX - rect.left;
+        const py = me.clientY - rect.top;
+        if (me.button === 0 && this.boxStart) {
+          if (c.box) c.finishBox(this.alpha(), me.shiftKey);
+          else if (me.target === canvas) {
+            const id = this.r.pick(px, py, this.viewer, this.alpha());
+            c.click(id, me.shiftKey);
+            this.select(id, false);
+          }
+          this.boxStart = null;
+          c.box = null;
+          this.renderDetail();
+        } else if (me.button === 2 && this.rdrag) {
+          c.rightClick(this.rdrag.target, this.rdrag.from, this.r.toWorld(px, py));
+          this.rdrag = null;
+          c.order = null;
+        } else if (me.button === 1) this.pan = null;
+        return;
+      }
       if (this.drag !== null && !this.drag.moved && me.target === canvas) {
         const rect = canvas.getBoundingClientRect();
         this.select(this.r.pick(me.clientX - rect.left, me.clientY - rect.top, this.viewer, this.alpha()), false);
@@ -218,13 +289,17 @@ export class LegionScreen {
     on(canvas, 'dblclick', () => {
       if (this.selected >= 0) this.focusReg(this.selected, 2.2);
     });
+    on(window, 'keyup', (e) => {
+      this.keysDown.delete((e as KeyboardEvent).key.toLowerCase());
+    });
     on(window, 'keydown', (e) => {
       const ke = e as KeyboardEvent;
-      if ((ke.target as HTMLElement).tagName === 'SELECT') return;
+      if ((ke.target as HTMLElement).tagName === 'SELECT' || (ke.target as HTMLElement).tagName === 'INPUT') return;
+      if (this.control && this.playerKey(ke)) return;
       if (ke.key === ' ') {
         ke.preventDefault();
         this.action('play');
-      } else if (ke.key >= '1' && ke.key <= '4') this.setSpeed(SPEEDS[Number(ke.key) - 1]);
+      } else if (ke.key >= '1' && ke.key <= '4') this.setSpeed(this.speeds[Number(ke.key) - 1]);
       else if (ke.key === 'n' || ke.key === 'N') this.action('skip');
       else if (ke.key === 'f' || ke.key === 'F') this.setDirector(!this.director);
       else if (ke.key === 'i' || ke.key === 'I') this.action('intent');
@@ -239,7 +314,19 @@ export class LegionScreen {
     for (const i of [0, 1]) {
       on(this.el[`roster${i}`], 'click', (e) => {
         const row = (e.target as HTMLElement).closest<HTMLElement>('[data-reg]');
-        if (row !== null) this.select(Number(row.dataset.reg), true);
+        if (row === null) return;
+        const id = Number(row.dataset.reg);
+        const c = this.control;
+        if (c && c.isMine(id)) {
+          // 玩家：點自己的後備＝入場（選了一團場上的就換兵）；點場上的＝選取
+          if (this.r.reg(id)?.reserve) c.reserveClick(id);
+          else {
+            c.click(id, (e as MouseEvent).shiftKey);
+            this.select(id, true);
+          }
+          return;
+        }
+        this.select(id, true);
       });
       on(this.el[`roster${i}`], 'mouseover', (e) => {
         const row = (e.target as HTMLElement).closest<HTMLElement>('[data-reg]');
@@ -249,6 +336,37 @@ export class LegionScreen {
         this.hovered = -1;
       });
     }
+  }
+
+  /** 玩家模式的按鍵：WASD 平移、指令快捷鍵；回傳 true 表示處理了 */
+  private playerKey(ke: KeyboardEvent): boolean {
+    const c = this.control!;
+    const k = ke.key.toLowerCase();
+    if (k === 'w' || k === 's' || k === 'd' || k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright') {
+      this.keysDown.add(k);
+      this.setDirector(false);
+      ke.preventDefault();
+      return true;
+    }
+    const mouse = this.mouse ? this.r.toWorld(this.mouse.x, this.mouse.y) : null;
+    const hover = this.mouse ? this.r.pick(this.mouse.x, this.mouse.y, this.viewer, this.alpha()) : -1;
+    // a 同時是平移鍵（WASD）與「邊走邊打」：有選取時當指令
+    if (k === 'a' && c.selected().length === 0 && !ke.ctrlKey) {
+      this.keysDown.add(k);
+      return true;
+    }
+    if (c.key(ke.key, ke.ctrlKey || ke.metaKey, mouse, hover)) {
+      ke.preventDefault();
+      this.renderDetail();
+      return true;
+    }
+    return false;
+  }
+
+  private toast(text: string): void {
+    this.el.toast.textContent = text;
+    this.el.toast.classList.remove('hidden');
+    this.toastUntil = performance.now() + 2500;
   }
 
   private action(act: string, el?: HTMLElement): void {
@@ -347,18 +465,21 @@ export class LegionScreen {
         <div class="lu-units">${[...counts]
           .map(([k, c]) => `<div class="lu-unit"><span class="ic" style="background:${p.color}">${unitSvg(k, 20, '#fff')}</span><span>${UNITS[k].name}</span><b>× ${c}</b><span class="muted small">${UNITS[k].cost} 點／${UNITS[k].men} 人</span></div>`)
           .join('')}</div>
-        <div class="lu-total"><b>${p.cost}</b> / ${RULES.budget} 點・${regs.length} 團・${men} 人</div>
+        <div class="lu-total"><b>${p.cost}</b> / ${this.meta.mode === 'capture' ? RULES.capture.budget : RULES.budget} 點・${regs.length} 團・${men} 人</div>
         ${rej.length ? `<div class="warn small">有 ${rej.length} 團布陣失敗：${esc(rej.map((x) => x.reason).join('、'))}</div>` : ''}
       </div>`;
     };
+    const ps = this.meta.playerSide;
+    const hidden = (i: number): string => `<div class="lu-side t${i}"><div class="lu-head" style="border-color:${this.meta.players[i].color}"><b>${esc(this.meta.players[i].side)}</b><span class="bot">${esc(this.meta.players[i].bot)}</span></div><p class="muted">對手的陣容開戰後才看得到。</p></div>`;
     this.el.lineup.innerHTML = `<div class="lu">
       <h2>開戰前陣容</h2>
-      <p class="muted">雙方各有 ${RULES.budget} 點，在<b>看不到對手</b>的情況下選兵、布陣。觀眾是上帝視角：埋伏在樹林裡的軍團會以黃色虛線框標示。</p>
-      <div class="lu-cols">${side(0)}<div class="lu-vs">VS</div>${side(1)}</div>
+      <p class="muted">${ps >= 0 ? '你指揮藍方。左鍵選取、右鍵移動或攻擊，快捷鍵見右下；暫停中也可以下指令。' : `雙方各有 ${this.meta.mode === 'capture' ? RULES.capture.budget : RULES.budget} 點，在<b>看不到對手</b>的情況下選兵、布陣。觀眾是上帝視角：埋伏在樹林裡的軍團會以黃色虛線框標示。`}</p>
+      <div class="lu-cols">${side(0)}<div class="lu-vs">VS</div>${ps === 0 ? hidden(1) : side(1)}</div>
       <div class="lu-foot"><button class="primary" data-act="start">開戰 <span data-el="countdown"></span></button><button data-act="help">規則說明</button></div>
     </div>`;
     this.el.countdown = this.el.lineup.querySelector<HTMLElement>('[data-el=countdown]')!;
     this.el.lineup.classList.remove('hidden');
+    if (ps >= 0) return;
     let left = 10;
     this.el.countdown.textContent = `（${left}）`;
     this.lineupTimer = window.setInterval(() => {
@@ -499,6 +620,11 @@ export class LegionScreen {
       if (this.el[`plan${i}`].textContent !== t) this.el[`plan${i}`].textContent = t;
     }
     for (const c of f.captions) this.caption(c);
+    if (this.control) {
+      const rej = f.events.filter((e) => e.type === 'rejected' && e.player === this.control!.side);
+      const last = rej[rej.length - 1];
+      if (last && last.type === 'rejected') this.toast(`${CMD_NAME[last.command] ?? last.command}：${last.reason}`);
+    }
     this.renderRosters(f);
     if (this.selected >= 0) this.renderDetail();
     if (f.over && !this.ended) {
@@ -526,17 +652,22 @@ export class LegionScreen {
 
   private renderRosters(f: LegionFrame): void {
     const byId = new Map(f.regs.map((r) => [r.id, r]));
-    const sig = f.regs.map((r) => `${r.id}:${r.men}:${r.status}:${r.level}:${r.concealed ? 1 : 0}:${Math.ceil(r.enterIn / TPS)}`).join(',') + `|${this.selected}`;
+    const ps = this.meta.playerSide;
+    // 玩家指揮：對手只列出現在看得到的團
+    const hide = (id: number, owner: number): boolean => ps >= 0 && owner !== ps && (f.visible[ps][id] !== 1 || byId.get(id)?.reserve === true);
+    const sig = f.regs.map((r) => `${r.id}:${r.men}:${r.status}:${r.level}:${r.concealed ? 1 : 0}:${Math.ceil(r.enterIn / TPS)}:${ps >= 0 ? f.visible[ps][r.id] : 0}`).join(',') + `|${this.selected}`;
     if (sig === this.rosterSig) return;
     this.rosterSig = sig;
     for (const i of [0, 1]) {
       const p = this.meta.players[i];
-      const regs = this.meta.regs.filter((r) => r.owner === i);
+      const all = this.meta.regs.filter((r) => r.owner === i);
+      const regs = all.filter((r) => !hide(r.id, i));
       const alive = regs.filter((r) => {
         const x = byId.get(r.id);
         return x !== undefined && x.status !== 'routed';
       }).length;
-      this.el[`roster${i}`].innerHTML = `<h3 style="border-color:${p.color}"><span class="sw" style="background:${p.color}"></span>${esc(p.side)}<span class="bot">${esc(p.bot)}</span><span class="cnt">${alive}/${regs.length} 團・擊殺 ${f.kills[i]}</span></h3>
+      const cnt = ps >= 0 && i !== ps ? `看得到 ${regs.length} 團` : `${alive}/${all.length} 團`;
+      this.el[`roster${i}`].innerHTML = `<h3 style="border-color:${p.color}"><span class="sw" style="background:${p.color}"></span>${esc(p.side)}<span class="bot">${esc(p.bot)}</span><span class="cnt">${cnt}・擊殺 ${f.kills[i]}</span></h3>
         ${regs
           .map((s) => {
             const r = byId.get(s.id);
@@ -636,7 +767,23 @@ export class LegionScreen {
     const now = performance.now();
     const a = this.paused ? 1 : this.alpha();
     if (this.director && this.started) this.direct();
-    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent });
+    const dt = Math.min(100, now - (this.lastTick || now));
+    this.lastTick = now;
+    if (this.keysDown.size > 0) {
+      const v = (dt / 1000) * (700 / this.r.cam.scale);
+      const k = this.keysDown;
+      if (k.has('w') || k.has('arrowup')) this.r.cam.y -= v;
+      if (k.has('s') || k.has('arrowdown')) this.r.cam.y += v;
+      if (k.has('a') || k.has('arrowleft')) this.r.cam.x -= v;
+      if (k.has('d') || k.has('arrowright')) this.r.cam.x += v;
+      this.r.clamp();
+    }
+    const c = this.control;
+    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent, selection: c?.selection, box: c?.box, order: c?.order });
+    if (this.toastUntil > 0 && now > this.toastUntil) {
+      this.toastUntil = 0;
+      this.el.toast.classList.add('hidden');
+    }
     if (this.bigUntil > 0 && now > this.bigUntil) {
       this.bigUntil = 0;
       this.el.big.classList.add('hidden');

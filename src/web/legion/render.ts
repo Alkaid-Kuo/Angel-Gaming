@@ -25,6 +25,10 @@ export interface DrawOptions {
   readonly showRanges: boolean;
   /** 顯示 AI 意圖（放大到一定程度才顯示；滑鼠指著或選中的軍團一律顯示） */
   readonly showIntent: boolean;
+  /** 玩家操控：選取中的團、框選（螢幕座標）、右鍵拖曳中的移動方向（世界座標） */
+  readonly selection?: ReadonlySet<number>;
+  readonly box?: { x0: number; y0: number; x1: number; y1: number } | null;
+  readonly order?: { from: { x: number; y: number }; to: { x: number; y: number } } | null;
 }
 
 interface Effect {
@@ -256,8 +260,8 @@ export class LegionRenderer {
   /** 戰爭迷霧用的離屏畫布 */
   private fogCanvas: HTMLCanvasElement | null = null;
   private prevRegById = new Map<number, RegFrame>();
-  private kindOf: UnitKind[];
-  private ownerOf: number[];
+  readonly kindOf: UnitKind[];
+  readonly ownerOf: number[];
 
   constructor(canvas: HTMLCanvasElement, meta: LegionMeta) {
     this.canvas = canvas;
@@ -496,11 +500,58 @@ export class LegionRenderer {
     this.drawTrails(now, opt);
     this.drawSkills(f, alpha, opt);
     if (opt.viewer >= 0) this.drawFog(opt.viewer, alpha);
-    if (opt.selected >= 0) this.drawSelection(opt.selected, alpha);
+    if (opt.selection && opt.selection.size > 0) {
+      for (const id of opt.selection) this.drawSelection(id, alpha, opt.selection.size === 1);
+    } else if (opt.selected >= 0) this.drawSelection(opt.selected, alpha, true);
     this.drawSoldiers(alpha, opt);
     this.drawArrows(f, alpha);
     this.drawBanners(alpha, opt);
     this.drawEffects(now);
+    this.drawOrders(opt);
+  }
+
+  /** 世界座標 → 螢幕座標 */
+  toScreen(x: number, y: number): [number, number] {
+    return [this.sx(x), this.sy(y)];
+  }
+
+  /** 下指令的地點閃一下 */
+  ping(x: number, y: number, color: string): void {
+    this.effects.push({ kind: 'ring', x, y, t0: performance.now(), life: 600, color, size: 1.6 });
+  }
+
+  /** 框選框、右鍵拖曳的移動方向 */
+  private drawOrders(opt: DrawOptions): void {
+    const ctx = this.ctx;
+    if (opt.box) {
+      const b = opt.box;
+      ctx.fillStyle = 'rgba(147,197,253,0.12)';
+      ctx.strokeStyle = 'rgba(191,219,254,0.85)';
+      ctx.lineWidth = 1;
+      ctx.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
+      ctx.strokeRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
+    }
+    if (opt.order) {
+      const a = opt.order.from;
+      const b = opt.order.to;
+      const x0 = this.sx(a.x);
+      const y0 = this.sy(a.y);
+      const x1 = this.sx(b.x);
+      const y1 = this.sy(b.y);
+      ctx.strokeStyle = '#bfdbfe';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+      const ang = Math.atan2(y1 - y0, x1 - x0);
+      ctx.fillStyle = '#bfdbfe';
+      ctx.beginPath();
+      ctx.moveTo(x1 + Math.cos(ang) * 9, y1 + Math.sin(ang) * 9);
+      ctx.lineTo(x1 + Math.cos(ang + 2.5) * 8, y1 + Math.sin(ang + 2.5) * 8);
+      ctx.lineTo(x1 + Math.cos(ang - 2.5) * 8, y1 + Math.sin(ang - 2.5) * 8);
+      ctx.fill();
+    }
   }
 
   /** 出生點（隊伍色的帳篷）與補給站（補給十字，顏色＝佔著那座橋的一方，沒人佔是灰色） */
@@ -1030,7 +1081,7 @@ export class LegionRenderer {
     ctx.stroke();
   }
 
-  private drawSelection(id: number, alpha: number): void {
+  private drawSelection(id: number, alpha: number, full: boolean): void {
     const r = this.regById.get(id);
     const p = this.regAt(id, alpha);
     if (r === undefined || p === null) return;
@@ -1051,7 +1102,7 @@ export class LegionRenderer {
     ctx.strokeRect(-hw, -hh, hw * 2, hh * 2);
     ctx.setLineDash([]);
     ctx.restore();
-    {
+    if (full) {
       const u = UNITS[kind];
       if (u.range > 0) {
         ctx.beginPath();

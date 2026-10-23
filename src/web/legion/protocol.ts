@@ -5,10 +5,18 @@ import type { LegionResult } from '../../legion/sim.ts';
 
 export type BotKey = 'push' | 'ambush' | 'ranged' | 'commander';
 
+/** 玩家的陣容：場上、後備（佔點模式）各幾團 */
+export interface PlayerArmy {
+  readonly field: readonly UnitKind[];
+  readonly reserve: readonly UnitKind[];
+}
+
 export interface LegionSetup {
-  readonly bots: readonly [BotKey, BotKey];
+  /** 'player' = 玩家指揮（只能是藍方） */
+  readonly bots: readonly [BotKey | 'player', BotKey];
   readonly mode: LegionMode;
   readonly seed: number;
+  readonly army?: PlayerArmy;
 }
 
 export interface RegStatic {
@@ -53,6 +61,8 @@ export interface LegionMeta {
   readonly soldierCount: number;
   /** 布陣被拒絕的軍團（顯示在陣容畫面） */
   readonly rejected: readonly { readonly player: number; readonly reason: string }[];
+  /** 玩家指揮的一方（-1 = 純觀戰） */
+  readonly playerSide: number;
 }
 
 export interface RegFrame {
@@ -136,7 +146,9 @@ export type ToLegionWorker =
   | { readonly type: 'speed'; readonly speed: number }
   | { readonly type: 'skip' }
   | { readonly type: 'restart' }
-  | { readonly type: 'replay' };
+  | { readonly type: 'replay' }
+  /** 玩家下的指令（下一個決策 tick 交給引擎，每次最多 10 個，多的排到下一次） */
+  | { readonly type: 'command'; readonly cmds: readonly unknown[] };
 
 export type FromLegionWorker =
   | { readonly type: 'meta'; readonly meta: LegionMeta }

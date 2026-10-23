@@ -32,10 +32,14 @@ export class LegionCommentator {
 
   private readonly regs: readonly RegStatic[];
   private readonly players: readonly PlayerMeta[];
+  /** 玩家指揮時是哪一方（-1 = 觀戰）：只講這一方看得到的事 */
+  private readonly viewer: number;
+  private match: LegionMatch | null = null;
 
-  constructor(regs: readonly RegStatic[], players: readonly PlayerMeta[]) {
+  constructor(regs: readonly RegStatic[], players: readonly PlayerMeta[], viewer = -1) {
     this.regs = regs;
     this.players = players;
+    this.viewer = viewer;
     this.firstSight = players.map(() => false);
     this.seenCav = players.map(() => new Set<number>());
     this.routs = players.map(() => 0);
@@ -63,11 +67,15 @@ export class LegionCommentator {
   }
 
   private say(tick: number, text: string, big = false, at?: Regiment): void {
+    // 玩家指揮：看不到的敵軍不播報
+    const v = this.viewer;
+    if (v >= 0 && at !== undefined && at.owner !== v && this.match !== null && this.match.visible[v][at.id] !== 1) return;
     this.out.push({ tick, text, ...(big ? { big: true } : {}), ...(at !== undefined ? { x: at.x, y: at.y } : {}) });
     this.lastAny = tick;
   }
 
   start(m: LegionMatch): void {
+    this.match = m;
     const [a, b] = this.players;
     const army = (p: PlayerMeta): string => {
       const counts = new Map<string, number>();
@@ -75,10 +83,9 @@ export class LegionCommentator {
       return [...counts].map(([n, c]) => `${n}×${c}`).join('、');
     };
     this.say(0, `比賽開始！${MODE_NAMES[m.mode]}・${m.map.name}。${a.side}「${a.bot}」對${b.side}「${b.bot}」`, true);
-    this.say(0, `${a.side}陣容：${army(a)}（${a.cost} 點）`);
-    this.say(0, `${b.side}陣容：${army(b)}（${b.cost} 點）`);
+    for (const p of [a, b]) if (this.viewer < 0 || p.id === this.viewer) this.say(0, `${p.side}陣容：${army(p)}（${p.cost} 點）`);
     if (m.mode === 'capture') this.say(0, `佔點模式：${m.flags.map((f) => `${f.name}（每秒 ${f.points} 分）`).join('、')}三面旗，佔領後每秒得分，先到 ${RULES.capture.scoreTarget} 分獲勝；也可以直接殲滅對手`);
-    else this.say(0, '殲滅戰：打垮對手全軍（潰散也算），或時間到時比剩餘兵力');
+    else this.say(0, '殲滅戰：打光對手全軍，或時間到時比剩餘兵力');
   }
 
   onEvent(m: LegionMatch, ev: LegionEvent): void {
@@ -163,7 +170,7 @@ export class LegionCommentator {
         this.routs[r.owner] += 1;
         this.say(t, `${this.name(r.id)} 撐不住了，潰散逃離戰場！`, UNITS[r.kind].cavalry || this.routs[r.owner] === 1, r);
         const left = m.regiments.filter((x) => x.owner === r.owner && !x.destroyed && !x.routed).length;
-        if (left > 0 && left <= 2) this.say(t, `${this.players[r.owner].side}只剩 ${left} 團還在戰鬥`);
+        if (left > 0 && left <= 2 && (this.viewer < 0 || r.owner === this.viewer)) this.say(t, `${this.players[r.owner].side}只剩 ${left} 團還在戰鬥`);
         return;
       }
       case 'levelUp': {
@@ -219,6 +226,7 @@ export class LegionCommentator {
     const t = m.tick;
     if (m.mode === 'capture') this.watchFlags(m);
     for (let p = 0; p < this.players.length; p++) {
+      if (this.viewer >= 0 && p !== this.viewer) continue;
       const vis = m.visible[p];
       for (const r of m.regiments) {
         if (r.owner === p || r.destroyed || vis[r.id] !== 1) continue;

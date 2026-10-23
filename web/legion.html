@@ -11,7 +11,7 @@
 <div id="setup" class="setup">
   <section class="hero">
     <h1>天使戰隊 軍團戰<small>原型</small></h1>
-    <p>中世紀大會戰。雙方 AI 各用 500 點選兵、在看不到對手的情況下布陣，開場就行軍接敵——側擊背擊、騎兵衝鋒、長槍架陣、樹林埋伏，一場約 2～5 分鐘。你是上帝視角的觀眾。</p>
+    <p>中世紀大會戰。雙方 AI 各用 500 點選兵、在看不到對手的情況下布陣，開場就行軍接敵——側擊背擊、騎兵衝鋒、長槍架陣、樹林埋伏，一場約 2～5 分鐘。你可以當上帝視角的觀眾，也可以親自指揮藍方。</p>
     <div class="row"><a class="muted small" href="./index.html">← 回到 RTS 試玩版</a></div>
   </section>
   <section class="card">
@@ -19,6 +19,7 @@
     <div class="lg-pick">
       <label class="side blue"><span class="sw" style="background:#3b82f6"></span>藍方
         <select name="blue">
+          <option value="player">玩家（你來指揮）</option>
           <option value="push" selected>鐵壁推進（整條戰線壓過河）</option>
           <option value="ambush">林中伏兵（樹林埋伏、騎兵繞後）</option>
           <option value="ranged">箭雨（高地弓兵、盾兵擋箭）</option>
@@ -48,9 +49,15 @@
     </div>
     <button id="start" class="primary" type="button">開始觀戰</button>
   </section>
+  <section class="card hidden" id="army">
+    <h2>你的軍隊</h2>
+    <p class="muted small" id="army-note"></p>
+    <div class="lg-army" id="army-rows"></div>
+    <div class="row"><span id="army-total"></span><button id="army-reset" type="button">預設陣容</button></div>
+  </section>
   <section class="card">
-    <h2>地圖：河谷</h2>
-    <p class="muted">160 × 100 格。中央一條 S 形河流，南北各一座 3 格寬的窄橋、中央一處淺灘（走得慢、受到的近戰傷害較高）；兩岸都有樹林可以埋伏，淺灘兩側各有一座高地（視野與射程加成）。藍方從西邊、紅方從東邊出發。</p>
+    <h2 id="map-name">地圖：河谷</h2>
+    <p class="muted" id="map-desc">160 × 100 格。中央一條 S 形河流，南北各一座 3 格寬的窄橋、中央一處淺灘（走得慢、受到的近戰傷害較高）；兩岸都有樹林可以埋伏，淺灘兩側各有一座高地（視野與射程加成）。藍方從西邊、紅方從東邊出發。</p>
   </section>
 </div>
 <div id="game" class="game hidden"></div>

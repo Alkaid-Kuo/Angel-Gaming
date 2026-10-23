@@ -7,11 +7,12 @@ import rangedSource from '../../../bots/legion-ranged.js?raw';
 import type { LegionEvent } from '../../legion/api.ts';
 import { TPS, UNITS } from '../../legion/config.ts';
 import { MAPS } from '../../legion/map.ts';
-import { LegionBatchController, LegionDriver } from '../../legion/runner.ts';
+import { LegionBatchController, LegionDriver, type LegionController } from '../../legion/runner.ts';
 import type { LegionMatch } from '../../legion/sim.ts';
 import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
 import { resolveKnobs } from '../../sandbox/controller.ts';
 import { LegionCommentator } from './commentary.ts';
+import { PlayerController } from './player.ts';
 import type { BotKey, Caption, FromLegionWorker, LegionFrame, LegionMeta, LegionSetup, PlayerMeta, RegFrame, RegStatic, ToLegionWorker } from './protocol.ts';
 import { ATTACKED_BIT, DOWN_BIT } from './protocol.ts';
 
@@ -34,6 +35,10 @@ const SKIP_LIMIT = 900;
 const SKIP_MIN = 30;
 
 let setup: LegionSetup | null = null;
+/** 玩家指揮時的控制器 */
+let player: PlayerController | null = null;
+/** 玩家指揮哪一方（-1 = 純觀戰） */
+let playerSide = -1;
 let driver: LegionDriver | null = null;
 let comm: LegionCommentator | null = null;
 let speed = 1;
@@ -59,7 +64,13 @@ function regName(m: LegionMatch): RegStatic[] {
 function begin(s: LegionSetup): void {
   setup = s;
   const map = MAPS['river-valley']();
-  const ctrls = s.bots.map((b, i) => new LegionBatchController(compiled[b], `legion-${b}.js`, map, s.seed, i));
+  player = null;
+  playerSide = s.bots.indexOf('player');
+  const ctrls: LegionController[] = s.bots.map((b, i) => {
+    if (b !== 'player') return new LegionBatchController(compiled[b], `legion-${b}.js`, map, s.seed, i);
+    player = new PlayerController(s.army ?? { field: ['spear', 'spear', 'sword', 'sword', 'archer', 'archer', 'shield', 'heavyCav', 'light'], reserve: [] });
+    return player;
+  });
   const knobs = ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label));
   const rejected: { player: number; reason: string }[] = [];
   driver = new LegionDriver({ seed: s.seed, mode: s.mode, controllers: ctrls, knobs, record: true });
@@ -85,8 +96,9 @@ function begin(s: LegionSetup): void {
     regs,
     soldierCount: m.soldiers.length,
     rejected,
+    playerSide,
   };
-  comm = new LegionCommentator(regs, players);
+  comm = new LegionCommentator(regs, players, meta.playerSide);
   comm.start(m);
   events = [];
   m.eventTap = (ev) => {
@@ -147,7 +159,8 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
       volley: r.volley !== null && r.volley.until > m.tick ? { x: r.volley.x, y: r.volley.y, until: r.volley.until } : null,
       switchLeft: Math.max(0, r.switchUntil - m.tick),
       skillCd: Math.max(0, r.skillReadyAt - m.tick),
-      intent: m.tick - r.intentAt <= 60 ? r.intent : '',
+      // 玩家指揮：看不到對手的意圖
+      intent: m.tick - r.intentAt <= 60 && (playerSide < 0 || r.owner === playerSide) ? r.intent : '',
       reserve: r.reserve,
       enterIn: r.reserve && r.enterAt >= 0 ? r.enterAt - m.tick : -1,
     });
@@ -162,7 +175,7 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
     arrows,
     flags: m.flags.map((f) => ({ owner: f.owner, capturer: f.capturer, progress: f.progress, contested: f.contested })),
     score: m.players.map((p) => m.scoreOf(p.id)),
-    plans: m.players.map((p) => p.plan),
+    plans: m.players.map((p) => (playerSide < 0 || p.id === playerSide ? p.plan : '')),
     strength: m.players.map((p) => m.strength(p.id)),
     kills: m.players.map((p) => p.kills),
     visible,
@@ -269,6 +282,9 @@ ctx.onmessage = (ev: MessageEvent<ToLegionWorker>) => {
         break;
       case 'replay':
         if (driver?.replay) post({ type: 'replayFile', json: JSON.stringify(driver.replay) });
+        break;
+      case 'command':
+        player?.push(msg.cmds);
         break;
     }
   } catch (e) {
