@@ -2,7 +2,7 @@
 // 每 tick：軍團決策 → 隊形位置 → 士兵移動（雙緩衝）→ 戰鬥（衝刺碰撞、近戰、射擊；傷害同時結算）→ 箭矢落地
 // → 傷亡整理（補位、潰散、老兵）→ 視野（含高度遮蔽）→ 旗點 → 勝負。
 import { Hasher } from '../shared/hash.ts';
-import { idiv, isqrt, tdiv } from '../shared/intmath.ts';
+import { idiv, isqrt, roundHalfEven, tdiv } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
 import type { EnemyRegiment, Flank, FlagState, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RegimentStatus } from './api.ts';
 import {
@@ -27,7 +27,7 @@ import {
 } from './config.ts';
 import { formationShape, grid, type FormationShape } from './formation.ts';
 import { angleDiff, iatan2, icos, isin, normDeg, offset, stepToward, turnToward } from './geom.ts';
-import { MAPS, defaultMapId, defaultTimeLimit, heightAt, sightBlocked, tileCoord, type LegionMap } from './map.ts';
+import { MAPS, defaultMapId, defaultTimeLimit, heightAt, sightBlocked, tileXY, type LegionMap } from './map.ts';
 import { clearLine, findPath, snapPoint } from './path.ts';
 
 export type { Flank };
@@ -217,6 +217,9 @@ export interface PlayerState {
   readonly cost: number;
   /** 佔點分數（分 × TPS：每 tick 加旗點的分數） */
   score: number;
+  /** 戰略意圖（plan 指令）與下達的 tick；不影響模擬 */
+  plan: string;
+  planAt: number;
   active: boolean;
   kills: number;
   losses: number;
@@ -264,8 +267,7 @@ class Grid {
   }
 
   cell(x: number, y: number): number {
-    let cx = tileCoord(x, this.w);
-    let cy = tileCoord(y, this.h);
+    let [cx, cy] = tileXY(x, y, this.w, this.h);
     if (cx < 0) cx = 0;
     else if (cx >= this.w) cx = this.w - 1;
     if (cy < 0) cy = 0;
@@ -339,7 +341,7 @@ export class LegionMatch {
     for (let p = 0; p < n; p++) this.inbox.push([]);
     for (let p = 0; p < n; p++) {
       const cost = this.deploy(p, setup.deployments[p]);
-      this.players.push({ id: p, cost, score: 0, active: true, kills: 0, losses: 0 });
+      this.players.push({ id: p, cost, score: 0, plan: '', planAt: -1, active: true, kills: 0, losses: 0 });
     }
     for (let p = 0; p < n; p++) this.visible.push(new Uint8Array(this.regiments.length));
     if (this.mode === 'capture') this.map.flags.forEach((f, i) => this.flags.push({ id: i, name: f.name, x: f.x, y: f.y, points: f.points, owner: -1, capturer: -1, progress: 0, contested: false }));
@@ -371,10 +373,9 @@ export class LegionMatch {
       const def = UNITS[kind];
       if (spent + def.cost > RULES.budget) return reject(i, `點數超過 ${RULES.budget}`);
       if (typeof o.x !== 'number' || typeof o.y !== 'number' || !Number.isFinite(o.x) || !Number.isFinite(o.y)) return reject(i, '座標不合法');
-      const x = Math.round(o.x);
-      const y = Math.round(o.y);
-      const tx = tileCoord(x, this.map.width);
-      const ty = tileCoord(y, this.map.height);
+      const x = roundHalfEven(o.x);
+      const y = roundHalfEven(o.y);
+      const [tx, ty] = tileXY(x, y, this.map.width, this.map.height);
       if (tx < zone.x0 || tx >= zone.x1 || ty < zone.y0 || ty >= zone.y1) return reject(i, '不在布陣區內');
       if (!walkable(this.map.terrain[ty * this.map.width + tx])) return reject(i, '位置不可通行');
       const formation = typeof o.formation === 'string' && def.formations.includes(o.formation as FormationKind) ? (o.formation as FormationKind) : def.formations[0];
@@ -615,8 +616,21 @@ export class LegionMatch {
 
   applyCommands(p: number, raw: unknown): void {
     if (!Array.isArray(raw)) return;
-    const n = Math.min(raw.length, RULES.commandsPerDecision);
-    for (let i = 0; i < n; i++) this.applyCommand(p, raw[i], false);
+    // 戰略意圖不佔指令額度；其餘指令依序最多 commandsPerDecision 個
+    let n = 0;
+    for (const c of raw) {
+      if (typeof c === 'object' && c !== null && (c as { type?: unknown }).type === 'plan') {
+        const text = (c as { text?: unknown }).text;
+        if (typeof text === 'string') {
+          this.players[p].plan = text.slice(0, RULES.planMax);
+          this.players[p].planAt = this.tick;
+        }
+        continue;
+      }
+      if (n >= RULES.commandsPerDecision) break;
+      n += 1;
+      this.applyCommand(p, c, false);
+    }
   }
 
   private rejectCmd(p: number, cmd: string, reason: string): void {
@@ -634,7 +648,7 @@ export class LegionMatch {
       r.intent = c.intent.slice(0, RULES.intentMax);
       r.intentAt = this.tick;
     }
-    const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
+    const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? roundHalfEven(v) : null);
     // 衝刺中：只接受微調方向，其他指令等衝完再執行
     if (r.dash !== null) {
       if (type === 'steer') {
@@ -927,8 +941,7 @@ export class LegionMatch {
   // ───────── 軍團決策 ─────────
 
   private terrainAt(x: number, y: number): number {
-    const tx = tileCoord(x, this.map.width);
-    const ty = tileCoord(y, this.map.height);
+    const [tx, ty] = tileXY(x, y, this.map.width, this.map.height);
     if (tx < 0 || ty < 0 || tx >= this.map.width || ty >= this.map.height) return T.River;
     return this.map.terrain[ty * this.map.width + tx];
   }
@@ -1305,8 +1318,9 @@ export class LegionMatch {
   private nearestEnemy(s: Soldier, radius: number, skipDown = false): number {
     const g = this.grid;
     const k = Math.ceil(radius / TILE);
-    const cx = Math.min(g.w - 1, Math.max(0, tileCoord(s.x, g.w)));
-    const cy = Math.min(g.h - 1, Math.max(0, tileCoord(s.y, g.h)));
+    const [sx0, sy0] = tileXY(s.x, s.y, g.w, g.h);
+    const cx = Math.min(g.w - 1, Math.max(0, sx0));
+    const cy = Math.min(g.h - 1, Math.max(0, sy0));
     let best = -1;
     let bestD = radius * radius;
     for (let y = Math.max(0, cy - k); y <= Math.min(g.h - 1, cy + k); y++) {
@@ -1417,8 +1431,9 @@ export class LegionMatch {
   /** 推擠：以自己移動後的位置對其他士兵 tick 開始時的位置；倒地的人不擋路 */
   private separate(s: Soldier, x: number, y: number, ignoreEnemy: boolean): [number, number] {
     const g = this.grid;
-    const cx = Math.min(g.w - 1, Math.max(0, tileCoord(x, g.w)));
-    const cy = Math.min(g.h - 1, Math.max(0, tileCoord(y, g.h)));
+    const [qx, qy] = tileXY(x, y, g.w, g.h);
+    const cx = Math.min(g.w - 1, Math.max(0, qx));
+    const cy = Math.min(g.h - 1, Math.max(0, qy));
     const side = s.owner === 0 ? 1 : -1;
     let px = 0;
     let py = 0;
@@ -1956,6 +1971,11 @@ export class LegionMatch {
       else if (r.spottedSince < 0) r.spottedSince = this.tick;
       if (!seen && this.concealed(r)) r.lastHidden = this.tick;
     }
+  }
+
+  /** 依目前位置重算視野（測試把軍團瞬移到定位後用） */
+  refreshVision(): void {
+    this.computeVision();
   }
 
   // ───────── 旗點與勝負 ─────────

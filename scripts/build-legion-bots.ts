@@ -3,7 +3,7 @@
 //       node scripts/build-legion-bots.ts --check  只檢查產生的檔案是否和原始碼一致（不一致時結束碼為 1）
 import { readFileSync, writeFileSync } from 'node:fs';
 
-export const LEGION_STRATEGIES = ['push', 'ambush', 'ranged'] as const;
+export const LEGION_STRATEGIES = ['push', 'ambush', 'ranged', 'commander'] as const;
 
 const lines = (s: string): string[] => s.replaceAll('\r\n', '\n').split('\n');
 
@@ -15,8 +15,8 @@ export function buildLegionBot(name: (typeof LEGION_STRATEGIES)[number]): string
   const head = body.slice(0, firstImport).filter((l) => l.startsWith('//') && l !== '// @ts-check');
   const rest = body
     .slice(firstImport)
-    .filter((l) => !l.startsWith('import ') && !l.startsWith('/** @typedef') && !/^export \{/.test(l))
-    .map((l) => l.replaceAll("import('./base.js').", ''));
+    .filter((l) => !l.startsWith('import ') && !l.startsWith("/** @typedef {import('./base.js')") && !/^export \{/.test(l))
+    .map((l) => l.replaceAll("import('./base.js').", '').replaceAll("'../../src/", "'../src/"));
   // 共用函式庫：去掉檔頭註解與頂層 export，typedef 的路徑改成 bots/ 底下的相對路徑
   const baseStart = base.findIndex((l) => !l.startsWith('//') && l.trim() !== '');
   const lib = base.slice(baseStart).map((l) => l.replace(/^export (class|const|function) /, '$1 ').replaceAll("'../../src/", "'../src/"));

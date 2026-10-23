@@ -1,7 +1,7 @@
 // 軍團尋路：格子上的 A*（八方向、不可切角），結果以直線可達性平滑成少數轉折點。
 import { idiv } from '../shared/intmath.ts';
 import { TILE, terrainCost, walkable } from './config.ts';
-import { tileCoord, type LegionMap } from './map.ts';
+import { tileXY, type LegionMap } from './map.ts';
 
 const SQRT2 = 141;
 const MIN_COST = 80;
@@ -86,8 +86,9 @@ class Scratch {
 const scratch = new WeakMap<LegionMap, Scratch>();
 
 function tileOf(map: LegionMap, x: number, y: number): number {
-  const tx = Math.min(map.width - 1, Math.max(0, tileCoord(x, map.width)));
-  const ty = Math.min(map.height - 1, Math.max(0, tileCoord(y, map.height)));
+  const [cx, cy] = tileXY(x, y, map.width, map.height);
+  const tx = Math.min(map.width - 1, Math.max(0, cx));
+  const ty = Math.min(map.height - 1, Math.max(0, cy));
   return map.snap[ty * map.width + tx];
 }
 
@@ -106,8 +107,7 @@ export function lineCost(map: LegionMap, ax: number, ay: number, bx: number, by:
   for (let k = 0; k <= steps; k++) {
     const x = ax + idiv(dx * k, steps);
     const y = ay + idiv(dy * k, steps);
-    const tx = tileCoord(x, map.width);
-    const ty = tileCoord(y, map.height);
+    const [tx, ty] = tileXY(x, y, map.width, map.height);
     if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return -1;
     const i = ty * map.width + tx;
     if (!walkable(map.terrain[i])) return -1;
@@ -132,8 +132,7 @@ export function snapPoint(map: LegionMap, x: number, y: number, flip = false): [
     const [fx, fy] = snapPoint(map, W - x, H - y, false);
     return [W - fx, H - fy];
   }
-  const tx = tileCoord(x, map.width);
-  const ty = tileCoord(y, map.height);
+  const [tx, ty] = tileXY(x, y, map.width, map.height);
   if (tx >= 0 && ty >= 0 && tx < map.width && ty < map.height && walkable(map.terrain[ty * map.width + tx])) return [x, y];
   return center(map, tileOf(map, x, y));
 }

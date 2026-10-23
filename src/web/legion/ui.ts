@@ -118,6 +118,7 @@ export class LegionScreen {
       <div class="bar t1" title="剩餘兵力（點數 × 剩餘人數比例；潰散不算）"><span data-el="pct1"></span><i data-el="bar1" style="background:${p[1].color}"></i></div>
       ${team(1)}
     </div>
+    <div class="lg-plans"><div class="pl t0" data-el="plan0"></div><div class="pl t1" data-el="plan1"></div></div>
     <div class="lg-big hidden" data-el="big"></div>
     <div class="lg-feed" data-el="feed"></div>
     <div class="lg-tip hidden" data-el="tip"></div>
@@ -401,7 +402,7 @@ export class LegionScreen {
     h.innerHTML = `<div class="lg-helpbox">
       <button class="ghost close" data-act="closeHelp">✕</button>
       <h2>軍團戰怎麼看</h2>
-      <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。旗標下方的小字是 AI 的意圖（放大時顯示，<kbd>I</kbd> 開關）。</p>
+      <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。計分條下方是 AI 的戰略意圖、旗標下方的小字是各團的意圖（放大時顯示），<kbd>I</kbd> 開關。</p>
       <h3>勝利條件</h3>
       <ul><li><b>殲滅戰</b>：對手全軍陣亡或潰散；剩餘兵力低於開場 ${RULES.collapsePercent}% 視為全軍潰敗。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比剩餘兵力。</li>
       <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比兵力。</li></ul>
@@ -488,6 +489,11 @@ export class LegionScreen {
       const p = this.meta.players;
       this.el.score.innerHTML = `<b style="color:${p[0].color}">${f.score[0]}</b><span>:</span><b style="color:${p[1].color}">${f.score[1]}</b><i>／${RULES.capture.scoreTarget}</i>`;
       this.el.score.classList.remove('hidden');
+    }
+    // 戰略意圖：一方視角只看得到自己的
+    for (const i of [0, 1]) {
+      const t = this.showIntent && (this.viewer < 0 || this.viewer === i) ? f.plans[i] ?? '' : '';
+      if (this.el[`plan${i}`].textContent !== t) this.el[`plan${i}`].textContent = t;
     }
     for (const c of f.captions) this.caption(c);
     this.renderRosters(f);

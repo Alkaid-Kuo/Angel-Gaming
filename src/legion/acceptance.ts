@@ -33,7 +33,7 @@ const W = 160000;
 const H = 100000;
 
 /** 找一塊平坦（同高度、全是平地）的區域中心（格） */
-function flatArea(m: LegionMatch, w: number, h: number): [number, number] {
+export function flatArea(m: LegionMatch, w: number, h: number): [number, number] {
   for (let cy = 50; cy < m.map.height - h; cy++) {
     for (let cx = 20; cx < 70; cx++) {
       const h0 = heightAt(m.map, cx * TILE, cy * TILE);
@@ -49,7 +49,7 @@ function flatArea(m: LegionMatch, w: number, h: number): [number, number] {
   throw new Error('找不到平坦區域');
 }
 
-function teleport(m: LegionMatch, r: Regiment, x: number, y: number, facing: number): void {
+export function teleport(m: LegionMatch, r: Regiment, x: number, y: number, facing: number): void {
   const dx = x - r.x;
   const dy = y - r.y;
   r.x = x;

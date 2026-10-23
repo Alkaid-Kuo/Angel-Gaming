@@ -1,5 +1,6 @@
 // 軍團戰：對戰組合 × 種子 × 模式的批次量測（勝率、時長、觀賞性指標、模擬速度）。
 // 用法：node scripts/legion-bench.ts [場數=10] [模式=annihilation|capture|both]
+//       環境變數 BOTS=commander,push（參賽者，預設全部）、FOCUS=commander（只跑有它的組合）
 import { readFileSync } from 'node:fs';
 import { compileBot, type CompiledBot } from '../src/sandbox/compile.ts';
 import { resolveKnobs } from '../src/sandbox/controller.ts';
@@ -7,7 +8,8 @@ import type { LegionMode } from '../src/legion/config.ts';
 import { MAPS } from '../src/legion/map.ts';
 import { LegionBatchController, LegionDriver } from '../src/legion/runner.ts';
 
-const BOTS = ['push', 'ambush', 'ranged'] as const;
+const BOTS = (process.env.BOTS ?? 'push,ambush,ranged,commander').split(',');
+const FOCUS = process.env.FOCUS ?? '';
 const compiled: Record<string, CompiledBot> = {};
 for (const b of BOTS) compiled[b] = compileBot(readFileSync(`bots/legion-${b}.js`, 'utf8'), `legion-${b}.js`);
 
@@ -109,6 +111,7 @@ for (const mode of modes) {
   console.log('組合            勝(A/B/平)  平均時長  首次接戰  交戰比例  接戰後安靜  衝鋒(擋下)  埋伏  側背擊  潰散  升級  領先易手  勝因');
   for (let i = 0; i < BOTS.length; i++) {
     for (let j = i; j < BOTS.length; j++) {
+      if (FOCUS !== '' && BOTS[i] !== FOCUS && BOTS[j] !== FOCUS) continue;
       const ms: Metrics[] = [];
       for (let g = 0; g < games; g++) {
         // 交換座位，抵銷先後手

@@ -2,6 +2,7 @@
 // 回放保存布陣與指令，重播不需要選手程式。
 import type { KnobValues } from '../api/types.ts';
 import { RULES as RTS_RULES } from '../config/index.ts';
+import { roundHalfEven } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
 import { BotLoadError, type CompiledBot } from '../sandbox/compile.ts';
 import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
@@ -53,10 +54,10 @@ export function legionHelpers(map: LegionMap, seed: number, playerId: number): L
     terrainAt: (x, y) => terrainAt(map, x, y),
     heightAt: (x, y) => heightAt(map, x, y),
     dist: (ax, ay, bx, by) => Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by)),
-    angleTo: (ax, ay, bx, by) => iatan2(Math.round(by - ay), Math.round(bx - ax)),
+    angleTo: (ax, ay, bx, by) => iatan2(roundHalfEven(by - ay), roundHalfEven(bx - ax)),
     offset: (x, y, deg, d) => {
-      const [ox, oy] = offset(Math.round(deg), Math.round(d));
-      return [Math.round(x) + ox, Math.round(y) + oy];
+      const [ox, oy] = offset(roundHalfEven(deg), roundHalfEven(d));
+      return [roundHalfEven(x) + ox, roundHalfEven(y) + oy];
     },
   };
 }
@@ -206,8 +207,10 @@ export class LegionDriver {
     const m = this.match;
     if (m.over) return;
     if (m.isDecisionTick()) {
+      // 先讓每一方都觀察完，再依序下指令：不然後面的一方會先看到前面一方剛下的指令造成的狀態（不公平）
+      const views = this.controllers.map((_, pid) => m.observe(pid));
       for (let pid = 0; pid < this.controllers.length; pid++) {
-        const obs = m.observe(pid);
+        const obs = views[pid];
         if (this.idle[pid]) continue;
         const out = this.controllers[pid].decide(obs);
         const rt = this.runtime[pid];

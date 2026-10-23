@@ -229,7 +229,9 @@ export type LegionCommand =
   | (Base & { readonly type: 'shield'; readonly mode: 'carry' | 'raise' | 'wall' | 'unwall' })
   | (Base & { readonly type: 'volley'; readonly x: number; readonly y: number })
   | (Base & DashAim & { readonly type: 'charge' | 'assault' | 'infiltrate' })
-  | (Base & { readonly type: 'steer'; readonly facing: number });
+  | (Base & { readonly type: 'steer'; readonly facing: number })
+  /** 整體戰略意圖（不對某一團；最多 30 字，觀戰畫面顯示在計分條；不佔指令額度） */
+  | { readonly type: 'plan'; readonly text: string };
 
 export interface LegionHelpers {
   /** 確定性亂數 [0, 1) */

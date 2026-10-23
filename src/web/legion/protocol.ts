@@ -3,7 +3,7 @@ import type { LegionEvent, RegimentStatus } from '../../legion/api.ts';
 import type { DashKind, FormationKind, LegionMode, ShieldStance, UnitKind } from '../../legion/config.ts';
 import type { LegionResult } from '../../legion/sim.ts';
 
-export type BotKey = 'push' | 'ambush' | 'ranged';
+export type BotKey = 'push' | 'ambush' | 'ranged' | 'commander';
 
 export interface LegionSetup {
   readonly bots: readonly [BotKey, BotKey];
@@ -111,6 +111,8 @@ export interface LegionFrame {
   readonly flags: readonly { readonly owner: number; readonly capturer: number; readonly progress: number; readonly contested: boolean }[];
   /** 佔點分數 */
   readonly score: readonly number[];
+  /** 依 playerId：AI 的戰略意圖（plan 指令；沒有就是空字串） */
+  readonly plans: readonly string[];
   readonly strength: readonly number[];
   readonly kills: readonly number[];
   /** 依 playerId：看得到的軍團（軍團 id 為索引） */

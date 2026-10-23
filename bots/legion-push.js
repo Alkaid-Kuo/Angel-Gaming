@@ -9,7 +9,7 @@
 /** @typedef {import('../src/legion/api.ts').LegionDeclaration} Declaration */
 /** @typedef {import('../src/legion/api.ts').OwnRegiment} Own */
 /** @typedef {import('../src/legion/api.ts').EnemyRegiment} Enemy */
-/** @typedef {import('../src/legion/api.ts').LegionCommand} Command */
+/** 對某一團的指令（不含 plan） @typedef {Exclude<import('../src/legion/api.ts').LegionCommand, { type: 'plan' }>} Command */
 /** @typedef {import('../src/legion/api.ts').Deployment} Deployment */
 /** @typedef {import('../src/legion/api.ts').UnitInfo} UnitInfo */
 /** @typedef {import('../src/legion/api.ts').UnitKind} UnitKind */
@@ -153,6 +153,17 @@ class LegionBase {
     const x = this.p === 0 ? o.x : this.W - o.x;
     const y = this.p === 0 ? o.y : this.H - o.y;
     return { x: x / TILE / this.sx, y: y / TILE / this.sy };
+  }
+
+  /**
+   * 四捨六入五成雙（雙方鏡像的座標捨入後仍然鏡像）
+   * @param {number} v
+   */
+  rnd(v) {
+    const f = Math.floor(v);
+    const d = v - f;
+    if (d !== 0.5) return d > 0.5 ? f + 1 : f;
+    return f % 2 === 0 ? f : f + 1;
   }
 
   /** @param {number} deg 己方視角的角度 → 世界角度 */
@@ -332,7 +343,7 @@ class LegionBase {
       const age = this.obs.tick - e.tick;
       if (age > maxAge) continue;
       const k = Math.min(age, 30);
-      out.push({ ...e, x: Math.round(e.x + e.vx * k), y: Math.round(e.y + e.vy * k) });
+      out.push({ ...e, x: this.rnd(e.x + e.vx * k), y: this.rnd(e.y + e.vy * k) });
     }
     return out;
   }
@@ -346,7 +357,7 @@ class LegionBase {
   predict(e, ticks) {
     const m = this.seen.get(e.id);
     if (!m) return { x: e.x, y: e.y };
-    return { x: Math.round(e.x + m.vx * ticks), y: Math.round(e.y + m.vy * ticks) };
+    return { x: this.rnd(e.x + m.vx * ticks), y: this.rnd(e.y + m.vy * ticks) };
   }
 
   /**
@@ -709,18 +720,14 @@ class LegionBase {
     /** @type {Enemy | null} */
     let pick = null;
     let pickS = -Infinity;
-    /** @type {Enemy | null} */
-    let nearest = null;
-    let nearD = Infinity;
+    let inRangeCount = 0;
     for (const e of this.foes) {
       const d = (this.dist(r, e) - e.radius / 2) / TILE;
       if (d > range + (r.height - e.height) - 1.5) continue;
-      if (d < nearD) {
-        nearD = d;
-        nearest = e;
-      }
+      inRangeCount += 1;
       let sc = -d + (1 - e.men / e.men0) * 10;
-      if (e.kind === 'shield') sc -= e.stance === 'carry' ? 10 : 40;
+      // 盾牆時姿態仍是持盾，要看狀態
+      if (e.kind === 'shield') sc -= e.stance === 'carry' && e.status !== 'walled' && e.status !== 'walling' ? 10 : 40;
       if (e.kind === 'archer') sc += 12;
       if (e.engaged) sc += 8;
       if (e.routed) sc -= 30;
@@ -730,8 +737,9 @@ class LegionBase {
       }
     }
     if (pick && r.order === 'attack' && r.target === pick.id) return true;
-    if (pick && nearest && pick.id !== nearest.id && !this.committed(r)) {
-      this.send(out, 4, { type: 'attack', id: r.id, target: pick.id }, `集火${this.units[pick.kind].name}`, 40);
+    // 射程內不只一個目標：明確指定（引擎的自動射擊只挑最近的）
+    if (pick && inRangeCount > 1) {
+      this.send(out, 8, { type: 'attack', id: r.id, target: pick.id }, `集火${this.units[pick.kind].name}`, 40);
       return true;
     }
     // 剛後撤過、或陣地旁有敵方近戰：留在原地射擊，不走回陣地（避免撤退與回位來回跑）

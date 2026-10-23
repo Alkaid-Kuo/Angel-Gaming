@@ -1,7 +1,7 @@
 // 軍團戰的規則數值（規格書 v0.2）。所有數值都是整數：座標單位 1 格 = 1000、時間單位 tick（每秒 10 tick）、
 // 血量與攻擊 ×10、倍率與減免為百分比。對照規格書：docs/軍團戰 規格書 v0.2（草案）.md。
 
-export const LEGION_ENGINE_VERSION = '0.2.0';
+export const LEGION_ENGINE_VERSION = '0.2.1';
 export const TPS = 10;
 export const TILE = 1000;
 
@@ -118,6 +118,8 @@ export const RULES = {
   deployDepthTiles: 20,
   /** AI 意圖文字的長度上限 */
   intentMax: 20,
+  /** 戰略意圖（plan 指令）的長度上限 */
+  planMax: 30,
   flank: {
     /** 正面、背面的半角（度）；楔形陣的正面較窄 */
     frontHalf: 60,

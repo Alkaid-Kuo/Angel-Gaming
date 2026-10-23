@@ -50,6 +50,11 @@
 @keyframes lgPop { from { transform: translateX(-50%) scale(0.85); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
 
 /* 解說字幕 */
+.lg-plans { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; max-width: calc(100% - 20px); pointer-events: none; }
+.lg-plans .pl { background: rgba(8, 12, 20, 0.8); border-radius: 6px; padding: 2px 10px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; color: var(--text); }
+.lg-plans .pl:empty { display: none; }
+.lg-plans .pl.t0 { border-left: 3px solid #3b82f6; color: #bfdbfe; }
+.lg-plans .pl.t1 { border-right: 3px solid #ef4444; color: #fecaca; }
 .lg-feed { position: absolute; left: 12px; bottom: 64px; width: min(520px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
 .lg-feed .cap { background: rgba(8, 12, 20, 0.78); border-left: 3px solid var(--accent); border-radius: 6px; padding: 4px 10px; font-size: 13px; line-height: 1.45; animation: lgIn 0.25s ease-out; }
 .lg-feed .cap:not(:nth-last-child(-n + 3)) { opacity: 0.55; }

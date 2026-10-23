@@ -366,16 +366,26 @@ export function tileCoord(v: number, tiles: number): number {
   return tiles - 1 - Math.floor((total - v) / TILE);
 }
 
+/**
+ * 座標 → 格（二維）：跟 tileCoord 一樣以地圖中心對稱；剛好落在中心線上的點（自己就是自己的鏡像那一軸），
+ * 依另一軸在中心的哪一側決定歸哪一格，讓旋轉 180° 的兩個點一定落在互相對應的兩格。
+ */
+export function tileXY(x: number, y: number, w: number, h: number): [number, number] {
+  let tx = tileCoord(x, w);
+  let ty = tileCoord(y, h);
+  if (y * 2 === h * TILE) ty = x * 2 < w * TILE ? h / 2 - 1 : h / 2;
+  if (x * 2 === w * TILE) tx = y * 2 < h * TILE ? w / 2 - 1 : w / 2;
+  return [tx, ty];
+}
+
 export function terrainAt(map: LegionMap, x: number, y: number): number {
-  const tx = tileCoord(x, map.width);
-  const ty = tileCoord(y, map.height);
+  const [tx, ty] = tileXY(x, y, map.width, map.height);
   if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return T.River;
   return map.terrain[ty * map.width + tx];
 }
 
 export function heightAt(map: LegionMap, x: number, y: number): number {
-  const tx = tileCoord(x, map.width);
-  const ty = tileCoord(y, map.height);
+  const [tx, ty] = tileXY(x, y, map.width, map.height);
   if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return 0;
   return map.heights[ty * map.width + tx];
 }
