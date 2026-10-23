@@ -75,6 +75,14 @@ export interface RegFrame {
   readonly formation: FormationKind;
   readonly stance: ShieldStance | null;
   readonly dashing: DashKind | null;
+  /** 衝刺中：目標方向（度）、還剩多遠（單位）、還在對準方向（還沒起步） */
+  readonly dash: { readonly dir: number; readonly left: number; readonly aligning: boolean } | null;
+  /** 槍林的朝向（度） */
+  readonly braceFacing: number;
+  /** 齊射中：落點與結束的 tick */
+  readonly volley: { readonly x: number; readonly y: number; readonly until: number } | null;
+  /** 換陣形還要幾個 tick */
+  readonly switchLeft: number;
   /** 招牌技能還要冷卻幾個 tick */
   readonly skillCd: number;
   /** AI 意圖（最近 6 秒內下的） */
@@ -93,7 +101,7 @@ export interface Caption {
 
 export interface LegionFrame {
   readonly tick: number;
-  /** [id, x, y, 旗標] × n；旗標低 12 位為軍團 id，第 12 位 = 本 tick 有出手 */
+  /** [id, x, y, 旗標] × n；旗標低 12 位為軍團 id，第 12 位 = 本 tick 有出手，第 13 位 = 倒地 */
   readonly soldiers: Int32Array;
   readonly regs: readonly RegFrame[];
   /** [x0, y0, x1, y1, t0, t1] × n：飛行中的箭 */
@@ -127,4 +135,5 @@ export type FromLegionWorker =
   | { readonly type: 'error'; readonly message: string };
 
 export const ATTACKED_BIT = 1 << 12;
+export const DOWN_BIT = 1 << 13;
 export const REG_MASK = (1 << 12) - 1;

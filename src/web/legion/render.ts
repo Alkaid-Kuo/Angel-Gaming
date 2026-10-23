@@ -1,8 +1,10 @@
-// 軍團戰繪製（Canvas 2D）：地形預先畫成一張圖；每格畫面依兩個 tick 之間插值畫士兵、箭矢、軍團旗標與特效。
-import { RULES, T, TILE, UNITS, type UnitKind } from '../../legion/config.ts';
+// 軍團戰繪製（Canvas 2D）：地形（含高度疊板）預先畫成一張圖；每格畫面依兩個 tick 之間插值畫士兵、箭矢、軍團旗標與特效，
+// 招牌技能與衝刺畫在地面層：槍林扇形、盾兵擋箭範圍與盾牆、齊射落點圈、衝刺的預定路線與走過的弧線。
+import type { RegimentStatus } from '../../legion/api.ts';
+import { FORMATION_NAMES, RULES, T, TILE, UNITS, type DashKind, type UnitKind } from '../../legion/config.ts';
 import { hashInts } from '../../shared/hash.ts';
 import { drawUnitIcon } from './icons.ts';
-import { ATTACKED_BIT, REG_MASK, type LegionFrame, type LegionMeta, type RegFrame } from './protocol.ts';
+import { ATTACKED_BIT, DOWN_BIT, REG_MASK, type LegionFrame, type LegionMeta, type RegFrame } from './protocol.ts';
 
 /** 地形圖每格的像素 */
 const TPX = 10;
@@ -21,6 +23,8 @@ export interface DrawOptions {
   readonly selected: number;
   readonly hovered: number;
   readonly showRanges: boolean;
+  /** 顯示 AI 意圖（放大到一定程度才顯示；滑鼠指著或選中的軍團一律顯示） */
+  readonly showIntent: boolean;
 }
 
 interface Effect {
@@ -34,6 +38,14 @@ interface Effect {
   size?: number;
 }
 
+/** 衝刺走過的路線（結束後淡出） */
+interface Trail {
+  readonly owner: number;
+  readonly kind: DashKind;
+  readonly pts: number[];
+  end: number;
+}
+
 interface Corpse {
   x: number;
   y: number;
@@ -45,6 +57,23 @@ const TEAM = ['#3b82f6', '#ef4444'];
 const TEAM_LIGHT = ['#bfdbfe', '#fecaca'];
 const TEAM_DARK = ['#1e3a8a', '#7f1d1d'];
 const ROUTED = ['#64748b', '#78716c'];
+const DASH_COLOR: Record<DashKind, string> = { charge: '#fb923c', assault: '#facc15', infiltrate: '#a3e635' };
+const DASH_NAME: Record<DashKind, string> = { charge: '衝鋒', assault: '突擊', infiltrate: '切入' };
+const TRAIL_FADE = 2500;
+/** 旗標右側的狀態標籤：文字、底色 */
+const TAG: Partial<Record<RegimentStatus, readonly [string, string]>> = {
+  routed: ['潰散', '#334155'],
+  charging: ['衝鋒', '#ea580c'],
+  assaulting: ['突擊', '#ca8a04'],
+  infiltrating: ['切入', '#4d7c0f'],
+  braced: ['槍林', '#0e7490'],
+  bracing: ['架槍林', '#155e75'],
+  unbracing: ['收槍林', '#155e75'],
+  walled: ['盾牆', '#0e7490'],
+  walling: ['架盾牆', '#155e75'],
+  volleying: ['齊射', '#b45309'],
+  reforming: ['變陣', '#6d28d9'],
+};
 
 function shade(hex: string, k: number): string {
   const n = parseInt(hex.slice(1), 16);
@@ -149,17 +178,39 @@ function paintTerrain(meta: LegionMeta): HTMLCanvasElement {
       }
     }
   }
-  // 高地：邊緣等高線
+  // 高度疊板：每高一階亮一點；高的一階在南邊、東邊露出側面（陰影帶），北邊、西邊有亮邊，像一層層疊起來的板子
+  const hAt = (x: number, y: number): number => (x < 0 || y < 0 || x >= w || y >= h ? -1 : meta.heights[y * w + x]);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (at(x, y) !== T.Hill) continue;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        if (at(x + dx, y + dy) === T.Hill) continue;
-        g.fillStyle = 'rgba(70,55,25,0.55)';
-        g.fillRect(x * TPX + (dx === 1 ? TPX - 2 : 0), y * TPX + (dy === 1 ? TPX - 2 : 0), dx === 0 ? TPX : 2, dy === 0 ? TPX : 2);
+      const lv = hAt(x, y);
+      if (lv >= 2) {
+        g.fillStyle = `rgba(255,244,214,${0.04 * (lv - 1)})`;
+        g.fillRect(x * TPX, y * TPX, TPX, TPX);
       }
-      g.fillStyle = 'rgba(255,240,190,0.08)';
-      g.fillRect(x * TPX, y * TPX, TPX, TPX / 2);
+      const up = hAt(x, y - 1);
+      if (up > lv) {
+        const d = Math.min(3, up - lv);
+        g.fillStyle = 'rgba(38,30,14,0.45)';
+        g.fillRect(x * TPX, y * TPX, TPX, 1 + d * 1.4);
+        g.fillStyle = 'rgba(0,0,0,0.12)';
+        g.fillRect(x * TPX, y * TPX + 1 + d * 1.4, TPX, 2);
+      } else if (up >= 0 && up < lv) {
+        g.fillStyle = 'rgba(255,240,200,0.28)';
+        g.fillRect(x * TPX, y * TPX, TPX, 1);
+      }
+      const left = hAt(x - 1, y);
+      if (left > lv) {
+        g.fillStyle = 'rgba(38,30,14,0.3)';
+        g.fillRect(x * TPX, y * TPX, 1.5, TPX);
+      } else if (left >= 0 && left < lv) {
+        g.fillStyle = 'rgba(255,240,200,0.2)';
+        g.fillRect(x * TPX, y * TPX, 1, TPX);
+      }
+      const right = hAt(x + 1, y);
+      if (right >= 0 && right < lv) {
+        g.fillStyle = 'rgba(50,40,20,0.4)';
+        g.fillRect((x + 1) * TPX - 1, y * TPX, 1, TPX);
+      }
     }
   }
   // 樹林：樹冠
@@ -198,6 +249,7 @@ export class LegionRenderer {
   private hasPrev: Uint8Array;
   private effects: Effect[] = [];
   private corpses: Corpse[] = [];
+  private trails = new Map<number, Trail>();
   private regById = new Map<number, RegFrame>();
   private prevRegById = new Map<number, RegFrame>();
   private kindOf: UnitKind[];
@@ -251,6 +303,17 @@ export class LegionRenderer {
     this.cur = f;
     this.regById = new Map(f.regs.map((r) => [r.id, r]));
     for (const ev of f.events) this.effectFor(ev, now);
+    // 衝刺軌跡：衝刺中每格記一點；結束後開始淡出
+    for (const r of f.regs) {
+      if (r.dashing === null || r.dash === null || r.dash.aligning) continue;
+      let t = this.trails.get(r.id);
+      if (t === undefined || t.end > 0) {
+        t = { owner: this.ownerOf[r.id], kind: r.dashing, pts: [], end: 0 };
+        this.trails.set(r.id, t);
+      }
+      t.pts.push(r.x, r.y);
+    }
+    for (const [id, t] of this.trails) if (t.end === 0 && (this.regById.get(id)?.dashing ?? null) === null) t.end = now;
   }
 
   /** 重新開始時清掉 */
@@ -259,6 +322,7 @@ export class LegionRenderer {
     this.cur = null;
     this.effects = [];
     this.corpses = [];
+    this.trails.clear();
     this.regById = new Map();
     this.prevRegById = new Map();
   }
@@ -271,10 +335,20 @@ export class LegionRenderer {
   private effectFor(ev: LegionFrame['events'][number], now: number): void {
     switch (ev.type) {
       case 'impact': {
+        if (ev.target < 0 && ev.kills === 0) return;
         const p = this.regPos(ev.target) ?? this.regPos(ev.reg);
         if (p === null) return;
-        this.effects.push({ kind: 'ring', x: p.x, y: p.y, t0: now, life: 900, color: ev.braced ? '#e2e8f0' : '#fb923c', size: 3.2 });
-        this.effects.push({ kind: 'text', x: p.x, y: p.y, t0: now, life: 1800, color: ev.braced ? '#e2e8f0' : '#fdba74', text: ev.braced ? '擋下衝鋒！' : `衝鋒！-${ev.kills}` });
+        const hit = [ev.kills > 0 ? `-${ev.kills}` : '', ev.downed > 0 ? `倒 ${ev.downed}` : ''].filter((x) => x !== '').join(' ');
+        this.effects.push({ kind: 'ring', x: p.x, y: p.y, t0: now, life: 900, color: ev.braced ? '#e2e8f0' : DASH_COLOR[ev.kind], size: ev.kind === 'charge' ? 3.6 : 2.6 });
+        this.effects.push({ kind: 'text', x: p.x, y: p.y, t0: now, life: 1800, color: ev.braced ? '#e2e8f0' : DASH_COLOR[ev.kind], text: ev.braced ? `擋下${DASH_NAME[ev.kind]}！` : `${DASH_NAME[ev.kind]}！${hit}` });
+        return;
+      }
+      case 'skill': {
+        if (ev.skill !== 'volley' && ev.skill !== 'wall' && ev.skill !== 'brace') return;
+        const p = this.regPos(ev.reg);
+        if (p === null) return;
+        const text = ev.skill === 'volley' ? '齊射！' : ev.skill === 'wall' ? '盾牆！' : '槍林！';
+        this.effects.push({ kind: 'text', x: p.x, y: p.y, t0: now, life: 1400, color: ev.skill === 'volley' ? '#fbbf24' : '#a5f3fc', text, size: 0.8 });
         return;
       }
       case 'ambush': {
@@ -411,6 +485,8 @@ export class LegionRenderer {
     }
     if (this.meta.mode === 'capture') this.drawFlags(f);
     this.drawCorpses(now);
+    this.drawTrails(now, opt);
+    this.drawSkills(f, alpha, opt);
     if (opt.selected >= 0) this.drawSelection(opt.selected, alpha);
     this.drawSoldiers(alpha, opt);
     this.drawArrows(f, alpha);
@@ -503,7 +579,8 @@ export class LegionRenderer {
         y = this.prevY[id] + (y - this.prevY[id]) * alpha;
       }
       const owner = this.ownerOf[regId];
-      const key = `${owner}|${this.kindOf[regId]}|${r?.status === 'routed' ? 1 : 0}|${r?.concealed ? 1 : 0}`;
+      const down = (sol[i + 3] & DOWN_BIT) !== 0 ? 1 : 0;
+      const key = `${owner}|${this.kindOf[regId]}|${r?.status === 'routed' ? 1 : 0}|${r?.concealed ? 1 : 0}|${down}`;
       let g = groups.get(key);
       if (g === undefined) {
         g = [];
@@ -513,11 +590,16 @@ export class LegionRenderer {
       if ((sol[i + 3] & ATTACKED_BIT) !== 0) sparks.push(x, y, r?.facing ?? 0);
     }
     for (const [key, pts] of groups) {
-      const [ownerS, kind, routedS, concS] = key.split('|');
+      const [ownerS, kind, routedS, concS, downS] = key.split('|');
       const owner = Number(ownerS);
       const routed = routedS === '1';
-      const color = routed ? ROUTED[owner] : TEAM[owner];
+      const down = downS === '1';
+      const color = routed ? ROUTED[owner] : down ? shade(TEAM[owner], 0.6) : TEAM[owner];
       ctx.globalAlpha = concS === '1' ? 0.55 : 1;
+      if (down && !simple) {
+        this.drawProne(pts, color, owner);
+        continue;
+      }
       if (simple) {
         ctx.fillStyle = color;
         const r = Math.max(1, s * 0.3);
@@ -544,6 +626,208 @@ export class LegionRenderer {
       }
       ctx.stroke();
     }
+  }
+
+  /** 倒地的士兵：橫躺的橢圓（與朝向垂直）＋頭上暈眩的小點 */
+  private drawProne(pts: number[], color: string, owner: number): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    const body = new Path2D();
+    const daze = new Path2D();
+    const L = s * 0.36;
+    const W = s * 0.14;
+    const r = Math.max(0.8, s * 0.06);
+    for (let i = 0; i < pts.length; i += 3) {
+      const x = this.sx(pts[i]);
+      const y = this.sy(pts[i + 1]);
+      const a = ((pts[i + 2] + 90) * Math.PI) / 180;
+      body.moveTo(x + Math.cos(a) * L, y + Math.sin(a) * L);
+      body.ellipse(x, y, L, W, a, 0, Math.PI * 2);
+      daze.moveTo(x - s * 0.2 + r, y - s * 0.35);
+      daze.arc(x - s * 0.2, y - s * 0.35, r, 0, Math.PI * 2);
+      daze.moveTo(x + s * 0.2 + r, y - s * 0.35);
+      daze.arc(x + s * 0.2, y - s * 0.35, r, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = color;
+    ctx.fill(body);
+    ctx.strokeStyle = shade(TEAM[owner], 0.4);
+    ctx.lineWidth = Math.max(0.6, s * 0.05);
+    ctx.stroke(body);
+    if (s >= 6) {
+      ctx.fillStyle = '#fde68a';
+      ctx.fill(daze);
+    }
+  }
+
+  /** 衝刺走過的路線：粗的半透明線，衝刺結束後淡出（看得出騎兵轉彎的弧度） */
+  private drawTrails(now: number, opt: DrawOptions): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    for (const [id, t] of this.trails) {
+      const a = t.end === 0 ? 1 : 1 - (now - t.end) / TRAIL_FADE;
+      if (a <= 0) {
+        this.trails.delete(id);
+        continue;
+      }
+      if (!this.shown(id, opt.viewer) || t.pts.length < 4) continue;
+      ctx.beginPath();
+      ctx.moveTo(this.sx(t.pts[0]), this.sy(t.pts[1]));
+      for (let i = 2; i < t.pts.length; i += 2) ctx.lineTo(this.sx(t.pts[i]), this.sy(t.pts[i + 1]));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = 0.28 * a;
+      ctx.strokeStyle = DASH_COLOR[t.kind];
+      ctx.lineWidth = Math.max(3, s * (t.kind === 'charge' ? 1.6 : 1.1));
+      ctx.stroke();
+      ctx.globalAlpha = 0.7 * a;
+      ctx.strokeStyle = TEAM_LIGHT[t.owner];
+      ctx.lineWidth = Math.max(1, s * 0.1);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** 招牌技能的地面標示：槍林扇形、盾兵擋箭範圍與盾牆、齊射落點圈、衝刺的預定路線 */
+  private drawSkills(f: LegionFrame, alpha: number, opt: DrawOptions): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    for (const r of f.regs) {
+      if (r.status === 'routed' || !this.shown(r.id, opt.viewer)) continue;
+      const p = this.regAt(r.id, alpha);
+      if (p === null) continue;
+      const owner = this.ownerOf[r.id];
+      const kind = this.kindOf[r.id];
+      const x = this.sx(p.x);
+      const y = this.sy(p.y);
+      if (r.volley !== null) this.drawVolley(r, x, y, f.tick, owner);
+      if (kind === 'spear' && (r.status === 'braced' || r.status === 'bracing' || r.status === 'unbracing')) this.drawBrace(r, x, y, owner);
+      if (kind === 'shield' && (r.stance === 'raise' || r.status === 'walled' || r.status === 'walling')) this.drawShield(r, x, y, p.facing, owner);
+      if (r.dash !== null && r.dashing !== null) {
+        // 衝刺的預定路線：沿目前方向剩下的距離（對準方向中是虛點）
+        const a = (r.dash.dir * Math.PI) / 180;
+        const len = (Math.max(r.dash.left, 1500) / TILE) * s;
+        const ex = x + Math.cos(a) * len;
+        const ey = y + Math.sin(a) * len;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(ex, ey);
+        ctx.setLineDash(r.dash.aligning ? [2, 5] : [8, 5]);
+        ctx.strokeStyle = DASH_COLOR[r.dashing];
+        ctx.globalAlpha = r.dash.aligning ? 0.6 : 0.85;
+        ctx.lineWidth = Math.max(1.5, s * 0.18);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const k = Math.max(5, s * 0.7);
+        ctx.beginPath();
+        ctx.moveTo(ex + Math.cos(a) * k, ey + Math.sin(a) * k);
+        ctx.lineTo(ex + Math.cos(a + 2.5) * k, ey + Math.sin(a + 2.5) * k);
+        ctx.lineTo(ex + Math.cos(a - 2.5) * k, ey + Math.sin(a - 2.5) * k);
+        ctx.fillStyle = DASH_COLOR[r.dashing];
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  /** 齊射：落點圈、剩餘時間的弧、弓兵到落點的虛線 */
+  private drawVolley(r: RegFrame, x: number, y: number, tick: number, owner: number): void {
+    const v = r.volley!;
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    const vx = this.sx(v.x);
+    const vy = this.sy(v.y);
+    const R = (RULES.volley.radius / TILE) * s;
+    ctx.beginPath();
+    ctx.arc(vx, vy, R, 0, Math.PI * 2);
+    ctx.fillStyle = owner === 0 ? 'rgba(59,130,246,0.13)' : 'rgba(239,68,68,0.13)';
+    ctx.fill();
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = TEAM_LIGHT[owner];
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const left = Math.max(0, Math.min(1, (v.until - tick) / RULES.volley.duration));
+    ctx.beginPath();
+    ctx.arc(vx, vy, R + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(vx, vy);
+    ctx.strokeStyle = 'rgba(251,191,36,0.35)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  /** 槍林：朝槍林方向的扇形（正面 ±60°），邊上一排槍尖；圓陣是一整圈（效果打折） */
+  private drawBrace(r: RegFrame, x: number, y: number, owner: number): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    const ready = r.status === 'braced';
+    const circle = r.formation === 'circle';
+    const R = ((Math.hypot(r.halfW, r.halfD) + UNITS.spear.reach + 600) / TILE) * s;
+    const a0 = (r.braceFacing * Math.PI) / 180;
+    const half = circle ? Math.PI : (RULES.flank.frontHalf * Math.PI) / 180;
+    ctx.beginPath();
+    if (circle) ctx.arc(x, y, R, 0, Math.PI * 2);
+    else {
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, R, a0 - half, a0 + half);
+      ctx.closePath();
+    }
+    ctx.fillStyle = owner === 0 ? `rgba(147,197,253,${ready ? 0.16 : 0.07})` : `rgba(252,165,165,${ready ? 0.16 : 0.07})`;
+    ctx.fill();
+    if (!ready) ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = ready ? 'rgba(226,232,240,0.75)' : 'rgba(226,232,240,0.4)';
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (!ready || s < 4) return;
+    // 槍尖：沿弧線每 8° 一根往外的短線
+    const step = (8 * Math.PI) / 180;
+    ctx.beginPath();
+    for (let a = a0 - half + step / 2; a < a0 + half; a += step) {
+      ctx.moveTo(x + Math.cos(a) * R, y + Math.sin(a) * R);
+      ctx.lineTo(x + Math.cos(a) * (R + s * 0.55), y + Math.sin(a) * (R + s * 0.55));
+    }
+    ctx.strokeStyle = 'rgba(241,245,249,0.85)';
+    ctx.lineWidth = Math.max(1, s * 0.08);
+    ctx.stroke();
+  }
+
+  /** 盾兵：舉盾或盾牆時周圍友軍的擋箭範圍；盾牆在正面畫一道牆 */
+  private drawShield(r: RegFrame, x: number, y: number, facing: number, owner: number): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    if (r.stance === 'raise' || r.status === 'walled') {
+      ctx.beginPath();
+      ctx.arc(x, y, ((r.rad + RULES.shield.auraRange) / TILE) * s, 0, Math.PI * 2);
+      ctx.fillStyle = owner === 0 ? 'rgba(191,219,254,0.07)' : 'rgba(254,202,202,0.07)';
+      ctx.fill();
+      ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = owner === 0 ? 'rgba(191,219,254,0.55)' : 'rgba(254,202,202,0.55)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (r.status !== 'walled' && r.status !== 'walling') return;
+    const a = (facing * Math.PI) / 180;
+    const d = (r.halfD / TILE) * s + s * 0.45;
+    const hw = (r.halfW / TILE) * s + s * 0.3;
+    const cx = x + Math.cos(a) * d;
+    const cy = y + Math.sin(a) * d;
+    ctx.beginPath();
+    ctx.moveTo(cx - Math.sin(a) * hw, cy + Math.cos(a) * hw);
+    ctx.lineTo(cx + Math.sin(a) * hw, cy - Math.cos(a) * hw);
+    ctx.strokeStyle = r.status === 'walled' ? 'rgba(226,232,240,0.9)' : 'rgba(226,232,240,0.4)';
+    ctx.lineWidth = Math.max(2, s * 0.32);
+    ctx.lineCap = 'butt';
+    if (r.status === 'walling') ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   /** 各兵種的士兵造型：身體（隊伍色）＋ 武器或坐騎（淺色） */
@@ -712,20 +996,26 @@ export class LegionRenderer {
     const h = 15 * k;
     // 先排好每個旗標的位置：與已放好的重疊就往上移，選中的軍團優先
     const order = [...f.regs].sort((a, b) => (b.id === opt.selected ? 1 : 0) - (a.id === opt.selected ? 1 : 0) || b.y - a.y);
-    const placed: [number, number][] = [];
+    // AI 意圖：放大到一定程度才顯示；滑鼠指著或選中的一律顯示；一方視角只看得到自己的
+    const zoomed = opt.showIntent && s >= this.fitScale * 1.6;
+    const intentOf = (r: RegFrame): string =>
+      r.intent !== '' && r.status !== 'routed' && (opt.viewer < 0 || this.ownerOf[r.id] === opt.viewer) && (zoomed || opt.hovered === r.id || opt.selected === r.id) ? r.intent : '';
+    const ih = 12 * k;
+    const placed: [number, number, number][] = [];
     const spot = new Map<number, [number, number, number]>();
     for (const r of order) {
       if (!this.shown(r.id, opt.viewer)) continue;
       const p = this.regAt(r.id, alpha);
       if (p === null) continue;
+      const bh = h + (intentOf(r) !== '' ? ih : 0);
       const bx = this.sx(p.x);
-      const by0 = this.sy(p.y) - (r.rad / TILE) * s - 12 * k;
+      const by0 = this.sy(p.y) - (r.rad / TILE) * s - 12 * k - (bh - h);
       let by = by0;
       for (let tries = 0; tries < 6; tries++) {
-        if (!placed.some(([px, py]) => Math.abs(px - bx) < w + 6 && Math.abs(py - by) < h + 3)) break;
+        if (!placed.some(([px, py, ph]) => Math.abs(px - bx) < w + 6 && by < py + ph + 3 && py < by + bh + 3)) break;
         by -= h + 4;
       }
-      placed.push([bx, by]);
+      placed.push([bx, by, bh]);
       spot.set(r.id, [bx, by, by0]);
     }
     for (const r of f.regs) {
@@ -800,17 +1090,37 @@ export class LegionRenderer {
       ctx.fillRect(x - w / 2, y + h / 2 + 1.5, w, 2.5 * k);
       ctx.fillStyle = frac > 0.5 ? '#4ade80' : frac > 0.25 ? '#facc15' : '#f87171';
       ctx.fillRect(x - w / 2, y + h / 2 + 1.5, w * frac, 2.5 * k);
-      // 狀態標籤
-      const tag = r.status === 'routed' ? '潰散' : r.status === 'braced' ? '架陣' : r.status === 'bracing' ? '架陣中' : r.status === 'unbracing' ? '收陣' : r.status === 'charging' ? '衝鋒' : r.concealed && opt.viewer < 0 ? '埋伏中' : '';
+      // 狀態標籤（招牌技能、衝刺、換陣形、潰散；上帝視角下的埋伏）
+      const t = TAG[r.status];
+      const tag = t !== undefined ? (r.status === 'reforming' ? `${t[0]}・${FORMATION_NAMES[r.formation]}` : t[0]) : r.concealed && opt.viewer < 0 ? '埋伏中' : '';
       if (tag !== '') {
         ctx.font = `700 ${Math.round(9 * k)}px ${font}`;
         const tw = ctx.measureText(tag).width + 6 * k;
-        ctx.fillStyle = tag === '衝鋒' ? '#f97316' : tag === '埋伏中' ? '#a16207' : tag === '潰散' ? '#334155' : '#0e7490';
+        ctx.fillStyle = t !== undefined ? t[1] : '#a16207';
         ctx.beginPath();
         ctx.roundRect(x + w / 2 + 2, y - h / 2, tw, h, 3 * k);
         ctx.fill();
+        if (r.status === 'reforming' && r.switchLeft > 0) {
+          // 換陣形的進度
+          ctx.fillStyle = 'rgba(255,255,255,0.25)';
+          ctx.fillRect(x + w / 2 + 2, y + h / 2 - 2 * k, tw * (1 - r.switchLeft / RULES.formationSwitchTicks), 2 * k);
+        }
         ctx.fillStyle = '#fff';
         ctx.fillText(tag, x + w / 2 + 2 + 3 * k, y + 0.5);
+      }
+      // AI 意圖
+      const intent = intentOf(r);
+      if (intent !== '') {
+        ctx.font = `600 ${Math.round(9 * k)}px ${font}`;
+        ctx.textAlign = 'center';
+        const tw = ctx.measureText(intent).width + 8 * k;
+        const iy = y + h / 2 + 5 * k + ih / 2;
+        ctx.fillStyle = 'rgba(8,12,20,0.72)';
+        ctx.beginPath();
+        ctx.roundRect(x - tw / 2, iy - ih / 2 + 1, tw, ih - 1, 3 * k);
+        ctx.fill();
+        ctx.fillStyle = owner === 0 ? '#bfdbfe' : '#fecaca';
+        ctx.fillText(intent, x, iy + 0.5);
       }
       ctx.globalAlpha = 1;
     }
@@ -835,7 +1145,7 @@ export class LegionRenderer {
         ctx.globalAlpha = 1;
       } else {
         ctx.globalAlpha = p < 0.8 ? 1 : (1 - p) / 0.2;
-        ctx.font = `800 ${Math.round(14 + Math.min(6, s * 0.4))}px ${font}`;
+        ctx.font = `800 ${Math.round((14 + Math.min(6, s * 0.4)) * (e.size ?? 1))}px ${font}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         const ty = y - 26 - p * 24;

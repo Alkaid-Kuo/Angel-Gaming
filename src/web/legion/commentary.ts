@@ -1,6 +1,6 @@
 // 軍團戰自動解說：依引擎事件與局勢產生中文字幕（在 Worker 內執行，只讀取比賽狀態）。
 import type { LegionEvent } from '../../legion/api.ts';
-import { MODE_NAMES, RULES, TERRAIN_NAMES, TPS, UNITS } from '../../legion/config.ts';
+import { MODE_NAMES, RULES, TERRAIN_NAMES, TPS, UNITS, type DashKind } from '../../legion/config.ts';
 import { terrainAt } from '../../legion/map.ts';
 import type { LegionMatch, Regiment } from '../../legion/sim.ts';
 import type { Caption, PlayerMeta, RegStatic } from './protocol.ts';
@@ -10,6 +10,9 @@ const SEC = TPS;
 const STATUS_EVERY = 35 * SEC;
 /** 正面接戰的解說最短間隔 */
 const FRONT_CONTACT_GAP = 10 * SEC;
+/** 同一種招牌技能的解說最短間隔 */
+const SKILL_GAP = 12 * SEC;
+const DASH_NAME: Readonly<Record<DashKind, string>> = { charge: '衝鋒', assault: '突擊', infiltrate: '切入' };
 
 export class LegionCommentator {
   private out: Caption[] = [];
@@ -21,6 +24,7 @@ export class LegionCommentator {
   private seenCav: Set<number>[] = [];
   private warned = false;
   private routs: number[] = [];
+  private lastSkill = new Map<string, number>();
 
   private readonly regs: readonly RegStatic[];
   private readonly players: readonly PlayerMeta[];
@@ -104,15 +108,38 @@ export class LegionCommentator {
       }
       case 'impact': {
         const r = reg(ev.reg);
-        const target = ev.target >= 0 ? this.name(ev.target) : '敵陣';
-        if (r === undefined) return;
+        if (r === undefined || ev.target < 0) return;
+        const target = this.name(ev.target);
+        const dash = DASH_NAME[ev.kind];
         if (ev.braced) {
-          this.say(t, `${target} 架起長槍，擋下了 ${this.name(r.id)} 的衝鋒！騎兵反被長槍刺傷`, true, r);
+          const by = reg(ev.target)?.kind === 'shield' ? '盾牆' : '槍林';
+          this.say(t, `${target} 的${by}擋下了 ${this.name(r.id)} 的${dash}！`, ev.kind === 'charge', r);
           return;
         }
         const flank = ev.flank === 'rear' ? '的背後' : ev.flank === 'side' ? '的側面' : '';
-        if (ev.kills === 0) this.say(t, `${this.name(r.id)} 衝鋒撞上 ${target}${flank}，但沒能撞開陣線`, false, r);
-        else this.say(t, `${this.name(r.id)} 衝鋒撞進 ${target}${flank}，${ev.kills} 人倒下！`, ev.kills >= 4 || ev.flank !== 'front', r);
+        if (ev.kind === 'infiltrate') {
+          this.say(t, `${this.name(r.id)} 切入 ${target}${flank}，攪亂陣形！`, false, r);
+          return;
+        }
+        const hit = [ev.kills > 0 ? `${ev.kills} 人陣亡` : '', ev.downed > 0 ? `${ev.downed} 人被撞倒` : ''].filter((x) => x !== '').join('、');
+        if (hit === '') this.say(t, `${this.name(r.id)} ${dash}撞上 ${target}${flank}，但沒能撞開陣線`, false, r);
+        else this.say(t, `${this.name(r.id)} ${dash}撞進 ${target}${flank}，${hit}！`, ev.kills >= 4 || ev.flank !== 'front', r);
+        return;
+      }
+      case 'skill': {
+        const r = reg(ev.reg);
+        if (r === undefined) return;
+        const key = `${r.owner}:${ev.skill}`;
+        if (t - (this.lastSkill.get(key) ?? -SKILL_GAP) < SKILL_GAP) return;
+        const where = this.place(m, r.x, r.y);
+        let text = '';
+        if (ev.skill === 'volley' && r.volley !== null) text = `${this.name(r.id)} 對${this.place(m, r.volley.x, r.volley.y)}齊射！`;
+        else if (ev.skill === 'charge') text = `${this.name(r.id)} 在${where}發起衝鋒！`;
+        else if (ev.skill === 'assault') text = `${this.name(r.id)} 發動突擊！`;
+        else if (ev.skill === 'wall') text = `${this.name(r.id)} 在${where}架起盾牆`;
+        if (text === '') return;
+        this.lastSkill.set(key, t);
+        this.say(t, text, false, r);
         return;
       }
       case 'routed': {

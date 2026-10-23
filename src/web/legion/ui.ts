@@ -1,6 +1,6 @@
 // 軍團戰觀戰畫面：電競轉播風的計分條、雙方兵力名冊、解說字幕、開戰前陣容、結算、自動導播與操作。
 import type { RegimentStatus } from '../../legion/api.ts';
-import { FORMATION_NAMES, MODE_NAMES, RULES, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type UnitKind } from '../../legion/config.ts';
+import { DASH, FORMATION_NAMES, MODE_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type SkillKind, type UnitKind } from '../../legion/config.ts';
 import { unitSvg } from './icons.ts';
 import type { Caption, FromLegionWorker, LegionFrame, LegionMeta, ToLegionWorker } from './protocol.ts';
 import { LegionRenderer } from './render.ts';
@@ -23,7 +23,19 @@ const STATUS_NAME: Record<RegimentStatus, string> = {
   routed: '潰散',
 };
 const ORDER_NAME: Record<string, string> = { idle: '待命', move: '移動', attackMove: '邊走邊打', attack: '攻擊', hold: '堅守', charge: '衝鋒' };
-const TERRAIN_TIP = ['', '移動 ×1.25', '移動 ×0.6（輕步兵不減速）・隱蔽：敵人要很近才看得到・騎兵不能衝鋒', '視野 +4 格・射程 +2 格、遠程傷害 ×1.2・由下往上的近戰 ×0.85', '移動 ×0.5・在這裡受到的近戰傷害 ×1.2・不能衝鋒', '不可通行', '移動 ×1.25・只有 3 格寬', '不可通行', '不可通行'];
+const TERRAIN_TIP = [
+  '',
+  '移動 ×1.25',
+  `移動 ×0.6（輕步兵不減速）・隱蔽：敵人 ${RULES.vision.concealDetect / TILE} 格內（輕步兵 ${RULES.vision.concealDetectLight / TILE} 格）才看得到・受到的遠程傷害 −${RULES.terrain.forestRangedDR}%・擋得住騎兵衝鋒（步兵的突擊、切入不受影響）`,
+  '比周圍高：視野更遠、弓兵射程更遠、居高臨下打人更痛（見上方「地形與高度」）',
+  `移動 ×0.5・在這裡受到的近戰傷害 ×${RULES.terrain.shallowMeleeTaken / 100}・擋得住騎兵衝鋒`,
+  '不可通行',
+  '移動 ×1.25・只有 3 格寬',
+  '不可通行・擋住視線',
+  '不可通行・擋住視線',
+];
+const SKILL_NAME: Record<SkillKind, string> = { brace: '槍林', assault: '突擊', shield: '持盾／舉盾／盾牆', volley: '齊射', infiltrate: '切入', charge: '衝鋒' };
+const HEIGHT_TIP = `每高 1 階：視野 +${RULES.height.sightPerLevel / TILE} 格、弓兵射程 +${RULES.height.rangePerLevel / TILE} 格、打較低的敵人傷害 +${RULES.height.rangedPerLevel}%（高低差最多算 ${RULES.height.clamp} 階）・上坡移動 ×${RULES.height.uphillSpeed / 100}、下坡 ×${RULES.height.downhillSpeed / 100}`;
 const SPEEDS = [1, 2, 4, 8];
 
 function esc(s: string): string {
@@ -49,6 +61,7 @@ export class LegionScreen {
   private paused = true;
   private started = false;
   private director = true;
+  private showIntent = true;
   private viewer = -1;
   private selected = -1;
   private hovered = -1;
@@ -117,6 +130,7 @@ export class LegionScreen {
         <option value="-1">上帝視角</option><option value="0">${esc(p[0].side)}視角</option><option value="1">${esc(p[1].side)}視角</option>
       </select>
       <button data-act="director" data-el="director" class="active" title="自動導播：鏡頭跟著主要戰場（F）">導播</button>
+      <button data-act="intent" data-el="intent" class="active" title="放大時在軍團旗標下顯示 AI 意圖（I）；滑鼠指著或選中的軍團一律顯示">意圖</button>
       <button data-act="fit" title="看全圖（Home）">全圖</button>
       <span class="sep"></span>
       <button data-act="help" title="規則說明（H）">說明</button>
@@ -210,6 +224,7 @@ export class LegionScreen {
       } else if (ke.key >= '1' && ke.key <= '4') this.setSpeed(SPEEDS[Number(ke.key) - 1]);
       else if (ke.key === 'n' || ke.key === 'N') this.action('skip');
       else if (ke.key === 'f' || ke.key === 'F') this.setDirector(!this.director);
+      else if (ke.key === 'i' || ke.key === 'I') this.action('intent');
       else if (ke.key === 'h' || ke.key === 'H') this.action('help');
       else if (ke.key === 'Home') this.action('fit');
       else if (ke.key === 'Escape') {
@@ -249,6 +264,10 @@ export class LegionScreen {
         return;
       case 'director':
         return this.setDirector(!this.director);
+      case 'intent':
+        this.showIntent = !this.showIntent;
+        this.el.intent.classList.toggle('active', this.showIntent);
+        return;
       case 'fit':
         this.setDirector(false);
         this.r.fit();
@@ -365,6 +384,7 @@ export class LegionScreen {
       return;
     }
     const pct = (n: number): string => `×${(n / 100).toFixed(n % 100 === 0 ? 0 : n % 10 === 0 ? 1 : 2)}`;
+    const sec = (t: number): string => `${t / TPS} 秒`;
     const rows = (Object.keys(UNITS) as UnitKind[])
       .map((k) => {
         const u = UNITS[k];
@@ -372,30 +392,42 @@ export class LegionScreen {
           .filter(([, v]) => v! > 100)
           .map(([t, v]) => `${UNITS[t as UnitKind].name} ${pct(v!)}`)
           .join('、');
-        return `<tr><td>${unitSvg(k, 16)} ${u.name}</td><td>${u.cost}</td><td>${u.men}</td><td>${u.hp / 10}</td><td>${u.attack / 10}／${(u.cooldown / TPS).toFixed(1)} 秒</td><td>${u.range ? `${u.range / TILE} 格` : '近戰'}</td><td>${((u.speed * TPS) / TILE).toFixed(1)}${dashDefOf(k) ? `（${dashDefOf(k)!.kind === 'charge' ? '衝鋒' : dashDefOf(k)!.kind === 'assault' ? '突擊' : '切入'} ${((dashDefOf(k)!.speed * TPS) / TILE).toFixed(1)}）` : ''}</td><td>${good || '—'}</td></tr>`;
+        const d = dashDefOf(k);
+        return `<tr><td>${unitSvg(k, 16)} ${u.name}</td><td>${u.cost}</td><td>${u.men}</td><td>${u.hp / 10}</td><td>${u.attack / 10}／${(u.cooldown / TPS).toFixed(1)} 秒</td><td>${u.range ? `${u.range / TILE} 格` : '近戰'}</td><td>${((u.speed * TPS) / TILE).toFixed(1)}${d ? `（${SKILL_NAME[u.skill]} ${((d.speed * TPS) / TILE).toFixed(1)}）` : ''}</td><td>${u.meleeDR}%／${u.rangedDR}%</td><td>${SKILL_NAME[u.skill]}</td><td>${good || '—'}</td></tr>`;
       })
       .join('');
+    const B = RULES.brace;
+    const S = RULES.shield;
     h.innerHTML = `<div class="lg-helpbox">
       <button class="ghost close" data-act="closeHelp">✕</button>
       <h2>軍團戰怎麼看</h2>
-      <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。</p>
+      <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。旗標下方的小字是 AI 的意圖（放大時顯示，<kbd>I</kbd> 開關）。</p>
       <h3>勝利條件</h3>
       <ul><li><b>殲滅戰</b>：對手全軍陣亡或潰散；剩餘兵力低於開場 ${RULES.collapsePercent}% 視為全軍潰敗。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比剩餘兵力。</li>
       <li><b>佔點</b>：同時控制超過半數的旗點 ${RULES.capture.dominationTicks / TPS} 秒（被奪回就歸零）；或殲滅對手。時間到先比旗點、再比兵力。</li></ul>
-      <h3>戰術</h3>
-      <ul><li><b>側擊 ×1.5、背擊 ×2</b>：看攻擊方在目標陣型的哪一面（陣型前方的小白箭頭是正面）。</li>
-      <li><b>衝鋒</b>（騎兵）：助跑 4 格後撞擊，傷害極高但轉向很慢；撞擊後要先脫離 6 格才能再衝。樹林、淺灘不能衝鋒。</li>
-      <li><b>架陣</b>（長槍方陣）：3 秒架好，正面受到的衝鋒只剩 20% 並反彈一半給騎兵；被側擊、背擊時無效。</li>
-      <li><b>接觸前迷霧</b>：地形公開，但敵軍要進入視野才看得到；<b>樹林中隱蔽</b>，要 3 格內（輕步兵 5 格）才發現，攻擊後曝光 10 秒。</li>
+      <h3>傷害</h3>
+      <ul><li><b>沒有攻擊削弱，只有傷害減免</b>：各兵種有近戰、遠程減免（下表），和姿態、地形、盾兵掩護的減免相乘。</li>
+      <li><b>側擊 ×${RULES.flank.side / 100}、背擊 ×${RULES.flank.rear / 100}</b>：看攻擊方在目標陣形的哪一面（旗標旁的小白箭頭是正面；楔形陣正面較窄，圓陣沒有側背）。</li></ul>
+      <h3>招牌技能（地圖上的標示）</h3>
+      <ul><li><b>槍林</b>（長槍，淡色扇形＋槍尖）：${sec(B.setTicks)}架好，朝指定方向；正面再減免 ${B.frontDR}%、攻速 ×${B.attackSpeed / 100}，正面衝來的敵人越快傷害越高，並擋下任何衝刺；架著時不會被撞倒或推開、不能移動。槍林要厚才擋得住，太薄會被衝穿；圓陣是全方向但效果減半。</li>
+      <li><b>突擊</b>（劍士，黃色箭頭）：朝指定方向短衝 ${DASH.assault.dist / TILE} 格擠進敵陣，第一擊 ×${RULES.dash.firstHit / 100}；冷卻 ${sec(DASH.assault.cooldown)}。</li>
+      <li><b>盾兵三種姿態</b>：持盾（正常速度）；舉盾（移動 ×${S.raise.speed / S.carry.speed}，虛線圈內的友軍遠程傷害 −${S.auraDR}%）；盾牆（白色粗線，站定，正面近戰 −${S.wall.meleeDR}%、遠程 −${S.wall.rangedDR}%，完全擋下步兵的突擊與切入，但擋不住騎兵衝鋒）。</li>
+      <li><b>齊射</b>（弓兵，落點圈）：對半徑 ${RULES.volley.radius / TILE} 格的區域密集射擊 ${sec(RULES.volley.duration)}（射速 ×${RULES.volley.rateDiv}），箭可以越過友軍；冷卻 ${sec(RULES.volley.cooldown)}。</li>
+      <li><b>切入</b>（輕步兵，綠色箭頭）：快速衝進敵陣亂戰，途中只有 ${RULES.evadeHitChance}% 的箭射得中；冷卻 ${sec(DASH.infiltrate.cooldown)}。</li>
+      <li><b>衝鋒</b>（騎兵，橘色箭頭與軌跡）：助跑 ${DASH.heavyCav.runup / TILE} 格後高速直衝，撞擊傷害另算，撞到沒死的會被擊倒 ${sec(RULES.knockdownTicks)}（倒地的士兵橫躺、頭上冒星星）。輕騎兵衝 ${DASH.lightCav.dist / TILE} 格、轉向較靈活，受到重擊會被打斷；重騎兵衝 ${DASH.heavyCav.dist / TILE} 格、幾乎不能轉彎、衝鋒中霸體。樹林、淺灘、牆擋得住衝鋒。冷卻 ${sec(DASH.lightCav.cooldown)}／${sec(DASH.heavyCav.cooldown)}。</li>
+      <li><b>衝刺共通</b>：一旦開始就不能取消，只能微調方向（虛線是預定路線）；衝勁撞光、撞上槍林或盾牆正面就停下；兩個衝刺對撞比衝擊力，相近就兩邊都停。楔形陣衝勁 ×${RULES.dash.wedgeMomentum / 100}。</li></ul>
+      <h3>陣形</h3>
+      <ul><li><b>橫陣</b>：寬、接敵面大；<b>方陣</b>：厚、槍林擋得住衝鋒；<b>楔形陣</b>：衝勁大、正面較窄；<b>圓陣</b>：沒有側背但不能移動。換陣形要 ${sec(RULES.formationSwitchTicks)}（旗標旁「變陣」），人數變少會自動重排。</li></ul>
+      <h3>地形與高度</h3>
+      <ul><li><b>高度</b>：河 0 階、河岸 1 階、平地 2 階、山丘 3 階、山頂 4 階（地圖上一層層的疊板，滑鼠指著看高度）。${HEIGHT_TIP}；往下衝刺更快更猛、往上變慢。較高的地形與建築擋住視線。</li>
+      <li><b>接觸前迷霧</b>：地形公開，但敵軍要進入視野才看得到；<b>樹林中隱蔽</b>，攻擊後曝光 ${sec(RULES.vision.revealTicks)}。</li>
       <li><b>老兵</b>：累積傷害達本團血量的 50%、120% 升級，攻擊與血量 +10%、+20%（旗標上的 ★）。</li>
       <li><b>殘兵潰散</b>：人數低於 ${RULES.routPercent}% 就失控，往己方後方撤離，只在被近身時反擊；潰散視同陣亡。</li></ul>
       <h3>兵種</h3>
-      <table class="lg-table"><tr><th>兵種</th><th>點數</th><th>人數</th><th>血量</th><th>攻擊</th><th>射程</th><th>速度（格／秒）</th><th>剋制</th></tr>${rows}</table>
-      <p class="muted small">盾兵：自己受到的遠程傷害 ×0.25，周圍 3 格友軍 ×0.5。弓兵近戰 ×0.5。</p>
-      <h3>地形</h3>
+      <table class="lg-table"><tr><th>兵種</th><th>點數</th><th>人數</th><th>血量</th><th>攻擊</th><th>射程</th><th>速度（格／秒）</th><th>減免（近／遠）</th><th>招牌技能</th><th>剋制</th></tr>${rows}</table>
       <table class="lg-table">${TERRAIN_NAMES.map((n, i) => (TERRAIN_TIP[i] ? `<tr><td>${n}</td><td>${TERRAIN_TIP[i]}</td></tr>` : '')).join('')}</table>
       <h3>操作</h3>
-      <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>Home</kbd> 全圖・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）</p>
+      <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>I</kbd> AI 意圖・<kbd>Home</kbd> 全圖・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）</p>
     </div>`;
     h.classList.remove('hidden');
   }
@@ -505,7 +537,7 @@ export class LegionScreen {
             const men = r?.men ?? 0;
             const frac = men / s.men0;
             const st = r === undefined ? '覆滅' : STATUS_NAME[r.status] + (r.concealed ? '・埋伏中' : '');
-            const cls = r === undefined ? 'dead' : r.status === 'routed' ? 'routed' : r.status === 'engaged' || r.status === 'charging' ? 'hot' : '';
+            const cls = r === undefined ? 'dead' : r.status === 'routed' ? 'routed' : r.status === 'engaged' || r.dashing !== null ? 'hot' : '';
             return `<div class="rr ${cls}${this.selected === s.id ? ' sel' : ''}" data-reg="${s.id}">
               <span class="ic" style="background:${r === undefined || r.status === 'routed' ? '#475569' : p.color}">${unitSvg(s.kind, 16, '#fff')}</span>
               <span class="nm">${esc(s.name)}${r && r.level > 1 ? `<span class="lv">${'★'.repeat(r.level - 1)}</span>` : ''}</span>
@@ -544,13 +576,19 @@ export class LegionScreen {
         <span>指令</span><b>${ORDER_NAME[r.order] ?? r.order}${target ? ` → ${esc(this.meta.players[target.owner].side)}${esc(target.name)}` : ''}</b>
         <span>等級</span><b>${r.level} 級${r.level > 1 ? `（攻擊、血量 +${RULES.veteran.levels[r.level - 1].attack - 100}%）` : ''}</b>
         <span>擊殺</span><b>${r.kills}</b>
-        <span>地形</span><b>${terrain}</b>
+        <span>地形</span><b>${terrain}・高度 ${this.heightAt(r.x, r.y)} 階</b>
         <span>陣形</span><b>${FORMATION_NAMES[r.formation]}${r.stance ? `・${r.stance === 'raise' ? '舉盾' : r.stance === 'wall' ? '盾牆' : '持盾'}` : ''}</b>
         <span>招牌技能</span><b>${r.skillCd > 0 ? `冷卻 ${Math.ceil(r.skillCd / TPS)} 秒` : '可以使用'}</b>
         ${r.intent ? `<span>意圖</span><b>${esc(r.intent)}</b>` : ''}
       </div>`
       }
       <div class="dt-stats small muted">攻擊 ${u.attack / 10}／${(u.cooldown / TPS).toFixed(1)} 秒・${u.range ? `射程 ${u.range / TILE} 格` : '近戰'}・速度 ${((u.speed * TPS) / TILE).toFixed(1)} 格／秒・視野 ${u.sight / TILE} 格${vs ? `<br>相剋：${vs}` : ''}</div>`;
+  }
+
+  private heightAt(x: number, y: number): number {
+    const tx = Math.floor(x / TILE);
+    const ty = Math.floor(y / TILE);
+    return this.meta.heights[ty * this.meta.width + tx] ?? 0;
   }
 
   private terrainName(x: number, y: number): string {
@@ -592,7 +630,7 @@ export class LegionScreen {
     const now = performance.now();
     const a = this.paused ? 1 : this.alpha();
     if (this.director && this.started) this.direct();
-    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true });
+    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent });
     if (this.bigUntil > 0 && now > this.bigUntil) {
       this.bigUntil = 0;
       this.el.big.classList.add('hidden');
@@ -604,7 +642,7 @@ export class LegionScreen {
   private direct(): void {
     const f = this.r.frame;
     if (f === null) return;
-    const hot = f.regs.filter((r) => r.status === 'engaged' || r.status === 'charging' || r.fireTarget >= 0);
+    const hot = f.regs.filter((r) => r.status === 'engaged' || r.dashing !== null || r.status === 'volleying' || r.fireTarget >= 0);
     const pool = hot.length > 0 ? hot : f.regs.filter((r) => r.status !== 'routed');
     if (pool.length === 0) return;
     let sx = 0;
@@ -615,7 +653,7 @@ export class LegionScreen {
     let y0 = Infinity;
     let y1 = -Infinity;
     for (const r of pool) {
-      const k = r.men + (r.status === 'charging' ? 30 : 0);
+      const k = r.men + (r.dashing !== null ? 30 : 0);
       sx += r.x * k;
       sy += r.y * k;
       w += k;
@@ -652,7 +690,7 @@ export class LegionScreen {
       const r = this.r.reg(id);
       const p = this.meta.players[s.owner];
       if (r !== undefined)
-        html = `<b style="color:${p.color}">${esc(p.side)} ${esc(s.name)}</b>　${r.men}/${s.men0} 人<br>${STATUS_NAME[r.status]}${r.concealed ? '・<span class="hint">埋伏中（敵方看不到）</span>' : ''}${r.level > 1 ? `・${r.level} 級老兵` : ''}`;
+        html = `<b style="color:${p.color}">${esc(p.side)} ${esc(s.name)}</b>　${r.men}/${s.men0} 人・${FORMATION_NAMES[r.formation]}・高度 ${this.heightAt(r.x, r.y)} 階<br>${STATUS_NAME[r.status]}${r.concealed ? '・<span class="hint">埋伏中（敵方看不到）</span>' : ''}${r.level > 1 ? `・${r.level} 級老兵` : ''}${r.intent && (this.viewer < 0 || this.viewer === s.owner) ? `<br><span class="muted">意圖：${esc(r.intent)}</span>` : ''}`;
     } else {
       const w = this.r.toWorld(this.mouse.x, this.mouse.y);
       const tx = Math.floor(w.x / TILE);
@@ -664,7 +702,11 @@ export class LegionScreen {
           const st = this.r.frame?.flags[flag];
           const own = st === undefined || st.owner < 0 ? '中立' : this.meta.players[st.owner].side;
           html = `<b>旗點：${esc(this.meta.flags[flag].name)}</b>　目前：${own}<br><span class="muted">只有一方的士兵在圈內就會慢慢佔領；同時控制過半旗點 ${RULES.capture.dominationTicks / TPS} 秒獲勝</span>`;
-        } else if (t !== 0) html = `<b>${TERRAIN_NAMES[t]}</b><br><span class="muted">${TERRAIN_TIP[t]}</span>`;
+        } else {
+          const hgt = this.meta.heights[ty * this.meta.width + tx];
+          const tip = [TERRAIN_TIP[t], t === T.River || t === T.Building || t === T.Wall ? '' : HEIGHT_TIP].filter((x) => x !== '').join('<br>');
+          html = `<b>${TERRAIN_NAMES[t]}</b>　高度 ${hgt} 階<br><span class="muted">${tip}</span>`;
+        }
       }
     }
     if (html === '') {

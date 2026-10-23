@@ -12,7 +12,7 @@ import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
 import { resolveKnobs } from '../../sandbox/controller.ts';
 import { LegionCommentator } from './commentary.ts';
 import type { BotKey, Caption, FromLegionWorker, LegionFrame, LegionMeta, LegionSetup, PlayerMeta, RegFrame, RegStatic, ToLegionWorker } from './protocol.ts';
-import { ATTACKED_BIT } from './protocol.ts';
+import { ATTACKED_BIT, DOWN_BIT } from './protocol.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (msg: FromLegionWorker, transfer: Transferable[] = []): void => ctx.postMessage(msg, transfer);
@@ -105,7 +105,7 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
     soldiers[k++] = s.id;
     soldiers[k++] = s.x;
     soldiers[k++] = s.y;
-    soldiers[k++] = s.reg | (s.cd === r.def.cooldown && r.def.range === 0 ? ATTACKED_BIT : 0);
+    soldiers[k++] = s.reg | (s.cd === r.def.cooldown && r.def.range === 0 ? ATTACKED_BIT : 0) | (s.downUntil > m.tick ? DOWN_BIT : 0);
   }
   const regs: RegFrame[] = [];
   for (const r of m.regiments) {
@@ -136,6 +136,10 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
       formation: r.formation,
       stance: r.stance,
       dashing: r.dash !== null ? r.dash.def.kind : null,
+      dash: r.dash !== null ? { dir: r.dash.dir, left: r.dash.left, aligning: r.dash.aligning } : null,
+      braceFacing: r.braceFacing,
+      volley: r.volley !== null && r.volley.until > m.tick ? { x: r.volley.x, y: r.volley.y, until: r.volley.until } : null,
+      switchLeft: Math.max(0, r.switchUntil - m.tick),
       skillCd: Math.max(0, r.skillReadyAt - m.tick),
       intent: m.tick - r.intentAt <= 60 ? r.intent : '',
     });
