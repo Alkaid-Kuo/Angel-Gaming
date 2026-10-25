@@ -6,6 +6,16 @@
 - 實作指引：[docs/開發任務書 M0～M2.md](docs/開發任務書%20M0～M2.md)
 - 規格未定義處的決定：[docs/M0 實作決策紀錄.md](docs/M0%20實作決策紀錄.md)
 
+## 軍團戰聯賽目錄（2026-10-25 搬移更新）
+
+遊戲、觀戰網頁與共用規則位於本專案 `C:\Claude\Sandbox\Angel-Gaming`；裁判、審查與兩位選手資料夾已集中到 `C:\Claude\Sandbox\Angel-Gaming-Legion`，詳見[聯賽目錄索引](../Angel-Gaming-Legion/README.md)。
+
+- 現行流程：[聯賽流程與規則](docs/2026-10-24_軍團戰聯賽流程與規則.md)、[第 2 輪交接文件](docs/2026-10-25_聯賽交接文件.md)。
+- 裁判操作：[Legion-Arena/README.md](../Angel-Gaming-Legion/Legion-Arena/README.md)。
+- 第 2 輪提示詞：[將軍](docs/2026-10-25_第二輪選手提示詞_將軍.md)、[元帥](docs/2026-10-25_第二輪選手提示詞_元帥.md)。
+
+依交接，第 1 輪已歸檔，第 2 輪為 `v3.x` 且尚未開賽；搬移後仍須修正信箱設定與工具內舊路徑，再完成事前檢查。本次文件更新不啟動服務或改動競賽規則。
+
 ## 需求
 
 - 開發：Node 22.18 以上（直接執行 TypeScript 原始碼）
