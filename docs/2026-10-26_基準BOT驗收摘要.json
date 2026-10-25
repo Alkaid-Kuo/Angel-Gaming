@@ -1,0 +1,119 @@
+{
+  "status": "completed",
+  "version": "v1.68",
+  "primarySha256": "f0fb9378237af402508f7a05a79c89c232019b6af28a24e01da4c81d7a61d2ba",
+  "sourceBytes": 18795,
+  "overallPass": false,
+  "functionalPass": false,
+  "plannedGames": 2280,
+  "completedGames": 2280,
+  "winRatePassed": false,
+  "reliabilityPassed": true,
+  "reliability": {
+    "exceptions": 0,
+    "timeouts": 0,
+    "illegalDeployments": 0,
+    "rejectedCommands": 0,
+    "maxDecisionMs": 1.1355999999999824
+  },
+  "modes": {
+    "annihilation": {
+      "training": {
+        "games": 900,
+        "wins": 784,
+        "losses": 116,
+        "draws": 0,
+        "winRate": 0.8711111111111111
+      },
+      "holdoutOverall": {
+        "games": 240,
+        "wins": 176,
+        "losses": 64,
+        "draws": 0,
+        "winRate": 0.7333333333333333
+      },
+      "gate": {
+        "groups": 3,
+        "passedGroups": 1,
+        "minGroupWinRate": 0.75
+      }
+    },
+    "capture": {
+      "training": {
+        "games": 900,
+        "wins": 884,
+        "losses": 16,
+        "draws": 0,
+        "winRate": 0.9822222222222222
+      },
+      "holdoutOverall": {
+        "games": 240,
+        "wins": 161,
+        "losses": 79,
+        "draws": 0,
+        "winRate": 0.6708333333333333
+      },
+      "gate": {
+        "groups": 3,
+        "passedGroups": 3,
+        "minGroupWinRate": 1
+      }
+    }
+  },
+  "integrity": {
+    "protectedFiles": 37,
+    "passed": true,
+    "sourceUnchanged": true,
+    "frozenEngineVerified": true
+  },
+  "developmentArchive": {
+    "files": 1398,
+    "bytes": 146713178,
+    "versionFiles": 70,
+    "highestVersion": "v1.69",
+    "selectedVersion": "v1.68",
+    "latestFileModifiedAt": "2026-10-25T19:22:55.133Z"
+  },
+  "timeReview": {
+    "passed": true,
+    "declaredStart": "2026-10-25T23:45:43+08:00",
+    "originalBudgetMinutes": 180,
+    "approvedExtensionMinutes": 40,
+    "extendedDeadline": "2026-10-26T03:25:43+08:00",
+    "finalizationWithinExtendedDeadline": true,
+    "requestsStartedAfterDeadline": 0,
+    "primaryObservedInServiceLog": false,
+    "primaryFirstObservedAt": null
+  },
+  "staticScopeReview": {
+    "passed": true,
+    "commandsReviewed": 148,
+    "allCommandCwdsBaseline": true,
+    "knownForbiddenDirectoryMentions": 0,
+    "otherSessionPathMentions": 0,
+    "externalUrlMentions": 0,
+    "reviewedRelativePathReferences": 4,
+    "unresolvedFlags": 0,
+    "credentialAudit": {
+      "baselineCredentialLiteralExposed": false,
+      "otherContestantCredentialLiteralExposed": false
+    },
+    "limitations": [
+      "僅為靜態命令與工作目錄查核，不等於作業系統隔離或完整執行期追蹤"
+    ]
+  },
+  "serviceAudit": {
+    "baselineRequests": 916,
+    "unfinishedRequests": 0
+  },
+  "supplementary": {
+    "version": "v1.65",
+    "archived": true,
+    "formallyEvaluated": false
+  },
+  "formalRound2OutputCreated": false,
+  "seedReservationCount": 1,
+  "poolModified": false,
+  "serviceStopped": true,
+  "finishedAt": "2026-10-25T20:24:59.455Z"
+}
