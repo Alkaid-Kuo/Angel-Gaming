@@ -34,6 +34,8 @@
   ],
   "exclude": [
     "src/web",
-    "bots/legion-marshal.js"
+    "bots/legion-marshal.js",
+    "bots/legion-general-v2.js",
+    "bots/legion-marshal-v2.js"
   ]
 }

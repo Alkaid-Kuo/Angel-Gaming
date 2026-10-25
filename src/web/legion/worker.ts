@@ -2,7 +2,9 @@
 // 軍團戰觀戰 Worker：執行比賽（三隻基準 AI）、產生解說，依播放速度把每個 tick 的畫面資料送回主執行緒。
 import ambushSource from '../../../bots/legion-ambush.js?raw';
 import commanderSource from '../../../bots/legion-commander.js?raw';
+import generalV2Source from '../../../bots/legion-general-v2.js?raw';
 import marshalSource from '../../../bots/legion-marshal.js?raw';
+import marshalV2Source from '../../../bots/legion-marshal-v2.js?raw';
 import pushSource from '../../../bots/legion-push.js?raw';
 import rangedSource from '../../../bots/legion-ranged.js?raw';
 import type { LegionEvent } from '../../legion/api.ts';
@@ -26,6 +28,8 @@ const compiled: Record<BotKey, CompiledBot> = {
   ranged: compileBot(rangedSource, 'legion-ranged.js'),
   commander: compileBot(commanderSource, 'legion-commander.js'),
   marshal: compileBot(marshalSource, 'legion-marshal.js'),
+  general2: compileBot(generalV2Source, 'legion-general-v2.js'),
+  marshal2: compileBot(marshalV2Source, 'legion-marshal-v2.js'),
 };
 const SIDES = ['藍方', '紅方'];
 const COLORS = ['#3b82f6', '#ef4444'];
