@@ -7,7 +7,7 @@ import { LegionScreen } from './ui.ts';
 const setupEl = document.getElementById('setup')!;
 const gameEl = document.getElementById('game')!;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
-const BOT_KEYS: BotKey[] = ['push', 'ambush', 'ranged', 'commander', 'marshal', 'general2', 'marshal2'];
+const BOT_KEYS: BotKey[] = ['push', 'ambush', 'ranged', 'commander', 'marshal', 'general2', 'marshal2', 'baseline168'];
 
 let worker: Worker | null = null;
 let screen: LegionScreen | null = null;
@@ -83,7 +83,9 @@ rowsEl.addEventListener('click', (e) => {
   if (b === null) return;
   const side = b.dataset.side as 'field' | 'reserve';
   const k = b.dataset.kind as UnitKind;
-  army[side][k] = Math.max(0, Math.min(20, army[side][k] + Number(b.dataset.d)));
+  const lim = limits();
+  const maxCount = Math.floor((side === 'field' ? lim.field : lim.total) / UNITS[k].cost);
+  army[side][k] = Math.max(0, Math.min(maxCount, army[side][k] + Number(b.dataset.d)));
   renderArmy();
 });
 document.getElementById('army-reset')!.addEventListener('click', () => {
