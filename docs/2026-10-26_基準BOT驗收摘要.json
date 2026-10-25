@@ -82,8 +82,8 @@
     "extendedDeadline": "2026-10-26T03:25:43+08:00",
     "finalizationWithinExtendedDeadline": true,
     "requestsStartedAfterDeadline": 0,
-    "primaryObservedInServiceLog": false,
-    "primaryFirstObservedAt": null
+    "primaryObservedInServiceLog": true,
+    "primaryFirstObservedAt": "2026-10-25T18:40:03.038Z"
   },
   "staticScopeReview": {
     "passed": true,
