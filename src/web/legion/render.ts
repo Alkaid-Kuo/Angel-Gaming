@@ -878,8 +878,11 @@ export class LegionRenderer {
         g = [];
         groups.set(key, g);
       }
-      g.push(x, y, r?.facing ?? 0);
-      if ((sol[i + 3] & ATTACKED_BIT) !== 0) sparks.push(x, y, r?.facing ?? 0);
+      // 圓陣沒有正面：每個人朝自己所在的方向（從陣中心往外），長槍就是四面架出去
+      let face = r?.facing ?? 0;
+      if (r !== undefined && r.formation === 'circle' && (x !== r.x || y !== r.y)) face = (Math.atan2(y - r.y, x - r.x) * 180) / Math.PI;
+      g.push(x, y, face);
+      if ((sol[i + 3] & ATTACKED_BIT) !== 0) sparks.push(x, y, face);
     }
     for (const [key, pts] of groups) {
       const [ownerS, kind, routedS, concS, downS] = key.split('|');
@@ -1382,8 +1385,8 @@ export class LegionRenderer {
         ctx.lineTo(x, y0 + h / 2);
         ctx.stroke();
       }
-      // 朝向箭頭（陣型前方）
-      if (s >= 4 && r.status !== 'routed') {
+      // 朝向箭頭（陣型前方；圓陣沒有正面不畫）
+      if (s >= 4 && r.status !== 'routed' && r.formation !== 'circle') {
         const a = (p.facing * Math.PI) / 180;
         const d = (r.halfD / TILE) * s + 5;
         const fx = this.sx(p.x) + Math.cos(a) * d;
