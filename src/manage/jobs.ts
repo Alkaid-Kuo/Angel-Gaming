@@ -3,7 +3,7 @@
 import type { ContentPack } from './content.ts';
 import type { BattleGateway, MatchRequest } from './gateway.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
-import { buildSide, findPlayer, notify, teamOf, truePower } from './state.ts';
+import { buildSide, findPlayer, lineageOf, notify, teamOf, truePower } from './state.ts';
 import type { GameState } from './types.ts';
 
 export async function processJobs(state: GameState, content: ContentPack, gateway: BattleGateway): Promise<void> {
@@ -24,7 +24,7 @@ export async function processJobs(state: GameState, content: ContentPack, gatewa
       const est = Math.round(truePower(content, p) + gauss(rng) * e.scoutSd);
       team.intel = team.intel.filter((i) => i.playerId !== p.id);
       team.intel.push({ playerId: p.id, week: state.week, estPower: est, sd: e.scoutSd });
-      notify(state, team.id, 'report', `球探報告：${p.name}（${p.lineageId} v${p.version}）真實強度約 ${est}（誤差 ±${e.scoutSd}）`);
+      notify(state, team.id, 'report', `球探報告：${p.name}（${lineageOf(content, p.lineageId).name} v${p.version}）真實強度約 ${est}（誤差 ±${e.scoutSd}）`);
     } else if (job.kind === 'scrim') {
       const opp = findPlayer(state, job.opponentId);
       if (!opp) continue;
@@ -45,7 +45,7 @@ export async function processJobs(state: GameState, content: ContentPack, gatewa
       p.presets = p.presets.filter((x) => x.target !== job.target && x.version === p.version);
       p.presets.push({ id: `r${job.id}`, target: job.target, version: p.version, bonus, reportedBonus: reported });
       if (p.presets.length > e.researchMaxPresets) p.presets.shift();
-      const label = job.target === 'generic' ? '泛用' : `針對 ${job.target}`;
+      const label = job.target === 'generic' ? '泛用' : `針對${lineageOf(content, job.target).name}`;
       notify(state, team.id, 'report', `研發完成：${p.name} 的${label}戰術預設，估計加成約 ${reported}（${job.games} 場樣本）`);
     }
   }

@@ -37,16 +37,24 @@ export class ManageGame {
   state: GameState;
   /** 存檔失敗的原因（私密視窗、容量滿等）；空字串＝正常 */
   saveError = '';
+  /** false＝展示模式：不讀也不寫 localStorage，不會覆蓋玩家的存檔 */
+  readonly persist: boolean;
   private readonly gateway = new FakeGateway(STUB_CONTENT);
 
-  private constructor(state: GameState) {
+  private constructor(state: GameState, persist = true) {
     this.state = state;
+    this.persist = persist;
   }
 
   static create(seed: number, teamName: string): ManageGame {
     const g = new ManageGame(newGame(seed, STUB_CONTENT, { humanName: teamName }));
     g.save();
     return g;
+  }
+
+  /** 展示用的局：不存檔（截圖、示範） */
+  static demo(seed: number, teamName: string): ManageGame {
+    return new ManageGame(newGame(seed, STUB_CONTENT, { humanName: teamName }), false);
   }
 
   /** 從 localStorage 讀檔；沒有或壞掉回傳 null */
@@ -95,6 +103,7 @@ export class ManageGame {
   }
 
   private save(): void {
+    if (!this.persist) return;
     try {
       localStorage.setItem(SAVE_KEY, serialize(this.state));
       this.saveError = '';
