@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>經營介面風格草圖</title>
+<style>
+body { margin: 0; padding: 28px; background: #101114; color: #e8e8e8; font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+h1 { margin: 0 0 6px; font-size: 26px; }
+p { color: #a0a3aa; margin: 0 0 20px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 22px; }
+a.card { display: block; text-decoration: none; color: inherit; background: #1b1c20; border: 1px solid #2c2e34; border-radius: 10px; overflow: hidden; }
+a.card:hover { border-color: #ffb800; }
+.thumb { position: relative; width: 100%; aspect-ratio: 1440 / 900; overflow: hidden; background: #000; }
+.thumb iframe { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; border: 0; transform-origin: 0 0; pointer-events: none; }
+.info { padding: 12px 16px 16px; }
+.info b { font-size: 18px; }
+.info span { display: block; color: #a0a3aa; font-size: 13px; margin-top: 4px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h1>經營介面風格草圖</h1>
+<p>同一個「基地」畫面、同一組假資料，用四種風格各畫一張。只是靜態草圖（1440×900），不能操作。說明見 docs/2026-10-27_經營介面風格草圖.md。</p>
+<div class="grid">
+  <a class="card" href="./cyber.html"><div class="thumb"><iframe src="./cyber.html" loading="lazy"></iframe></div><div class="info"><b>A　霓虹賽博</b><span>黑底、黃青洋紅霓虹、警示膠帶、故障字、雙色調頭像、全像卡框。</span></div></a>
+  <a class="card" href="./pixel.html"><div class="thumb"><iframe src="./pixel.html" loading="lazy"></iframe></div><div class="info"><b>B　霓虹像素</b><span>繁中像素字（俐方體 11 號）、像素視窗與游標選單、RPG 對話框、CRT 掃描線。</span></div></a>
+  <a class="card" href="./ark.html"><div class="thumb"><iframe src="./ark.html" loading="lazy"></iframe></div><div class="info"><b>C　工業極簡（類明日方舟）</b><span>炭灰底、白色磚塊選單、中英雙語標籤、大面積角色立繪、細線與技術註記。</span></div></a>
+  <a class="card" href="./table.html"><div class="thumb"><iframe src="./table.html" loading="lazy"></iframe></div><div class="info"><b>D　戰術沙盤桌（額外提案）</b><span>木桌、毛氈戰術板、實體選手卡、軟木板積分表、帳本與籌碼、檔案分頁導覽。呼應軍團戰的微縮沙盤美術。</span></div></a>
+</div>
+<script>
+  // 依縮圖寬度縮放 iframe
+  const fit = () => document.querySelectorAll('.thumb').forEach((t) => { t.querySelector('iframe').style.transform = `scale(${t.clientWidth / 1440})`; });
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>

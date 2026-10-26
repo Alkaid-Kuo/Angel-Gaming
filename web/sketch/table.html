@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>草圖 D：戰術沙盤桌</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Noto+Serif+TC:wght@600;700;900&family=Caveat:wght@600;700&display=swap">
+<style>
+:root { --serif: "Noto Serif TC", serif; --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --hand: "Caveat", cursive; --paper: #f4ecd8; --ink: #2b2118; --red: #b3261e; --felt: #2f5a3c; }
+* { box-sizing: border-box; }
+body { margin: 0; width: 1440px; height: 900px; overflow: hidden; position: relative; font-family: var(--zh); color: var(--ink);
+  background: radial-gradient(900px 620px at 48% 34%, rgba(255, 214, 150, 0.38), transparent 70%), radial-gradient(1400px 900px at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.6)),
+    repeating-linear-gradient(92deg, rgba(0, 0, 0, 0.07) 0 2px, transparent 2px 11px), repeating-linear-gradient(88deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 27px), linear-gradient(180deg, #6e4628, #4a2d18); }
+.obj { position: absolute; filter: drop-shadow(0 14px 14px rgba(0, 0, 0, 0.45)) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35)); }
+/* 隊旗 */
+.banner { left: 40px; top: 0; width: 230px; height: 250px; background: linear-gradient(180deg, #1e3a8a, #172e6b); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 86%, 0 100%); display: flex; flex-direction: column; align-items: center; padding-top: 26px; gap: 6px; color: #f6e7b0; }
+.banner b { font-family: var(--serif); font-size: 30px; letter-spacing: 0.15em; }
+.banner small { font-size: 12px; letter-spacing: 0.3em; opacity: 0.8; }
+.patch { width: 120px; height: 120px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 40% 35%, #f8f3e6, #e2d6b8); box-shadow: inset 0 0 0 5px #d4a017, inset 0 0 0 7px #f8f3e6, inset 0 0 0 9px #d4a017; }
+/* 桌面月曆 */
+.cal { left: 300px; top: 30px; width: 150px; height: 150px; transform: rotate(-4deg); background: var(--paper); border-top: 26px solid var(--red); text-align: center; padding-top: 6px; }
+.cal::before { content: "新創聯賽"; position: absolute; left: 0; right: 0; top: -22px; color: #fff; font-size: 13px; letter-spacing: 0.3em; }
+.cal b { display: block; font-family: var(--serif); font-size: 72px; line-height: 1; }
+.cal span { font-size: 15px; letter-spacing: 0.2em; }
+/* 毛氈戰術板 */
+.board { left: 300px; top: 210px; width: 820px; height: 520px; border-radius: 10px; padding: 26px 30px;
+  background: radial-gradient(ellipse at 50% 40%, #3d7350, var(--felt) 70%), var(--felt); box-shadow: inset 0 0 0 12px #6b4a2b, inset 0 0 0 14px #3b2614, inset 0 0 40px rgba(0, 0, 0, 0.45); }
+.board::after { content: ""; position: absolute; inset: 14px; border-radius: 4px; pointer-events: none; background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px); background-size: 6px 6px; }
+.board h2 { margin: 0; color: #f3ead2; font-family: var(--serif); font-size: 18px; letter-spacing: 0.4em; opacity: 0.85; text-align: center; }
+.chalk { position: absolute; left: 50%; top: 66px; width: 380px; height: 2px; margin-left: -190px; background: rgba(255, 255, 255, 0.35); }
+.vsrow { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin-top: 18px; color: #f3ead2; }
+.vsrow .side { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.vsrow .side b { font-family: var(--serif); font-size: 26px; letter-spacing: 0.1em; }
+.vsrow .side .patch { width: 104px; height: 104px; }
+.stamp { font-family: var(--serif); font-weight: 900; font-size: 54px; color: var(--red); border: 5px solid var(--red); border-radius: 10px; padding: 0 16px; transform: rotate(-10deg); background: rgba(244, 236, 216, 0.85); box-shadow: 0 4px 0 rgba(0, 0, 0, 0.25); }
+.scrib { font-family: var(--hand); font-size: 26px; color: #f6e7b0; transform: rotate(-3deg); text-align: center; }
+.cards { display: flex; justify-content: center; gap: 26px; margin-top: 12px; }
+.card { position: relative; width: 168px; padding: 8px 8px 10px; background: #fbf7ee; border-radius: 8px; box-shadow: 0 10px 14px rgba(0, 0, 0, 0.45); }
+.card:nth-child(1) { transform: rotate(-5deg) translateY(6px); } .card:nth-child(2) { transform: rotate(1.5deg); } .card:nth-child(3) { transform: rotate(6deg) translateY(8px); }
+.card .ph { height: 128px; overflow: hidden; border-radius: 4px; border: 2px solid #d9c9a3; }
+.card .ph .avatar { width: 100%; height: 100%; display: block; }
+.card b { display: block; font-family: var(--serif); font-size: 20px; text-align: center; margin-top: 6px; }
+.card .ln { display: flex; justify-content: space-between; font-size: 12px; color: #6b5b45; padding: 0 4px; }
+.card .rt { position: absolute; right: -10px; top: -12px; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-weight: 900; font-size: 15px; color: #fff; background: radial-gradient(circle at 35% 30%, #c98a3a, #8a5520); box-shadow: inset 0 0 0 3px #e9c27a, 0 4px 6px rgba(0, 0, 0, 0.4); }
+.token { position: absolute; left: 50%; bottom: -20px; transform: translateX(-50%); padding: 4px 14px; font-family: var(--serif); font-weight: 900; font-size: 15px; letter-spacing: 0.2em; color: #3b2614; background: linear-gradient(180deg, #f0d48a, #c99a3c); border-radius: 999px; box-shadow: 0 3px 0 #8a6420, 0 6px 8px rgba(0, 0, 0, 0.35); white-space: nowrap; }
+.bell { left: 1140px; top: 560px; width: 250px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.btn { width: 230px; padding: 20px 0; text-align: center; font-family: var(--serif); font-weight: 900; font-size: 28px; letter-spacing: 0.2em; color: #fff4dc; background: radial-gradient(circle at 40% 30%, #d8443a, #8f1c16); border-radius: 18px; box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.18), 0 8px 0 #5e110d, 0 16px 20px rgba(0, 0, 0, 0.45); }
+.bell small { font-family: var(--hand); font-size: 22px; color: #f6e7b0; }
+/* 軟木板積分表 */
+.cork { left: 1150px; top: 30px; width: 260px; height: 500px; padding: 18px; border-radius: 6px; background: radial-gradient(circle at 30% 30%, rgba(0, 0, 0, 0.06) 2px, transparent 3px) 0 0 / 14px 14px, radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.08) 1.5px, transparent 2.5px) 0 0 / 11px 11px, #b8895a; box-shadow: inset 0 0 0 10px #6b4a2b; }
+.sheet { position: relative; margin: 14px 4px 0; padding: 26px 18px 18px; background: var(--paper); transform: rotate(1.5deg); background-image: repeating-linear-gradient(180deg, transparent 0 31px, rgba(43, 33, 24, 0.12) 31px 32px); box-shadow: 0 6px 10px rgba(0, 0, 0, 0.35); }
+.sheet::before { content: ""; position: absolute; left: 50%; top: -8px; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff7468, var(--red)); box-shadow: 0 3px 4px rgba(0, 0, 0, 0.4); }
+.sheet h3 { margin: 0 0 6px; font-family: var(--serif); font-size: 20px; letter-spacing: 0.25em; text-align: center; }
+.sheet .r { display: grid; grid-template-columns: 22px 26px 1fr 24px; align-items: center; gap: 6px; height: 32px; font-size: 15px; }
+.sheet .r .patch { width: 24px; height: 24px; box-shadow: inset 0 0 0 2px #d4a017; }
+.sheet .r b { font-family: var(--serif); text-align: right; }
+.sheet .r.me { color: var(--red); font-weight: 700; }
+.sheet .r.me::after { content: ""; position: absolute; left: 10px; right: 10px; height: 26px; border: 2px solid var(--red); border-radius: 50%; transform: rotate(-2deg); }
+.sheet .r.cut { border-bottom: 2px dashed rgba(179, 38, 30, 0.6); }
+/* 帳本與籌碼 */
+.ledger { left: 36px; top: 300px; width: 240px; height: 300px; padding: 20px 18px; border-left: 14px solid #4a2f1c; transform: rotate(3deg); background-color: var(--paper); background-image: repeating-linear-gradient(180deg, transparent 0 27px, rgba(70, 100, 160, 0.25) 27px 28px), linear-gradient(90deg, #ead9b4, var(--paper) 14%); }
+.ledger h4 { margin: 0 0 6px; font-family: var(--serif); font-size: 18px; letter-spacing: 0.3em; }
+.ledger .l { display: flex; justify-content: space-between; height: 28px; align-items: center; font-size: 14px; }
+.ledger .l b { font-family: var(--hand); font-size: 24px; }
+.ledger .l.neg b { color: var(--red); }
+.ledger .tot { margin-top: 6px; border-top: 2px solid var(--ink); padding-top: 4px; display: flex; justify-content: space-between; align-items: baseline; }
+.ledger .tot b { font-family: var(--hand); font-size: 40px; }
+.chips { left: 70px; top: 640px; width: 190px; height: 160px; }
+.chip { position: absolute; width: 74px; height: 74px; border-radius: 50%; box-shadow: inset 0 0 0 7px rgba(255, 255, 255, 0.85), inset 0 0 0 10px currentColor, 0 4px 0 rgba(0, 0, 0, 0.35); border: 4px dashed rgba(255, 255, 255, 0.9); }
+.fame { left: 70px; top: 790px; color: #f6e7b0; font-family: var(--hand); font-size: 26px; transform: rotate(-3deg); }
+/* 檔案分頁導覽 */
+.tabs { position: absolute; left: 300px; bottom: -6px; display: flex; gap: 8px; }
+.tab { position: relative; width: 112px; height: 84px; padding: 12px 0 0; text-align: center; border-radius: 10px 10px 0 0; font-family: var(--serif); font-weight: 900; font-size: 20px; letter-spacing: 0.15em; box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.35); }
+.tab small { display: block; font-family: var(--zh); font-weight: 500; font-size: 12px; letter-spacing: 0.05em; opacity: 0.75; }
+.tab .n { position: absolute; right: 6px; top: -10px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--red); color: #fff; font-family: var(--zh); font-size: 13px; }
+.note { position: absolute; left: 480px; top: 10px; font-size: 12px; color: rgba(255, 240, 210, 0.55); }
+</style>
+</head>
+<body>
+<div class="obj banner"><div class="patch"><span data-crest="天使戰隊" data-size="74"></span></div><b>天使戰隊</b><small>ANGEL GAMING</small></div>
+<div class="obj cal"><b>4</b><span>例行賽 第 4 週</span></div>
+<div class="obj board">
+  <h2>下一場對手</h2><div class="chalk"></div>
+  <div class="vsrow">
+    <div class="side"><div class="patch"><span data-crest="天使戰隊" data-size="64"></span></div><b>天使戰隊</b></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:8px"><span class="stamp">VS</span><span class="scrib">odds ×2.00 — 有機會！</span></div>
+    <div class="side"><div class="patch"><span data-crest="暗影工作室" data-size="64"></span></div><b>暗影工作室</b></div>
+  </div>
+  <div class="cards">
+    <div class="card"><span class="rt">1518</span><div class="ph"><span data-avatar="xzr" data-size="150"></span></div><b>謝子睿</b><div class="ln"><span>強攻流</span><span>v3 黃金</span></div><span class="token">先鋒</span></div>
+    <div class="card"><span class="rt">1478</span><div class="ph"><span data-avatar="qmz2" data-size="150"></span></div><b>邱明哲</b><div class="ln"><span>均衡流</span><span>v2 白銀</span></div><span class="token">中堅</span></div>
+    <div class="card"><span class="rt">1479</span><div class="ph"><span data-avatar="xce" data-size="150"></span></div><b>徐承恩</b><div class="ln"><span>龜守流</span><span>v2 白銀</span></div><span class="token">大將</span></div>
+  </div>
+</div>
+<div class="obj cork"><div class="sheet"><h3>積分表</h3>
+  <div class="r"><span>1</span><span class="patch"><span data-crest="鐵壁電競" data-size="16"></span></span><span>鐵壁電競</span><b>9</b></div>
+  <div class="r"><span>2</span><span class="patch"><span data-crest="北辰戰隊" data-size="16"></span></span><span>北辰戰隊</span><b>9</b></div>
+  <div class="r"><span>3</span><span class="patch"><span data-crest="蒼穹電競" data-size="16"></span></span><span>蒼穹電競</span><b>6</b></div>
+  <div class="r cut"><span>4</span><span class="patch"><span data-crest="雷霆電競" data-size="16"></span></span><span>雷霆電競</span><b>3</b></div>
+  <div class="r"><span>5</span><span class="patch"><span data-crest="暗影工作室" data-size="16"></span></span><span>暗影工作室</span><b>3</b></div>
+  <div class="r"><span>6</span><span class="patch"><span data-crest="赤焰俱樂部" data-size="16"></span></span><span>赤焰俱樂部</span><b>3</b></div>
+  <div class="r me"><span>7</span><span class="patch"><span data-crest="天使戰隊" data-size="16"></span></span><span>天使戰隊</span><b>3</b></div>
+  <div class="r"><span>8</span><span class="patch"><span data-crest="星河戰隊" data-size="16"></span></span><span>星河戰隊</span><b>0</b></div>
+</div></div>
+<div class="obj ledger"><h4>帳本</h4>
+  <div class="l"><span>贊助</span><b>+8</b></div>
+  <div class="l"><span>獎金</span><b>+5</b></div>
+  <div class="l neg"><span>薪資</span><b>−20.6</b></div>
+  <div class="l neg"><span>訓練中心</span><b>−2</b></div>
+  <div class="tot"><span>現金</span><b>104.8萬</b></div>
+  <div style="font-family:var(--hand);font-size:20px;color:#b3261e;transform:rotate(-4deg)">還撐 7 週！</div>
+</div>
+<div class="obj chips"><span class="chip" style="left:0;top:40px;color:#b3261e;background:#b3261e"></span><span class="chip" style="left:56px;top:56px;color:#1e3a8a;background:#1e3a8a"></span><span class="chip" style="left:30px;top:18px;color:#2f5a3c;background:#2f5a3c"></span></div>
+<div class="obj fame">★ 名氣 10</div>
+<div class="obj bell"><div class="btn">進入比賽日</div><small>對手名單比賽日才公開</small></div>
+<div class="tabs">
+  <div class="tab" style="background:#e8d39a">戰隊<small>4/5 人</small></div>
+  <div class="tab" style="background:#c9dbb0">市場<small>3 名自由</small></div>
+  <div class="tab" style="background:#b7cfe0">訓練<small>200 場</small></div>
+  <div class="tab" style="background:#e3b9a8">聯賽<small>第 7 名</small></div>
+  <div class="tab" style="background:#d5c4e6">賭盤<small>4 場</small></div>
+  <div class="tab" style="background:#f0e2c0">財務<small>−14.6／週</small></div>
+  <div class="tab" style="background:#f4ecd8">信件<small>新報告</small><span class="n">3</span></div>
+</div>
+<div class="note">草圖 D・戰術沙盤桌（呼應軍團戰的微縮沙盤美術；非實際畫面）</div>
+<script type="module" src="../../src/web/sketch/fill.ts"></script>
+</body>
+</html>
