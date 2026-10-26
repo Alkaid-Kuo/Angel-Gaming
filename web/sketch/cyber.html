@@ -3,186 +3,232 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>設計稿 A：夜城霓虹</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap">
+<title>設計稿 A：夜城天台</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap">
 <link rel="stylesheet" href="./stage.css">
 <style>
-/* 配色：深夜紫黑底；青（我方、主要操作）、洋紅（對手、警示）、紫霧；黃只出現在極少數的危險提示 */
-#stage { --c: #29f0ff; --m: #ff2e88; --v: #6b3cff; --ink: #05060d; --txt: #e9f4ff; --dim: #8a93b8; --y: #f5f749;
-  --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --num: "Rajdhani", "Noto Sans TC", sans-serif; --mono: "Share Tech Mono", monospace; color: var(--txt); font-family: var(--zh); background: var(--ink); }
-.sky { position: absolute; inset: 0; background: linear-gradient(180deg, #03040a 0%, #0b0820 32%, #2a0d3e 43%, #120a26 52%, #05060d 70%); }
-.glow { position: absolute; left: 960px; top: 450px; width: 1500px; height: 420px; margin: -210px 0 0 -750px; background: radial-gradient(ellipse, rgba(255, 46, 136, 0.35), rgba(107, 60, 255, 0.15) 45%, transparent 70%); filter: blur(10px); }
-#city { position: absolute; left: 160px; top: 160px; width: 1600px; height: 330px; opacity: 0.9; transform: translateX(calc(var(--mx) * -10px)); }
-/* 街道：單點透視，消失點 (960, 470) */
-.street { position: absolute; inset: 0; perspective: 900px; perspective-origin: 960px 470px; transform-style: preserve-3d; }
-.road { position: absolute; left: -1200px; top: 470px; width: 4320px; height: 2400px; transform-origin: 50% 0; transform: translateX(calc(var(--mx) * -30px)) rotateX(84deg);
-  background: linear-gradient(90deg, transparent 49.6%, rgba(41, 240, 255, 0.45) 49.7% 49.78%, transparent 49.78% 50.22%, rgba(41, 240, 255, 0.45) 50.22% 50.3%, transparent 50.4%),
-    linear-gradient(rgba(255, 46, 136, 0.25) 3px, transparent 3px) 0 0 / 100% 160px, linear-gradient(90deg, rgba(41, 240, 255, 0.14) 2px, transparent 2px) 0 0 / 180px 100%, linear-gradient(180deg, #0c0a1c, #05060d);
-  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 12%); animation: roadmove 1.2s linear infinite; }
-@keyframes roadmove { to { background-position: 0 0, 0 160px, 0 0, 0 0; } }
-.wall { position: absolute; top: -200px; height: 1500px; width: 1300px; transform-style: preserve-3d;
-  background: repeating-linear-gradient(90deg, rgba(41, 240, 255, 0.05) 0 2px, transparent 2px 64px), repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 44px), linear-gradient(90deg, #120c26, #07060f); }
-.wall.l { left: 0; transform-origin: 0 50%; transform: translateX(calc(var(--mx) * -50px)) rotateY(78deg); }
-.wall.r { right: 0; transform-origin: 100% 50%; transform: translateX(calc(var(--mx) * -50px)) rotateY(-78deg); }
-.wall .band { position: absolute; left: 0; right: 0; height: 6px; background: var(--m); box-shadow: 0 0 20px var(--m); opacity: 0.6; }
-.wall.r .band { background: var(--c); box-shadow: 0 0 20px var(--c); }
+/* 配色：霧藍黑與鋼藍灰占九成；青白霓虹是唯一主色（我方、選中）；暖橘只給開戰與對手 */
+#stage { --bg: #0a1018; --st: #1c2a36; --st2: #2a3b4a; --c: #7fe7f2; --c2: #d6fafc; --cl: rgba(127, 231, 242, 0.5); --txt: #dbe7ee; --dim: #7d93a3; --dim2: #4d6273; --or: #ff7a45; --or2: #ffb08f;
+  --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --num: "Rajdhani", "Noto Sans TC", sans-serif; --mono: "Share Tech Mono", monospace; color: var(--txt); font-family: var(--zh); background: var(--bg); }
+
+/* ── 城市（畫布比舞台大一圈，整組隨滑鼠與懸停飄移） ── */
+.cam { position: absolute; inset: 0; transform: translate(calc(var(--mx) * -26px), calc(var(--my) * -14px)); }
+.world { position: absolute; left: -64px; top: -36px; width: 2048px; height: 1152px; animation: drone 9s ease-in-out infinite; }
+@keyframes drone { 50% { translate: 0 -7px; } }
+.world canvas { position: absolute; inset: 0; }
+.mist { position: absolute; left: 0; right: 0; height: 260px; pointer-events: none; background: radial-gradient(closest-side, rgba(150, 205, 220, 0.07), transparent) 0 0 / 640px 220px repeat-x; animation: mist 70s linear infinite; }
+@keyframes mist { to { background-position: 640px 0; } }
+.sweep { position: absolute; left: 0; right: 0; height: 160px; pointer-events: none; background: linear-gradient(180deg, transparent, rgba(127, 231, 242, 0.05) 80%, rgba(127, 231, 242, 0.22) 99%, transparent); animation: sweep 7s cubic-bezier(.5, 0, .5, 1) infinite; }
+@keyframes sweep { 0% { top: 240px; opacity: 0; } 10% { opacity: 1; } 75% { top: 900px; opacity: 1; } 80%, 100% { top: 900px; opacity: 0; } }
+
+/* ── AR 標籤：菱形釘點＋細桿＋卡片；平時半亮，滑鼠移上去全亮 ── */
+.tag { position: absolute; width: 0; height: 0; --tc: rgba(127, 231, 242, 0.55); --L: 96px; transform: scale(var(--k, 1)); transform-origin: 0 0; cursor: pointer; }
+.tag .pin { position: absolute; left: -8px; top: -8px; width: 16px; height: 16px; border: 2px solid var(--tc); background: rgba(10, 16, 24, 0.7); transform: rotate(45deg); }
+.tag .pin::after { content: ""; position: absolute; inset: -9px; border: 1px solid var(--tc); animation: ping 2.6s ease-out infinite; animation-delay: var(--d, 0s); }
+@keyframes ping { from { opacity: 0.9; scale: 0.4; } to { opacity: 0; scale: 1.6; } }
+.tag .stem { position: absolute; left: -1px; bottom: 8px; width: 2px; height: var(--L); background: linear-gradient(0deg, var(--tc), rgba(127, 231, 242, 0.05)); transform-origin: 50% 100%; }
+.tag .card { position: absolute; left: -2px; bottom: calc(var(--L) + 8px); min-width: 236px; padding: 12px 22px 14px 20px; background: linear-gradient(100deg, rgba(10, 18, 26, 0.9), rgba(10, 18, 26, 0.62)); border-left: 3px solid var(--tc); box-shadow: inset 0 0 0 1px rgba(127, 231, 242, 0.14); transition: box-shadow 0.25s, background 0.25s; white-space: nowrap; }
+.tag.R .card { left: auto; right: -2px; border-left: 0; border-right: 3px solid var(--tc); text-align: right; }
+.tag .no { display: block; font-family: var(--mono); font-size: 14px; letter-spacing: 0.24em; color: var(--dim); }
+.tag b { display: block; margin-top: 4px; font-size: 38px; font-weight: 900; line-height: 1.05; letter-spacing: 0.08em; color: #b9cad4; transition: color 0.25s, text-shadow 0.25s; }
+.tag .en { font-family: var(--num); font-weight: 600; font-size: 17px; letter-spacing: 0.3em; color: var(--dim2); }
+.tag .st { display: block; margin-top: 8px; font-size: 16px; letter-spacing: 0.06em; color: var(--dim); }
+.tag .st i { font-style: normal; font-family: var(--num); font-weight: 700; font-size: 21px; color: var(--c); margin-right: 4px; }
+.tag .new { display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--c); box-shadow: 0 0 10px var(--c); animation: blink 1.2s infinite; }
+.tag:hover { --tc: var(--c); z-index: 5; }
+.tag:hover .card { background: linear-gradient(100deg, rgba(14, 34, 44, 0.95), rgba(14, 34, 44, 0.75)); box-shadow: inset 0 0 0 1px rgba(127, 231, 242, 0.5), 0 0 40px rgba(127, 231, 242, 0.2); }
+.tag:hover b { color: #fff; text-shadow: 0 0 18px rgba(127, 231, 242, 0.8); }
+.tag.op { --tc: rgba(255, 122, 69, 0.85); }
+.tag.op b { color: var(--or2); }
+.tag.op .st i { color: var(--or); }
+.tag.in .stem { animation: grow 0.5s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
+.tag.in .card { animation: cardin 0.6s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--d, 0s) + 0.25s); }
+.tag.in .pin { animation: pop 0.4s cubic-bezier(.2, .8, .2, 1.4) both; animation-delay: var(--d, 0s); }
+@keyframes grow { from { scale: 1 0; } }
+@keyframes cardin { from { opacity: 0; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0 0 0 0); } }
+@keyframes pop { from { opacity: 0; scale: 0.2; } }
+
+/* ── 競技場上空的比賽卡 ── */
+.mcard { position: absolute; width: 0; height: 0; }
+.mcard .bx { position: absolute; left: 0; bottom: 30px; transform: translateX(-50%); padding: 14px 34px 16px; text-align: center; white-space: nowrap; background: linear-gradient(180deg, rgba(10, 20, 28, 0.82), rgba(10, 20, 28, 0.55)); box-shadow: inset 0 0 0 1px rgba(127, 231, 242, 0.3); }
+.mcard .bx::before, .mcard .bx::after { content: ""; position: absolute; top: -6px; width: 22px; height: 22px; border-top: 3px solid var(--c); }
+.mcard .bx::before { left: -6px; border-left: 3px solid var(--c); }
+.mcard .bx::after { right: -6px; border-right: 3px solid var(--c); }
+.mcard .lb { font-family: var(--mono); font-size: 15px; letter-spacing: 0.32em; color: var(--c); }
+.mcard h1 { margin: 2px 0 0; font-size: 76px; line-height: 1.05; font-weight: 900; letter-spacing: 0.16em; color: #fff; text-shadow: 0 0 30px rgba(127, 231, 242, 0.45); }
+.mcard .vs { margin-top: 4px; font-size: 20px; font-weight: 700; letter-spacing: 0.12em; color: var(--txt); }
+.mcard .vs i { font-style: normal; font-family: var(--num); font-weight: 700; color: var(--dim); margin: 0 12px; }
+.mcard .vs em { font-style: normal; color: var(--or2); }
+.mcard .ln { position: absolute; left: -1px; bottom: 0; width: 2px; height: 30px; background: linear-gradient(0deg, transparent, var(--c)); }
+
+/* ── HUD：四角框、方位帶、掃描線、暗角 ── */
+.corner { position: absolute; width: 46px; height: 46px; border-color: rgba(127, 231, 242, 0.45); border-style: solid; border-width: 0; pointer-events: none; }
+.tape { position: absolute; left: 660px; top: 118px; width: 600px; height: 34px; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 25%, #000 75%, transparent); }
+.tape .tk { position: absolute; left: -300px; top: 0; width: 1200px; height: 34px; display: flex; transform: translateX(calc(var(--mx) * -60px));
+  background: repeating-linear-gradient(90deg, rgba(127, 231, 242, 0.5) 0 1px, transparent 1px 20px) 0 0 / 100% 8px no-repeat, repeating-linear-gradient(90deg, rgba(127, 231, 242, 0.8) 0 2px, transparent 2px 100px) 0 0 / 100% 14px no-repeat; }
+.tape .tk span { flex: none; width: 100px; padding-top: 16px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.1em; color: var(--dim); }
+.tape .tk span.n { color: var(--c); }
+.tape .mk { position: absolute; left: 50%; top: 0; width: 0; height: 0; margin-left: -7px; border: 7px solid transparent; border-top-color: var(--c); }
 #rain { position: absolute; inset: 0; pointer-events: none; }
-.fog { position: absolute; left: 0; right: 0; top: 380px; height: 260px; background: linear-gradient(180deg, transparent, rgba(107, 60, 255, 0.12), transparent); }
-/* 招牌（從兩側伸出、近大遠小） */
-.signs { position: absolute; inset: 0; perspective: 900px; perspective-origin: 960px 470px; transform-style: preserve-3d; transform: translateX(calc(var(--mx) * -40px)); }
-.sign { position: absolute; transform-style: preserve-3d; transition: filter 0.2s; }
-.sign .bd { position: relative; padding: 22px 28px; background: rgba(8, 6, 20, 0.86); border: 3px solid var(--sc); border-radius: 6px; box-shadow: 0 0 22px var(--sc), inset 0 0 22px color-mix(in srgb, var(--sc) 40%, transparent); }
-.sign .zh { display: block; font-size: 64px; font-weight: 900; line-height: 1; color: #fff; text-shadow: 0 0 8px var(--sc), 0 0 22px var(--sc), 0 0 46px var(--sc); letter-spacing: 0.08em; }
-.sign .en { display: block; margin-top: 8px; font-family: var(--mono); font-size: 17px; letter-spacing: 0.35em; color: var(--sc); }
-.sign .st { position: absolute; right: -14px; top: -16px; padding: 4px 12px; background: var(--sc); color: #05060d; font-family: var(--num); font-weight: 700; font-size: 20px; border-radius: 3px; box-shadow: 0 0 16px var(--sc); }
-.sign .pole { position: absolute; top: 50%; width: 140px; height: 8px; background: linear-gradient(90deg, #1b1630, #39305a); }
-.sign.L .pole { right: 100%; } .sign.R .pole { left: 100%; }
-.sign.v .zh { writing-mode: vertical-rl; letter-spacing: 0.15em; }
-.sign:hover { filter: brightness(1.35) saturate(1.2); }
-.flick { animation: flick 5s infinite; }
-@keyframes flick { 0%, 18%, 22%, 62%, 64%, 100% { opacity: 1; } 20%, 63% { opacity: 0.35; } }
-.reflect { position: absolute; width: 160px; height: 300px; background: linear-gradient(180deg, var(--sc), transparent); opacity: 0.18; filter: blur(14px); }
-/* 中央全像徽章 */
-.holo { position: absolute; left: 960px; top: 430px; width: 0; height: 0; transform: translate(calc(var(--mx) * 10px), calc(var(--my) * 8px)); }
-.holo-in { position: absolute; left: -300px; top: -300px; width: 600px; height: 600px; animation: hov 6s ease-in-out infinite; }
-@keyframes hov { 50% { transform: translateY(-12px); } }
-.holo-in > svg { position: absolute; inset: 0; overflow: visible; }
-.holo .r1 { transform-box: view-box; transform-origin: 300px 300px; animation: spin 26s linear infinite; }
-.holo .r2 { transform-box: view-box; transform-origin: 300px 300px; animation: spinr 40s linear infinite; }
-.holo .disc { position: absolute; left: 70px; top: 70px; width: 460px; height: 460px; border-radius: 50%; overflow: hidden;
-  background: radial-gradient(circle, rgba(41, 240, 255, 0.14), rgba(107, 60, 255, 0.1) 60%, rgba(5, 6, 13, 0.6)), linear-gradient(#070818e6, #070818e6), repeating-linear-gradient(0deg, rgba(41, 240, 255, 0.08) 0 2px, transparent 2px 6px); box-shadow: inset 0 0 60px rgba(41, 240, 255, 0.35), 0 0 60px rgba(41, 240, 255, 0.25); }
-.holo .disc::after { content: ""; position: absolute; left: 0; right: 0; height: 60px; background: linear-gradient(180deg, transparent, rgba(41, 240, 255, 0.25), transparent); animation: sweep 3.5s linear infinite; }
-@keyframes sweep { from { top: -60px; } to { top: 460px; } }
-.holo .lab { position: absolute; left: 0; right: 0; top: 118px; text-align: center; font-family: var(--mono); font-size: 17px; letter-spacing: 0.4em; color: var(--c); }
-.holo h1 { position: absolute; left: 0; right: 0; top: 140px; margin: 0; text-align: center; font-size: 74px; font-weight: 900; letter-spacing: 0.15em; color: #fff; text-shadow: 3px 0 var(--m), -3px 0 var(--c), 0 0 30px rgba(41, 240, 255, 0.6); animation: glitch 4s steps(1) infinite; }
-@keyframes glitch { 0%, 90%, 100% { transform: none; } 91% { transform: translateX(-6px) skewX(-8deg); } 93% { transform: translateX(5px); } 95% { transform: none; clip-path: inset(30% 0 40% 0); } 96% { clip-path: none; } }
-.holo .teams { position: absolute; left: 0; right: 0; top: 250px; display: flex; justify-content: center; align-items: center; gap: 26px; }
-.holo .t { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 19px; font-weight: 700; }
-.holo .t .crest { filter: drop-shadow(0 0 14px var(--c)); }
-.holo .t.op .crest { filter: drop-shadow(0 0 14px var(--m)); }
-.holo .x { font-family: var(--num); font-weight: 700; font-size: 60px; color: #fff; text-shadow: 0 0 20px var(--m); }
-.holo .odds { position: absolute; left: 0; right: 0; top: 388px; text-align: center; font-family: var(--mono); font-size: 15px; letter-spacing: 0.08em; color: var(--dim); }
-.holo .odds b { color: var(--c); }
-.jack { position: absolute; left: 960px; top: 742px; transform: translate(-50%, 0) translate(calc(var(--mx) * 10px), 0); display: flex; align-items: center; gap: 18px; padding: 16px 46px; font-size: 32px; font-weight: 900; letter-spacing: 0.3em; color: #05060d; background: var(--c);
-  clip-path: polygon(22px 0, calc(100% - 22px) 0, 100% 50%, calc(100% - 22px) 100%, 22px 100%, 0 50%); box-shadow: 0 0 40px var(--c); animation: jp 2s ease-in-out infinite; }
-.jack small { font-family: var(--mono); font-size: 15px; letter-spacing: 0.3em; }
-@keyframes jp { 50% { filter: brightness(1.25) drop-shadow(0 0 20px var(--c)); } }
-/* 前景：我方全像出賽卡 */
-.cards { position: absolute; left: 960px; top: 830px; display: flex; gap: 26px; transform: translateX(-50%) translate(calc(var(--mx) * 30px), calc(var(--my) * 10px)); perspective: 900px; }
-.hc { position: relative; width: 300px; height: 150px; display: grid; grid-template-columns: 112px 1fr; gap: 14px; align-items: center; padding: 14px 16px; background: linear-gradient(135deg, rgba(41, 240, 255, 0.16), rgba(107, 60, 255, 0.12)); border: 1.5px solid rgba(41, 240, 255, 0.7); box-shadow: 0 0 24px rgba(41, 240, 255, 0.3);
-  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px)); transform: rotateX(16deg); animation: cf 5s ease-in-out infinite; }
-.hc:nth-child(2) { animation-delay: -1.6s; } .hc:nth-child(3) { animation-delay: -3.2s; }
-@keyframes cf { 50% { transform: rotateX(16deg) translateY(-8px); } }
-.hc .pic { position: relative; width: 112px; height: 112px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px var(--c), 0 0 18px var(--c); }
-.hc .pic .avatar { width: 112px; height: 112px; display: block; filter: grayscale(1) contrast(1.3); }
-.hc .pic::after { content: ""; position: absolute; inset: 0; background: linear-gradient(160deg, var(--c), var(--v) 60%, var(--m)); mix-blend-mode: color; }
-.hc .slot { font-family: var(--mono); font-size: 14px; letter-spacing: 0.3em; color: var(--c); }
-.hc b { display: block; font-size: 32px; font-weight: 900; letter-spacing: 0.06em; }
-.hc .cls { font-size: 14px; color: var(--dim); }
-.hc .rt { position: absolute; right: 18px; top: 12px; font-family: var(--num); font-weight: 700; font-size: 36px; color: var(--c); text-shadow: 0 0 14px var(--c); }
-/* 頂列 */
-.hud { position: absolute; left: 0; right: 0; top: 0; height: 104px; display: flex; align-items: center; gap: 20px; padding: 0 44px; background: linear-gradient(180deg, rgba(3, 4, 10, 0.92), rgba(3, 4, 10, 0)); }
-.hud .team { display: flex; align-items: center; gap: 14px; }
-.hud .team .crest { filter: drop-shadow(0 0 12px var(--c)); }
-.hud .team b { display: block; font-size: 34px; font-weight: 900; letter-spacing: 0.14em; text-shadow: 2px 0 var(--m), -2px 0 var(--c); }
-.hud .team small { font-family: var(--mono); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); }
-.wkbar { display: flex; gap: 5px; margin-left: 30px; align-items: center; }
-.wkbar i { width: 30px; height: 10px; transform: skewX(-30deg); background: rgba(41, 240, 255, 0.15); }
-.wkbar i.d { background: var(--c); box-shadow: 0 0 10px var(--c); }
-.wkbar i.n { background: #fff; box-shadow: 0 0 14px #fff; animation: blink 1s infinite; }
-.wkbar span { margin-left: 12px; font-family: var(--num); font-weight: 700; font-size: 28px; color: #fff; }
-.hud .res { margin-left: auto; display: flex; align-items: center; gap: 26px; }
+.scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px); }
+.vig { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(1500px 940px at 50% 46%, transparent 58%, rgba(0, 0, 0, 0.7)); }
+
+/* ── 頂列 ── */
+.top { position: absolute; left: 0; right: 0; top: 0; height: 108px; display: flex; align-items: center; gap: 30px; padding: 0 56px; background: linear-gradient(180deg, rgba(4, 7, 11, 0.94), rgba(4, 7, 11, 0)); }
+.team { display: flex; align-items: center; gap: 16px; }
+.team .crest { filter: drop-shadow(0 0 12px rgba(127, 231, 242, 0.4)); }
+.team b { display: block; font-size: 34px; font-weight: 900; letter-spacing: 0.16em; line-height: 1.1; color: #fff; }
+.team small { font-family: var(--mono); font-size: 13px; letter-spacing: 0.28em; color: var(--dim); }
+.wk { display: flex; align-items: center; gap: 14px; margin-left: 20px; padding-left: 30px; border-left: 1px solid rgba(127, 231, 242, 0.2); }
+.wk .segs { display: flex; gap: 4px; }
+.wk .segs i { width: 26px; height: 6px; background: rgba(127, 231, 242, 0.14); }
+.wk .segs i.d { background: var(--c); }
+.wk .segs i.n { background: #fff; box-shadow: 0 0 12px var(--c); animation: blink 1.2s infinite; }
+.wk b { font-family: var(--num); font-weight: 700; font-size: 40px; line-height: 1; color: #fff; }
+.wk span { font-size: 16px; color: var(--dim); letter-spacing: 0.1em; }
+.res { margin-left: auto; display: flex; align-items: center; gap: 30px; }
 .cash { text-align: right; }
-.cash small { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.35em; color: var(--dim); }
-.cash b { font-family: var(--num); font-weight: 700; font-size: 50px; line-height: 0.95; color: var(--c); text-shadow: 0 0 16px rgba(41, 240, 255, 0.6); }
-.cash b em { font-family: var(--zh); font-style: normal; font-size: 18px; margin-left: 4px; color: var(--dim); text-shadow: none; }
+.cash small { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.3em; color: var(--dim); }
+.cash b { font-family: var(--num); font-weight: 700; font-size: 50px; line-height: 0.95; color: #fff; }
+.cash b em { font-family: var(--zh); font-style: normal; font-weight: 500; font-size: 17px; margin-left: 4px; color: var(--dim); }
+.cash .dl { display: block; font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; color: var(--dim); }
 .gauge { display: flex; align-items: center; gap: 10px; }
-.gauge .g { position: relative; width: 60px; height: 60px; }
+.gauge .g { position: relative; width: 58px; height: 58px; }
 .gauge .g svg { position: absolute; inset: 0; transform: rotate(-90deg); }
-.gauge .g b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--num); font-weight: 700; font-size: 26px; }
-.gauge span { font-size: 15px; color: var(--dim); line-height: 1.3; }
-.gauge span b { display: block; font-size: 17px; color: #fff; }
-.ib { position: relative; width: 56px; height: 56px; display: grid; place-items: center; border: 1.5px solid rgba(41, 240, 255, 0.5); clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); color: var(--c); }
-.ib em { position: absolute; right: 2px; top: 2px; min-width: 20px; height: 20px; background: var(--m); color: #fff; font-style: normal; font-family: var(--num); font-weight: 700; font-size: 15px; display: grid; place-items: center; }
-.vig { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(1500px 900px at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.75)); }
-.scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px); }
-/* 進場 */
-.in { animation: fadein 0.9s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
-@keyframes fadein { from { opacity: 0; filter: blur(8px) brightness(3); } }
-.sign.in { animation-name: signon; }
-@keyframes signon { 0% { opacity: 0; } 10% { opacity: 1; } 15% { opacity: 0.2; } 25% { opacity: 1; } 30% { opacity: 0.4; } 40%, 100% { opacity: 1; } }
+.gauge .g b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--num); font-weight: 700; font-size: 25px; color: #fff; }
+.gauge span { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: var(--dim); line-height: 1.5; }
+.gauge span b { display: block; font-family: var(--zh); font-size: 16px; letter-spacing: 0.1em; color: var(--txt); }
+.ib { position: relative; width: 54px; height: 54px; display: grid; place-items: center; color: var(--c); border: 1px solid rgba(127, 231, 242, 0.35); }
+.ib em { position: absolute; right: -7px; top: -7px; min-width: 22px; height: 22px; padding: 0 5px; background: var(--c); color: var(--bg); font-style: normal; font-family: var(--num); font-weight: 700; font-size: 15px; display: grid; place-items: center; }
+
+/* ── 屋頂：左我方名單（選中＝全亮）、中開戰、右對手情報 ── */
+.panel { position: absolute; top: 852px; width: 640px; padding: 18px 26px 20px; background: linear-gradient(180deg, rgba(10, 18, 26, 0.9), rgba(8, 13, 19, 0.82)); box-shadow: inset 0 0 0 1px rgba(127, 231, 242, 0.16), 0 30px 60px rgba(0, 0, 0, 0.5); }
+.panel .hd { display: flex; align-items: baseline; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid rgba(127, 231, 242, 0.14); }
+.panel .hd .no { font-family: var(--mono); font-size: 14px; letter-spacing: 0.24em; color: var(--dim); }
+.panel .hd b { font-size: 34px; font-weight: 900; letter-spacing: 0.1em; line-height: 1; }
+.panel .hd .en { font-family: var(--num); font-weight: 600; font-size: 17px; letter-spacing: 0.3em; color: var(--dim); }
+.panel .hd .st { margin-left: auto; font-size: 16px; color: var(--dim); letter-spacing: 0.06em; }
+.squad { left: 56px; transform: translate(calc(var(--mx) * -40px), calc(var(--my) * -10px)); border-left: 4px solid var(--c); box-shadow: inset 0 0 0 1px rgba(127, 231, 242, 0.45), 0 0 50px rgba(127, 231, 242, 0.12), 0 30px 60px rgba(0, 0, 0, 0.5); }
+.squad .hd b { color: #fff; text-shadow: 0 0 18px rgba(127, 231, 242, 0.7); }
+.squad .hd .no, .squad .hd .st { color: var(--c); }
+.units { display: flex; gap: 16px; margin-top: 16px; }
+.u { flex: 1; display: flex; align-items: center; gap: 12px; }
+.pic { position: relative; flex: none; width: 74px; height: 74px; border-radius: 50%; overflow: hidden; background: var(--st); box-shadow: 0 0 0 2px var(--c), 0 0 0 6px rgba(127, 231, 242, 0.12); }
+.pic .avatar { display: block; width: 74px; height: 74px; filter: grayscale(1) contrast(1.15) brightness(1.08); }
+.pic::after { content: ""; position: absolute; inset: 0; background: linear-gradient(165deg, #d6fafc, #4d8ea0 52%, #0a1018); mix-blend-mode: color; opacity: 0.9; }
+.u .rl { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.24em; color: var(--c); }
+.u b { display: block; font-size: 24px; font-weight: 900; letter-spacing: 0.06em; line-height: 1.2; color: #fff; }
+.u .rt { font-family: var(--num); font-weight: 700; font-size: 24px; color: var(--c); }
+.u .rt small { font-family: var(--zh); font-weight: 500; font-size: 13px; color: var(--dim); margin-left: 6px; }
+
+.target { right: 56px; transform: translate(calc(var(--mx) * -40px), calc(var(--my) * -10px)); border-right: 4px solid var(--or); }
+.target .hd .no { color: var(--or); }
+.target .hd .st b { font-family: var(--num); font-weight: 700; font-size: 22px; color: var(--or2); }
+.target .body { display: flex; align-items: center; gap: 20px; margin-top: 14px; }
+.target .cr { flex: none; width: 90px; height: 90px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, #2a1d18, #120c0a); box-shadow: 0 0 0 2px var(--or), 0 0 0 7px rgba(255, 122, 69, 0.12), 0 0 30px rgba(255, 122, 69, 0.25); }
+.target .nm { font-size: 30px; font-weight: 900; letter-spacing: 0.08em; color: #fff; line-height: 1.1; }
+.target .meta { margin-top: 4px; font-size: 15px; color: var(--dim); letter-spacing: 0.06em; }
+.target .meta b { font-family: var(--num); font-weight: 700; font-size: 19px; color: var(--or2); }
+.slots { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.slots i { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 1.5px dashed rgba(255, 122, 69, 0.7); font-style: normal; font-family: var(--num); font-weight: 700; font-size: 18px; color: var(--or); }
+.slots em { font-style: normal; margin-left: 6px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.16em; color: var(--or); animation: blink 1.6s infinite; }
+
+.deploy { position: absolute; left: 960px; top: 866px; width: 520px; transform: translateX(-50%) translate(calc(var(--mx) * -34px), calc(var(--my) * -10px)); display: flex; flex-direction: column; align-items: center; }
+.deploy .cd { display: flex; align-items: baseline; gap: 14px; font-size: 15px; letter-spacing: 0.14em; color: var(--dim); }
+.deploy .cd b { font-family: var(--num); font-weight: 700; font-size: 34px; letter-spacing: 0.08em; color: #fff; }
+.go { position: relative; margin-top: 10px; width: 400px; height: 96px; display: flex; align-items: center; justify-content: center; gap: 18px; color: #170b06; cursor: pointer;
+  background: linear-gradient(180deg, #ff9a6b, var(--or) 55%, #e2602e); clip-path: polygon(26px 0, calc(100% - 26px) 0, 100% 50%, calc(100% - 26px) 100%, 26px 100%, 0 50%); animation: gopulse 2.4s ease-in-out infinite; }
+@keyframes gopulse { 50% { filter: brightness(1.12) drop-shadow(0 0 18px rgba(255, 122, 69, 0.8)); } }
+.go b { font-size: 46px; font-weight: 900; letter-spacing: 0.28em; line-height: 1; margin-right: -0.28em; }
+.go span { font-family: var(--num); font-weight: 700; font-size: 18px; letter-spacing: 0.4em; }
+.go .chev { display: flex; gap: 2px; }
+.go .chev i { width: 12px; height: 22px; background: #170b06; clip-path: polygon(0 0, 45% 0, 100% 50%, 45% 100%, 0 100%, 55% 50%); animation: chev 1.2s infinite; }
+.go .chev i:nth-child(2) { animation-delay: 0.15s; } .go .chev i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes chev { 0%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+.deploy .lock { margin-top: 10px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.2em; color: var(--dim); }
+.glowline { position: absolute; left: 960px; top: 940px; width: 860px; height: 2px; margin-left: -430px; background: linear-gradient(90deg, transparent, rgba(255, 122, 69, 0.6), transparent); filter: blur(1px); }
+
+/* ── 進場 ── */
+.in { animation: fin 0.9s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
+@keyframes fin { from { opacity: 0; translate: 0 30px; } }
+.tag.in, .mcard.in { animation: none; }
+.mcard.in .bx { animation: fin 0.9s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
+.world.lights { animation: drone 9s ease-in-out infinite, lights 1.6s ease-out both; }
+@keyframes lights { from { filter: brightness(0.15) saturate(0); } }
+.still .world.lights { animation: none; }
 </style>
 </head>
 <body>
 <div id="vp"><div id="stage">
-  <div class="sky"></div>
-  <div class="glow"></div>
-  <canvas id="city" width="1600" height="330"></canvas>
-  <div class="street">
-    <div class="road"></div>
-    <div class="wall l"><span class="band" style="top:420px"></span><span class="band" style="top:880px"></span></div>
-    <div class="wall r"><span class="band" style="top:360px"></span><span class="band" style="top:960px"></span></div>
-  </div>
-  <div class="fog"></div>
+  <section class="cam"><div class="world lights">
+    <canvas id="city" width="2048" height="1152"></canvas>
+    <div class="mist" style="top:300px"></div>
+    <div class="mist" style="top:420px;animation-duration:110s;animation-direction:reverse;opacity:.7"></div>
+    <canvas id="fx" width="2048" height="1152"></canvas>
+    <div class="sweep"></div>
 
-  <!-- 中央全像徽章 -->
-  <section class="holo"><div class="holo-in in" style="--d:.2s">
-    <svg viewBox="0 0 600 600">
-      <g class="r1"><circle cx="300" cy="300" r="292" fill="none" stroke="rgba(41,240,255,.7)" stroke-width="3" stroke-dasharray="40 14 6 14"/>
-        <circle cx="300" cy="300" r="276" fill="none" stroke="rgba(41,240,255,.25)" stroke-width="14" stroke-dasharray="1.5 6"/></g>
-      <g class="r2"><circle cx="300" cy="300" r="258" fill="none" stroke="rgba(255,46,136,.75)" stroke-width="3" stroke-dasharray="120 60 30 60 300 80"/></g>
-      <g transform="rotate(-90 300 300)"><circle cx="300" cy="300" r="244" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6" stroke-dasharray="166.3 4"/>
-        <circle cx="300" cy="300" r="244" fill="none" stroke="#29f0ff" stroke-width="6" stroke-dasharray="166.3 4 166.3 4 166.3 4 0 2000" style="filter:drop-shadow(0 0 6px #29f0ff)"/>
-        <circle cx="300" cy="300" r="244" fill="none" stroke="#fff" stroke-width="8" stroke-dasharray="0 511 166.3 2000" style="animation:blink 1s infinite"/></g>
-      <path d="M 300 0 V 26 M 300 574 V 600 M 0 300 H 26 M 574 300 H 600" stroke="#ff2e88" stroke-width="3"/>
-    </svg>
-    <div class="disc">
-      <div class="lab">MATCH DAY · W04</div>
+    <div class="mcard in" data-at="arena" style="--d:.5s"><i class="ln"></i><div class="bx">
+      <div class="lb">MATCH DAY · W04 · 中央競技場</div>
       <h1>比賽日</h1>
-      <div class="teams">
-        <div class="t"><span data-crest="天使戰隊" data-primary="#1d4ed8" data-secondary="#29f0ff" data-size="96"></span>天使戰隊</div>
-        <span class="x">VS</span>
-        <div class="t op"><span data-crest="暗影工作室" data-primary="#5b0f3f" data-secondary="#ff2e88" data-size="96"></span>暗影工作室</div>
-      </div>
-      <div class="odds">押你贏 <b>×2.00</b> · 對手名單 <b style="color:var(--m)">加密中</b></div>
-    </div>
-  </div></section>
-  <div class="jack in" style="--d:.9s">開戰<small>JACK IN ▶▶</small></div>
+      <div class="vs">天使戰隊<i>VS</i><em>暗影工作室</em></div>
+    </div></div>
 
-  <!-- 兩側招牌 -->
-  <section class="signs">
-    <div class="sign L in" style="--sc:#29f0ff;left:150px;top:190px;transform:translateZ(0px) rotateY(32deg);--d:.3s"><div class="bd"><span class="zh">戰隊</span><span class="en">SQUAD 4/5</span><span class="st">名單OK</span></div></div>
-    <div class="sign L in flick" style="--sc:#ff2e88;left:260px;top:520px;transform:translateZ(-160px) rotateY(32deg);--d:.45s"><div class="bd"><span class="zh">轉會市場</span><span class="en">MARKET</span><span class="st">3 人</span></div></div>
-    <div class="sign L v in" style="--sc:#6b3cff;left:170px;top:120px;transform:translateZ(-560px) rotateY(34deg);--d:.6s"><div class="bd"><span class="zh">訓練基地</span><span class="st">200</span></div></div>
-    <div class="sign R in" style="--sc:#29f0ff;left:1460px;top:170px;transform:translateZ(0px) rotateY(-32deg);--d:.35s"><div class="bd"><span class="zh">聯賽</span><span class="en">LEAGUE #7</span><span class="st">3 分</span></div></div>
-    <div class="sign R in" style="--sc:#ff2e88;left:1430px;top:500px;transform:translateZ(-160px) rotateY(-32deg);--d:.5s"><div class="bd"><span class="zh">賭盤</span><span class="en">BOOK · 4 OPEN</span><span class="st">×2.00</span></div></div>
-    <div class="sign R v in flick" style="--sc:#f5f749;left:1609px;top:60px;transform:translateZ(-560px) rotateY(-34deg);--d:.65s"><div class="bd"><span class="zh">財務</span><span class="st" style="background:#ff2e88;color:#fff">−14.6</span></div></div>
-    <span class="reflect" style="--sc:#29f0ff;left:180px;top:760px"></span><span class="reflect" style="--sc:#ff2e88;left:1560px;top:760px"></span>
-  </section>
+    <div class="tag in" data-at="finance" style="--d:.9s;--L:60px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">06 · 2.9 KM</span><b>財務</b><span class="en">FINANCE</span><span class="st"><i>−14.6</i>萬／週</span></div></div>
+    <div class="tag R in" data-at="market" style="--d:.7s;--L:70px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">02 · 1.8 KM</span><b>轉會市場</b><span class="en">MARKET</span><span class="st"><span class="new"></span><i>3</i>名自由球員</span></div></div>
+    <div class="tag in" data-at="training" style="--d:.8s;--L:100px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">03 · 0.7 KM</span><b>訓練基地</b><span class="en">TRAINING</span><span class="st"><i>200</i>／200 訓練點</span></div></div>
+    <div class="tag in" data-at="league" style="--d:.75s;--L:60px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">04 · 2.5 KM</span><b>聯賽</b><span class="en">LEAGUE</span><span class="st">第 <i>7</i> 名 · 3 分</span></div></div>
+    <div class="tag R in" data-at="betting" style="--d:.85s;--L:100px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">05 · 0.8 KM</span><b>賭盤</b><span class="en">BETTING</span><span class="st"><i>4</i>場開盤中</span></div></div>
+    <div class="tag R op in" data-at="rival" style="--d:.95s;--L:70px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">TARGET · 1.7 KM</span><b>暗影工作室</b><span class="en">RIVAL HQ</span><span class="st">情報 <i>2</i> 則</span></div></div>
+  </div></section>
 
   <canvas id="rain" width="1920" height="1080"></canvas>
 
-  <!-- 前景出賽卡 -->
-  <section class="cards in" style="--d:.8s">
-    <div class="hc"><span class="pic"><span data-avatar="xzr" data-size="112"></span></span><div><span class="slot">先鋒</span><b>謝子睿</b><span class="cls">強攻流 v3</span></div><span class="rt">1518</span></div>
-    <div class="hc"><span class="pic"><span data-avatar="qmz2" data-size="112"></span></span><div><span class="slot">中堅</span><b>邱明哲</b><span class="cls">均衡流 v2</span></div><span class="rt">1478</span></div>
-    <div class="hc"><span class="pic"><span data-avatar="xce" data-size="112"></span></span><div><span class="slot">大將</span><b>徐承恩</b><span class="cls">龜守流 v2</span></div><span class="rt">1479</span></div>
-  </section>
+  <i class="corner" style="left:24px;top:24px;border-left-width:2px;border-top-width:2px"></i>
+  <i class="corner" style="right:24px;top:24px;border-right-width:2px;border-top-width:2px"></i>
+  <i class="corner" style="left:24px;bottom:24px;border-left-width:2px;border-bottom-width:2px"></i>
+  <i class="corner" style="right:24px;bottom:24px;border-right-width:2px;border-bottom-width:2px"></i>
+  <div class="tape in" style="--d:.3s"><div class="tk"><span>300</span><span>315</span><span>330</span><span>345</span><span class="n">N</span><span>015</span><span>030</span><span>045</span><span>060</span><span>075</span><span>090</span><span>105</span></div><i class="mk"></i></div>
 
-  <header class="hud in">
-    <div class="team"><span data-crest="天使戰隊" data-primary="#0f1a3a" data-secondary="#29f0ff" data-size="58"></span><div><b>天使戰隊</b><small>NEO LEAGUE // 新創聯賽</small></div></div>
-    <div class="wkbar"><i class="d"></i><i class="d"></i><i class="d"></i><i class="n"></i><i></i><i></i><i></i><i></i><i></i><span>W04</span></div>
+  <header class="top in">
+    <div class="team"><span data-crest="天使戰隊" data-primary="#16222d" data-secondary="#7fe7f2" data-size="58"></span><div><b>天使戰隊</b><small>ANGEL GAMING // NEO LEAGUE</small></div></div>
+    <div class="wk"><div class="segs"><i class="d"></i><i class="d"></i><i class="d"></i><i class="n"></i><i></i><i></i><i></i><i></i><i></i></div><b>W04</b><span>／09 例行賽</span></div>
     <div class="res">
-      <div class="cash"><small>CREDITS 資金</small><b>104.8<em>萬</em></b></div>
-      <div class="gauge"><div class="g"><svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="25" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="5"/><circle cx="30" cy="30" r="25" fill="none" stroke="#29f0ff" stroke-width="5" stroke-dasharray="52 157"/></svg><b>10</b></div><span><b>名氣</b>REP</span></div>
-      <div class="gauge"><div class="g"><svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="25" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="5"/><circle cx="30" cy="30" r="25" fill="none" stroke="#ff2e88" stroke-width="5" stroke-dasharray="55 157"/></svg><b>7</b></div><span><b>跑道</b>週</span></div>
+      <div class="cash"><small>資金 FUNDS</small><b>104.8<em>萬</em></b><span class="dl">▼ 14.6 / 週</span></div>
+      <div class="gauge"><div class="g"><svg viewBox="0 0 58 58"><circle cx="29" cy="29" r="24" fill="none" stroke="rgba(127,231,242,.14)" stroke-width="4"/><circle cx="29" cy="29" r="24" fill="none" stroke="#7fe7f2" stroke-width="4" stroke-dasharray="50 151"/></svg><b>10</b></div><span><b>名氣</b>REP</span></div>
+      <div class="gauge"><div class="g"><svg viewBox="0 0 58 58"><circle cx="29" cy="29" r="24" fill="none" stroke="rgba(127,231,242,.14)" stroke-width="4"/><circle cx="29" cy="29" r="24" fill="none" stroke="#d6fafc" stroke-width="4" stroke-dasharray="53 151"/></svg><b>7</b></div><span><b>資金跑道</b>WEEKS</span></div>
       <div class="ib"><span data-icon="mail" data-size="24"></span><em>3</em></div>
       <div class="ib"><span data-icon="menu" data-size="24"></span></div>
     </div>
   </header>
+
+  <section class="panel squad in" style="--d:.55s">
+    <div class="hd"><span class="no">01</span><b>戰隊</b><span class="en">SQUAD</span><span class="st">4／5 · 名單已排</span></div>
+    <div class="units">
+      <div class="u"><span class="pic"><span data-avatar="xzr" data-jersey="#2a3b4a" data-size="74"></span></span><div><span class="rl">先鋒</span><b>謝子睿</b><span class="rt">1518<small>強攻</small></span></div></div>
+      <div class="u"><span class="pic"><span data-avatar="qmz2" data-jersey="#2a3b4a" data-size="74"></span></span><div><span class="rl">中堅</span><b>邱明哲</b><span class="rt">1478<small>均衡</small></span></div></div>
+      <div class="u"><span class="pic"><span data-avatar="xce" data-jersey="#2a3b4a" data-size="74"></span></span><div><span class="rl">大將</span><b>徐承恩</b><span class="rt">1479<small>龜守</small></span></div></div>
+    </div>
+  </section>
+
+  <div class="glowline in" style="--d:.7s"></div>
+  <section class="deploy in" style="--d:.65s">
+    <div class="cd"><span>開賽倒數</span><b id="cd">02:14:37</b></div>
+    <div class="go"><b>開戰</b><span>DEPLOY</span><span class="chev"><i></i><i></i><i></i></span></div>
+    <div class="lock">名單已鎖定 · 中央競技場 20:00</div>
+  </section>
+
+  <section class="panel target in" style="--d:.6s">
+    <div class="hd"><span class="no">TARGET</span><b>對手情報</b><span class="st">押你贏 <b>×2.00</b></span></div>
+    <div class="body">
+      <span class="cr"><span data-crest="暗影工作室" data-primary="#2a160f" data-secondary="#ff7a45" data-size="62"></span></span>
+      <div><div class="nm">暗影工作室</div><div class="meta">評分約 <b>1490</b> ± 40 · 2 勝 1 敗</div>
+        <div class="slots"><i>?</i><i>?</i><i>?</i><em>名單加密中</em></div></div>
+    </div>
+  </section>
+
   <div class="scan"></div>
   <div class="vig"></div>
-  <div class="design-note" style="left:44px;bottom:20px">設計稿 A · 夜城霓虹</div>
+  <div class="design-note" style="left:56px;bottom:12px">設計稿 A · 夜城天台</div>
 </div></div>
 <script type="module" src="../../src/web/sketch/cyber.ts"></script>
 <script type="module" src="../../src/web/sketch/fill.ts"></script>

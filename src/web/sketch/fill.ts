@@ -7,15 +7,16 @@ import { avatarSvg, crestSvg, icon, npcCrest, type CrestSpec, type IconName } fr
 const ME: CrestSpec = { shape: 0, primary: '#3b82f6', secondary: '#d4a017', emblem: 'wings' };
 const crestFor = (name: string): CrestSpec => (name === '天使戰隊' ? ME : npcCrest(name));
 
-const NEON_PALETTE = [
-  '#0d0221', '#1a1040', '#2e2160', '#541388', '#8c1eff', '#ff2a6d', '#ff6c11', '#fcee0a', '#00f0ff', '#05d9e8', '#1de9b6',
-  '#f5f5f5', '#c0c0d8', '#7a7aa0', '#3b82f6', '#1e3a8a', '#d4a017', '#f6d2b8', '#e2b48f', '#b9825a', '#8a5a3b', '#3b2a20', '#111111',
+// 像素版（設計稿 B）的暮色限色盤，另加三種膚色
+const DUSK_PALETTE = [
+  '#0f1020', '#1b1d33', '#2a2b4a', '#3b3552', '#5a5070', '#7a6a9a', '#8a8aa0', '#b9b4c0', '#e8dcc4', '#fff6e0',
+  '#e8735a', '#b5503f', '#f2a65a', '#7cc4a8', '#3f7f78', '#c9a1b4', '#d9a487', '#a8705a', '#6e4a40',
 ];
 
 function hexRgb(h: string): [number, number, number] {
   return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 }
-const PAL = NEON_PALETTE.map(hexRgb);
+const PAL = DUSK_PALETTE.map(hexRgb);
 
 async function pixelate(svg: string, w: number, h: number): Promise<ImageData | null> {
   const img = new Image();
