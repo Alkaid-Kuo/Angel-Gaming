@@ -49,6 +49,7 @@
     <div class="modes">
       <label class="mode-tile"><input type="radio" name="mode" value="annihilation" checked><span class="t">殲滅戰</span><span class="d">打垮對手全軍；時間到比戰果</span></label>
       <label class="mode-tile"><input type="radio" name="mode" value="capture"><span class="t">佔點</span><span class="d">大河谷的三個渡口各一面旗，佔領後每秒得分，先到 400 分獲勝</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="sandbox"><span class="t">自訂（沙盒）</span><span class="d">雙方兵力自己選、不限點數，在平地測試場上擺好再開打；測試兵種對抗與操作</span></label>
     </div>
     <div class="row">
       <label>Seed <input id="seed" type="number" min="0" step="1"></label>
@@ -62,6 +63,23 @@
     <p class="muted small" id="army-note"></p>
     <div class="lg-army" id="army-rows"></div>
     <div class="row"><span id="army-total"></span><button id="army-reset" type="button">預設陣容</button></div>
+  </section>
+  <section class="card hidden" id="sandbox">
+    <h2>自訂對戰</h2>
+    <p class="muted small">雙方各自選兵（不限點數）與指揮方式。按「開始布陣」後雙方會先面對面擺好，你可以拖曳任何一團調整位置、朝向與陣形，再按「開戰」。選現有 AI 時，它指揮的是你指定的兵團（AI 原本是照自己挑的兵設計的，組合差太多時可能會怪怪的）。</p>
+    <div class="sb-cols">
+      <div class="sb-side t0">
+        <label class="sb-role"><span class="sw" style="background:#3b82f6"></span>藍方 <select id="sb-role0"></select></label>
+        <div class="lg-army no-reserve" id="sb-rows0"></div>
+        <div class="row small"><span id="sb-total0"></span><button type="button" data-sb-clear="0">清空</button></div>
+      </div>
+      <div class="sb-side t1">
+        <label class="sb-role"><span class="sw" style="background:#ef4444"></span>紅方 <select id="sb-role1"></select></label>
+        <div class="lg-army no-reserve" id="sb-rows1"></div>
+        <div class="row small"><span id="sb-total1"></span><button type="button" data-sb-clear="1">清空</button></div>
+      </div>
+    </div>
+    <div class="row"><label>開打距離 <select id="sb-dist"><option value="6">6 格（貼近）</option><option value="12">12 格</option><option value="20" selected>20 格</option><option value="30">30 格</option></select></label><span class="muted small">雙方前排相距幾格（之後還可以拖曳調整）</span></div>
   </section>
   <section class="card">
     <h2 id="map-name">地圖：河谷</h2>

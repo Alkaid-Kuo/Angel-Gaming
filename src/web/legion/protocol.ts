@@ -11,13 +11,41 @@ export interface PlayerArmy {
   readonly reserve: readonly UnitKind[];
 }
 
-export interface LegionSetup {
+export interface MatchSetup {
+  readonly kind?: 'match';
   /** 'player' = 玩家指揮（只能是藍方） */
   readonly bots: readonly [BotKey | 'player', BotKey];
   readonly mode: LegionMode;
   readonly seed: number;
   readonly army?: PlayerArmy;
 }
+
+/** 自訂對戰（沙盒）裡一方由誰指揮：玩家（只能是藍方）、待命不動、直接進攻，或用現有 AI 指揮指定的兵團 */
+export type SandboxRole = 'player' | 'idle' | 'attack' | BotKey;
+
+/** 沙盒布陣：一團的位置（單位座標）、朝向、陣形 */
+export interface SandboxUnit {
+  readonly kind: UnitKind;
+  readonly x: number;
+  readonly y: number;
+  readonly facing: number;
+  readonly formation: FormationKind;
+}
+
+/** 自訂對戰：平地測試場、不限點數、開打前可以拖曳布陣 */
+export interface SandboxSetup {
+  readonly kind: 'sandbox';
+  readonly seed: number;
+  readonly roles: readonly [SandboxRole, SandboxRole];
+  /** 依 playerId 的兵團 */
+  readonly armies: readonly [readonly UnitKind[], readonly UnitKind[]];
+  /** 自動面對面擺放時，雙方前排相距幾格 */
+  readonly distance: number;
+  /** 依 playerId 的布陣（順序同 armies）；沒有就自動面對面 */
+  readonly placement?: readonly [readonly SandboxUnit[], readonly SandboxUnit[]];
+}
+
+export type LegionSetup = MatchSetup | SandboxSetup;
 
 export interface RegStatic {
   readonly id: number;
@@ -65,6 +93,8 @@ export interface LegionMeta {
   readonly playerSide: number;
   /** 重播剛才玩家打的那一場（照錄下來的指令重建） */
   readonly replay: boolean;
+  /** 自訂對戰（沙盒）：開打前可以拖曳布陣 */
+  readonly sandbox: boolean;
 }
 
 export interface RegFrame {
@@ -149,7 +179,12 @@ export type ToLegionWorker =
   | { readonly type: 'pause' }
   | { readonly type: 'speed'; readonly speed: number }
   | { readonly type: 'skip' }
-  | { readonly type: 'restart' }
+  /** 重看／重來；沙盒的 edit = 回到布陣階段 */
+  | { readonly type: 'restart'; readonly edit?: boolean }
+  /** 沙盒布陣：把一團擺到指定位置、朝向、陣形（開戰前才有效） */
+  | { readonly type: 'place'; readonly id: number; readonly x: number; readonly y: number; readonly facing: number; readonly formation: FormationKind }
+  /** 沙盒布陣：全部擺回自動面對面 */
+  | { readonly type: 'autoPlace' }
   | { readonly type: 'replay' }
   /** 玩家下的指令（下一個決策 tick 交給引擎，每次最多 10 個，多的排到下一次） */
   | { readonly type: 'command'; readonly cmds: readonly unknown[] };
@@ -159,6 +194,8 @@ export type FromLegionWorker =
   | { readonly type: 'frame'; readonly frame: LegionFrame }
   | { readonly type: 'skipped'; readonly x: number; readonly y: number }
   | { readonly type: 'replayFile'; readonly json: string }
+  /** 給畫面的短提示（例如沙盒布陣的位置不合法） */
+  | { readonly type: 'toast'; readonly text: string }
   | { readonly type: 'error'; readonly message: string };
 
 export const ATTACKED_BIT = 1 << 12;

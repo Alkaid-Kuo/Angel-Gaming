@@ -31,6 +31,8 @@ export interface DrawOptions {
   readonly order?: { from: { x: number; y: number }; to: { x: number; y: number } } | null;
   /** 按住技能鍵瞄準中：選取的團與滑鼠位置（世界座標） */
   readonly aim?: { ids: readonly number[]; to: { x: number; y: number } } | null;
+  /** 沙盒布陣：拖曳中的團放開後的位置預覽（世界座標；半寬沿正面、半深沿前後） */
+  readonly ghost?: { x: number; y: number; facing: number; halfW: number; halfD: number; color: string } | null;
 }
 
 interface Effect {
@@ -523,9 +525,34 @@ export class LegionRenderer {
     this.effects.push({ kind: 'ring', x, y, t0: performance.now(), life: 600, color, size: 1.6 });
   }
 
-  /** 框選框、右鍵拖曳的移動方向 */
+  /** 框選框、右鍵拖曳的移動方向、沙盒布陣的拖曳預覽 */
   private drawOrders(opt: DrawOptions): void {
     const ctx = this.ctx;
+    if (opt.ghost) {
+      const g = opt.ghost;
+      const a = (g.facing * Math.PI) / 180;
+      const fx = Math.cos(a);
+      const fy = Math.sin(a);
+      const corner = (f: number, l: number): [number, number] => [this.sx(g.x + fx * f * g.halfD - fy * l * g.halfW), this.sy(g.y + fy * f * g.halfD + fx * l * g.halfW)];
+      const pts = [corner(1, 1), corner(1, -1), corner(-1, -1), corner(-1, 1)];
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = g.color;
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 朝向箭頭
+      const [cx, cy] = [this.sx(g.x), this.sy(g.y)];
+      const [hx, hy] = [this.sx(g.x + fx * (g.halfD + 1500)), this.sy(g.y + fy * (g.halfD + 1500))];
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(hx, hy);
+      ctx.stroke();
+    }
     if (opt.box) {
       const b = opt.box;
       ctx.fillStyle = 'rgba(147,197,253,0.12)';

@@ -78,10 +78,13 @@ export class PlayerController implements LegionController {
   readonly label = 'player';
   readonly declaration: LegionDeclaration = { name: '玩家', version: '', style: '由你親自指揮', knobs: [] };
   private readonly army: PlayerArmy;
+  /** 沙盒：指定好的布陣（不自動布陣） */
+  private readonly fixed: Deployment[] | null;
   private queue: unknown[] = [];
 
-  constructor(army: PlayerArmy) {
+  constructor(army: PlayerArmy, fixed: Deployment[] | null = null) {
     this.army = army;
+    this.fixed = fixed;
   }
 
   push(cmds: readonly unknown[]): void {
@@ -93,7 +96,7 @@ export class PlayerController implements LegionController {
   }
 
   deploy(data: LegionInitData): CallOutcome<unknown> {
-    return ok(autoDeploy(this.army, data));
+    return ok(this.fixed ?? autoDeploy(this.army, data));
   }
 
   decide(_obs: LegionObservation): CallOutcome<unknown> {

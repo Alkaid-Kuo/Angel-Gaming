@@ -255,6 +255,8 @@ export interface LegionSetup {
   /** 依 playerId：選手 deploy() 的原始回傳 */
   readonly deployments: readonly unknown[];
   readonly timeLimitTicks?: number;
+  /** 沙盒（觀戰網頁的自訂對戰）：不限點數、可以擺在地圖上任何可通行的位置；正式比賽不用 */
+  readonly sandbox?: boolean;
 }
 
 const FLANK_PCT: Readonly<Record<Flank, number>> = { front: 100, side: RULES.flank.side, rear: RULES.flank.rear };
@@ -310,6 +312,8 @@ export class LegionMatch {
   readonly mode: LegionMode;
   readonly seed: number;
   readonly timeLimitTicks: number;
+  /** 沙盒：布陣不限點數與布陣區 */
+  readonly sandbox: boolean;
   tick = 0;
   readonly rng: Prng;
   readonly soldiers: Soldier[] = [];
@@ -346,6 +350,7 @@ export class LegionMatch {
     this.mode = setup.mode;
     this.seed = setup.seed;
     this.timeLimitTicks = setup.timeLimitTicks ?? defaultTimeLimit(setup.mode);
+    this.sandbox = setup.sandbox === true;
     this.rng = Prng.fromInts(setup.seed, 0x1e9);
     this.grid = new Grid(this.map.width, this.map.height);
     const n = setup.deployments.length;
@@ -375,8 +380,8 @@ export class LegionMatch {
     const base = this.soldiers.length;
     const regBase = this.regiments.length;
     const capture = this.mode === 'capture';
-    const budget = capture ? RULES.capture.budget : RULES.budget;
-    const cap = capture ? RULES.capture.fieldCap : RULES.budget;
+    const budget = this.sandbox ? Infinity : capture ? RULES.capture.budget : RULES.budget;
+    const cap = this.sandbox ? Infinity : capture ? RULES.capture.fieldCap : RULES.budget;
     let spent = 0;
     let onField = 0;
     const placed: Regiment[] = [];
@@ -407,7 +412,10 @@ export class LegionMatch {
       const x = roundHalfEven(o.x);
       const y = roundHalfEven(o.y);
       const [tx, ty] = tileXY(x, y, this.map.width, this.map.height);
-      if (tx < zone.x0 || tx >= zone.x1 || ty < zone.y0 || ty >= zone.y1) return reject(i, '不在布陣區內');
+      if (this.sandbox) {
+        // 沙盒：整張地圖都能擺，只留邊緣 1 格
+        if (x < TILE || y < TILE || x > (this.map.width - 1) * TILE || y > (this.map.height - 1) * TILE) return reject(i, '超出地圖');
+      } else if (tx < zone.x0 || tx >= zone.x1 || ty < zone.y0 || ty >= zone.y1) return reject(i, '不在布陣區內');
       if (!walkable(this.map.terrain[ty * this.map.width + tx])) return reject(i, '位置不可通行');
       const formation = typeof o.formation === 'string' && def.formations.includes(o.formation as FormationKind) ? (o.formation as FormationKind) : def.formations[0];
       const widthIn = typeof o.width === 'number' && Number.isFinite(o.width) ? Math.max(1, Math.min(def.men, Math.round(o.width))) : null;
