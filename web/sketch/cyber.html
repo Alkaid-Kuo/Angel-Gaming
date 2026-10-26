@@ -2,186 +2,189 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<title>草圖 A：霓虹賽博</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設計稿 A：夜城霓虹</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="./stage.css">
 <style>
-:root { --bg: #06050b; --y: #fcee0a; --c: #00f0ff; --m: #ff2a6d; --p: #9d4edd; --line: rgba(0, 240, 255, 0.32); --mono: "Share Tech Mono", monospace; --head: "Orbitron", "Noto Sans TC", sans-serif; --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
-* { box-sizing: border-box; }
-body { margin: 0; width: 1440px; height: 900px; overflow: hidden; position: relative; color: #e8f6ff; font-family: var(--zh);
-  background: radial-gradient(900px 500px at 75% 10%, rgba(157, 78, 221, 0.3), transparent 60%), radial-gradient(700px 500px at 5% 95%, rgba(0, 240, 255, 0.14), transparent 60%), var(--bg); }
-body::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 50; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 3px); }
-.floor { position: absolute; left: -10%; right: -10%; bottom: -260px; height: 520px; z-index: 0; opacity: 0.55;
-  background: linear-gradient(rgba(255, 42, 109, 0.45) 1px, transparent 1px) 0 0 / 70px 70px, linear-gradient(90deg, rgba(255, 42, 109, 0.45) 1px, transparent 1px) 0 0 / 70px 70px;
-  transform: perspective(420px) rotateX(68deg); mask-image: linear-gradient(transparent, #000 60%); }
-.sun { position: absolute; right: 120px; top: 120px; width: 300px; height: 300px; border-radius: 50%; z-index: 0; opacity: 0.18; background: repeating-linear-gradient(180deg, var(--m) 0 14px, transparent 14px 22px); filter: blur(1px); }
-.wrap { position: relative; z-index: 1; height: 100%; display: grid; grid-template-columns: 230px 1fr 360px; grid-template-rows: 64px 1fr 44px; gap: 18px; padding: 16px 22px; }
-.frame { position: relative; background: rgba(8, 9, 22, 0.78); border: 1px solid var(--line); clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px)); }
-.frame::before { content: ""; position: absolute; left: 8px; top: 8px; width: 16px; height: 16px; border-left: 2px solid var(--c); border-top: 2px solid var(--c); }
-.lbl { font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; color: var(--c); opacity: 0.85; }
+/* 配色：深夜紫黑底；青（我方、主要操作）、洋紅（對手、警示）、紫霧；黃只出現在極少數的危險提示 */
+#stage { --c: #29f0ff; --m: #ff2e88; --v: #6b3cff; --ink: #05060d; --txt: #e9f4ff; --dim: #8a93b8; --y: #f5f749;
+  --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --num: "Rajdhani", "Noto Sans TC", sans-serif; --mono: "Share Tech Mono", monospace; color: var(--txt); font-family: var(--zh); background: var(--ink); }
+.sky { position: absolute; inset: 0; background: linear-gradient(180deg, #03040a 0%, #0b0820 32%, #2a0d3e 43%, #120a26 52%, #05060d 70%); }
+.glow { position: absolute; left: 960px; top: 450px; width: 1500px; height: 420px; margin: -210px 0 0 -750px; background: radial-gradient(ellipse, rgba(255, 46, 136, 0.35), rgba(107, 60, 255, 0.15) 45%, transparent 70%); filter: blur(10px); }
+#city { position: absolute; left: 160px; top: 160px; width: 1600px; height: 330px; opacity: 0.9; transform: translateX(calc(var(--mx) * -10px)); }
+/* 街道：單點透視，消失點 (960, 470) */
+.street { position: absolute; inset: 0; perspective: 900px; perspective-origin: 960px 470px; transform-style: preserve-3d; }
+.road { position: absolute; left: -1200px; top: 470px; width: 4320px; height: 2400px; transform-origin: 50% 0; transform: translateX(calc(var(--mx) * -30px)) rotateX(84deg);
+  background: linear-gradient(90deg, transparent 49.6%, rgba(41, 240, 255, 0.45) 49.7% 49.78%, transparent 49.78% 50.22%, rgba(41, 240, 255, 0.45) 50.22% 50.3%, transparent 50.4%),
+    linear-gradient(rgba(255, 46, 136, 0.25) 3px, transparent 3px) 0 0 / 100% 160px, linear-gradient(90deg, rgba(41, 240, 255, 0.14) 2px, transparent 2px) 0 0 / 180px 100%, linear-gradient(180deg, #0c0a1c, #05060d);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 12%); animation: roadmove 1.2s linear infinite; }
+@keyframes roadmove { to { background-position: 0 0, 0 160px, 0 0, 0 0; } }
+.wall { position: absolute; top: -200px; height: 1500px; width: 1300px; transform-style: preserve-3d;
+  background: repeating-linear-gradient(90deg, rgba(41, 240, 255, 0.05) 0 2px, transparent 2px 64px), repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 44px), linear-gradient(90deg, #120c26, #07060f); }
+.wall.l { left: 0; transform-origin: 0 50%; transform: translateX(calc(var(--mx) * -50px)) rotateY(78deg); }
+.wall.r { right: 0; transform-origin: 100% 50%; transform: translateX(calc(var(--mx) * -50px)) rotateY(-78deg); }
+.wall .band { position: absolute; left: 0; right: 0; height: 6px; background: var(--m); box-shadow: 0 0 20px var(--m); opacity: 0.6; }
+.wall.r .band { background: var(--c); box-shadow: 0 0 20px var(--c); }
+#rain { position: absolute; inset: 0; pointer-events: none; }
+.fog { position: absolute; left: 0; right: 0; top: 380px; height: 260px; background: linear-gradient(180deg, transparent, rgba(107, 60, 255, 0.12), transparent); }
+/* 招牌（從兩側伸出、近大遠小） */
+.signs { position: absolute; inset: 0; perspective: 900px; perspective-origin: 960px 470px; transform-style: preserve-3d; transform: translateX(calc(var(--mx) * -40px)); }
+.sign { position: absolute; transform-style: preserve-3d; transition: filter 0.2s; }
+.sign .bd { position: relative; padding: 22px 28px; background: rgba(8, 6, 20, 0.86); border: 3px solid var(--sc); border-radius: 6px; box-shadow: 0 0 22px var(--sc), inset 0 0 22px color-mix(in srgb, var(--sc) 40%, transparent); }
+.sign .zh { display: block; font-size: 64px; font-weight: 900; line-height: 1; color: #fff; text-shadow: 0 0 8px var(--sc), 0 0 22px var(--sc), 0 0 46px var(--sc); letter-spacing: 0.08em; }
+.sign .en { display: block; margin-top: 8px; font-family: var(--mono); font-size: 17px; letter-spacing: 0.35em; color: var(--sc); }
+.sign .st { position: absolute; right: -14px; top: -16px; padding: 4px 12px; background: var(--sc); color: #05060d; font-family: var(--num); font-weight: 700; font-size: 20px; border-radius: 3px; box-shadow: 0 0 16px var(--sc); }
+.sign .pole { position: absolute; top: 50%; width: 140px; height: 8px; background: linear-gradient(90deg, #1b1630, #39305a); }
+.sign.L .pole { right: 100%; } .sign.R .pole { left: 100%; }
+.sign.v .zh { writing-mode: vertical-rl; letter-spacing: 0.15em; }
+.sign:hover { filter: brightness(1.35) saturate(1.2); }
+.flick { animation: flick 5s infinite; }
+@keyframes flick { 0%, 18%, 22%, 62%, 64%, 100% { opacity: 1; } 20%, 63% { opacity: 0.35; } }
+.reflect { position: absolute; width: 160px; height: 300px; background: linear-gradient(180deg, var(--sc), transparent); opacity: 0.18; filter: blur(14px); }
+/* 中央全像徽章 */
+.holo { position: absolute; left: 960px; top: 430px; width: 0; height: 0; transform: translate(calc(var(--mx) * 10px), calc(var(--my) * 8px)); }
+.holo-in { position: absolute; left: -300px; top: -300px; width: 600px; height: 600px; animation: hov 6s ease-in-out infinite; }
+@keyframes hov { 50% { transform: translateY(-12px); } }
+.holo-in > svg { position: absolute; inset: 0; overflow: visible; }
+.holo .r1 { transform-box: view-box; transform-origin: 300px 300px; animation: spin 26s linear infinite; }
+.holo .r2 { transform-box: view-box; transform-origin: 300px 300px; animation: spinr 40s linear infinite; }
+.holo .disc { position: absolute; left: 70px; top: 70px; width: 460px; height: 460px; border-radius: 50%; overflow: hidden;
+  background: radial-gradient(circle, rgba(41, 240, 255, 0.14), rgba(107, 60, 255, 0.1) 60%, rgba(5, 6, 13, 0.6)), linear-gradient(#070818e6, #070818e6), repeating-linear-gradient(0deg, rgba(41, 240, 255, 0.08) 0 2px, transparent 2px 6px); box-shadow: inset 0 0 60px rgba(41, 240, 255, 0.35), 0 0 60px rgba(41, 240, 255, 0.25); }
+.holo .disc::after { content: ""; position: absolute; left: 0; right: 0; height: 60px; background: linear-gradient(180deg, transparent, rgba(41, 240, 255, 0.25), transparent); animation: sweep 3.5s linear infinite; }
+@keyframes sweep { from { top: -60px; } to { top: 460px; } }
+.holo .lab { position: absolute; left: 0; right: 0; top: 118px; text-align: center; font-family: var(--mono); font-size: 17px; letter-spacing: 0.4em; color: var(--c); }
+.holo h1 { position: absolute; left: 0; right: 0; top: 140px; margin: 0; text-align: center; font-size: 74px; font-weight: 900; letter-spacing: 0.15em; color: #fff; text-shadow: 3px 0 var(--m), -3px 0 var(--c), 0 0 30px rgba(41, 240, 255, 0.6); animation: glitch 4s steps(1) infinite; }
+@keyframes glitch { 0%, 90%, 100% { transform: none; } 91% { transform: translateX(-6px) skewX(-8deg); } 93% { transform: translateX(5px); } 95% { transform: none; clip-path: inset(30% 0 40% 0); } 96% { clip-path: none; } }
+.holo .teams { position: absolute; left: 0; right: 0; top: 250px; display: flex; justify-content: center; align-items: center; gap: 26px; }
+.holo .t { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 19px; font-weight: 700; }
+.holo .t .crest { filter: drop-shadow(0 0 14px var(--c)); }
+.holo .t.op .crest { filter: drop-shadow(0 0 14px var(--m)); }
+.holo .x { font-family: var(--num); font-weight: 700; font-size: 60px; color: #fff; text-shadow: 0 0 20px var(--m); }
+.holo .odds { position: absolute; left: 0; right: 0; top: 388px; text-align: center; font-family: var(--mono); font-size: 15px; letter-spacing: 0.08em; color: var(--dim); }
+.holo .odds b { color: var(--c); }
+.jack { position: absolute; left: 960px; top: 742px; transform: translate(-50%, 0) translate(calc(var(--mx) * 10px), 0); display: flex; align-items: center; gap: 18px; padding: 16px 46px; font-size: 32px; font-weight: 900; letter-spacing: 0.3em; color: #05060d; background: var(--c);
+  clip-path: polygon(22px 0, calc(100% - 22px) 0, 100% 50%, calc(100% - 22px) 100%, 22px 100%, 0 50%); box-shadow: 0 0 40px var(--c); animation: jp 2s ease-in-out infinite; }
+.jack small { font-family: var(--mono); font-size: 15px; letter-spacing: 0.3em; }
+@keyframes jp { 50% { filter: brightness(1.25) drop-shadow(0 0 20px var(--c)); } }
+/* 前景：我方全像出賽卡 */
+.cards { position: absolute; left: 960px; top: 830px; display: flex; gap: 26px; transform: translateX(-50%) translate(calc(var(--mx) * 30px), calc(var(--my) * 10px)); perspective: 900px; }
+.hc { position: relative; width: 300px; height: 150px; display: grid; grid-template-columns: 112px 1fr; gap: 14px; align-items: center; padding: 14px 16px; background: linear-gradient(135deg, rgba(41, 240, 255, 0.16), rgba(107, 60, 255, 0.12)); border: 1.5px solid rgba(41, 240, 255, 0.7); box-shadow: 0 0 24px rgba(41, 240, 255, 0.3);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px)); transform: rotateX(16deg); animation: cf 5s ease-in-out infinite; }
+.hc:nth-child(2) { animation-delay: -1.6s; } .hc:nth-child(3) { animation-delay: -3.2s; }
+@keyframes cf { 50% { transform: rotateX(16deg) translateY(-8px); } }
+.hc .pic { position: relative; width: 112px; height: 112px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px var(--c), 0 0 18px var(--c); }
+.hc .pic .avatar { width: 112px; height: 112px; display: block; filter: grayscale(1) contrast(1.3); }
+.hc .pic::after { content: ""; position: absolute; inset: 0; background: linear-gradient(160deg, var(--c), var(--v) 60%, var(--m)); mix-blend-mode: color; }
+.hc .slot { font-family: var(--mono); font-size: 14px; letter-spacing: 0.3em; color: var(--c); }
+.hc b { display: block; font-size: 32px; font-weight: 900; letter-spacing: 0.06em; }
+.hc .cls { font-size: 14px; color: var(--dim); }
+.hc .rt { position: absolute; right: 18px; top: 12px; font-family: var(--num); font-weight: 700; font-size: 36px; color: var(--c); text-shadow: 0 0 14px var(--c); }
 /* 頂列 */
-.top { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; }
-.logo { display: flex; align-items: center; gap: 12px; }
-.glitch { position: relative; font-weight: 900; font-size: 28px; letter-spacing: 0.12em; color: #fff; text-shadow: 2px 0 var(--m), -2px 0 var(--c); }
-.glitch::after { content: attr(data-t); position: absolute; left: 3px; top: 0; color: var(--y); clip-path: inset(48% 0 38% 0); text-shadow: none; opacity: 0.8; }
-.logo small { display: block; font-family: var(--mono); color: var(--y); letter-spacing: 0.3em; font-size: 11px; }
-.weeks { display: flex; gap: 3px; margin-left: 20px; }
-.weeks i { width: 34px; height: 8px; background: rgba(0, 240, 255, 0.15); transform: skewX(-30deg); }
-.weeks i.d { background: var(--c); box-shadow: 0 0 8px var(--c); }
-.weeks i.n { background: var(--y); box-shadow: 0 0 12px var(--y); }
-.wk { font-family: var(--head); font-weight: 700; font-size: 14px; color: var(--y); margin-left: 8px; }
-.res { margin-left: auto; display: flex; gap: 14px; }
-.chip { padding: 6px 14px 6px 12px; border: 1px solid var(--line); background: rgba(0, 240, 255, 0.06); clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px); }
-.chip .lbl { display: block; font-size: 10px; }
-.chip b { font-family: var(--head); font-size: 20px; }
-.chip.cash b { color: var(--y); text-shadow: 0 0 10px rgba(252, 238, 10, 0.6); }
-.chip.warn { border-color: rgba(255, 42, 109, 0.7); }
-.chip.warn b { color: var(--m); }
-/* 左側選單 */
-.nav { grid-row: 2 / 4; padding: 22px 0 16px; display: flex; flex-direction: column; gap: 4px; }
-.nav .lbl { padding: 0 22px 8px; }
-.nav a { position: relative; display: flex; align-items: baseline; gap: 10px; padding: 11px 22px; text-decoration: none; color: #b9c7d8; font-weight: 700; font-size: 17px; letter-spacing: 0.1em; }
-.nav a span { font-family: var(--mono); font-size: 11px; color: rgba(0, 240, 255, 0.6); }
-.nav a em { font-style: normal; font-family: var(--mono); font-size: 10px; color: rgba(185, 199, 216, 0.55); margin-left: auto; }
-.nav a.on { color: #0a0a0a; background: var(--y); clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%); }
-.nav a.on span, .nav a.on em { color: #0a0a0a; }
-.nav a .bad { position: absolute; right: 70px; top: 12px; background: var(--m); color: #fff; font-family: var(--mono); font-size: 11px; padding: 0 6px; }
-.nav .sys { margin-top: auto; padding: 0 22px; font-family: var(--mono); font-size: 11px; color: rgba(0, 240, 255, 0.55); line-height: 1.7; }
-/* 中央 */
-.main { display: grid; grid-template-rows: auto 1fr; gap: 18px; min-height: 0; }
-.match { padding: 0 30px 26px; overflow: hidden; }
-.tape { margin: 0 -30px 22px; height: 30px; display: flex; align-items: center; gap: 18px; padding: 0 30px; font-family: var(--mono); color: #0a0a0a; font-size: 13px; letter-spacing: 0.25em; font-weight: 700;
-  background: repeating-linear-gradient(135deg, var(--y) 0 18px, #0a0a0a 18px 26px); }
-.tape b { background: var(--y); padding: 2px 10px; }
-.tape span { background: #0a0a0a; color: var(--y); padding: 3px 12px; letter-spacing: 0.3em; }
-.vs { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
-.side { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.side .crest { filter: drop-shadow(0 0 14px rgba(0, 240, 255, 0.55)); }
-.side.opp .crest { filter: drop-shadow(0 0 14px rgba(255, 42, 109, 0.6)); }
-.side b { font-size: 24px; font-weight: 900; letter-spacing: 0.12em; }
-.side .lbl { font-size: 11px; }
-.big-vs { font-family: var(--head); font-weight: 900; font-size: 96px; font-style: italic; color: #fff; text-shadow: 4px 0 var(--m), -4px 0 var(--c), 0 0 30px rgba(255, 255, 255, 0.4); }
-.odds { text-align: center; font-family: var(--mono); color: var(--y); font-size: 13px; letter-spacing: 0.2em; }
-.lineup { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 22px; }
-.pl { position: relative; display: grid; grid-template-columns: 92px 1fr; gap: 12px; align-items: center; padding: 10px 12px; background: linear-gradient(90deg, rgba(0, 240, 255, 0.12), rgba(0, 240, 255, 0.02)); border-left: 3px solid var(--c); }
-.duo { position: relative; width: 92px; height: 92px; overflow: hidden; clip-path: polygon(0 0, 100% 0, 100% 80%, 80% 100%, 0 100%); }
-.duo .avatar { filter: grayscale(1) contrast(1.25) brightness(1.05); display: block; }
-.duo::after { content: ""; position: absolute; inset: 0; background: linear-gradient(150deg, var(--m), var(--c)); mix-blend-mode: color; }
-.duo::before { content: ""; position: absolute; inset: 0; z-index: 1; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.25) 0 1px, transparent 1px 3px); }
-.pl .slot { font-family: var(--mono); color: var(--y); font-size: 12px; letter-spacing: 0.25em; }
-.pl b { display: block; font-size: 22px; font-weight: 900; letter-spacing: 0.08em; }
-.pl .cls { font-size: 12px; color: #9fb3c8; }
-.pl .rt { position: absolute; right: 12px; top: 10px; font-family: var(--head); font-size: 22px; font-weight: 700; color: var(--c); text-shadow: 0 0 10px rgba(0, 240, 255, 0.6); }
-.cta { display: flex; gap: 14px; margin-top: 24px; align-items: center; }
-.btn { font-family: var(--zh); font-weight: 900; font-size: 20px; letter-spacing: 0.2em; padding: 14px 36px; background: var(--y); color: #0a0a0a; border: none; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 50%, calc(100% - 18px) 100%, 0 100%); box-shadow: 0 0 24px rgba(252, 238, 10, 0.5); }
-.btn small { font-family: var(--mono); font-size: 12px; margin-left: 10px; letter-spacing: 0.2em; }
-.btn2 { font-family: var(--zh); font-weight: 700; font-size: 15px; padding: 12px 22px; color: var(--c); background: transparent; border: 1px solid var(--c); letter-spacing: 0.15em; }
-.cta .lbl { margin-left: auto; color: var(--m); }
-/* 設施格 */
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.cell { padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; }
-.cell b { font-size: 19px; letter-spacing: 0.12em; }
-.cell .lbl { font-size: 11px; }
-.cell .v { font-family: var(--head); font-size: 22px; color: var(--y); margin-top: 6px; }
-.cell .v small { font-family: var(--zh); font-size: 12px; color: #9fb3c8; margin-left: 4px; }
-.cell.alert::before { border-color: var(--m); }
-.cell.alert .v { color: var(--m); }
-/* 右欄 */
-.right { display: grid; grid-template-rows: auto 1fr; gap: 18px; min-height: 0; }
-.table { padding: 18px 20px; }
-.table h3 { margin: 0 0 10px; font-size: 16px; letter-spacing: 0.2em; display: flex; justify-content: space-between; }
-.row { display: grid; grid-template-columns: 26px 26px 1fr 30px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed rgba(0, 240, 255, 0.15); font-size: 14px; }
-.row .n { font-family: var(--head); color: rgba(0, 240, 255, 0.7); font-size: 13px; }
-.row .p { font-family: var(--head); text-align: right; font-weight: 700; }
-.row.me { color: var(--y); background: linear-gradient(90deg, rgba(252, 238, 10, 0.15), transparent); }
-.row.cut { border-bottom: 1px solid var(--m); }
-.holo { position: relative; padding: 3px; background: conic-gradient(from 210deg, var(--c), var(--m), var(--y), var(--c)); clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px)); }
-.holo-in { height: 100%; padding: 16px; background: linear-gradient(170deg, #160f2c, #07060f 70%); clip-path: inherit; display: flex; flex-direction: column; gap: 8px; }
-.holo .top2 { display: flex; justify-content: space-between; align-items: flex-start; }
-.holo .rt { font-family: var(--head); font-size: 40px; font-weight: 900; line-height: 1; color: #fff; text-shadow: 2px 0 var(--m), -2px 0 var(--c); }
-.holo .tag { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border: 1px solid var(--y); color: var(--y); letter-spacing: 0.2em; }
-.holo .duo { width: 100%; height: 210px; }
-.holo .duo .avatar { width: 100%; height: 100%; }
-.holo b { font-size: 26px; letter-spacing: 0.15em; text-align: center; }
-.stat { display: grid; grid-template-columns: 54px 1fr 40px; gap: 8px; align-items: center; font-family: var(--mono); font-size: 12px; color: #9fb3c8; }
-.stat div { height: 6px; background: rgba(0, 240, 255, 0.12); }
-.stat div i { display: block; height: 100%; background: linear-gradient(90deg, var(--c), var(--m)); box-shadow: 0 0 8px var(--c); }
-.stat span:last-child { color: #fff; text-align: right; }
-/* 底列 */
-.feed { grid-column: 2 / -1; display: flex; align-items: center; gap: 16px; padding: 0 18px; font-family: var(--mono); font-size: 13px; color: #b9c7d8; white-space: nowrap; overflow: hidden; }
-.feed .lbl { color: var(--m); }
-.feed i { color: var(--y); font-style: normal; animation: blink 1s steps(1) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-.note { position: absolute; left: 260px; bottom: 6px; z-index: 60; font-family: var(--zh); font-size: 12px; color: rgba(255, 255, 255, 0.5); }
+.hud { position: absolute; left: 0; right: 0; top: 0; height: 104px; display: flex; align-items: center; gap: 20px; padding: 0 44px; background: linear-gradient(180deg, rgba(3, 4, 10, 0.92), rgba(3, 4, 10, 0)); }
+.hud .team { display: flex; align-items: center; gap: 14px; }
+.hud .team .crest { filter: drop-shadow(0 0 12px var(--c)); }
+.hud .team b { display: block; font-size: 34px; font-weight: 900; letter-spacing: 0.14em; text-shadow: 2px 0 var(--m), -2px 0 var(--c); }
+.hud .team small { font-family: var(--mono); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); }
+.wkbar { display: flex; gap: 5px; margin-left: 30px; align-items: center; }
+.wkbar i { width: 30px; height: 10px; transform: skewX(-30deg); background: rgba(41, 240, 255, 0.15); }
+.wkbar i.d { background: var(--c); box-shadow: 0 0 10px var(--c); }
+.wkbar i.n { background: #fff; box-shadow: 0 0 14px #fff; animation: blink 1s infinite; }
+.wkbar span { margin-left: 12px; font-family: var(--num); font-weight: 700; font-size: 28px; color: #fff; }
+.hud .res { margin-left: auto; display: flex; align-items: center; gap: 26px; }
+.cash { text-align: right; }
+.cash small { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.35em; color: var(--dim); }
+.cash b { font-family: var(--num); font-weight: 700; font-size: 50px; line-height: 0.95; color: var(--c); text-shadow: 0 0 16px rgba(41, 240, 255, 0.6); }
+.cash b em { font-family: var(--zh); font-style: normal; font-size: 18px; margin-left: 4px; color: var(--dim); text-shadow: none; }
+.gauge { display: flex; align-items: center; gap: 10px; }
+.gauge .g { position: relative; width: 60px; height: 60px; }
+.gauge .g svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.gauge .g b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--num); font-weight: 700; font-size: 26px; }
+.gauge span { font-size: 15px; color: var(--dim); line-height: 1.3; }
+.gauge span b { display: block; font-size: 17px; color: #fff; }
+.ib { position: relative; width: 56px; height: 56px; display: grid; place-items: center; border: 1.5px solid rgba(41, 240, 255, 0.5); clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); color: var(--c); }
+.ib em { position: absolute; right: 2px; top: 2px; min-width: 20px; height: 20px; background: var(--m); color: #fff; font-style: normal; font-family: var(--num); font-weight: 700; font-size: 15px; display: grid; place-items: center; }
+.vig { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(1500px 900px at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.75)); }
+.scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px); }
+/* 進場 */
+.in { animation: fadein 0.9s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
+@keyframes fadein { from { opacity: 0; filter: blur(8px) brightness(3); } }
+.sign.in { animation-name: signon; }
+@keyframes signon { 0% { opacity: 0; } 10% { opacity: 1; } 15% { opacity: 0.2; } 25% { opacity: 1; } 30% { opacity: 0.4; } 40%, 100% { opacity: 1; } }
 </style>
 </head>
 <body>
-<div class="floor"></div><div class="sun"></div>
-<div class="wrap">
-  <header class="top">
-    <div class="logo"><span data-crest="天使戰隊" data-size="44"></span><div><span class="glitch" data-t="天使戰隊">天使戰隊</span><small>ANGEL.GG // NIGHT LEAGUE</small></div></div>
-    <div class="weeks"><i class="d"></i><i class="d"></i><i class="d"></i><i class="n"></i><i></i><i></i><i></i><i></i><i></i></div><span class="wk">W04 / 09</span>
+<div id="vp"><div id="stage">
+  <div class="sky"></div>
+  <div class="glow"></div>
+  <canvas id="city" width="1600" height="330"></canvas>
+  <div class="street">
+    <div class="road"></div>
+    <div class="wall l"><span class="band" style="top:420px"></span><span class="band" style="top:880px"></span></div>
+    <div class="wall r"><span class="band" style="top:360px"></span><span class="band" style="top:960px"></span></div>
+  </div>
+  <div class="fog"></div>
+
+  <!-- 中央全像徽章 -->
+  <section class="holo"><div class="holo-in in" style="--d:.2s">
+    <svg viewBox="0 0 600 600">
+      <g class="r1"><circle cx="300" cy="300" r="292" fill="none" stroke="rgba(41,240,255,.7)" stroke-width="3" stroke-dasharray="40 14 6 14"/>
+        <circle cx="300" cy="300" r="276" fill="none" stroke="rgba(41,240,255,.25)" stroke-width="14" stroke-dasharray="1.5 6"/></g>
+      <g class="r2"><circle cx="300" cy="300" r="258" fill="none" stroke="rgba(255,46,136,.75)" stroke-width="3" stroke-dasharray="120 60 30 60 300 80"/></g>
+      <g transform="rotate(-90 300 300)"><circle cx="300" cy="300" r="244" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6" stroke-dasharray="166.3 4"/>
+        <circle cx="300" cy="300" r="244" fill="none" stroke="#29f0ff" stroke-width="6" stroke-dasharray="166.3 4 166.3 4 166.3 4 0 2000" style="filter:drop-shadow(0 0 6px #29f0ff)"/>
+        <circle cx="300" cy="300" r="244" fill="none" stroke="#fff" stroke-width="8" stroke-dasharray="0 511 166.3 2000" style="animation:blink 1s infinite"/></g>
+      <path d="M 300 0 V 26 M 300 574 V 600 M 0 300 H 26 M 574 300 H 600" stroke="#ff2e88" stroke-width="3"/>
+    </svg>
+    <div class="disc">
+      <div class="lab">MATCH DAY · W04</div>
+      <h1>比賽日</h1>
+      <div class="teams">
+        <div class="t"><span data-crest="天使戰隊" data-primary="#1d4ed8" data-secondary="#29f0ff" data-size="96"></span>天使戰隊</div>
+        <span class="x">VS</span>
+        <div class="t op"><span data-crest="暗影工作室" data-primary="#5b0f3f" data-secondary="#ff2e88" data-size="96"></span>暗影工作室</div>
+      </div>
+      <div class="odds">押你贏 <b>×2.00</b> · 對手名單 <b style="color:var(--m)">加密中</b></div>
+    </div>
+  </div></section>
+  <div class="jack in" style="--d:.9s">開戰<small>JACK IN ▶▶</small></div>
+
+  <!-- 兩側招牌 -->
+  <section class="signs">
+    <div class="sign L in" style="--sc:#29f0ff;left:150px;top:190px;transform:translateZ(0px) rotateY(32deg);--d:.3s"><div class="bd"><span class="zh">戰隊</span><span class="en">SQUAD 4/5</span><span class="st">名單OK</span></div></div>
+    <div class="sign L in flick" style="--sc:#ff2e88;left:260px;top:520px;transform:translateZ(-160px) rotateY(32deg);--d:.45s"><div class="bd"><span class="zh">轉會市場</span><span class="en">MARKET</span><span class="st">3 人</span></div></div>
+    <div class="sign L v in" style="--sc:#6b3cff;left:170px;top:120px;transform:translateZ(-560px) rotateY(34deg);--d:.6s"><div class="bd"><span class="zh">訓練基地</span><span class="st">200</span></div></div>
+    <div class="sign R in" style="--sc:#29f0ff;left:1460px;top:170px;transform:translateZ(0px) rotateY(-32deg);--d:.35s"><div class="bd"><span class="zh">聯賽</span><span class="en">LEAGUE #7</span><span class="st">3 分</span></div></div>
+    <div class="sign R in" style="--sc:#ff2e88;left:1430px;top:500px;transform:translateZ(-160px) rotateY(-32deg);--d:.5s"><div class="bd"><span class="zh">賭盤</span><span class="en">BOOK · 4 OPEN</span><span class="st">×2.00</span></div></div>
+    <div class="sign R v in flick" style="--sc:#f5f749;left:1609px;top:60px;transform:translateZ(-560px) rotateY(-34deg);--d:.65s"><div class="bd"><span class="zh">財務</span><span class="st" style="background:#ff2e88;color:#fff">−14.6</span></div></div>
+    <span class="reflect" style="--sc:#29f0ff;left:180px;top:760px"></span><span class="reflect" style="--sc:#ff2e88;left:1560px;top:760px"></span>
+  </section>
+
+  <canvas id="rain" width="1920" height="1080"></canvas>
+
+  <!-- 前景出賽卡 -->
+  <section class="cards in" style="--d:.8s">
+    <div class="hc"><span class="pic"><span data-avatar="xzr" data-size="112"></span></span><div><span class="slot">先鋒</span><b>謝子睿</b><span class="cls">強攻流 v3</span></div><span class="rt">1518</span></div>
+    <div class="hc"><span class="pic"><span data-avatar="qmz2" data-size="112"></span></span><div><span class="slot">中堅</span><b>邱明哲</b><span class="cls">均衡流 v2</span></div><span class="rt">1478</span></div>
+    <div class="hc"><span class="pic"><span data-avatar="xce" data-size="112"></span></span><div><span class="slot">大將</span><b>徐承恩</b><span class="cls">龜守流 v2</span></div><span class="rt">1479</span></div>
+  </section>
+
+  <header class="hud in">
+    <div class="team"><span data-crest="天使戰隊" data-primary="#0f1a3a" data-secondary="#29f0ff" data-size="58"></span><div><b>天使戰隊</b><small>NEO LEAGUE // 新創聯賽</small></div></div>
+    <div class="wkbar"><i class="d"></i><i class="d"></i><i class="d"></i><i class="n"></i><i></i><i></i><i></i><i></i><i></i><span>W04</span></div>
     <div class="res">
-      <div class="chip cash"><span class="lbl">CREDITS</span><b>104.8</b> 萬</div>
-      <div class="chip"><span class="lbl">REP</span><b>10</b></div>
-      <div class="chip warn"><span class="lbl">BURN / RUNWAY</span><b>7</b> 週</div>
+      <div class="cash"><small>CREDITS 資金</small><b>104.8<em>萬</em></b></div>
+      <div class="gauge"><div class="g"><svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="25" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="5"/><circle cx="30" cy="30" r="25" fill="none" stroke="#29f0ff" stroke-width="5" stroke-dasharray="52 157"/></svg><b>10</b></div><span><b>名氣</b>REP</span></div>
+      <div class="gauge"><div class="g"><svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="25" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="5"/><circle cx="30" cy="30" r="25" fill="none" stroke="#ff2e88" stroke-width="5" stroke-dasharray="55 157"/></svg><b>7</b></div><span><b>跑道</b>週</span></div>
+      <div class="ib"><span data-icon="mail" data-size="24"></span><em>3</em></div>
+      <div class="ib"><span data-icon="menu" data-size="24"></span></div>
     </div>
   </header>
-  <nav class="nav frame">
-    <div class="lbl">// MENU</div>
-    <a class="on" href="#"><span>00</span>基地<em>HQ</em></a>
-    <a href="#"><span>01</span>戰隊<em>SQUAD</em></a>
-    <a href="#"><span>02</span>轉會市場<em>MARKET</em></a>
-    <a href="#"><span>03</span>訓練基地<em>LAB</em></a>
-    <a href="#"><span>04</span>聯賽<em>LEAGUE</em></a>
-    <a href="#"><span>05</span>賭盤<em>BOOK</em></a>
-    <a href="#"><span>06</span>財務<em>FIN</em></a>
-    <a href="#"><span>07</span>信件<em>MAIL</em><i class="bad">3</i></a>
-    <div class="sys">SYS.OK<br>LINK: 新創聯賽-08<br>SAVE: AUTO</div>
-  </nav>
-  <section class="main">
-    <div class="match frame">
-      <div class="tape"><b>MATCH DAY</b><span>例行賽 第 4 週</span><span>對手 暗影工作室</span></div>
-      <div class="vs">
-        <div class="side"><span data-crest="天使戰隊" data-size="120"></span><b>天使戰隊</b><span class="lbl">PWR 1492 · L W L</span></div>
-        <div><div class="big-vs">VS</div><div class="odds">ODDS ×2.00</div></div>
-        <div class="side opp"><span data-crest="暗影工作室" data-size="120"></span><b>暗影工作室</b><span class="lbl">PWR 1510 · L L W</span></div>
-      </div>
-      <div class="lineup">
-        <div class="pl"><div class="duo"><span data-avatar="xzr" data-size="92"></span></div><div><span class="slot">先鋒</span><b>謝子睿</b><span class="cls">強攻流 v3</span></div><span class="rt">1518</span></div>
-        <div class="pl"><div class="duo"><span data-avatar="qmz2" data-size="92"></span></div><div><span class="slot">中堅</span><b>邱明哲</b><span class="cls">均衡流 v2</span></div><span class="rt">1478</span></div>
-        <div class="pl"><div class="duo"><span data-avatar="xce" data-size="92"></span></div><div><span class="slot">大將</span><b>徐承恩</b><span class="cls">龜守流 v2</span></div><span class="rt">1479</span></div>
-      </div>
-      <div class="cta"><button class="btn">進入比賽日<small>&gt;&gt; ENTER</small></button><button class="btn2">調整名單</button><span class="lbl">對手名單 [ENCRYPTED] 比賽日解鎖</span></div>
-    </div>
-    <div class="grid">
-      <div class="cell frame"><span class="lbl">01 SQUAD</span><b>戰隊</b><span class="v">4/5<small>名選手</small></span></div>
-      <div class="cell frame"><span class="lbl">02 MARKET</span><b>轉會市場</b><span class="v">3<small>名自由球員</small></span></div>
-      <div class="cell frame"><span class="lbl">03 LAB</span><b>訓練基地</b><span class="v">200<small>場可排</small></span></div>
-      <div class="cell frame"><span class="lbl">05 BOOK</span><b>賭盤</b><span class="v">4<small>場開盤</small></span></div>
-      <div class="cell frame alert"><span class="lbl">06 FIN</span><b>財務</b><span class="v">−14.6<small>萬／週</small></span></div>
-      <div class="cell frame"><span class="lbl">07 MAIL</span><b>信件</b><span class="v">3<small>封未讀</small></span></div>
-    </div>
-  </section>
-  <aside class="right">
-    <div class="table frame"><h3>聯賽排名<span class="lbl">LIVE</span></h3>
-      <div class="row"><span class="n">01</span><span data-crest="鐵壁電競" data-size="22"></span><span>鐵壁電競</span><span class="p">9</span></div>
-      <div class="row"><span class="n">02</span><span data-crest="北辰戰隊" data-size="22"></span><span>北辰戰隊</span><span class="p">9</span></div>
-      <div class="row"><span class="n">03</span><span data-crest="蒼穹電競" data-size="22"></span><span>蒼穹電競</span><span class="p">6</span></div>
-      <div class="row cut"><span class="n">04</span><span data-crest="雷霆電競" data-size="22"></span><span>雷霆電競</span><span class="p">3</span></div>
-      <div class="row me"><span class="n">07</span><span data-crest="天使戰隊" data-size="22"></span><span>天使戰隊</span><span class="p">3</span></div>
-    </div>
-    <div class="holo"><div class="holo-in">
-      <div class="top2"><div><div class="lbl">ACE // 王牌</div><div class="rt">1518</div></div><span class="tag">GOLD v3</span></div>
-      <div class="duo"><span data-avatar="xzr" data-size="300"></span></div>
-      <b>謝子睿</b>
-      <div class="stat"><span>攻勢</span><div><i style="width:82%"></i></div><span>82</span></div>
-      <div class="stat"><span>穩定</span><div><i style="width:56%"></i></div><span>56</span></div>
-      <div class="stat"><span>週薪</span><div><i style="width:40%"></i></div><span>6.1萬</span></div>
-    </div></div>
-  </aside>
-  <footer class="feed frame"><span class="lbl">&gt; FEED</span>鐵壁電競 3:0 星河戰隊　//　球探回報：賴星宇 真實強度約 1561　//　贊助商：名氣 10 → 每週 8 萬<i>_</i></footer>
-</div>
-<div class="note">草圖 A・霓虹賽博（非實際畫面）</div>
+  <div class="scan"></div>
+  <div class="vig"></div>
+  <div class="design-note" style="left:44px;bottom:20px">設計稿 A · 夜城霓虹</div>
+</div></div>
+<script type="module" src="../../src/web/sketch/cyber.ts"></script>
 <script type="module" src="../../src/web/sketch/fill.ts"></script>
 </body>
 </html>
