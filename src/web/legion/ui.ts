@@ -107,12 +107,12 @@ export class LegionScreen {
     this.worker = worker;
     this.meta = meta;
     this.onExit = onExit;
-    this.speeds = meta.playerSide >= 0 ? PLAYER_SPEEDS : SPEEDS;
+    this.speeds = meta.controlSides.length > 0 ? PLAYER_SPEEDS : SPEEDS;
     root.innerHTML = this.layout();
     for (const n of root.querySelectorAll<HTMLElement>('[data-el]')) this.el[n.dataset.el!] = n;
     this.r = new LegionRenderer(this.el.canvas as HTMLCanvasElement, meta);
-    if (meta.playerSide >= 0) {
-      this.control = new PlayerControl(this.r, meta.playerSide, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t));
+    if (meta.controlSides.length > 0) {
+      this.control = new PlayerControl(this.r, meta.controlSides, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t));
       this.viewer = meta.playerSide;
       this.director = false;
     }
@@ -144,7 +144,7 @@ export class LegionScreen {
 
   private layout(): string {
     const p = this.meta.players;
-    const player = this.meta.playerSide >= 0;
+    const player = this.meta.controlSides.length > 0;
     const team = (i: number): string =>
       `<div class="team t${i}"><span class="sw" style="background:${p[i].color}"></span><span class="nm">${esc(p[i].side)}</span><span class="bot">${esc(p[i].bot)}</span></div>`;
     return `<div class="lg">
@@ -813,7 +813,7 @@ export class LegionScreen {
     }
     for (const c of f.captions) this.caption(c);
     if (this.control) {
-      const rej = f.events.filter((e) => e.type === 'rejected' && e.player === this.control!.side);
+      const rej = f.events.filter((e) => e.type === 'rejected' && this.control!.sides.includes(e.player));
       const last = rej[rej.length - 1];
       if (last && last.type === 'rejected') this.toast(`${CMD_NAME[last.command] ?? last.command}：${last.reason}`);
     }

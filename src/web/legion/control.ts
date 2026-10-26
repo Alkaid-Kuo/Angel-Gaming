@@ -33,7 +33,8 @@ const deg = (a: Pt, b: Pt): number => {
 const FORMATION_KEYS: Record<string, FormationKind> = { z: 'line', x: 'square', c: 'wedge', v: 'circle' };
 
 export class PlayerControl {
-  readonly side: number;
+  /** 可以下指令的各方（自訂對戰可能雙方都是） */
+  readonly sides: readonly number[];
   readonly selection = new Set<number>();
   /** 框選（螢幕座標） */
   box: { x0: number; y0: number; x1: number; y1: number } | null = null;
@@ -45,9 +46,9 @@ export class PlayerControl {
   private readonly sendCmds: (cmds: unknown[]) => void;
   private readonly toast: (text: string) => void;
 
-  constructor(r: LegionRenderer, side: number, sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void) {
+  constructor(r: LegionRenderer, sides: readonly number[], sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void) {
     this.r = r;
-    this.side = side;
+    this.sides = sides;
     this.sendCmds = sendCmds;
     this.toast = toast;
   }
@@ -60,7 +61,7 @@ export class PlayerControl {
   mine(): RegFrame[] {
     const f = this.frame;
     if (f === null) return [];
-    return f.regs.filter((r) => !r.reserve && this.r.ownerOf[r.id] === this.side);
+    return f.regs.filter((r) => !r.reserve && this.sides.includes(this.r.ownerOf[r.id]));
   }
 
   /** 選取中、還在場上的團 */
@@ -71,7 +72,7 @@ export class PlayerControl {
   }
 
   isMine(id: number): boolean {
-    return this.r.ownerOf[id] === this.side;
+    return this.sides.includes(this.r.ownerOf[id]);
   }
 
   /** 點選：自己的團加入選取（Shift 切換），點空地或敵軍清掉選取 */
@@ -111,12 +112,13 @@ export class PlayerControl {
     for (const r of this.mine()) this.selection.add(r.id);
   }
 
-  /** 右鍵：點到看得到的敵軍就攻擊；否則移動（拖曳超過 1.5 格就照拖曳方向決定朝向） */
+  /** 右鍵：點到不同陣營的團（看得到的）就攻擊；否則移動（拖曳超過 1.5 格就照拖曳方向決定朝向） */
   rightClick(target: number, from: Pt, to: Pt): void {
     const sel = this.selected();
     if (sel.length === 0) return;
-    if (target >= 0 && !this.isMine(target)) {
-      this.sendCmds(sel.map((r) => ({ type: 'attack', id: r.id, target, intent: '玩家：攻擊' })));
+    const foes = target >= 0 ? sel.filter((r) => this.r.ownerOf[r.id] !== this.r.ownerOf[target]) : [];
+    if (foes.length > 0) {
+      this.sendCmds(foes.map((r) => ({ type: 'attack', id: r.id, target, intent: '玩家：攻擊' })));
       this.r.ping(from.x, from.y, '#f87171');
       return;
     }

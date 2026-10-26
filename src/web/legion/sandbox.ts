@@ -116,13 +116,18 @@ abstract class FixedController implements LegionController {
   abstract decide(obs: LegionObservation): CallOutcome<unknown>;
 }
 
-/** 待命不動：從不下指令（軍團照引擎的預設反應：被近身就還手） */
+/** 待命：自己不下指令（軍團照引擎的預設反應：被近身就還手），但玩家可以替它下指令（測試對方架槍林、盾牆等） */
 export class IdleController extends FixedController {
   readonly label = 'idle';
-  readonly declaration: LegionDeclaration = { name: '待命不動', version: '', style: '站著當木樁，不下任何指令', knobs: [] };
+  readonly declaration: LegionDeclaration = { name: '待命', version: '', style: '自己不會動，你可以替它下指令', knobs: [] };
+  private queue: unknown[] = [];
+
+  push(cmds: readonly unknown[]): void {
+    this.queue.push(...cmds);
+  }
 
   decide(): CallOutcome<unknown> {
-    return ok([]);
+    return ok(this.queue.splice(0, RULES.commandsPerDecision));
   }
 }
 

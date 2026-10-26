@@ -47,6 +47,8 @@ const SKIP_MIN = 30;
 let setup: LegionSetup | null = null;
 /** 玩家指揮時的控制器 */
 let player: PlayerController | null = null;
+/** 依 playerId：玩家可以下指令的控制器（一般對戰只有玩家那一方；自訂對戰另有「待命」的一方） */
+let manual: ({ push(cmds: readonly unknown[]): void } | null)[] = [null, null];
 /** 玩家指揮哪一方（-1 = 純觀戰） */
 let playerSide = -1;
 /** 正在跑的比賽：AI／玩家對戰是 LegionDriver，重播是 LegionReplayCursor */
@@ -85,9 +87,14 @@ function buildSandbox(s: SandboxSetup & { readonly placement: readonly [readonly
     const units = toDeployment(s.placement[i]);
     if (role === 'player') {
       player = new PlayerController({ field: [...s.armies[i]], reserve: [] }, units);
+      manual[i] = player;
       return player;
     }
-    if (role === 'idle') return new IdleController(units);
+    if (role === 'idle') {
+      const idle = new IdleController(units);
+      manual[i] = idle;
+      return idle;
+    }
     if (role === 'attack') return new AttackController(units, center(s.placement[1 - i]));
     return new SquadController(new LegionBatchController(compiled[role], `legion-${role}.js`, map, s.seed, i), units);
   });
@@ -106,7 +113,9 @@ function begin(s0: LegionSetup, replay: LegionReplay | null = null): void {
   const s: LegionSetup = s0.kind === 'sandbox' && s0.placement === undefined ? { ...s0, placement: faceOff(s0.armies, s0.distance, MAPS[SANDBOX_MAP]()) } : s0;
   setup = s;
   player = null;
-  playerSide = replay !== null ? -1 : s.kind === 'sandbox' ? (s.roles[0] === 'player' ? 0 : -1) : s.bots.indexOf('player');
+  manual = [null, null];
+  // 自訂對戰一律上帝視角（不藏對方的意圖與位置）
+  playerSide = replay !== null || s.kind === 'sandbox' ? -1 : s.bots.indexOf('player');
   const rejected: { player: number; reason: string }[] = [];
   let players: PlayerMeta[];
   let m: LegionMatch;
@@ -126,6 +135,7 @@ function begin(s0: LegionSetup, replay: LegionReplay | null = null): void {
     const ctrls: LegionController[] = s.bots.map((b, i) => {
       if (b !== 'player') return new LegionBatchController(compiled[b], `legion-${b}.js`, map, s.seed, i);
       player = new PlayerController(s.army ?? { field: ['spear', 'spear', 'spear', 'sword', 'sword', 'archer', 'archer', 'shield', 'shield', 'heavyCav', 'light'], reserve: [] });
+      manual[i] = player;
       return player;
     });
     const knobs = ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label));
@@ -156,6 +166,7 @@ function begin(s0: LegionSetup, replay: LegionReplay | null = null): void {
     soldierCount: m.soldiers.length,
     rejected,
     playerSide,
+    controlSides: replay !== null ? [] : [0, 1].filter((p) => manual[p] !== null),
     replay: replay !== null,
     sandbox: s.kind === 'sandbox' && replay === null,
   };
@@ -314,6 +325,21 @@ function skip(): void {
   if (hit !== null) post({ type: 'skipped', x: (hit as { x: number; y: number }).x, y: (hit as { x: number; y: number }).y });
 }
 
+/** 玩家的指令依軍團所屬的一方，交給那一方的控制器（自訂對戰可以同時指揮雙方） */
+function command(cmds: readonly unknown[]): void {
+  const m = driver?.match;
+  if (!m) return;
+  const by: unknown[][] = [[], []];
+  for (const c of cmds) {
+    const id = (c as { id?: unknown }).id;
+    const owner = typeof id === 'number' ? m.regiments[id]?.owner : undefined;
+    if (owner !== undefined && manual[owner] !== null) by[owner].push(c);
+  }
+  by.forEach((list, p) => {
+    if (list.length > 0) manual[p]?.push(list);
+  });
+}
+
 /** 沙盒開戰：補上延後的開場解說 */
 function startIntro(): void {
   if (!introPending || driver === null || comm === null) return;
@@ -390,7 +416,7 @@ ctx.onmessage = (ev: MessageEvent<ToLegionWorker>) => {
         if (driver?.replay) post({ type: 'replayFile', json: JSON.stringify(driver.replay) });
         break;
       case 'command':
-        player?.push(msg.cmds);
+        command(msg.cmds);
         break;
       case 'place':
         place(msg.id, msg.x, msg.y, msg.facing, msg.formation);

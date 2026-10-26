@@ -89,8 +89,10 @@ export interface LegionMeta {
   readonly soldierCount: number;
   /** 布陣被拒絕的軍團（顯示在陣容畫面） */
   readonly rejected: readonly { readonly player: number; readonly reason: string }[];
-  /** 玩家指揮的一方（-1 = 純觀戰） */
+  /** 玩家指揮的一方（-1 = 純觀戰；自訂對戰一律 -1＝上帝視角） */
   readonly playerSide: number;
+  /** 玩家可以下指令的各方（一般對戰同 playerSide；自訂對戰是「玩家」與「待命」的那幾方） */
+  readonly controlSides: readonly number[];
   /** 重播剛才玩家打的那一場（照錄下來的指令重建） */
   readonly replay: boolean;
   /** 自訂對戰（沙盒）：開打前可以拖曳布陣 */

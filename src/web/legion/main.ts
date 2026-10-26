@@ -112,7 +112,7 @@ const none = (): Record<UnitKind, number> => ({ spear: 0, sword: 0, shield: 0, a
 const sbArmy: [Record<UnitKind, number>, Record<UnitKind, number>] = [{ ...none(), heavyCav: 1 }, { ...none(), spear: 1 }];
 // 指揮方式：藍方多一個「玩家」；現有 AI 沿用觀戰選單的名稱
 const aiOptions = [...blueSel.options].filter((o) => o.value !== 'player' && o.value !== 'random').map((o) => `<option value="${o.value}">${o.text}（指揮指定兵團）</option>`).join('');
-const basicOptions = '<option value="idle">待命不動（木樁，被打才還手）</option><option value="attack">直接進攻（全軍打最近的敵人）</option>';
+const basicOptions = '<option value="idle">待命（自己不動，你可以替它下指令）</option><option value="attack">直接進攻（全軍打最近的敵人）</option>';
 sbRoleSel[0].innerHTML = `<option value="player">玩家（你來指揮）</option>${basicOptions}${aiOptions}`;
 sbRoleSel[1].innerHTML = `${basicOptions}${aiOptions}`;
 
