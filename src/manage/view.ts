@@ -6,7 +6,7 @@ import type { ContentPack } from './content.ts';
 import type { StandingRow } from './league.ts';
 import { standings } from './league.ts';
 import { capacityLeft, rosterOf, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
-import type { Bet, FixtureId, GameState, IntelReport, Job, Phase, PlayerId, ScrimReport, Stage, TeamId } from './types.ts';
+import type { Bet, FixtureId, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, ScrimReport, SeasonResult, Stage, TeamId, Winner } from './types.ts';
 import { TOTAL_WEEKS } from './types.ts';
 
 export interface KnownPlayer {
@@ -29,6 +29,8 @@ export interface KnownFixture {
   away: TeamId;
   /** 打完才有 */
   score: { home: number; away: number } | null;
+  /** 各對位結果（公開戰績），打完才有 */
+  slots: { home: PlayerId; away: PlayerId; winner: Winner }[];
 }
 
 export interface KnownPreset {
@@ -69,6 +71,10 @@ export interface KnownView {
   presets: KnownPreset[];
   bets: Bet[];
   jobs: Job[];
+  /** 我方帳本與收件匣（玩家的戰隊才有收件匣） */
+  ledger: LedgerEntry[];
+  inbox: Message[];
+  seasonResult: SeasonResult | null;
 }
 
 export function knownView(state: GameState, content: ContentPack, teamId: TeamId): KnownView {
@@ -92,7 +98,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       capacityLeft: capacityLeft(state, content, team),
       weeklyFixedCost: fixed,
       weeklySponsor: sponsor,
-      runwayWeeks: burn <= 0 ? null : Math.floor(team.cash / burn),
+      runwayWeeks: burn <= 0 ? null : Math.max(0, Math.floor(team.cash / burn)),
     },
     players: state.players.map((p) => ({
       id: p.id,
@@ -113,6 +119,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       home: f.home,
       away: f.away,
       score: f.result ? { home: f.result.homeWins, away: f.result.awayWins } : null,
+      slots: f.result ? f.result.slots.map((x) => ({ home: x.a, away: x.b, winner: x.winner })) : [],
     })),
     odds: state.fixtures
       .filter((f) => f.week === state.week && f.result === null)
@@ -128,5 +135,8 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
     ),
     bets: state.bets.filter((b) => b.teamId === teamId).map((b) => ({ ...b })),
     jobs: state.jobs.filter((j) => j.teamId === teamId).map((j) => ({ ...j })),
+    ledger: team.ledger.map((e) => ({ ...e })),
+    inbox: teamId === state.humanTeamId ? state.inbox.map((m) => ({ ...m })) : [],
+    seasonResult: state.seasonResult ? { ranks: [...state.seasonResult.ranks], humanRank: state.seasonResult.humanRank } : null,
   };
 }

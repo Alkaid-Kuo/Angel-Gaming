@@ -1,0 +1,88 @@
+/* 經營頁（沿用 style.css 的色票與 card／table.data／pill 等元件） */
+html, body { height: auto; min-height: 100%; }
+#app { min-height: 100vh; }
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+.accent { color: var(--accent); }
+.mg-text { width: 150px; background: #0a0f18; color: var(--text); border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 8px; font: inherit; }
+button:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--line-strong); color: var(--muted); }
+button:disabled:hover { border-color: var(--line-strong); color: var(--muted); }
+
+/* 外框 */
+.mg-top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 16px; background: linear-gradient(180deg, #0f1622, #0a0f18); border-bottom: 1px solid var(--line); }
+.mg-brand { display: flex; flex-direction: column; line-height: 1.2; min-width: 110px; }
+.mg-brand b { font-size: 17px; letter-spacing: 0.04em; }
+.mg-pills { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
+.mg-top-act { display: flex; gap: 6px; align-items: center; }
+.mg-warnbar { background: rgba(127, 29, 29, 0.5); border-bottom: 1px solid var(--bad); color: #fecaca; padding: 6px 16px; font-size: 13px; }
+.mg-tabs { display: flex; gap: 4px; padding: 8px 16px 0; border-bottom: 1px solid var(--line); overflow-x: auto; background: var(--surface-solid); }
+.mg-tabs button { white-space: nowrap; flex: none; border-radius: 8px 8px 0 0; border-bottom: none; background: transparent; border-color: transparent; padding: 8px 16px; position: relative; }
+.mg-tabs button.active { background: var(--bg); border-color: var(--line-strong); color: var(--accent); }
+.mg-tabs button i { font-style: normal; font-size: 11px; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--accent-dim); color: var(--accent); }
+.mg-main { max-width: 1080px; margin: 0 auto; padding: 18px 16px 60px; }
+.mg-main .card { margin-bottom: 14px; }
+.mg-main h3 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); letter-spacing: 0.06em; }
+
+/* 數字卡 */
+.mg-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.mg-card { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px; border-radius: 14px; background: var(--surface-solid); border: 1px solid var(--line); }
+.mg-card .k { color: var(--muted); font-size: 12px; letter-spacing: 0.06em; }
+.mg-card .big { font-size: 26px; font-variant-numeric: tabular-nums; }
+.mg-card .s { color: var(--muted); font-size: 12px; }
+
+/* 版面小元件 */
+.mg-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; align-items: start; }
+.mg-vs { font-size: 18px; margin: 4px 0 12px; }
+.mg-tm.me { color: var(--accent); font-weight: 700; }
+.mg-todo { margin: 4px 0; padding-left: 20px; line-height: 1.8; }
+.mg-scroll { overflow-x: auto; }
+.mg-act { white-space: nowrap; text-align: right; }
+.mg-act button { padding: 4px 9px; font-size: 12px; margin-left: 4px; }
+.mg-badge { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--accent); color: var(--accent); white-space: nowrap; }
+.mg-badge.off { border-color: var(--line-strong); color: var(--muted); text-decoration: line-through; }
+.mg-bar { height: 8px; border-radius: 4px; background: #1f2937; margin: 6px 0; overflow: hidden; }
+.mg-bar i { display: block; height: 100%; background: var(--accent); }
+
+/* 陣容 */
+.mg-lineup { display: flex; gap: 12px; flex-wrap: wrap; }
+.mg-slotsel { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line-strong); min-width: 260px; }
+.mg-slotsel span { color: var(--accent); font-weight: 700; font-size: 12px; letter-spacing: 0.06em; }
+.mg-slotsel select { width: 100%; }
+
+/* 賽程 */
+table.data tr.me td { background: rgba(34, 211, 238, 0.08); }
+table.data tr.cut td { border-bottom: 2px dashed var(--line-strong); }
+.mg-fx { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); margin-bottom: 8px; background: var(--surface-2); }
+.mg-fx.me { border-color: var(--accent); }
+.mg-tag { display: inline-block; font-size: 11px; color: var(--muted); border: 1px solid var(--line-strong); border-radius: 999px; padding: 0 8px; margin-right: 6px; }
+.mg-slots { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 12px; color: #cbd5e1; }
+.mg-slot.hw::before, .mg-slot.aw::before { content: "● "; }
+.mg-slot.hw::before { color: #60a5fa; }
+.mg-slot.aw::before { color: #f87171; }
+.mg-ranks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mg-ranks li { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 8px; background: var(--surface-2); border-left: 4px solid var(--line-strong); }
+.mg-ranks li.me { border-left-color: var(--accent); background: rgba(34, 211, 238, 0.1); }
+.mg-ranks .rank { font-weight: 700; width: 18px; color: var(--muted); }
+.mg-ranks li:first-child .rank { color: var(--gold); }
+
+/* 訊息 */
+.mg-msg { padding: 6px 10px; border-left: 3px solid var(--line-strong); margin: 4px 0; background: var(--surface-2); border-radius: 0 6px 6px 0; line-height: 1.5; }
+.mg-msg .w { color: var(--muted); font-size: 12px; margin-right: 10px; }
+.mg-msg.finance { border-left-color: var(--gold); }
+.mg-msg.report { border-left-color: var(--accent); }
+.mg-msg.result { border-left-color: #a78bfa; }
+.mg-msg.system { border-left-color: var(--good); }
+
+/* 對話框與提示 */
+.mg-overlay { position: fixed; inset: 0; z-index: 30; background: rgba(2, 6, 12, 0.72); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.mg-dialog { background: var(--surface-solid); border: 1px solid var(--line-strong); border-radius: 16px; padding: 20px 24px; width: min(640px, 100%); max-height: 88vh; overflow-y: auto; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6); }
+.mg-dialog h2 { margin: 0 0 8px; font-size: 24px; letter-spacing: 0.04em; }
+.mg-dialog .row { justify-content: flex-end; }
+.mg-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 40; background: rgba(8, 47, 73, 0.96); border: 1px solid var(--accent); color: #fff; border-radius: 999px; padding: 8px 18px; font-size: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); pointer-events: none; }
+.mg-toast.bad { background: rgba(69, 10, 10, 0.96); border-color: var(--bad); }
+
+@media (max-width: 640px) {
+  .mg-top { gap: 8px; padding: 8px 10px; }
+  .mg-main { padding: 12px 10px 48px; }
+  .mg-card .big { font-size: 22px; }
+}

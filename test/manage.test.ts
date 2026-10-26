@@ -260,6 +260,16 @@ describe('資訊分層', () => {
     walk(knownView(s, content, me.id), 'view');
     expect(knownView(s, content, me.id).presets).toHaveLength(1);
   });
+
+  it('視圖：資金跑道不會是負數；別隊的視圖看不到玩家的信箱', () => {
+    const s = newGame(52, content);
+    humanTeam(s).cash = -50;
+    const v = knownView(s, content, s.humanTeamId);
+    expect(v.me.runwayWeeks === null || v.me.runwayWeeks >= 0).toBe(true);
+    expect(v.inbox.length).toBeGreaterThan(0);
+    const other = s.teams.find((t) => !t.human) as GameState['teams'][number];
+    expect(knownView(s, content, other.id).inbox).toHaveLength(0);
+  });
 });
 
 describe('自動玩家與平衡下限', () => {
