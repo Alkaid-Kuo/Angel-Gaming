@@ -7,7 +7,7 @@ import { LegionScreen } from './ui.ts';
 const setupEl = document.getElementById('setup')!;
 const gameEl = document.getElementById('game')!;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
-const BOT_KEYS: BotKey[] = ['push', 'ambush', 'ranged', 'commander', 'marshal', 'general2', 'marshal2', 'baseline168'];
+const BOT_KEYS: BotKey[] = ['push', 'ambush', 'ranged', 'commander', 'marshal', 'general2', 'marshal2', 'baseline168', 'baseline114'];
 
 let worker: Worker | null = null;
 let screen: LegionScreen | null = null;

@@ -2,6 +2,7 @@
 // 軍團戰觀戰 Worker：執行所選 AI 的比賽、產生解說，依播放速度把每個 tick 的畫面資料送回主執行緒。
 import ambushSource from '../../../bots/legion-ambush.js?raw';
 import baselineV168Source from '../../../bots/legion-baseline-v1.68.js?raw';
+import baselineV114Source from '../../../bots/legion-baseline-v1.114.js?raw';
 import commanderSource from '../../../bots/legion-commander.js?raw';
 import generalV2Source from '../../../bots/legion-general-v2.js?raw';
 import marshalSource from '../../../bots/legion-marshal.js?raw';
@@ -34,6 +35,7 @@ const compiled: Record<BotKey, CompiledBot> = {
   general2: compileBot(generalV2Source, 'legion-general-v2.js'),
   marshal2: compileBot(marshalV2Source, 'legion-marshal-v2.js'),
   baseline168: compileBot(baselineV168Source, 'legion-baseline-v1.68.js'),
+  baseline114: compileBot(baselineV114Source, 'legion-baseline-v1.114.js'),
 };
 const SIDES = ['藍方', '紅方'];
 const COLORS = ['#3b82f6', '#ef4444'];
