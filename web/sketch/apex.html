@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設計稿 E：動態戰隊終端</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<style>
+/* 配色：墨黑底、白、天使金為唯一主色，冰藍只用在細線與數據 */
+:root {
+  --ink: #0b0e14; --ink2: #131823; --ink3: #1b2230;
+  --white: #eef2f6; --paper: #e9edf2; --grey: #8b95a4; --grey2: #5b6574;
+  --gold: #f0b54a; --gold2: #ffd98a; --gold3: #b9832a;
+  --ice: #7fd8ff; --red: #ff5d5d;
+  --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  --en: "Barlow Condensed", "Noto Sans TC", sans-serif;
+  --mono: "Share Tech Mono", monospace;
+  --mx: 0; --my: 0;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
+#vp { position: fixed; inset: 0; overflow: hidden; }
+#stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; overflow: hidden; color: var(--white); font-family: var(--zh); transform-origin: center; transform: translate(-50%, -50%); }
+/* 截圖模式（?still）：略過進場動畫，直接顯示完成狀態 */
+.still .hero-in, .still .lens, .still .orb, .still .plate-in, .still .tile, .still .ticker, .still .top { animation: none !important; }
+
+/* ───── 背景：廣角場館 ───── */
+.bg { position: absolute; inset: 0; background: radial-gradient(1300px 900px at 60% 42%, #1c2535 0%, #0e131c 52%, #07090d 100%); }
+.bigword { position: absolute; left: -60px; top: 60px; font-family: var(--en); font-weight: 800; font-style: italic; font-size: 560px; line-height: 0.8; letter-spacing: -0.02em; color: transparent; -webkit-text-stroke: 2px rgba(255, 255, 255, 0.045); transform: translate(calc(var(--mx) * -14px), calc(var(--my) * -8px)) rotate(-7deg); white-space: nowrap; }
+.floor { position: absolute; left: -30%; width: 160%; top: 640px; height: 1200px; transform-origin: 50% 0; transform: translateX(calc(var(--mx) * -40px)) perspective(620px) rotateX(74deg); }
+.floor-grid { position: absolute; inset: 0; background: linear-gradient(rgba(255, 255, 255, 0.07) 2px, transparent 2px) 0 0 / 120px 120px, linear-gradient(90deg, rgba(255, 255, 255, 0.07) 2px, transparent 2px) 0 0 / 120px 120px; -webkit-mask-image: linear-gradient(transparent, #000 25%, #000 60%, transparent); }
+.floor-ring { position: absolute; left: calc(50% - 760px); top: 40px; width: 1000px; height: 1000px; border-radius: 50%; border: 4px solid rgba(240, 181, 74, 0.28); box-shadow: 0 0 60px rgba(240, 181, 74, 0.15), inset 0 0 60px rgba(240, 181, 74, 0.1); animation: spin 60s linear infinite; }
+.floor-ring::before { content: ""; position: absolute; inset: 70px; border-radius: 50%; border: 3px dashed rgba(255, 255, 255, 0.14); }
+.floor-ring::after { content: ""; position: absolute; inset: 180px; border-radius: 50%; border: 2px solid rgba(127, 216, 255, 0.16); }
+.beams i { position: absolute; top: -100px; width: 220px; height: 1000px; background: linear-gradient(180deg, rgba(255, 236, 200, 0.1), transparent 75%); transform: skewX(-18deg); animation: beam 7s ease-in-out infinite; }
+.beams i:nth-child(1) { left: 250px; } .beams i:nth-child(2) { left: 560px; width: 120px; animation-delay: -2.4s; } .beams i:nth-child(3) { left: 1260px; width: 320px; opacity: 0.6; animation-delay: -4.8s; }
+@keyframes beam { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+#dust { position: absolute; inset: 0; pointer-events: none; }
+.vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(1400px 900px at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.75)); }
+.frame-mark { position: absolute; width: 34px; height: 34px; border: 2px solid rgba(255, 255, 255, 0.35); }
+.micro { position: absolute; font-family: var(--mono); font-size: 13px; letter-spacing: 0.22em; color: rgba(255, 255, 255, 0.32); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spinr { to { transform: rotate(-360deg); } }
+
+/* ───── 主角：圓形鏡頭與環 ───── */
+.hero { position: absolute; left: 120px; top: 150px; width: 800px; height: 800px; transform: translate(calc(var(--mx) * -26px), calc(var(--my) * -16px)); }
+.hero-in { position: absolute; inset: 0; animation: heroIn 1s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes heroIn { from { opacity: 0; transform: scale(0.82) rotate(-25deg); } }
+.rings { position: absolute; inset: 0; overflow: visible; }
+.rings .r-spin { transform-box: view-box; transform-origin: 400px 400px; animation: spin 90s linear infinite; }
+.rings .r-spinr { transform-box: view-box; transform-origin: 400px 400px; animation: spinr 140s linear infinite; }
+.rings .r-fast { transform-box: view-box; transform-origin: 400px 400px; animation: spin 18s linear infinite; }
+.rings text { font-family: var(--mono); font-size: 17px; letter-spacing: 7px; fill: rgba(255, 255, 255, 0.4); }
+.lens { position: absolute; left: 160px; top: 160px; width: 480px; height: 480px; border-radius: 50%; overflow: hidden; background: #1a2130;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 0 14px rgba(240, 181, 74, 0.14), 0 0 0 15px rgba(240, 181, 74, 0.5), 0 40px 90px rgba(0, 0, 0, 0.7);
+  animation: lensIn 0.9s 0.25s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes lensIn { from { clip-path: circle(0% at 50% 50%); } to { clip-path: circle(50% at 50% 50%); } }
+.lens .avatar { position: absolute; left: -20px; top: 10px; width: 520px; height: 520px; filter: grayscale(1) contrast(1.2) brightness(1.05); }
+.lens::after { content: ""; position: absolute; inset: 0; background: linear-gradient(165deg, #f3d29a 0%, #b98a45 45%, #1b2230 100%); mix-blend-mode: color; opacity: 0.85; }
+.lens::before { content: ""; position: absolute; inset: 0; z-index: 2; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 2px, transparent 2px 5px), radial-gradient(circle at 50% 40%, transparent 55%, rgba(11, 14, 20, 0.65)); }
+.scan { position: absolute; left: 0; right: 0; height: 90px; z-index: 3; background: linear-gradient(180deg, transparent, rgba(255, 230, 170, 0.28), transparent); animation: scan 4.2s ease-in-out infinite; }
+@keyframes scan { 0% { top: -90px; } 60%, 100% { top: 480px; } }
+.orb { position: absolute; width: 104px; height: 104px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(11, 14, 20, 0.86); border: 2px solid var(--gold); box-shadow: 0 0 24px rgba(240, 181, 74, 0.35); animation: pop 0.5s 0.9s both; }
+.orb b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 36px; line-height: 1; color: var(--gold2); }
+.orb span { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.orb.ice { border-color: var(--ice); box-shadow: 0 0 24px rgba(127, 216, 255, 0.3); }
+.orb.ice b { color: var(--white); }
+@keyframes pop { from { opacity: 0; transform: scale(0.4); } }
+
+/* 名牌 */
+.plate { position: absolute; left: 96px; top: 742px; transform: translate(calc(var(--mx) * -40px), calc(var(--my) * -20px)); }
+.plate-in { animation: plateIn 0.7s 0.45s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes plateIn { from { opacity: 0; transform: translateX(-120px) skewX(-12deg); } }
+.tags { display: flex; gap: 6px; }
+.tags span { padding: 5px 18px; font-weight: 900; font-size: 17px; letter-spacing: 0.18em; transform: skewX(-14deg); }
+.tags span > i { display: inline-block; font-style: normal; transform: skewX(14deg); }
+.tags .g { background: var(--gold); color: var(--ink); }
+.tags .w { background: var(--white); color: var(--ink); }
+.tags .o { border: 2px solid var(--gold); color: var(--gold2); padding: 3px 16px; }
+.plate h1 { margin: 4px 0 0; font-size: 112px; line-height: 1; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); text-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 0 40px rgba(240, 181, 74, 0.25); }
+.roman { font-family: var(--en); font-style: italic; font-weight: 700; font-size: 28px; letter-spacing: 0.45em; color: var(--gold); margin-top: 2px; }
+.stats { display: flex; align-items: flex-end; gap: 26px; margin-top: 10px; }
+.stats div { display: flex; align-items: baseline; gap: 8px; }
+.stats b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 50px; line-height: 1; }
+.stats span { font-family: var(--mono); font-size: 13px; letter-spacing: 0.2em; color: var(--grey); }
+.stats i { width: 2px; height: 40px; background: rgba(255, 255, 255, 0.25); transform: skewX(-20deg); }
+
+/* ───── 頂列 ───── */
+.top { position: absolute; left: 0; right: 0; top: 0; height: 120px; display: flex; align-items: center; padding: 0 56px; gap: 22px; background: linear-gradient(180deg, rgba(5, 7, 10, 0.85), transparent); animation: topIn 0.6s both; }
+@keyframes topIn { from { opacity: 0; transform: translateY(-50px); } }
+.team { display: flex; align-items: center; gap: 16px; }
+.team .crest { filter: drop-shadow(0 0 16px rgba(240, 181, 74, 0.45)); }
+.team b { display: block; font-size: 38px; font-weight: 900; letter-spacing: 0.14em; line-height: 1.1; }
+.team small { font-family: var(--mono); font-size: 13px; letter-spacing: 0.28em; color: var(--grey); }
+.slash { width: 3px; height: 60px; background: linear-gradient(var(--gold), transparent); transform: skewX(-22deg); margin: 0 6px; }
+.wk { display: flex; align-items: baseline; gap: 10px; }
+.wk b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 60px; line-height: 1; color: var(--gold); }
+.wk span { font-family: var(--en); font-weight: 600; font-size: 22px; letter-spacing: 0.2em; color: var(--grey); }
+.res { margin-left: auto; display: flex; align-items: center; gap: 30px; }
+.funds { text-align: right; }
+.funds .lb { font-family: var(--mono); font-size: 12px; letter-spacing: 0.3em; color: var(--grey); }
+.funds b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 56px; line-height: 0.9; }
+.funds b small { font-family: var(--zh); font-style: normal; font-size: 18px; color: var(--grey); margin-left: 4px; }
+.funds .dl { font-family: var(--mono); font-size: 13px; color: var(--red); letter-spacing: 0.1em; }
+.gauge { position: relative; width: 74px; height: 74px; }
+.gauge svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.gauge b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 28px; }
+.gauge + .gl { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: var(--grey); line-height: 1.5; }
+.gl b { display: block; font-family: var(--zh); font-size: 16px; letter-spacing: 0.1em; color: var(--white); }
+.icon-btn { position: relative; width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; border: 2px solid rgba(255, 255, 255, 0.25); color: var(--white); }
+.icon-btn em { position: absolute; right: -4px; top: -4px; min-width: 24px; height: 24px; border-radius: 12px; background: var(--red); font-style: normal; font-family: var(--en); font-weight: 700; font-size: 16px; display: grid; place-items: center; }
+
+/* ───── 3D 選單 ───── */
+.deck-wrap { position: absolute; left: 958px; top: 168px; width: 800px; height: 780px; perspective: 1700px; perspective-origin: 20% 45%; }
+.deck-float { width: 100%; height: 100%; transform-style: preserve-3d; animation: float 7s ease-in-out infinite; }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+.deck { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(6, 1fr); grid-template-rows: 300px 142px 142px 104px; gap: 14px; transform-style: preserve-3d;
+  transform: rotateY(calc(-19deg + var(--mx) * -5deg)) rotateX(calc(5deg + var(--my) * 4deg)) rotateZ(-1.5deg); transform-origin: 30% 50%; }
+.tile { position: relative; overflow: hidden; transform-style: preserve-3d; transition: transform 0.25s cubic-bezier(.2, .8, .2, 1), box-shadow 0.25s; animation: tileIn 0.7s cubic-bezier(.2, .8, .2, 1) both; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.45); }
+.tile:hover { transform: translateZ(46px); box-shadow: 0 40px 70px rgba(0, 0, 0, 0.6); }
+.tile::after { content: ""; position: absolute; top: 0; bottom: 0; left: -40%; width: 30%; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent); transform: skewX(-18deg); transition: left 0.6s; pointer-events: none; }
+.tile:hover::after { left: 130%; }
+@keyframes tileIn { from { opacity: 0; transform: translateX(220px) translateZ(-260px) rotateY(38deg); } }
+.s6 { grid-column: span 6; } .s3 { grid-column: span 3; } .s2 { grid-column: span 2; }
+.w { background: var(--paper); color: var(--ink); padding: 18px 22px; display: flex; flex-direction: column; justify-content: space-between; }
+.w .hd { display: flex; justify-content: space-between; align-items: center; }
+.w .hd .ic { color: var(--gold3); }
+.w .st { font-family: var(--mono); font-size: 14px; letter-spacing: 0.12em; color: var(--grey2); }
+.w .zh { font-size: 46px; font-weight: 900; letter-spacing: 0.08em; line-height: 1; transform: skewX(-6deg); }
+.w .en { font-family: var(--en); font-weight: 600; font-size: 19px; letter-spacing: 0.38em; color: var(--grey2); margin-top: 6px; }
+.w .no { position: absolute; right: 14px; bottom: -22px; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 150px; line-height: 1; color: rgba(11, 14, 20, 0.06); }
+.w::before { content: ""; position: absolute; left: 0; top: 0; width: 6px; height: 100%; background: var(--gold); transform: scaleY(0.35); transform-origin: top; transition: transform 0.25s; }
+.w:hover::before { transform: scaleY(1); }
+.d { background: linear-gradient(150deg, rgba(36, 44, 60, 0.95), rgba(14, 18, 26, 0.95)); border: 1px solid rgba(255, 255, 255, 0.12); padding: 16px 22px; display: flex; align-items: center; gap: 18px; }
+.d .zh { font-size: 34px; font-weight: 900; letter-spacing: 0.1em; transform: skewX(-6deg); }
+.d .en { font-family: var(--en); font-weight: 600; font-size: 16px; letter-spacing: 0.35em; color: var(--grey); }
+.d .v { margin-left: auto; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 40px; }
+.d .v.bad { color: var(--red); }
+.d .badge { margin-left: auto; padding: 4px 14px; background: var(--red); font-family: var(--en); font-weight: 700; font-size: 20px; letter-spacing: 0.1em; transform: skewX(-12deg); }
+/* 比賽日大磚 */
+.mday { display: grid; grid-template-columns: 262px minmax(0, 1fr) 206px; padding: 24px 0 24px 30px; color: var(--white);
+  background: linear-gradient(115deg, rgba(240, 181, 74, 0.22), rgba(240, 181, 74, 0) 38%), repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 12px), linear-gradient(150deg, #222a39, #0d1118); border: 1px solid rgba(240, 181, 74, 0.5); }
+.mday::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--gold); }
+.mday .lb { font-family: var(--mono); font-size: 14px; letter-spacing: 0.28em; color: var(--gold2); }
+.mday h2 { margin: 6px 0 0; font-size: 76px; line-height: 1; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); }
+.mday .sub { font-size: 18px; color: var(--grey); letter-spacing: 0.2em; margin-top: 8px; }
+.lu { display: flex; gap: 12px; margin-top: 22px; }
+.lu div { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; color: var(--grey); letter-spacing: 0.15em; }
+.cp { width: 62px; height: 62px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px var(--white), 0 0 0 5px rgba(240, 181, 74, 0.5); }
+.cp .avatar { width: 62px; height: 62px; display: block; filter: grayscale(0.4); }
+.cp.q { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25); border: 2px dashed rgba(255, 93, 93, 0.6); display: grid; place-items: center; font-family: var(--en); font-weight: 800; font-size: 28px; color: rgba(255, 255, 255, 0.4); background: rgba(255, 93, 93, 0.06); }
+.lu .sep { justify-content: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 22px; color: var(--gold); padding: 0 2px; }
+.vs { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.vs .t { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.vs .t .cc { width: 104px; height: 104px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, #2a3346, #10141c); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8), 0 0 0 9px rgba(240, 181, 74, 0.18), 0 20px 40px rgba(0, 0, 0, 0.5); }
+.vs .t.opp .cc { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5), 0 0 0 9px rgba(255, 93, 93, 0.16), 0 20px 40px rgba(0, 0, 0, 0.5); }
+.vs .t b { font-size: 18px; white-space: nowrap; letter-spacing: 0.12em; }
+.vs .x { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.vs .x b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 56px; line-height: 0.9; color: var(--gold); text-shadow: 0 0 30px rgba(240, 181, 74, 0.5); }
+.vs .x span { font-family: var(--mono); font-size: 13px; letter-spacing: 0.2em; padding: 3px 10px; border: 1px solid rgba(240, 181, 74, 0.5); color: var(--gold2); }
+.go { position: relative; display: grid; place-items: center; }
+.go svg { position: absolute; width: 206px; height: 206px; }
+.go .seg { transform-box: view-box; transform-origin: 115px 115px; transform: rotate(-90deg); }
+.go .rot { transform-box: view-box; transform-origin: 115px 115px; animation: spin 12s linear infinite; }
+.go .now { animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: 0.25; } }
+.go .btn { position: relative; width: 128px; height: 128px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 40% 30%, var(--gold2), var(--gold) 45%, var(--gold3)); color: var(--ink); box-shadow: 0 0 0 4px rgba(11, 14, 20, 0.9), 0 0 40px rgba(240, 181, 74, 0.6); animation: pulse 2.4s ease-in-out infinite; }
+.go .btn b { font-size: 38px; font-weight: 900; letter-spacing: 0.12em; line-height: 1; }
+.go .btn span { font-family: var(--en); font-weight: 700; font-size: 15px; letter-spacing: 0.35em; margin-top: 4px; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(11, 14, 20, 0.9), 0 0 70px rgba(240, 181, 74, 0.95); } }
+.go .wkl { position: absolute; bottom: 4px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: var(--grey); }
+
+/* ───── 底部跑馬燈 ───── */
+.ticker { position: absolute; left: -30px; right: -30px; bottom: 22px; height: 44px; display: flex; align-items: center; background: rgba(5, 7, 10, 0.75); border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.1); transform: skewX(-14deg); overflow: hidden; animation: tickIn 0.6s 0.6s both; }
+@keyframes tickIn { from { opacity: 0; transform: skewX(-14deg) translateY(40px); } }
+.ticker .lv { flex: none; height: 100%; padding: 0 30px 0 70px; display: flex; align-items: center; gap: 10px; background: var(--gold); color: var(--ink); font-family: var(--en); font-weight: 800; font-size: 22px; letter-spacing: 0.25em; }
+.ticker .lv i { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: blink 1s infinite; }
+.ticker .tx { display: flex; gap: 60px; padding-left: 40px; white-space: nowrap; font-size: 17px; letter-spacing: 0.08em; color: #cfd6e0; transform: skewX(14deg); animation: tick 40s linear infinite; }
+.ticker .tx span::before { content: "◆"; color: var(--gold); margin-right: 14px; font-size: 12px; }
+@keyframes tick { from { transform: skewX(14deg) translateX(0); } to { transform: skewX(14deg) translateX(-50%); } }
+.note { position: absolute; left: 760px; top: 100px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: rgba(255, 255, 255, 0.3); }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage">
+  <div class="bg"></div>
+  <div class="bigword">ANGEL</div>
+  <div class="floor"><div class="floor-grid"></div><div class="floor-ring"></div></div>
+  <div class="beams"><i></i><i></i><i></i></div>
+  <canvas id="dust" width="1920" height="1080"></canvas>
+  <div class="vignette"></div>
+
+  <!-- 主角鏡頭 -->
+  <section class="hero"><div class="hero-in">
+    <svg class="rings" viewBox="0 0 800 800" width="800" height="800">
+      <defs><path id="tp" d="M 400 8 A 392 392 0 1 1 399.99 8"/>
+        <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#b9832a"/></linearGradient></defs>
+      <g class="r-spinr"><text><textPath href="#tp">ACE · 謝子睿 · VANGUARD · 強攻流 · RATING 1518 · GOLD v3 · ANGEL GAMING · NEW LEAGUE · SEASON 01 · ACE · 謝子睿 · VANGUARD ·</textPath></text></g>
+      <g class="r-spin"><circle cx="400" cy="400" r="360" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="12" stroke-dasharray="1.6 5.94"/>
+        <circle cx="400" cy="400" r="360" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="22" stroke-dasharray="3 185.5"/></g>
+      <circle cx="400" cy="400" r="330" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="10"/>
+      <circle cx="400" cy="400" r="330" fill="none" stroke="url(#gold)" stroke-width="10" stroke-linecap="round" stroke-dasharray="880 2073" transform="rotate(-90 400 400)"/>
+      <g class="r-fast"><circle cx="400" cy="400" r="300" fill="none" stroke="rgba(127,216,255,.55)" stroke-width="2" stroke-dasharray="60 120 14 80 200 400 30 980"/></g>
+      <circle cx="400" cy="400" r="286" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="1"/>
+      <path d="M 400 40 L 400 64 M 400 736 L 400 760 M 40 400 L 64 400 M 736 400 L 760 400" stroke="var(--gold)" stroke-width="3"/>
+    </svg>
+    <div class="lens"><span data-avatar="xzr" data-jersey="#3a4458" data-size="520"></span><i class="scan"></i></div>
+    <div class="orb" style="left:646px;top:132px"><b>1518</b><span>RATING</span></div>
+    <div class="orb ice" style="left:44px;top:500px"><b>v3</b><span>GOLD</span></div>
+  </div></section>
+
+  <section class="plate"><div class="plate-in">
+    <div class="tags"><span class="g"><i>先鋒 · VANGUARD</i></span><span class="w"><i>強攻流</i></span><span class="o"><i>本週焦點</i></span></div>
+    <h1>謝子睿</h1>
+    <div class="roman">XIE ZI-RUI</div>
+    <div class="stats"><div><b>1518</b><span>RATING</span></div><i></i><div><b>2-1</b><span>RECORD</span></div><i></i><div><b>6.1</b><span>萬／週</span></div></div>
+  </div></section>
+
+  <!-- 頂列 -->
+  <header class="top">
+    <div class="team"><span data-crest="天使戰隊" data-primary="#eef2f6" data-secondary="#f0b54a" data-size="68"></span><div><b>天使戰隊</b><small>ANGEL GAMING // 新創聯賽</small></div></div>
+    <div class="slash"></div>
+    <div class="wk"><b>W04</b><span>/ 09 · REGULAR</span></div>
+    <div class="res">
+      <div class="funds"><div class="lb">FUNDS</div><b>104.8<small>萬</small></b><div class="dl">▼ 14.6 / WEEK</div></div>
+      <div class="gauge"><svg viewBox="0 0 74 74"><circle cx="37" cy="37" r="31" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="37" cy="37" r="31" fill="none" stroke="var(--ice)" stroke-width="6" stroke-linecap="round" stroke-dasharray="65 195"/></svg><b>10</b></div>
+      <div class="gl"><b>名氣</b>REP</div>
+      <div class="gauge"><svg viewBox="0 0 74 74"><circle cx="37" cy="37" r="31" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="37" cy="37" r="31" fill="none" stroke="var(--gold)" stroke-width="6" stroke-linecap="round" stroke-dasharray="68 195"/></svg><b>7</b></div>
+      <div class="gl"><b>資金跑道</b>WEEKS</div>
+      <div class="icon-btn"><span data-icon="mail" data-size="24"></span><em>3</em></div>
+      <div class="icon-btn"><span data-icon="menu" data-size="24"></span></div>
+    </div>
+  </header>
+  <div class="note">DESIGN E // 動態戰隊終端（設計稿）</div>
+
+  <!-- 3D 選單 -->
+  <section class="deck-wrap"><div class="deck-float"><div class="deck">
+    <div class="tile s6 mday" style="animation-delay:.25s">
+      <div>
+        <div class="lb">MATCH DAY // W04</div>
+        <h2>比賽日</h2>
+        <div class="sub">對手名單比賽日才公開</div>
+        <div class="lu">
+          <div><span class="cp"><span data-avatar="xzr" data-jersey="#3a4458" data-size="62"></span></span>先鋒</div>
+          <div><span class="cp"><span data-avatar="qmz2" data-jersey="#3a4458" data-size="62"></span></span>中堅</div>
+          <div><span class="cp"><span data-avatar="xce" data-jersey="#3a4458" data-size="62"></span></span>大將</div>
+        </div>
+      </div>
+      <div class="vs">
+        <div class="t"><span class="cc"><span data-crest="天使戰隊" data-primary="#eef2f6" data-secondary="#f0b54a" data-size="70"></span></span><b>天使戰隊</b></div>
+        <div class="x"><b>VS</b><span>ODDS ×2.00</span></div>
+        <div class="t opp"><span class="cc"><span data-crest="暗影工作室" data-size="70"></span></span><b>暗影工作室</b></div>
+      </div>
+      <div class="go">
+        <svg viewBox="0 0 230 230">
+          <g class="seg">
+            <circle cx="115" cy="115" r="106" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="7" stroke-dasharray="70 4"/>
+            <circle cx="115" cy="115" r="106" fill="none" stroke="#f0b54a" stroke-width="7" stroke-dasharray="70 4 70 4 70 4 0 2000"/>
+            <circle class="now" cx="115" cy="115" r="106" fill="none" stroke="#ffd98a" stroke-width="9" stroke-dasharray="0 222 70 2000"/>
+          </g>
+          <g class="rot"><circle cx="115" cy="115" r="92" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1.5" stroke-dasharray="3 9"/></g>
+        </svg>
+        <div class="btn"><b>開戰</b><span>START</span></div>
+        <span class="wkl">WEEK 4 / 9</span>
+      </div>
+    </div>
+    <div class="tile s3 w" style="animation-delay:.33s"><div class="hd"><span data-icon="users" data-size="32"></span><span class="st">4 / 5 · 名單已排</span></div><div><div class="zh">戰隊</div><div class="en">SQUAD</div></div><span class="no">01</span></div>
+    <div class="tile s3 w" style="animation-delay:.39s"><div class="hd"><span data-icon="contract" data-size="32"></span><span class="st">3 FREE AGENTS</span></div><div><div class="zh">轉會市場</div><div class="en">RECRUIT</div></div><span class="no">02</span></div>
+    <div class="tile s2 w" style="animation-delay:.45s"><div class="hd"><span data-icon="target" data-size="30"></span><span class="st">200 / 200</span></div><div><div class="zh">訓練</div><div class="en">TRAINING</div></div><span class="no">03</span></div>
+    <div class="tile s2 w" style="animation-delay:.51s"><div class="hd"><span data-icon="trophy" data-size="30"></span><span class="st">#7 · 3 PTS</span></div><div><div class="zh">聯賽</div><div class="en">LEAGUE</div></div><span class="no">04</span></div>
+    <div class="tile s2 w" style="animation-delay:.57s"><div class="hd"><span data-icon="ticket" data-size="30"></span><span class="st">4 OPEN</span></div><div><div class="zh">賭盤</div><div class="en">BETTING</div></div><span class="no">05</span></div>
+    <div class="tile s3 d" style="animation-delay:.63s"><span data-icon="chart" data-size="30"></span><div><div class="zh">財務</div><div class="en">FINANCE</div></div><span class="v bad">−14.6</span></div>
+    <div class="tile s3 d" style="animation-delay:.69s"><span data-icon="mail" data-size="30"></span><div><div class="zh">信件</div><div class="en">MAIL</div></div><span class="badge">3 NEW</span></div>
+  </div></div></section>
+
+  <footer class="ticker"><span class="lv"><i></i>LIVE</span><div class="tx">
+    <span>鐵壁電競 3 : 0 星河戰隊</span><span>球探回報：賴星宇 真實強度約 1561，比評分高 46</span><span>贊助商來電：名氣 10，每週贊助 8 萬</span><span>暗影工作室 大將換人</span>
+    <span>鐵壁電競 3 : 0 星河戰隊</span><span>球探回報：賴星宇 真實強度約 1561，比評分高 46</span><span>贊助商來電：名氣 10，每週贊助 8 萬</span><span>暗影工作室 大將換人</span>
+  </div></footer>
+
+  <div class="frame-mark" style="left:24px;top:24px;border-right:none;border-bottom:none"></div>
+  <div class="frame-mark" style="right:24px;bottom:84px;border-left:none;border-top:none"></div>
+  <div class="micro" style="left:30px;top:520px;writing-mode:vertical-rl">SYS.TERMINAL // AG-01</div>
+  <div class="micro" style="right:30px;top:980px">LAT 25.03 / LON 121.56</div>
+</div></div>
+<script type="module">
+  const stage = document.getElementById('stage');
+  // 以 1920×1080 設計，等比縮放到視窗大小
+  const fit = () => { stage.style.transform = `translate(-50%, -50%) scale(${Math.min(innerWidth / 1920, innerHeight / 1080)})`; };
+  addEventListener('resize', fit); fit();
+  const still = location.search.includes('still');
+  if (still) stage.classList.add('still');
+  // 滑鼠視差：各層以不同深度跟著游標移動，選單跟著轉角度
+  let tx = 0, ty = 0, cx = 0, cy = 0;
+  addEventListener('mousemove', (e) => { tx = (e.clientX / innerWidth) * 2 - 1; ty = (e.clientY / innerHeight) * 2 - 1; });
+  // 浮塵粒子
+  const cv = document.getElementById('dust'), g = cv.getContext('2d');
+  const ps = Array.from({ length: 70 }, (_, i) => ({ x: (i * 977) % 1920, y: (i * 571) % 1080, r: 0.6 + ((i * 37) % 10) / 6, v: 0.15 + ((i * 13) % 10) / 30, gold: i % 3 === 0 }));
+  const tick = () => {
+    cx += (tx - cx) * 0.06; cy += (ty - cy) * 0.06;
+    stage.style.setProperty('--mx', cx.toFixed(4)); stage.style.setProperty('--my', cy.toFixed(4));
+    g.clearRect(0, 0, 1920, 1080);
+    for (const p of ps) {
+      p.y -= p.v; p.x += Math.sin(p.y / 90) * 0.25;
+      if (p.y < -10) p.y = 1090;
+      g.fillStyle = p.gold ? 'rgba(255,217,138,.55)' : 'rgba(220,235,255,.35)';
+      g.beginPath(); g.arc(p.x - cx * 20, p.y - cy * 10, p.r, 0, Math.PI * 2); g.fill();
+    }
+    if (!still) requestAnimationFrame(tick);
+  };
+  tick();
+</script>
+<script type="module" src="../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

@@ -22,6 +22,7 @@ a.card:hover { border-color: #ffb800; }
 <h1>經營介面風格草圖</h1>
 <p>同一個「基地」畫面、同一組假資料，用四種風格各畫一張。只是靜態草圖（1440×900），不能操作。說明見 docs/2026-10-27_經營介面風格草圖.md。</p>
 <div class="grid">
+  <a class="card" href="./apex.html" style="grid-column:1/-1;border-color:#f0b54a"><div class="thumb" style="aspect-ratio:1920/1080"><iframe src="./apex.html?still" loading="lazy" style="width:1920px;height:1080px"></iframe></div><div class="info"><b>E　動態戰隊終端（主推）</b><span>墨黑＋白＋天使金。3D 傾斜選單磚、圓形鏡頭與旋轉環、廣角透視地板、滑鼠視差、進場動畫。點進去全螢幕看動態效果。</span></div></a>
   <a class="card" href="./cyber.html"><div class="thumb"><iframe src="./cyber.html" loading="lazy"></iframe></div><div class="info"><b>A　霓虹賽博</b><span>黑底、黃青洋紅霓虹、警示膠帶、故障字、雙色調頭像、全像卡框。</span></div></a>
   <a class="card" href="./pixel.html"><div class="thumb"><iframe src="./pixel.html" loading="lazy"></iframe></div><div class="info"><b>B　霓虹像素</b><span>繁中像素字（俐方體 11 號）、像素視窗與游標選單、RPG 對話框、CRT 掃描線。</span></div></a>
   <a class="card" href="./ark.html"><div class="thumb"><iframe src="./ark.html" loading="lazy"></iframe></div><div class="info"><b>C　工業極簡（類明日方舟）</b><span>炭灰底、白色磚塊選單、中英雙語標籤、大面積角色立繪、細線與技術註記。</span></div></a>
@@ -29,7 +30,7 @@ a.card:hover { border-color: #ffb800; }
 </div>
 <script>
   // 依縮圖寬度縮放 iframe
-  const fit = () => document.querySelectorAll('.thumb').forEach((t) => { t.querySelector('iframe').style.transform = `scale(${t.clientWidth / 1440})`; });
+  const fit = () => document.querySelectorAll('.thumb').forEach((t) => { const f = t.querySelector('iframe'); f.style.transform = `scale(${t.clientWidth / parseInt(f.style.width || '1440', 10)})`; });
   addEventListener('resize', fit); fit();
 </script>
 </body>

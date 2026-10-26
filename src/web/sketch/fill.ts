@@ -2,7 +2,7 @@
 //   data-crest="隊名" data-size        → 向量隊徽
 //   data-avatar="種子" data-jersey data-size → 向量頭像
 //   canvas[data-pix-avatar] / canvas[data-pix-crest] data-px data-scale → 像素化（縮到小格再整數倍放大，顏色量化到色票）
-import { avatarSvg, crestSvg, npcCrest, type CrestSpec } from '../club/art.ts';
+import { avatarSvg, crestSvg, icon, npcCrest, type CrestSpec, type IconName } from '../club/art.ts';
 
 const ME: CrestSpec = { shape: 0, primary: '#3b82f6', secondary: '#d4a017', emblem: 'wings' };
 const crestFor = (name: string): CrestSpec => (name === '天使戰隊' ? ME : npcCrest(name));
@@ -69,7 +69,13 @@ async function paint(canvas: HTMLCanvasElement, svg: string, w: number, h: numbe
 
 export async function fill(root: ParentNode = document): Promise<void> {
   root.querySelectorAll<HTMLElement>('[data-crest]').forEach((el) => {
-    el.innerHTML = crestSvg(crestFor(el.dataset.crest as string), Number(el.dataset.size ?? 48));
+    const spec = { ...crestFor(el.dataset.crest as string) };
+    if (el.dataset.primary) spec.primary = el.dataset.primary;
+    if (el.dataset.secondary) spec.secondary = el.dataset.secondary;
+    el.innerHTML = crestSvg(spec, Number(el.dataset.size ?? 48));
+  });
+  root.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => {
+    el.innerHTML = icon(el.dataset.icon as IconName, Number(el.dataset.size ?? 24), Number(el.dataset.stroke ?? 1.8));
   });
   root.querySelectorAll<HTMLElement>('[data-avatar]').forEach((el) => {
     el.innerHTML = avatarSvg(el.dataset.avatar as string, el.dataset.jersey ?? '#3b82f6', Number(el.dataset.size ?? 96));
