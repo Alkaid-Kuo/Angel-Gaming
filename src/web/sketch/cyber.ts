@@ -33,13 +33,13 @@ const rnd = (): number => {
 };
 
 type RGB = [number, number, number];
-const FOG: RGB = [22, 37, 49];
-const GLOW: RGB = [36, 74, 86];
+const FOG: RGB = [15, 27, 39];
+const GLOW: RGB = [24, 74, 92];
 const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const css = (c: RGB, a = 1): string => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
 const fogT = (d: number): number => Math.min(1, Math.max(0, (d - 400) / 7000)) ** 0.7 * 0.92;
-const CY = '127,231,242';
-const OR = '255,122,69';
+const CY = '79,232,245'; // 冷青（主色）
+const MG = '255,46,136'; // 洋紅（只給對手）
 
 // ── 城市資料 ──
 const ARENA = { x: 0, z: 1300, r: 250, h: 66 };
@@ -146,11 +146,11 @@ function drawBld(b: Bld): void {
   const t = fogT(c.d);
   const lm = b.land ? 0.08 : 0;
   const front = [proj(b.x0, 0, b.z0), proj(b.x1, 0, b.z0), proj(b.x1, b.h, b.z0), proj(b.x0, b.h, b.z0)];
-  if (b.x0 > 0) face([proj(b.x0, 0, b.z0), proj(b.x0, 0, b.z1), proj(b.x0, b.h, b.z1), proj(b.x0, b.h, b.z0)], mix([8, 14, 21], GLOW, lm), t);
-  else if (b.x1 < 0) face([proj(b.x1, 0, b.z0), proj(b.x1, 0, b.z1), proj(b.x1, b.h, b.z1), proj(b.x1, b.h, b.z0)], mix([8, 14, 21], GLOW, lm), t);
-  face(front, mix([11, 19, 27], GLOW, lm), t);
+  if (b.x0 > 0) face([proj(b.x0, 0, b.z0), proj(b.x0, 0, b.z1), proj(b.x0, b.h, b.z1), proj(b.x0, b.h, b.z0)], mix([6, 11, 17], GLOW, lm), t);
+  else if (b.x1 < 0) face([proj(b.x1, 0, b.z0), proj(b.x1, 0, b.z1), proj(b.x1, b.h, b.z1), proj(b.x1, b.h, b.z0)], mix([6, 11, 17], GLOW, lm), t);
+  face(front, mix([8, 15, 22], GLOW, lm), t);
   const roof = [proj(b.x0, b.h, b.z0), proj(b.x1, b.h, b.z0), proj(b.x1, b.h, b.z1), proj(b.x0, b.h, b.z1)];
-  g.fillStyle = css(mix(mix([19, 30, 40], GLOW, lm), FOG, t));
+  g.fillStyle = css(mix(mix([15, 25, 35], GLOW, lm), FOG, t));
   poly(g, roof);
   g.fill();
   if (c.d < 3000) {
@@ -167,7 +167,7 @@ function drawBld(b: Bld): void {
     if (c.d < 2400 && rnd() < 0.18) {
       const ix = (b.x1 - b.x0) * 0.25;
       const iz = (b.z1 - b.z0) * 0.25;
-      g.fillStyle = css(mix([34, 50, 64], FOG, t));
+      g.fillStyle = css(mix([27, 43, 58], FOG, t));
       poly(g, [proj(b.x0 + ix, b.h, b.z0 + iz), proj(b.x1 - ix, b.h, b.z0 + iz), proj(b.x1 - ix, b.h, b.z1 - iz), proj(b.x0 + ix, b.h, b.z1 - iz)]);
       g.fill();
     }
@@ -209,7 +209,7 @@ function drawArena(): void {
     const j = (i + 1) % bot.length;
     const a = (i / bot.length) * Math.PI * 2;
     if (Math.sin(a) > 0.15) continue;
-    g.fillStyle = css(mix([18, 30, 41], FOG, t));
+    g.fillStyle = css(mix([14, 24, 34], FOG, t));
     poly(g, [bot[i], bot[j], top[j], top[i]]);
     g.fill();
     if (i % 4 === 0) {
@@ -222,10 +222,10 @@ function drawArena(): void {
     }
   }
   // 頂緣、看台、場地
-  g.fillStyle = css(mix([30, 46, 60], FOG, t));
+  g.fillStyle = css(mix([24, 39, 54], FOG, t));
   poly(g, top);
   g.fill();
-  g.fillStyle = css(mix([12, 20, 28], FOG, t));
+  g.fillStyle = css(mix([9, 16, 23], FOG, t));
   poly(g, ring(x, h - 8, z, r * 0.86));
   g.fill();
   for (const [k, yy, a] of [
@@ -263,23 +263,23 @@ function drawArena(): void {
   // 天空與遠方天際線
   const sky = g.createLinearGradient(0, 0, 0, HORIZON + 30);
   sky.addColorStop(0, '#04070b');
-  sky.addColorStop(0.65, '#0b141d');
-  sky.addColorStop(1, '#1b2e3c');
+  sky.addColorStop(0.65, '#08111a');
+  sky.addColorStop(1, '#142638');
   g.fillStyle = sky;
   g.fillRect(0, 0, CW, HORIZON + 30);
   let x = 0;
   while (x < CW) {
     const w = 8 + rnd() * 34;
     const h = 6 + rnd() ** 2.2 * 80;
-    g.fillStyle = '#132330';
+    g.fillStyle = '#0e1b28';
     g.fillRect(x, HORIZON - h, w, h + 30);
     x += w + 1;
   }
   // 地面
   const gd = g.createLinearGradient(0, HORIZON, 0, CH);
-  gd.addColorStop(0, '#1a2b38');
-  gd.addColorStop(0.3, '#0d1820');
-  gd.addColorStop(1, '#070d12');
+  gd.addColorStop(0, '#132332');
+  gd.addColorStop(0.3, '#09131c');
+  gd.addColorStop(1, '#04080c');
   g.fillStyle = gd;
   g.fillRect(0, HORIZON, CW, CH - HORIZON);
   // 街道：沿 z 與沿 x 的細線，近亮遠暗
@@ -351,9 +351,9 @@ function drawArena(): void {
   }
   // 遠方霧帶、競技場光暈、大道光暈
   const haze = g.createLinearGradient(0, HORIZON - 30, 0, HORIZON + 200);
-  haze.addColorStop(0, 'rgba(27,46,60,0)');
-  haze.addColorStop(0.25, 'rgba(27,46,60,0.75)');
-  haze.addColorStop(1, 'rgba(27,46,60,0)');
+  haze.addColorStop(0, 'rgba(20,38,54,0)');
+  haze.addColorStop(0.25, 'rgba(20,38,54,0.75)');
+  haze.addColorStop(1, 'rgba(20,38,54,0)');
   g.fillStyle = haze;
   g.fillRect(0, HORIZON - 30, CW, 230);
   g.globalCompositeOperation = 'lighter';
@@ -389,11 +389,11 @@ function drawArena(): void {
 const ROOF_Y = proj(0, ROOF, 230).y;
 {
   const rg = g.createLinearGradient(0, ROOF_Y, 0, CH);
-  rg.addColorStop(0, '#111c25');
-  rg.addColorStop(1, '#060a0e');
+  rg.addColorStop(0, '#0c1620');
+  rg.addColorStop(1, '#04070b');
   g.fillStyle = rg;
   g.fillRect(0, ROOF_Y, CW, CH - ROOF_Y);
-  g.strokeStyle = 'rgba(127,231,242,0.07)';
+  g.strokeStyle = 'rgba(79,232,245,0.07)';
   g.lineWidth = 1;
   for (let x = -1600; x <= 1600; x += 60) {
     const a = proj(x, ROOF, 230);
@@ -412,14 +412,14 @@ const ROOF_Y = proj(0, ROOF, 230).y;
   }
   // 玻璃欄杆
   const top = proj(0, ROOF + 14, 228).y;
-  g.fillStyle = 'rgba(127,231,242,0.035)';
+  g.fillStyle = 'rgba(79,232,245,0.035)';
   g.fillRect(0, top, CW, ROOF_Y - top);
-  g.strokeStyle = 'rgba(127,231,242,0.3)';
+  g.strokeStyle = 'rgba(79,232,245,0.3)';
   g.beginPath();
   g.moveTo(0, top);
   g.lineTo(CW, top);
   g.stroke();
-  g.strokeStyle = 'rgba(127,231,242,0.16)';
+  g.strokeStyle = 'rgba(79,232,245,0.16)';
   for (let x = -2400; x <= 2400; x += 60) {
     const a = proj(x, ROOF, 228);
     const b = proj(x, ROOF + 14, 228);
@@ -428,7 +428,7 @@ const ROOF_Y = proj(0, ROOF, 230).y;
     g.lineTo(b.x, b.y);
     g.stroke();
   }
-  g.fillStyle = 'rgba(127,231,242,0.4)';
+  g.fillStyle = 'rgba(79,232,245,0.4)';
   g.fillRect(0, ROOF_Y - 1, CW, 2);
 }
 
@@ -586,7 +586,7 @@ function frame(t: number): void {
   f.globalCompositeOperation = 'source-over';
   // 地標線框：滑鼠移到標籤上時全亮
   for (const [id, l] of Object.entries(LAND)) {
-    const col = id === 'rival' ? OR : CY;
+    const col = id === 'rival' ? MG : CY;
     const x0 = l.x - l.w / 2;
     const x1 = l.x + l.w / 2;
     const z0 = l.z - l.d / 2;
@@ -623,7 +623,7 @@ function frame(t: number): void {
       const a = a0 + ((a1 - a0) * s) / 8;
       pts.push(proj(hc.x + hc.r * Math.cos(a), ROOF, hc.z + hc.r * Math.sin(a)));
     }
-    f.strokeStyle = w < 3 ? `rgba(${CY},0.8)` : w === 3 ? `rgba(214,250,252,${0.5 + 0.5 * Math.sin(t * 5)})` : 'rgba(127,231,242,0.14)';
+    f.strokeStyle = w < 3 ? `rgba(${CY},0.8)` : w === 3 ? `rgba(214,250,252,${0.5 + 0.5 * Math.sin(t * 5)})` : 'rgba(79,232,245,0.14)';
     f.lineWidth = 7;
     polyline(pts, false);
     f.stroke();
