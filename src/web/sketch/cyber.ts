@@ -33,13 +33,95 @@ const rnd = (): number => {
 };
 
 type RGB = [number, number, number];
-const FOG: RGB = [15, 27, 39];
-const GLOW: RGB = [24, 74, 92];
 const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const css = (c: RGB, a = 1): string => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const rgb = (c: RGB): string => c.map((v) => Math.round(v)).join(',');
+const hex = (c: RGB): string => `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+const WHITE: RGB = [255, 255, 255];
+const BLACK: RGB = [0, 0, 0];
+
+// ── 配色：網址 ?pal=名稱 切換（右下角的色塊也可以點）。中性色保留原本的明暗、只換色相；主色、點綴色整組換掉 ──
+interface Pal {
+  name: string;
+  label: string;
+  main: RGB; // 主色：我方、選中、競技場、城市的光
+  accent: RGB; // 點綴：開戰、對手
+  hue: number; // 中性色的色相
+  sat: number; // 中性色飽和度（相對冷青版的倍數）
+}
+const PALS: Pal[] = [
+  { name: 'cyan', label: '冷青＋洋紅', main: [79, 232, 245], accent: [255, 46, 136], hue: 210, sat: 1 },
+  { name: 'acid', label: '酸性黃綠＋桃紅', main: [200, 255, 46], accent: [255, 46, 99], hue: 140, sat: 0.55 },
+  { name: 'red', label: '紅黑白', main: [255, 42, 61], accent: [244, 241, 236], hue: 0, sat: 0.12 },
+  { name: 'teal', label: '青綠＋粉', main: [46, 242, 192], accent: [255, 95, 162], hue: 168, sat: 0.7 },
+  { name: 'mono', label: '冰白＋紅', main: [214, 232, 245], accent: [255, 51, 68], hue: 215, sat: 0.25 },
+  { name: 'outlaw', label: '黃＋洋紅', main: [255, 210, 63], accent: [255, 46, 136], hue: 275, sat: 0.45 },
+  { name: 'violet', label: '電光紫＋青', main: [178, 107, 255], accent: [63, 240, 255], hue: 255, sat: 0.8 },
+  { name: 'amber', label: '琥珀＋紅', main: [255, 176, 0], accent: [255, 59, 48], hue: 30, sat: 0.25 },
+];
+const PAL = PALS.find((p) => p.name === new URLSearchParams(location.search).get('pal')) ?? PALS[0];
+function satLight([r, g, b]: RGB): [number, number] {
+  const mx = Math.max(r, g, b) / 255;
+  const mn = Math.min(r, g, b) / 255;
+  const l = (mx + mn) / 2;
+  return [mx === mn ? 0 : (mx - mn) / (1 - Math.abs(2 * l - 1)), l];
+}
+function fromHsl(h: number, s: number, l: number): RGB {
+  const k = (n: number): number => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number): number => 255 * (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)));
+  return [f(0), f(8), f(4)];
+}
+/** 中性色：保留明暗，色相換成這組的中性色相 */
+const N = (c: RGB): RGB => {
+  const [s, l] = satLight(c);
+  return fromHsl(PAL.hue, Math.min(1, s * PAL.sat), l);
+};
+const FOG = N([15, 27, 39]);
+const GLOW = mix(PAL.main, BLACK, 0.66);
 const fogT = (d: number): number => Math.min(1, Math.max(0, (d - 400) / 7000)) ** 0.7 * 0.92;
-const CY = '79,232,245'; // 冷青（主色）
-const MG = '255,46,136'; // 洋紅（只給對手）
+const CY = rgb(PAL.main);
+const MG = rgb(PAL.accent);
+const LT = rgb(mix(PAL.main, WHITE, 0.7)); // 主色的亮光：窗燈、路燈
+const LT2 = rgb(mix(PAL.main, WHITE, 0.82)); // 更亮：頂緣燈、車頭燈、信標
+const NL = rgb(N([140, 180, 196])); // 中性色的燈
+{
+  const stage = document.getElementById('stage') as HTMLElement;
+  const vars: Record<string, string> = {
+    '--bg': hex(N([4, 7, 11])),
+    '--bg-rgb': rgb(N([4, 7, 11])),
+    '--st': hex(N([24, 38, 53])),
+    '--st2': hex(N([34, 50, 70])),
+    '--c': hex(PAL.main),
+    '--c-rgb': CY,
+    '--c2': hex(mix(PAL.main, WHITE, 0.75)),
+    '--cm': hex(mix(PAL.main, BLACK, 0.4)),
+    '--cl': `rgba(${CY},0.5)`,
+    '--txt': hex(N([219, 231, 238])),
+    '--dim': hex(N([125, 147, 163])),
+    '--dim2': hex(N([77, 98, 115])),
+    '--tagb': hex(N([185, 202, 212])),
+    '--pn-rgb': rgb(N([10, 18, 26])),
+    '--pn2-rgb': rgb(mix(mix(PAL.main, BLACK, 0.85), N([10, 18, 26]), 0.3)),
+    '--mg': hex(PAL.accent),
+    '--mg-rgb': MG,
+    '--mg2': hex(mix(PAL.accent, WHITE, 0.45)),
+    '--mg3': hex(mix(PAL.accent, WHITE, 0.3)),
+    '--mg4': hex(mix(PAL.accent, BLACK, 0.15)),
+    '--mgd1': hex(mix(PAL.accent, BLACK, 0.84)),
+    '--mgd2': hex(mix(PAL.accent, BLACK, 0.93)),
+    '--ink': hex(mix(PAL.accent, BLACK, 0.9)),
+  };
+  for (const [k, v] of Object.entries(vars)) stage.style.setProperty(k, v);
+  // 隊徽與頭像在 fill.ts 才畫，這裡先把顏色填好
+  document.querySelectorAll<HTMLElement>('[data-crest="天使戰隊"]').forEach((el) => Object.assign(el.dataset, { primary: hex(N([22, 34, 45])), secondary: hex(PAL.main) }));
+  document.querySelectorAll<HTMLElement>('[data-crest="暗影工作室"]').forEach((el) => Object.assign(el.dataset, { primary: vars['--mgd1'], secondary: hex(PAL.accent) }));
+  document.querySelectorAll<HTMLElement>('[data-avatar]').forEach((el) => (el.dataset.jersey = vars['--st2']));
+  const note = document.querySelector('.design-note');
+  if (note) note.textContent += ` · ${PAL.label}`;
+  const bar = document.querySelector('.pals');
+  if (bar) bar.innerHTML = PALS.map((p) => `<a href="?pal=${p.name}" title="${p.label}"${p === PAL ? ' class="on"' : ''}><i style="background:${hex(p.main)}"></i><i style="background:${hex(p.accent)}"></i></a>`).join('');
+}
 
 // ── 城市資料 ──
 const ARENA = { x: 0, z: 1300, r: 250, h: 66 };
@@ -135,7 +217,7 @@ function windows(b: Bld, t: number, along: 'x' | 'z', fixed: number): void {
       const u = (along === 'x' ? b.x0 : b.z0) + ((i + 0.5) * len) / cols;
       const p = along === 'x' ? proj(u, ((j + 0.5) * b.h) / rows, fixed) : proj(fixed, ((j + 0.5) * b.h) / rows, u);
       const s = F / p.d;
-      g.fillStyle = rnd() < 0.85 ? `rgba(201,246,250,${(0.35 + rnd() * 0.4) * (1 - t)})` : `rgba(140,180,196,${0.4 * (1 - t)})`;
+      g.fillStyle = rnd() < 0.85 ? `rgba(${LT},${(0.35 + rnd() * 0.4) * (1 - t)})` : `rgba(${NL},${0.4 * (1 - t)})`;
       g.fillRect(p.x, p.y, Math.max(1, 2.6 * s), Math.max(1, 1.6 * s));
     }
   }
@@ -146,11 +228,11 @@ function drawBld(b: Bld): void {
   const t = fogT(c.d);
   const lm = b.land ? 0.08 : 0;
   const front = [proj(b.x0, 0, b.z0), proj(b.x1, 0, b.z0), proj(b.x1, b.h, b.z0), proj(b.x0, b.h, b.z0)];
-  if (b.x0 > 0) face([proj(b.x0, 0, b.z0), proj(b.x0, 0, b.z1), proj(b.x0, b.h, b.z1), proj(b.x0, b.h, b.z0)], mix([6, 11, 17], GLOW, lm), t);
-  else if (b.x1 < 0) face([proj(b.x1, 0, b.z0), proj(b.x1, 0, b.z1), proj(b.x1, b.h, b.z1), proj(b.x1, b.h, b.z0)], mix([6, 11, 17], GLOW, lm), t);
-  face(front, mix([8, 15, 22], GLOW, lm), t);
+  if (b.x0 > 0) face([proj(b.x0, 0, b.z0), proj(b.x0, 0, b.z1), proj(b.x0, b.h, b.z1), proj(b.x0, b.h, b.z0)], mix(N([6, 11, 17]), GLOW, lm), t);
+  else if (b.x1 < 0) face([proj(b.x1, 0, b.z0), proj(b.x1, 0, b.z1), proj(b.x1, b.h, b.z1), proj(b.x1, b.h, b.z0)], mix(N([6, 11, 17]), GLOW, lm), t);
+  face(front, mix(N([8, 15, 22]), GLOW, lm), t);
   const roof = [proj(b.x0, b.h, b.z0), proj(b.x1, b.h, b.z0), proj(b.x1, b.h, b.z1), proj(b.x0, b.h, b.z1)];
-  g.fillStyle = css(mix(mix([15, 25, 35], GLOW, lm), FOG, t));
+  g.fillStyle = css(mix(mix(N([15, 25, 35]), GLOW, lm), FOG, t));
   poly(g, roof);
   g.fill();
   if (c.d < 3000) {
@@ -167,13 +249,13 @@ function drawBld(b: Bld): void {
     if (c.d < 2400 && rnd() < 0.18) {
       const ix = (b.x1 - b.x0) * 0.25;
       const iz = (b.z1 - b.z0) * 0.25;
-      g.fillStyle = css(mix([27, 43, 58], FOG, t));
+      g.fillStyle = css(mix(N([27, 43, 58]), FOG, t));
       poly(g, [proj(b.x0 + ix, b.h, b.z0 + iz), proj(b.x1 - ix, b.h, b.z0 + iz), proj(b.x1 - ix, b.h, b.z1 - iz), proj(b.x0 + ix, b.h, b.z1 - iz)]);
       g.fill();
     }
   } else {
     const n = Math.floor((b.lit * b.h) / 8);
-    g.fillStyle = `rgba(201,246,250,${0.4 * (1 - t)})`;
+    g.fillStyle = `rgba(${LT},${0.4 * (1 - t)})`;
     for (let i = 0; i < n; i++) {
       const p = proj(b.x0 + rnd() * (b.x1 - b.x0), rnd() * b.h, b.z0);
       g.fillRect(p.x, p.y, 1, 1);
@@ -209,7 +291,7 @@ function drawArena(): void {
     const j = (i + 1) % bot.length;
     const a = (i / bot.length) * Math.PI * 2;
     if (Math.sin(a) > 0.15) continue;
-    g.fillStyle = css(mix([14, 24, 34], FOG, t));
+    g.fillStyle = css(mix(N([14, 24, 34]), FOG, t));
     poly(g, [bot[i], bot[j], top[j], top[i]]);
     g.fill();
     if (i % 4 === 0) {
@@ -222,10 +304,10 @@ function drawArena(): void {
     }
   }
   // 頂緣、看台、場地
-  g.fillStyle = css(mix([24, 39, 54], FOG, t));
+  g.fillStyle = css(mix(N([24, 39, 54]), FOG, t));
   poly(g, top);
   g.fill();
-  g.fillStyle = css(mix([9, 16, 23], FOG, t));
+  g.fillStyle = css(mix(N([9, 16, 23]), FOG, t));
   poly(g, ring(x, h - 8, z, r * 0.86));
   g.fill();
   for (const [k, yy, a] of [
@@ -239,7 +321,7 @@ function drawArena(): void {
     g.stroke();
   }
   const fieldPts = ring(x, 14, z, r * 0.5);
-  g.fillStyle = 'rgba(40,96,108,0.85)';
+  g.fillStyle = css(mix(PAL.main, BLACK, 0.55), 0.85);
   poly(g, fieldPts);
   g.fill();
   g.strokeStyle = `rgba(${CY},0.6)`;
@@ -253,7 +335,7 @@ function drawArena(): void {
   g.lineTo(l1.x, l1.y);
   g.stroke();
   // 頂緣燈
-  g.fillStyle = 'rgba(214,250,252,0.95)';
+  g.fillStyle = `rgba(${LT2},0.95)`;
   top.forEach((p, i) => {
     if (i % 2 === 0) g.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
   });
@@ -262,24 +344,24 @@ function drawArena(): void {
 {
   // 天空與遠方天際線
   const sky = g.createLinearGradient(0, 0, 0, HORIZON + 30);
-  sky.addColorStop(0, '#04070b');
-  sky.addColorStop(0.65, '#08111a');
-  sky.addColorStop(1, '#142638');
+  sky.addColorStop(0, hex(N([4, 7, 11])));
+  sky.addColorStop(0.65, hex(N([8, 17, 26])));
+  sky.addColorStop(1, hex(N([20, 38, 56])));
   g.fillStyle = sky;
   g.fillRect(0, 0, CW, HORIZON + 30);
   let x = 0;
   while (x < CW) {
     const w = 8 + rnd() * 34;
     const h = 6 + rnd() ** 2.2 * 80;
-    g.fillStyle = '#0e1b28';
+    g.fillStyle = hex(N([14, 27, 40]));
     g.fillRect(x, HORIZON - h, w, h + 30);
     x += w + 1;
   }
   // 地面
   const gd = g.createLinearGradient(0, HORIZON, 0, CH);
-  gd.addColorStop(0, '#132332');
-  gd.addColorStop(0.3, '#09131c');
-  gd.addColorStop(1, '#04080c');
+  gd.addColorStop(0, hex(N([19, 35, 50])));
+  gd.addColorStop(0.3, hex(N([9, 19, 28])));
+  gd.addColorStop(1, hex(N([4, 8, 12])));
   g.fillStyle = gd;
   g.fillRect(0, HORIZON, CW, CH - HORIZON);
   // 街道：沿 z 與沿 x 的細線，近亮遠暗
@@ -301,7 +383,7 @@ function drawArena(): void {
     if (ix % 2 === 0) {
       for (let z = 320; z < 4200; z += 40) {
         const p = proj(sx, 4, z);
-        g.fillStyle = `rgba(201,246,250,${0.55 * (1 - fogT(p.d))})`;
+        g.fillStyle = `rgba(${LT},${0.55 * (1 - fogT(p.d))})`;
         g.fillRect(p.x, p.y, Math.max(1, (2.2 * F) / p.d), Math.max(1, (2.2 * F) / p.d));
       }
     }
@@ -326,7 +408,7 @@ function drawArena(): void {
     for (const sx of [-64, 64]) {
       const p = proj(sx, 6, z);
       const s = Math.max(1, (3 * F) / p.d);
-      g.fillStyle = `rgba(214,250,252,${0.8 * (1 - fogT(p.d))})`;
+      g.fillStyle = `rgba(${LT2},${0.8 * (1 - fogT(p.d))})`;
       g.fillRect(p.x - s / 2, p.y - s / 2, s, s);
     }
   }
@@ -342,7 +424,7 @@ function drawArena(): void {
   for (const b of beacons) {
     const a = proj(b.x, b.y - 40, b.z);
     const e = proj(b.x, b.y, b.z);
-    g.strokeStyle = `rgba(120,150,165,${0.6 * (1 - fogT(a.d))})`;
+    g.strokeStyle = `rgba(${rgb(N([120, 150, 165]))},${0.6 * (1 - fogT(a.d))})`;
     g.lineWidth = 1;
     g.beginPath();
     g.moveTo(a.x, a.y);
@@ -351,9 +433,10 @@ function drawArena(): void {
   }
   // 遠方霧帶、競技場光暈、大道光暈
   const haze = g.createLinearGradient(0, HORIZON - 30, 0, HORIZON + 200);
-  haze.addColorStop(0, 'rgba(20,38,54,0)');
-  haze.addColorStop(0.25, 'rgba(20,38,54,0.75)');
-  haze.addColorStop(1, 'rgba(20,38,54,0)');
+  const hz = N([20, 38, 54]);
+  haze.addColorStop(0, css(hz, 0));
+  haze.addColorStop(0.25, css(hz, 0.75));
+  haze.addColorStop(1, css(hz, 0));
   g.fillStyle = haze;
   g.fillRect(0, HORIZON - 30, CW, 230);
   g.globalCompositeOperation = 'lighter';
@@ -389,11 +472,11 @@ function drawArena(): void {
 const ROOF_Y = proj(0, ROOF, 230).y;
 {
   const rg = g.createLinearGradient(0, ROOF_Y, 0, CH);
-  rg.addColorStop(0, '#0c1620');
-  rg.addColorStop(1, '#04070b');
+  rg.addColorStop(0, hex(N([12, 22, 32])));
+  rg.addColorStop(1, hex(N([4, 7, 11])));
   g.fillStyle = rg;
   g.fillRect(0, ROOF_Y, CW, CH - ROOF_Y);
-  g.strokeStyle = 'rgba(79,232,245,0.07)';
+  g.strokeStyle = `rgba(${CY},0.07)`;
   g.lineWidth = 1;
   for (let x = -1600; x <= 1600; x += 60) {
     const a = proj(x, ROOF, 230);
@@ -412,14 +495,14 @@ const ROOF_Y = proj(0, ROOF, 230).y;
   }
   // 玻璃欄杆
   const top = proj(0, ROOF + 14, 228).y;
-  g.fillStyle = 'rgba(79,232,245,0.035)';
+  g.fillStyle = `rgba(${CY},0.035)`;
   g.fillRect(0, top, CW, ROOF_Y - top);
-  g.strokeStyle = 'rgba(79,232,245,0.3)';
+  g.strokeStyle = `rgba(${CY},0.3)`;
   g.beginPath();
   g.moveTo(0, top);
   g.lineTo(CW, top);
   g.stroke();
-  g.strokeStyle = 'rgba(79,232,245,0.16)';
+  g.strokeStyle = `rgba(${CY},0.16)`;
   for (let x = -2400; x <= 2400; x += 60) {
     const a = proj(x, ROOF, 228);
     const b = proj(x, ROOF + 14, 228);
@@ -428,7 +511,7 @@ const ROOF_Y = proj(0, ROOF, 230).y;
     g.lineTo(b.x, b.y);
     g.stroke();
   }
-  g.fillStyle = 'rgba(79,232,245,0.4)';
+  g.fillStyle = `rgba(${CY},0.4)`;
   g.fillRect(0, ROOF_Y - 1, CW, 2);
 }
 
@@ -522,8 +605,8 @@ function frame(t: number): void {
     const ny = dx / len;
     const w1 = (90 * F) / e0.d;
     const gr = f.createLinearGradient(b0.x, b0.y, e0.x, e0.y);
-    gr.addColorStop(0, 'rgba(201,246,250,0.2)');
-    gr.addColorStop(1, 'rgba(201,246,250,0)');
+    gr.addColorStop(0, `rgba(${LT},0.2)`);
+    gr.addColorStop(1, `rgba(${LT},0)`);
     f.fillStyle = gr;
     f.beginPath();
     f.moveTo(b0.x - nx * 3, b0.y - ny * 3);
@@ -543,7 +626,7 @@ function frame(t: number): void {
     const a = proj(c.lane, 3, c.z);
     const b = proj(c.lane, 3, c.z - dir * 60);
     const k = 1 - fogT(a.d);
-    f.strokeStyle = dir < 0 ? `rgba(214,250,252,${0.85 * k})` : `rgba(110,170,190,${0.6 * k})`;
+    f.strokeStyle = dir < 0 ? `rgba(${LT2},${0.85 * k})` : `rgba(${rgb(N([110, 170, 190]))},${0.6 * k})`;
     f.lineWidth = Math.max(1, Math.min(5, (6 * F) / a.d));
     f.beginPath();
     f.moveTo(a.x, a.y);
@@ -555,7 +638,7 @@ function frame(t: number): void {
     const on = Math.sin(t * 2.6 + b.p) > 0.55;
     const p = proj(b.x, b.y, b.z);
     const k = 1 - fogT(p.d);
-    f.fillStyle = `rgba(214,250,252,${(on ? 0.95 : 0.15) * k})`;
+    f.fillStyle = `rgba(${LT2},${(on ? 0.95 : 0.15) * k})`;
     f.beginPath();
     f.arc(p.x, p.y, on ? 2.4 : 1.4, 0, Math.PI * 2);
     f.fill();
@@ -574,8 +657,8 @@ function frame(t: number): void {
     const a = proj(v.x, v.y, v.z);
     const b = proj(v.x - v.v * 1.6, v.y, v.z);
     const gr = f.createLinearGradient(a.x, a.y, b.x, b.y);
-    gr.addColorStop(0, 'rgba(214,250,252,0.8)');
-    gr.addColorStop(1, 'rgba(214,250,252,0)');
+    gr.addColorStop(0, `rgba(${LT2},0.8)`);
+    gr.addColorStop(1, `rgba(${LT2},0)`);
     f.strokeStyle = gr;
     f.lineWidth = 1.5;
     f.beginPath();
@@ -623,7 +706,7 @@ function frame(t: number): void {
       const a = a0 + ((a1 - a0) * s) / 8;
       pts.push(proj(hc.x + hc.r * Math.cos(a), ROOF, hc.z + hc.r * Math.sin(a)));
     }
-    f.strokeStyle = w < 3 ? `rgba(${CY},0.8)` : w === 3 ? `rgba(214,250,252,${0.5 + 0.5 * Math.sin(t * 5)})` : 'rgba(79,232,245,0.14)';
+    f.strokeStyle = w < 3 ? `rgba(${CY},0.8)` : w === 3 ? `rgba(${LT2},${0.5 + 0.5 * Math.sin(t * 5)})` : `rgba(${CY},0.14)`;
     f.lineWidth = 7;
     polyline(pts, false);
     f.stroke();
@@ -631,7 +714,8 @@ function frame(t: number): void {
 }
 onFrame((t) => frame(still ? 3 : t));
 
-// 雨：細、淡、偏青
+// 雨：細、淡，帶一點中性色相
+const RAIN = rgb(N([190, 235, 245]));
 const rain = document.getElementById('rain') as HTMLCanvasElement | null;
 if (rain) {
   const rg = rain.getContext('2d') as CanvasRenderingContext2D;
@@ -647,7 +731,7 @@ if (rain) {
         d.y = -40;
         d.x = ((d.x + 1500) % 2100) - 100;
       }
-      rg.strokeStyle = `rgba(190,235,245,${0.06 + d.z * 0.08})`;
+      rg.strokeStyle = `rgba(${RAIN},${0.06 + d.z * 0.08})`;
       rg.lineWidth = d.z * 0.9;
       rg.beginPath();
       rg.moveTo(d.x - mx * 30 * d.z, d.y);
