@@ -91,4 +91,6 @@ export async function fill(root: ParentNode = document): Promise<void> {
   document.body.classList.add('ready');
 }
 
-void fill();
+// 完整 UI 的頁面（#stage 標了 data-screen）由 ui.ts 先補好外框與顏色再呼叫 fill()；
+// 打包後 ui.ts 會先載入這支，所以這裡不能自己先畫
+if (!document.querySelector('#stage[data-screen]')) void fill();

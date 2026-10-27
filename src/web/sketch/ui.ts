@@ -1,9 +1,10 @@
 // 完整 UI 設計稿共用：舞台、背景、外框（頂列＋左側導覽）、隊徽預設色、單色流派徽記。
 // 各頁在 #stage 上標 data-screen（目前在哪一頁，導覽列會亮）、data-word（背景描邊大字）；
 // data-shell="none" 不放頂列與導覽（演出畫面、標題畫面），data-bg="none" 不放共用背景。
-// 這支要排在 fill.ts 前面：隊徽與頭像的顏色在這裡先補好，fill.ts 才畫。
+// 隊徽與頭像的顏色在這裡先補好，最後才呼叫 fill() 畫出來。
 import { initStage, dust } from './stage.ts';
 import { LINEAGE_LOOK } from '../club/art.ts';
+import { fill } from './fill.ts';
 
 const stage = initStage();
 const screen = stage.dataset.screen ?? '';
@@ -70,3 +71,4 @@ document.querySelectorAll<HTMLElement>('[data-lineage]').forEach((el) => {
   const size = Number(el.dataset.size ?? 16);
   if (l) el.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="currentColor" color="currentColor" aria-hidden="true">${l.glyph}</svg>`;
 });
+void fill();
