@@ -40,7 +40,7 @@ const hex = (c: RGB): string => `#${c.map((v) => Math.round(v).toString(16).padS
 const WHITE: RGB = [255, 255, 255];
 const BLACK: RGB = [0, 0, 0];
 
-// ── 配色：網址 ?pal=名稱 切換（右下角的色塊也可以點）。中性色保留原本的明暗、只換色相；主色、點綴色整組換掉 ──
+// ── 配色：預設紅黑白；網址 ?pal=名稱 可換成其他試色（右下角的色塊也可以點）。中性色保留原本的明暗、只換色相；主色、點綴色整組換掉 ──
 interface Pal {
   name: string;
   label: string;
@@ -59,7 +59,8 @@ const PALS: Pal[] = [
   { name: 'violet', label: '電光紫＋青', main: [178, 107, 255], accent: [63, 240, 255], hue: 255, sat: 0.8 },
   { name: 'amber', label: '琥珀＋紅', main: [255, 176, 0], accent: [255, 59, 48], hue: 30, sat: 0.25 },
 ];
-const PAL = PALS.find((p) => p.name === new URLSearchParams(location.search).get('pal')) ?? PALS[0];
+const DEFAULT_PAL = 'red'; // 使用者選定：紅黑白
+const PAL = PALS.find((p) => p.name === (new URLSearchParams(location.search).get('pal') ?? DEFAULT_PAL)) ?? PALS[0];
 function satLight([r, g, b]: RGB): [number, number] {
   const mx = Math.max(r, g, b) / 255;
   const mn = Math.min(r, g, b) / 255;

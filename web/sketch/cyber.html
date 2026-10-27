@@ -7,10 +7,10 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap">
 <link rel="stylesheet" href="./stage.css">
 <style>
-/* 配色：中性暗色占九成；主色 --c 給我方與選中；點綴 --mg 只給開戰與對手。下面是預設的冷青＋洋紅，其他配色由 cyber.ts 依 ?pal= 覆寫 */
-#stage { --bg: #04070b; --bg-rgb: 4, 7, 11; --st: #182635; --st2: #223246; --c: #4fe8f5; --c-rgb: 79, 232, 245; --c2: #d4fbfe; --cm: #2f8b93; --cl: rgba(var(--c-rgb), 0.5);
-  --txt: #dbe7ee; --dim: #7d93a3; --dim2: #4d6273; --tagb: #b9cad4; --pn-rgb: 10, 18, 26; --pn2-rgb: 12, 35, 44;
-  --mg: #ff2e88; --mg-rgb: 255, 46, 136; --mg2: #ff8cc4; --mg3: #ff6aa8; --mg4: #d81b6f; --mgd1: #2a0f1e; --mgd2: #12060c; --ink: #1a0410;
+/* 配色：紅黑白。炭黑中性色占九成；紅是唯一主色（我方、選中）；白只給開戰與對手。其他試色由 cyber.ts 依 ?pal= 覆寫 */
+#stage { --bg: #080707; --bg-rgb: 8, 7, 7; --st: #282525; --st2: #363232; --c: #ff2a3d; --c-rgb: 255, 42, 61; --c2: #ffcacf; --cm: #991925; --cl: rgba(var(--c-rgb), 0.5);
+  --txt: #e6e3e3; --dim: #928e8e; --dim2: #625e5e; --tagb: #c8c5c5; --pn-rgb: 19, 17, 17; --pn2-rgb: 32, 10, 12;
+  --mg: #f4f1ec; --mg-rgb: 244, 241, 236; --mg2: #f9f7f5; --mg3: #f7f5f2; --mg4: #cfcdc9; --mgd1: #272726; --mgd2: #111111; --ink: #181818;
   --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --num: "Rajdhani", "Noto Sans TC", sans-serif; --mono: "Share Tech Mono", monospace; color: var(--txt); font-family: var(--zh); background: var(--bg); }
 
 /* ── 城市（畫布比舞台大一圈，整組隨滑鼠與懸停飄移） ── */
