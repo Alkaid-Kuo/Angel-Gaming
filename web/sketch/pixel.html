@@ -3,143 +3,176 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>設計稿 B：黃昏商店街</title>
+<title>設計稿 B：霓虹雨巷</title>
 <link rel="stylesheet" href="./stage.css">
 <style>
 @font-face { font-family: "Cubic11"; src: url("https://cdn.jsdelivr.net/gh/ACh-K/Cubic-11@main/fonts/web/Cubic_11.woff2") format("woff2"); font-display: block; }
-/* 像素格＝4px（背景是 480×270 放大 4 倍）；字用 11 的整數倍（22／33／44）。
-   暮色限色盤：靛藍、灰紫、米白為主；珊瑚只給選中與開戰；薄荷是我方；杏色只在夕陽與燈光 */
-#stage { --K: #0f1020; --I: #1b1d33; --J: #2a2b4a; --G: #3b3552; --U: #5a5070; --V: #7a6a9a; --S: #8a8aa0; --T: #b9b4c0; --C: #e8dcc4; --W: #fff6e0; --R: #e8735a; --D: #b5503f; --A: #f2a65a; --M: #7cc4a8; --N: #3f7f78; --P: #c9a1b4;
-  font-family: "Cubic11", monospace; font-size: 22px; line-height: 1.5; color: var(--C); -webkit-font-smoothing: none; image-rendering: pixelated; background: var(--I); }
+/* 像素格＝4px（背景是 480×270 放大 4 倍）；字用 11 的整數倍。
+   色票只有三個色系：靛藍中性色 K～S、霓虹粉 a～R、青 c～T，另加白 W。粉＝招牌、對手、開戰；青＝我方、框線、選中 */
+#stage { --K: #060515; --I: #0b0a1f; --J: #141838; --G: #1e2552; --U: #2b3472; --V: #3e4a96; --S: #6670c0;
+  --a: #3d0f3f; --b: #7a1a5c; --m: #c4286c; --P: #ff3d7f; --R: #ff9ec4;
+  --c: #0c3550; --d: #1580a0; --e: #22b8d0; --Q: #3ff0ff; --T: #b8fbff; --W: #f4f0ff;
+  --glowP: 0 0 2px var(--P), 0 0 10px var(--P), 0 0 26px rgba(255, 61, 127, 0.55);
+  --glowQ: 0 0 2px var(--Q), 0 0 10px var(--Q), 0 0 26px rgba(63, 240, 255, 0.5);
+  font-family: "Cubic11", monospace; font-size: 22px; line-height: 1.5; color: var(--W); -webkit-font-smoothing: none; background: var(--K); }
 canvas { image-rendering: pixelated; display: block; }
 #bg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
-.crt { position: absolute; inset: 0; z-index: 40; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(15, 16, 32, 0.16) 0 2px, transparent 2px 4px), radial-gradient(ellipse at center, transparent 62%, rgba(15, 16, 32, 0.55)); }
-
-/* 像素視窗：階梯圓角＋雙色框＋硬陰影 */
-.sh { position: absolute; z-index: 2; filter: drop-shadow(8px 8px 0 rgba(15, 16, 32, 0.75)); }
-.win { position: relative; background: var(--I); padding: 24px 28px 20px; box-shadow: inset 0 0 0 4px var(--bc, var(--C)), inset 0 0 0 8px var(--bc2, var(--G));
-  clip-path: polygon(8px 0, calc(100% - 8px) 0, calc(100% - 8px) 4px, calc(100% - 4px) 4px, calc(100% - 4px) 8px, 100% 8px, 100% calc(100% - 8px), calc(100% - 4px) calc(100% - 8px), calc(100% - 4px) calc(100% - 4px), calc(100% - 8px) calc(100% - 4px), calc(100% - 8px) 100%, 8px 100%, 8px calc(100% - 4px), 4px calc(100% - 4px), 4px calc(100% - 8px), 0 calc(100% - 8px), 0 8px, 4px 8px, 4px 4px, 8px 4px); }
-.win .tt { position: absolute; left: 24px; top: 0; padding: 0 12px; line-height: 1.2; background: var(--bc, var(--C)); color: var(--I); }
-.dim { color: var(--S); }
-.mint { color: var(--M); }
+.crt { position: absolute; inset: 0; z-index: 40; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(6, 5, 21, 0.22) 0 2px, transparent 2px 4px), radial-gradient(ellipse at center, transparent 58%, rgba(6, 5, 21, 0.62)); }
 .blink { animation: blink 1s steps(1) infinite; }
 
-/* 頂列 */
-.top { left: 24px; top: 16px; width: 1872px; }
-.top .win { height: 80px; display: flex; align-items: center; gap: 24px; padding: 0 32px; background: rgba(27, 29, 51, 0.92); }
-.top .nm { font-size: 44px; line-height: 1; color: var(--C); text-shadow: 4px 4px 0 var(--K); }
-.top .wk { color: var(--T); }
-.top .wk b { font-weight: 400; color: var(--M); }
-.top .res { margin-left: auto; display: flex; gap: 40px; align-items: center; }
-.top .res span { display: flex; align-items: center; gap: 10px; font-size: 33px; line-height: 1; }
-
-/* 街上的招牌（跟著街屋層視差；選中的是珊瑚色） */
-.street { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-.sign { top: 466px; pointer-events: auto; cursor: pointer; }
-.sign .win { padding: 16px 16px 12px; text-align: center; --bc2: var(--J); background: var(--J); }
-.sign .hd { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.sign b { font-weight: 400; font-size: 33px; line-height: 1.1; color: var(--C); }
-.sign em { display: block; margin-top: 4px; font-style: normal; color: var(--T); }
-.sign:hover .win, .sign.on .win { --bc: var(--R); --bc2: var(--D); background: var(--G); }
-.sign:hover b, .sign.on b { color: var(--W); }
-.sign.on em { color: var(--A); }
-.cursor { position: absolute; left: 50%; top: -48px; margin-left: -11px; font-size: 33px; line-height: 1; color: var(--R); text-shadow: 4px 4px 0 var(--K); animation: hop 0.8s steps(2) infinite; }
+/* 選單招牌：位置由程式依透視算，字是直式霓虹管 */
+.sign { position: absolute; z-index: 2; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.sign b { font-weight: 400; line-height: 1; writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.06em; color: var(--R); text-shadow: var(--glowP); }
+.sign.s1 b { font-size: 88px; }
+.sign.s2 b { font-size: 66px; }
+.sign.s3 b { font-size: 44px; }
+.sign em { position: absolute; left: 50%; top: 100%; translate: -50% 12px; padding: 2px 12px 0; white-space: nowrap; font-style: normal; font-size: 22px; line-height: 1.4; color: var(--R); background: var(--K); box-shadow: inset 0 0 0 4px var(--b); }
+.sign.s1 em { font-size: 33px; }
+.sign:hover b, .sign.on b { color: var(--T); text-shadow: var(--glowQ); }
+.sign:hover em, .sign.on em { color: var(--T); box-shadow: inset 0 0 0 4px var(--d); }
+.sign .cur { position: absolute; left: 50%; bottom: 100%; margin-left: -11px; padding-bottom: 8px; font-size: 22px; line-height: 1; color: var(--Q); text-shadow: var(--glowQ); animation: hop 0.8s steps(2) infinite; }
 @keyframes hop { 50% { transform: translateY(-8px); } }
+.sign.in { animation: neon 1.2s linear both; animation-delay: var(--d, 0s); }
+@keyframes neon { 0%, 9.9% { opacity: 0; } 10%, 14.9% { opacity: 1; } 15%, 29.9% { opacity: 0; } 30%, 33.9% { opacity: 1; } 34%, 44.9% { opacity: 0.15; } 45%, 100% { opacity: 1; } }
 
-/* 街口布條 */
-.banner { left: 752px; top: 320px; width: 416px; z-index: 3; filter: drop-shadow(0 8px 0 rgba(15, 16, 32, 0.55)); animation: sway 3.2s steps(2) infinite; transform-origin: 50% 0; }
-@keyframes sway { 50% { transform: translateY(4px); } }
-.banner .cloth { position: relative; padding: 16px 24px 32px; background: var(--C); color: var(--I); text-align: center; box-shadow: inset 0 0 0 4px var(--T), inset 0 0 0 8px var(--C), inset 0 0 0 12px var(--G);
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 87.5% calc(100% - 16px), 75% 100%, 62.5% calc(100% - 16px), 50% 100%, 37.5% calc(100% - 16px), 25% 100%, 12.5% calc(100% - 16px), 0 100%); }
-.banner .row { display: flex; align-items: center; justify-content: center; gap: 20px; }
-.banner h1 { margin: 0; font-weight: 400; font-size: 44px; line-height: 1.1; letter-spacing: 0.1em; color: var(--I); }
-.banner .vs { margin-top: 6px; font-size: 22px; color: var(--G); }
-.banner .vs i { font-style: normal; color: var(--D); margin: 0 6px; }
-.banner .ring { position: absolute; top: -8px; width: 8px; height: 12px; background: var(--S); }
+/* 光環裡的全像比賽日 */
+.holo { position: absolute; left: 960px; top: 304px; z-index: 2; width: 290px; height: 290px; margin: -145px 0 0 -145px; pointer-events: none; }
+.holo .hi { width: 100%; height: 100%; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  background: repeating-linear-gradient(0deg, rgba(63, 240, 255, 0.08) 0 2px, transparent 2px 4px), rgba(6, 5, 21, 0.6); animation: holo 5s steps(1) infinite; }
+@keyframes holo { 0%, 60%, 62%, 64%, 100% { opacity: 1; } 61% { opacity: 0.55; } 63% { opacity: 0.8; } }
+.holo .tg { font-size: 22px; line-height: 1; letter-spacing: 0.3em; color: var(--e); }
+.holo h1 { margin: 8px 0 10px; font-weight: 400; font-size: 66px; line-height: 1; letter-spacing: 0.08em; color: var(--R); text-shadow: var(--glowP); }
+.holo .vs { display: flex; align-items: center; gap: 22px; }
+.holo .vs b { font-weight: 400; font-size: 33px; line-height: 1; color: var(--W); }
+.holo .nm { display: flex; gap: 26px; margin-top: 8px; line-height: 1.2; }
+.holo .me { color: var(--T); }
+.holo .op { color: var(--R); }
+.holo .tm { margin-top: 2px; color: var(--S); }
+.holo.in { animation: scan 0.8s steps(8) both; animation-delay: 0.3s; }
+@keyframes scan { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
 
-/* 下方：出賽名單、開戰、助理對話 */
-.party { left: 24px; top: 836px; width: 620px; }
-.party .win { --bc: var(--M); --bc2: var(--N); display: flex; gap: 8px; padding: 40px 20px 18px; }
-.party .tt { color: var(--K); }
-.pl { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.pl canvas { box-shadow: 0 0 0 4px var(--C), 6px 6px 0 4px var(--K); }
-.pl .slot { margin-top: 10px; padding: 0 8px; background: var(--M); color: var(--K); line-height: 1.3; }
-.pl b { font-weight: 400; font-size: 33px; line-height: 1.1; }
-.pl .bar { display: flex; gap: 4px; }
-.pl .bar i { width: 12px; height: 8px; background: var(--G); }
-.pl .bar i.f { background: var(--M); }
-.pl .rt { color: var(--T); }
+/* 頂列：一條深色帶，下緣一道青線 */
+.top { position: absolute; left: 0; top: 0; z-index: 5; width: 1920px; height: 84px; display: flex; align-items: center; gap: 24px; padding: 0 36px; background: rgba(6, 5, 21, 0.88); box-shadow: 0 4px 0 var(--c); }
+.top .tm b { display: block; font-weight: 400; font-size: 44px; line-height: 1; text-shadow: 0 0 12px rgba(63, 240, 255, 0.45); }
+.top .tm span { display: block; margin-top: 4px; font-size: 22px; line-height: 1; letter-spacing: 0.25em; color: var(--e); }
+.top .wk { display: flex; align-items: center; gap: 14px; margin-left: 28px; }
+.top .wk .n { font-size: 44px; line-height: 1; color: var(--Q); text-shadow: var(--glowQ); }
+.top .seg { display: flex; gap: 4px; }
+.top .seg i { width: 20px; height: 12px; background: var(--c); }
+.top .seg i.f { background: var(--Q); box-shadow: 0 0 8px var(--Q); }
+.top .seg i.cur { background: var(--W); animation: blink 1s steps(1) infinite; }
+.top .wk small { font-size: 22px; color: var(--S); }
+.top .res { margin-left: auto; display: flex; align-items: center; gap: 36px; }
+.top .res > span { display: flex; align-items: center; gap: 10px; font-size: 33px; line-height: 1; }
+.top .res small { font-size: 22px; color: var(--S); }
+.top .mail { position: relative; }
+.top .mail em { position: absolute; right: -16px; top: -12px; min-width: 24px; padding: 0 4px; font-style: normal; font-size: 22px; line-height: 24px; text-align: center; background: var(--P); color: var(--K); }
 
-.go { position: absolute; z-index: 3; left: 960px; top: 862px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; }
-.go .odds { padding: 0 12px; background: var(--I); color: var(--T); box-shadow: 4px 4px 0 var(--K); }
-.go .odds b { font-weight: 400; color: var(--A); }
-.go .btn { margin-top: 20px; padding: 12px 36px; font-size: 44px; line-height: 1.1; color: var(--I); background: var(--R); cursor: pointer;
-  box-shadow: 8px 8px 0 var(--K), inset -4px -4px 0 var(--D), inset 4px 4px 0 var(--A); }
-.go .btn:hover { background: var(--A); }
-.go .key { margin-top: 16px; color: var(--C); text-shadow: 4px 4px 0 var(--K); }
+/* 下方面板：青色發光框，角落一朵粉色像素雲 */
+.pnl { position: absolute; z-index: 3; }
+.pnl .hd { display: flex; align-items: baseline; gap: 12px; padding-left: 16px; margin-bottom: 10px; font-size: 33px; line-height: 1; text-shadow: 0 0 10px rgba(63, 240, 255, 0.5); }
+.pnl .hd small { font-size: 22px; letter-spacing: 0.25em; color: var(--e); text-shadow: none; }
+.pnl .box { position: relative; background: rgba(6, 5, 21, 0.86); box-shadow: 0 0 0 4px var(--Q), 0 0 22px 2px rgba(63, 240, 255, 0.45), inset 0 0 0 4px var(--c), inset 0 0 28px rgba(63, 240, 255, 0.12); }
+.pnl .orn { position: absolute; z-index: 1; filter: drop-shadow(0 0 6px rgba(255, 61, 127, 0.6)); }
+.pnl .orn.tr { right: -20px; top: 28px; }
+.pnl .orn.bl { left: -20px; bottom: -14px; }
 
-.talk { right: 24px; top: 836px; width: 620px; }
-.talk .win { display: flex; gap: 24px; padding: 28px 28px 20px; }
-.talk canvas { flex: none; box-shadow: 0 0 0 4px var(--C), 6px 6px 0 4px var(--K); }
-.talk .who { color: var(--M); }
-.talk p { margin: 2px 0 0; font-size: 33px; line-height: 1.3; }
-.talk .opts { display: flex; gap: 16px; margin-top: 12px; }
-.talk .opts span { padding: 0 12px; background: var(--J); box-shadow: inset 0 0 0 4px var(--S); color: var(--T); }
-.talk .opts span.on { box-shadow: inset 0 0 0 4px var(--R); color: var(--W); }
-.talk .arrow { position: absolute; right: 24px; bottom: 16px; color: var(--R); }
+.party { left: 36px; top: 800px; width: 640px; }
+.party .box { display: flex; gap: 8px; padding: 22px 16px 16px; }
+.pl { flex: 1; display: flex; flex-direction: column; align-items: center; }
+.pl canvas { box-shadow: 0 0 0 4px var(--d); }
+.pl .slot { margin-top: 12px; padding: 0 8px; font-size: 22px; line-height: 1.3; background: var(--d); color: var(--K); }
+.pl b { font-weight: 400; font-size: 33px; line-height: 1.3; }
+.pl .rt { color: var(--e); line-height: 1.2; }
+.pl .bar { display: flex; gap: 4px; margin-top: 6px; }
+.pl .bar i { width: 12px; height: 8px; background: var(--c); }
+.pl .bar i.f { background: var(--Q); }
+
+.go { position: absolute; z-index: 3; left: 960px; top: 852px; translate: -50% 0; display: flex; flex-direction: column; align-items: center; }
+.go .odds { padding: 2px 14px 0; font-size: 22px; color: var(--S); background: rgba(6, 5, 21, 0.85); }
+.go .odds b { font-weight: 400; color: var(--R); }
+.go .gl { margin-top: 18px; filter: drop-shadow(0 0 12px rgba(255, 61, 127, 0.75)); }
+.go .btn { display: block; padding: 20px 64px 16px; font-size: 55px; line-height: 1; color: var(--K); background: var(--P); cursor: pointer; box-shadow: inset 0 4px 0 var(--R), inset 0 -4px 0 var(--m);
+  clip-path: polygon(20px 0, calc(100% - 20px) 0, 100% 50%, calc(100% - 20px) 100%, 20px 100%, 0 50%); }
+.go .btn:hover { background: var(--R); }
+.go .key { margin-top: 16px; font-size: 22px; letter-spacing: 0.2em; color: var(--e); }
+
+.talk { right: 36px; top: 800px; width: 640px; }
+.talk .box { display: flex; gap: 24px; padding: 26px 28px 26px; }
+.talk canvas { flex: none; box-shadow: 0 0 0 4px var(--d); }
+.talk p { margin: 0; font-size: 33px; line-height: 1.35; }
+.talk .opts { display: flex; gap: 16px; margin-top: 16px; }
+.talk .opts span { padding: 2px 12px 0; color: var(--S); box-shadow: inset 0 0 0 4px var(--G); }
+.talk .opts span.on { color: var(--T); box-shadow: inset 0 0 0 4px var(--Q); }
+.talk .arrow { position: absolute; right: 22px; bottom: 12px; color: var(--P); }
 
 /* 進場：像素感的跳格動畫 */
-.in { animation: popin 0.5s steps(5) both; animation-delay: var(--d, 0s); }
+.top.in, .pnl.in, .go.in { animation: popin 0.5s steps(5) both; animation-delay: var(--d, 0s); }
 @keyframes popin { from { opacity: 0; translate: 0 32px; } }
-.banner.in { animation: drop 0.6s steps(6) both, sway 3.2s steps(2) 0.6s infinite; animation-delay: var(--d, 0s), calc(var(--d, 0s) + 0.6s); }
-@keyframes drop { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+.go.in { animation-name: popgo; }
+@keyframes popgo { from { opacity: 0; translate: -50% 32px; } }
 </style>
 </head>
 <body>
 <div id="vp"><div id="stage">
   <canvas id="bg" width="480" height="270"></canvas>
 
-  <section class="street">
-    <div class="sh sign in" style="left:60px;width:216px;--d:.5s"><div class="win"><div class="hd"><span data-px-icon="coin"></span><b>財務</b></div><em>−14.6萬／週</em></div></div>
-    <div class="sh sign in" style="left:324px;width:200px;--d:.55s"><div class="win"><div class="hd"><span data-px-icon="scroll"></span><b>市場</b></div><em>3 名新人</em></div></div>
-    <div class="sh sign on in" style="left:556px;width:184px;--d:.6s"><span class="cursor">▼</span><div class="win"><div class="hd"><span data-px-icon="flag"></span><b>戰隊</b></div><em>4／5 已排</em></div></div>
-    <div class="sh sign in" style="left:1180px;width:184px;--d:.65s"><div class="win"><div class="hd"><span data-px-icon="cup"></span><b>聯賽</b></div><em>第 7 名</em></div></div>
-    <div class="sh sign in" style="left:1396px;width:216px;--d:.7s"><div class="win"><div class="hd"><span data-px-icon="bell"></span><b>訓練</b></div><em>200／200</em></div></div>
-    <div class="sh sign in" style="left:1652px;width:216px;--d:.75s"><div class="win"><div class="hd"><span data-px-icon="dice"></span><b>賭盤</b></div><em>4 場開盤</em></div></div>
-    <div class="sh banner in" style="--d:.3s"><div class="cloth">
-      <div class="row"><canvas data-pix-crest="天使戰隊" data-px="14" data-scale="4"></canvas><h1>比賽日</h1><canvas data-pix-crest="暗影工作室" data-px="14" data-scale="4"></canvas></div>
-      <div class="vs">天使戰隊<i>VS</i>暗影工作室</div>
-    </div></div>
-  </section>
+  <div class="sign s1 in"><b>財務</b><em>−14.6萬／週</em></div>
+  <div class="sign s2 on in"><span class="cur">▼</span><b>戰隊</b><em>4／5 已排</em></div>
+  <div class="sign s3 in"><b>市場</b><em>3 名新人</em></div>
+  <div class="sign s1 in"><b>聯賽</b><em>第 7 名</em></div>
+  <div class="sign s2 in"><b>訓練</b><em>200／200</em></div>
+  <div class="sign s3 in"><b>賭盤</b><em>4 場開盤</em></div>
 
-  <div class="sh top in"><div class="win">
-    <canvas data-pix-crest="天使戰隊" data-px="14" data-scale="4"></canvas>
-    <span class="nm">天使戰隊</span>
-    <span class="wk"><b>第 4 週</b>　例行賽</span>
-    <div class="res"><span><span data-px-icon="coin" data-k="4"></span>104.8萬</span><span class="mint">★ 10</span><span style="color:var(--T)">⌛ 7週</span><span style="color:var(--P)">✉ 3</span></div>
+  <div class="holo in"><div class="hi">
+    <span class="tg">MATCH DAY</span>
+    <h1>比賽日</h1>
+    <div class="vs"><canvas data-pix-crest="天使戰隊" data-ramp="c" data-px="14" data-scale="4"></canvas><b>VS</b><canvas data-pix-crest="暗影工作室" data-ramp="p" data-px="14" data-scale="4"></canvas></div>
+    <div class="nm"><span class="me">天使戰隊</span><span class="op">暗影工作室</span></div>
+    <span class="tm">20:00 開賽</span>
   </div></div>
 
-  <div class="sh party in" style="--d:.8s"><div class="win"><span class="tt">出賽名單</span>
-    <div class="pl"><canvas data-pix-avatar="xzr" data-jersey="#3f7f78" data-px="20" data-scale="4"></canvas><span class="slot">先鋒</span><b>謝子睿</b><span class="rt">1518</span><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></div></div>
-    <div class="pl"><canvas data-pix-avatar="qmz2" data-jersey="#3f7f78" data-px="20" data-scale="4"></canvas><span class="slot">中堅</span><b>邱明哲</b><span class="rt">1478</span><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i></div></div>
-    <div class="pl"><canvas data-pix-avatar="xce" data-jersey="#3f7f78" data-px="20" data-scale="4"></canvas><span class="slot">大將</span><b>徐承恩</b><span class="rt">1479</span><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i></div></div>
-  </div></div>
+  <header class="top in">
+    <canvas data-pix-crest="天使戰隊" data-ramp="c" data-px="13" data-scale="4"></canvas>
+    <div class="tm"><b>天使戰隊</b><span>ANGEL GAMING</span></div>
+    <div class="wk"><span class="n">W04</span><div class="seg"><i class="f"></i><i class="f"></i><i class="f"></i><i class="cur"></i><i></i><i></i><i></i><i></i><i></i></div><small>例行賽 · 共 9 週</small></div>
+    <div class="res">
+      <span><i data-px-icon="coin"></i>104.8萬<small>−14.6／週</small></span>
+      <span><i data-px-icon="star"></i>10<small>名氣</small></span>
+      <span><i data-px-icon="glass"></i>7週<small>資金跑道</small></span>
+      <span class="mail"><i data-px-icon="mail"></i><em>3</em></span>
+    </div>
+  </header>
+
+  <div class="pnl party in" style="--d:.8s">
+    <div class="hd">出賽名單<small>SQUAD 4/5</small></div>
+    <span class="orn tr" data-px-icon="cloud"></span>
+    <div class="box">
+      <div class="pl"><canvas data-pix-avatar="xzr" data-ramp="c" data-jersey="#3b6fd8" data-px="20" data-scale="4"></canvas><span class="slot">先鋒</span><b>謝子睿</b><span class="rt">1518 強攻</span><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></div></div>
+      <div class="pl"><canvas data-pix-avatar="qmz2" data-ramp="c" data-jersey="#3b6fd8" data-px="20" data-scale="4"></canvas><span class="slot">中堅</span><b>邱明哲</b><span class="rt">1478 均衡</span><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i></div></div>
+      <div class="pl"><canvas data-pix-avatar="xce" data-ramp="c" data-jersey="#3b6fd8" data-px="20" data-scale="4"></canvas><span class="slot">大將</span><b>徐承恩</b><span class="rt">1479 龜守</span><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
 
   <div class="go in" style="--d:.95s">
-    <span class="odds">押你贏 <b>×2.00</b>　對手名單 ？？？</span>
-    <span class="btn"><span class="blink">▶</span> 開戰！</span>
+    <span class="odds">押你贏 <b>×2.00</b>　對手名單 <b>？？？</b></span>
+    <div class="gl"><span class="btn"><span class="blink">▶</span> 開戰</span></div>
     <span class="key blink">按 ENTER</span>
   </div>
 
-  <div class="sh talk in" style="--d:.9s"><div class="win">
-    <canvas data-pix-avatar="assistant-lin" data-jersey="#7cc4a8" data-px="24" data-scale="4"></canvas>
-    <div><div class="who">助理　小林</div><p>暗影的大將換人了。<br>要派球探去看看嗎？</p>
-      <div class="opts"><span class="on">▶ 派球探（1萬）</span><span>算了</span></div></div>
-    <span class="arrow blink">▼</span>
-  </div></div>
+  <div class="pnl talk in" style="--d:.9s">
+    <div class="hd">助理　小林<small>ASSIST</small></div>
+    <span class="orn tr" data-px-icon="cloud"></span>
+    <div class="box">
+      <canvas data-pix-avatar="assistant-lin" data-ramp="c" data-jersey="#3b6fd8" data-px="24" data-scale="4"></canvas>
+      <div><p>暗影的大將換人了。<br>要派球探去看看嗎？</p>
+        <div class="opts"><span class="on">▶ 派球探（1萬）</span><span>算了</span></div></div>
+      <span class="arrow blink">▼</span>
+    </div>
+  </div>
 
   <div class="crt"></div>
-  <div class="design-note" style="right:36px;top:104px;z-index:50">設計稿 B · 黃昏商店街</div>
+  <div class="design-note" style="right:36px;top:100px">設計稿 B · 霓虹雨巷</div>
 </div></div>
 <script type="module" src="../../src/web/sketch/pixel.ts"></script>
 <script type="module" src="../../src/web/sketch/fill.ts"></script>
