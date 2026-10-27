@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天使戰隊</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="./sketch/stage.css">
+<link rel="stylesheet" href="./sketch/angel.css">
+<link rel="stylesheet" href="./sketch/ui/ui.css">
+<link rel="stylesheet" href="./game.css">
+</head>
+<body>
+<div id="vp"><div id="stage">
+  <div class="bgx"><div class="word"></div><div class="beams"><i style="left:640px"></i><i style="left:1060px;width:130px;animation-delay:-2.4s"></i><i style="left:280px;width:150px;opacity:.5;animation-delay:-4.8s"></i></div><div class="fl"><i></i></div><div class="vig"></div></div>
+  <canvas id="dust" width="1920" height="1080"></canvas>
+
+  <!-- 基地的夜城：常駐，只在基地畫面顯示（隱藏時畫格回呼會略過） -->
+  <section id="city" hidden>
+    <div class="cam"><div class="world lights">
+      <canvas id="city-cv" width="2048" height="1152"></canvas>
+      <div class="mist" style="top:300px"></div>
+      <div class="mist" style="top:420px;animation-duration:110s;animation-direction:reverse;opacity:.7"></div>
+      <canvas id="fx-cv" width="2048" height="1152"></canvas>
+      <div class="sweep"></div>
+      <div id="city-tags"></div>
+    </div></div>
+    <canvas id="rain-cv" width="1920" height="1080"></canvas>
+    <i class="corner" style="left:24px;top:24px;border-left-width:2px;border-top-width:2px"></i>
+    <i class="corner" style="right:24px;top:24px;border-right-width:2px;border-top-width:2px"></i>
+    <i class="corner" style="left:24px;bottom:24px;border-left-width:2px;border-bottom-width:2px"></i>
+    <i class="corner" style="right:24px;bottom:24px;border-right-width:2px;border-bottom-width:2px"></i>
+    <div class="scan"></div>
+    <div class="vig2"></div>
+  </section>
+
+  <div id="app"></div>
+  <div id="cine" hidden></div>
+  <div id="toasts"></div>
+</div></div>
+<script type="module" src="../src/web/game/main.ts"></script>
+</body>
+</html>
