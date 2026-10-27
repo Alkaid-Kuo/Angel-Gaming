@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：賭盤</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 左：本週四場的注單（主勝／客勝賠率鈕）；右：下注單；右下：已下的注與本季紀錄 */
+.board { left: 0; top: 0; width: 1040px; height: 766px; }
+.slip { display: grid; grid-template-columns: 1fr 150px 1fr; align-items: center; gap: 0 16px; padding: 12px 18px; margin-bottom: 8px; background: rgba(255, 255, 255, 0.03); }
+.slip.me { background: linear-gradient(90deg, rgba(var(--gold-rgb), 0.12), rgba(var(--gold-rgb), 0.02)); box-shadow: inset 4px 0 0 var(--gold); }
+.slip .tm { display: flex; align-items: center; gap: 14px; }
+.slip .tm.r { flex-direction: row-reverse; text-align: right; }
+.slip .tm b { display: block; font-size: 22px; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); }
+.slip .tm small { font-size: 13px; color: var(--grey); }
+.slip .tm small .num { font-size: 17px; color: var(--white); }
+.slip .mid { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.slip .mid .vs { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 26px; color: var(--grey2); }
+.slip .mid small { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.odd { grid-column: span 1; display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 18px; margin-top: 10px; cursor: pointer; transform: skewX(-12deg); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22); background: rgba(255, 255, 255, 0.02); }
+.odd > * { transform: skewX(12deg); }
+.odd span { font-size: 14px; letter-spacing: 0.12em; color: var(--grey); }
+.odd .num { font-size: 26px; }
+.odd.on { background: radial-gradient(130% 180% at 35% 15%, var(--gold2), var(--gold) 45%, var(--gold3)); box-shadow: 0 0 24px rgba(var(--gold-rgb), 0.4); }
+.odd.on span, .odd.on .num { color: var(--ink); }
+.odd.lock { opacity: 0.35; cursor: default; }
+.odd.mine { box-shadow: inset 0 0 0 2px var(--gold); }
+.odd.mine span { color: var(--gold2); }
+.edge { display: flex; align-items: center; gap: 8px; grid-column: span 3; margin-top: 8px; font-size: 14px; color: var(--grey); }
+.edge b { color: var(--gold2); }
+
+.bs { left: 1064px; top: 0; width: 628px; height: 500px; }
+.bs .pick { display: flex; align-items: center; gap: 16px; padding: 14px 16px; background: rgba(255, 255, 255, 0.04); }
+.bs .pick b { font-size: 24px; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); display: inline-block; }
+.bs .pick small { display: block; font-size: 13px; color: var(--grey); }
+.bs .pick .num { margin-left: auto; font-size: 44px; color: var(--gold); }
+.amt { display: flex; align-items: baseline; justify-content: space-between; margin-top: 12px; }
+.amt small { font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em; color: var(--grey); }
+.amt .num { font-size: 64px; line-height: 0.9; }
+.amt .num em { font-family: var(--zh); font-style: normal; font-weight: 500; font-size: 20px; color: var(--grey); margin-left: 6px; }
+.chips { display: flex; gap: 10px; margin-top: 14px; }
+.chips span { flex: 1; height: 44px; display: grid; place-items: center; border-radius: 50%; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 18px; color: var(--white); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.3), inset 0 0 0 6px rgba(var(--ink-rgb), 1), inset 0 0 0 7px rgba(255, 255, 255, 0.15); border-radius: 22px; }
+.chips span.mx { color: var(--gold2); box-shadow: inset 0 0 0 2px var(--gold); }
+.lim { margin-top: 14px; }
+.lim .row2 { display: flex; justify-content: space-between; font-size: 13px; color: var(--grey); margin-bottom: 6px; }
+.win { display: flex; align-items: baseline; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.win span { font-size: 15px; color: var(--grey); }
+.win .num { font-size: 38px; color: var(--gold2); }
+.bs .go { display: flex; justify-content: flex-end; margin-top: 8px; }
+
+.mybets { left: 1064px; top: 520px; width: 628px; height: 246px; }
+.mybets .row { grid-template-columns: 1fr 70px 80px 90px; min-height: 48px; font-size: 15px; }
+.mybets .row .num { font-size: 22px; text-align: right; }
+.mybets .row .s { display: flex; align-items: center; gap: 8px; }
+.season { display: flex; gap: 24px; margin-top: 14px; font-size: 14px; color: var(--grey); }
+.season .num { font-size: 26px; color: var(--white); margin-left: 4px; }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="betting" data-word="BETTING">
+  <div class="ph in" style="--d:.15s"><span class="en">BETTING // 賭盤 · W04</span><h1>賭盤</h1><div class="sub">莊家抽成 8% · 單場上限 <b>40</b> 萬 · 單注至少 1 萬 · 賠率在下注時鎖定 · 自己的比賽只能押自己</div></div>
+
+  <section class="body">
+    <div class="pn board in" style="--d:.25s">
+      <div class="pt"><span class="no">01</span><b>本週注單</b><span class="en">ODDS</span><span class="aux">開賽前都能下注</span></div>
+      <div class="slip me">
+        <div class="tm"><span class="cr" style="width:54px;height:54px"><span data-crest="天使戰隊" data-size="34"></span></span><div><b>天使戰隊</b><small>評分約 <span class="num">1492</span> · 第 7</small></div></div>
+        <div class="mid"><span class="vs">VS</span><small>我方比賽</small></div>
+        <div class="tm r"><span class="cr foe" style="width:54px;height:54px"><span data-crest="暗影工作室" data-foe data-size="34"></span></span><div><b class="rd">暗影工作室</b><small>評分約 <span class="num">1502</span> · 第 3</small></div></div>
+        <div class="odd mine"><span>押天使戰隊 · 已下 5 萬</span><span class="num">×2.00</span></div><div></div><div class="odd lock"><span>不能押對手</span><span class="num">×1.75</span></div>
+      </div>
+      <div class="slip">
+        <div class="tm"><span class="cr" style="width:54px;height:54px"><span data-crest="雷霆電競" data-size="34"></span></span><div><b>雷霆電競</b><small>評分約 <span class="num">1571</span> · 第 1</small></div></div>
+        <div class="mid"><span class="vs">VS</span><small>20:00</small></div>
+        <div class="tm r"><span class="cr" style="width:54px;height:54px"><span data-crest="赤焰俱樂部" data-size="34"></span></span><div><b>赤焰俱樂部</b><small>評分約 <span class="num">1508</span> · 第 8</small></div></div>
+        <div class="odd"><span>主勝</span><span class="num">×1.25</span></div><div></div><div class="odd"><span>客勝</span><span class="num">×3.60</span></div>
+      </div>
+      <div class="slip">
+        <div class="tm"><span class="cr" style="width:54px;height:54px"><span data-crest="北辰戰隊" data-size="34"></span></span><div><b>北辰戰隊</b><small>評分約 <span class="num">1534</span> · 第 2</small></div></div>
+        <div class="mid"><span class="vs">VS</span><small>20:00</small></div>
+        <div class="tm r"><span class="cr" style="width:54px;height:54px"><span data-crest="星河戰隊" data-size="34"></span></span><div><b>星河戰隊</b><small>評分約 <span class="num">1486</span> · 第 6</small></div></div>
+        <div class="odd on"><span>主勝 · 選中</span><span class="num">×1.70</span></div><div></div><div class="odd"><span>客勝</span><span class="num">×2.10</span></div>
+        <div class="edge"><span data-icon="info" data-size="18"></span>情報：星河戰隊大將<b>被高估約 30</b>（球探 W02），北辰的實際勝率可能比賠率高。</div>
+      </div>
+      <div class="slip">
+        <div class="tm"><span class="cr" style="width:54px;height:54px"><span data-crest="鐵壁電競" data-size="34"></span></span><div><b>鐵壁電競</b><small>評分約 <span class="num">1519</span> · 第 4</small></div></div>
+        <div class="mid"><span class="vs">VS</span><small>20:00</small></div>
+        <div class="tm r"><span class="cr" style="width:54px;height:54px"><span data-crest="蒼穹電競" data-size="34"></span></span><div><b>蒼穹電競</b><small>評分約 <span class="num">1497</span> · 第 5</small></div></div>
+        <div class="odd"><span>主勝</span><span class="num">×1.55</span></div><div></div><div class="odd"><span>客勝</span><span class="num">×2.35</span></div>
+      </div>
+    </div>
+
+    <div class="pn g bs in sr" style="--d:.32s">
+      <div class="pt"><span class="no">02</span><b>下注單</b><span class="en">BET SLIP</span></div>
+      <div class="pick"><span data-crest="北辰戰隊" data-size="40"></span><div><b>北辰戰隊 勝</b><small>北辰戰隊 vs 星河戰隊 · 賠率鎖定</small></div><span class="num">×1.70</span></div>
+      <div class="amt"><small>下注金額</small><span class="num">10<em>萬</em></span></div>
+      <div class="chips"><span>+1</span><span>+5</span><span>+10</span><span class="mx">MAX</span></div>
+      <div class="lim"><div class="row2"><span>單場上限（200＋名氣 × 20 千）</span><span>10／40 萬</span></div><div class="meter g" style="--v:25%"><i></i></div></div>
+      <div class="win"><span>押中可得</span><span class="num">17.0<small class="dim" style="font-size:16px"> 萬</small></span></div>
+      <div class="go"><a class="btn"><b>確認下注</b><span>PLACE BET</span></a></div>
+    </div>
+
+    <div class="pn mybets in sr" style="--d:.4s">
+      <div class="pt"><span class="no">03</span><b>已下的注</b><span class="aux">開獎在比賽日之後</span></div>
+      <div class="rows">
+        <div class="row hd"><span>內容</span><span style="text-align:right">賠率</span><span style="text-align:right">下注</span><span style="text-align:right">可得</span></div>
+        <div class="row me"><span class="s"><span data-crest="天使戰隊" data-size="20"></span>天使戰隊 勝</span><span class="num">×2.00</span><span class="num">5.0</span><span class="num gd">10.0</span></div>
+      </div>
+      <div class="season"><span>本季下注<span class="num">3</span> 注</span><span>淨額<span class="num rd">−6.2</span> 萬</span><span>報酬率<span class="num">−31%</span></span><span>亂押長期必輸，有情報再押</span></div>
+    </div>
+  </section>
+
+  <div class="design-note">完整 UI · 賭盤</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

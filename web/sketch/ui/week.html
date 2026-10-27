@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：週結算</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 週結算：左邊現金從 104.8 滾到 119.8（逐筆帳目）；中間名次 7 → 5；右邊新報告；下方其他賽場戰果 */
+.hd2 { position: absolute; left: 172px; top: 60px; }
+.hd2 .en { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 14px; letter-spacing: 0.32em; color: var(--gold2); }
+.hd2 .en::before { content: ""; width: 34px; height: 3px; background: var(--gold); transform: skewX(-30deg); }
+.hd2 h1 { margin: 2px 0 0; font-size: 90px; line-height: 1; font-weight: 900; letter-spacing: 0.08em; transform: skewX(-7deg); transform-origin: 0 100%; }
+.hd2 h1 .num { font-size: 96px; color: var(--gold); margin-right: 18px; }
+
+.money { position: absolute; left: 172px; top: 250px; width: 620px; height: 600px; }
+.money .big { display: flex; align-items: baseline; gap: 16px; }
+.money .big .from { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 44px; color: var(--grey2); text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.25); }
+.money .big .to { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 120px; line-height: 0.85; color: #fff; }
+.money .big em { font-style: normal; font-size: 26px; color: var(--grey); }
+.money .delta { margin-top: 10px; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 34px; color: var(--gold2); }
+.money .lines { margin-top: 18px; }
+.money .ln { display: grid; grid-template-columns: 1fr 100px; align-items: center; height: 42px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); font-size: 17px; color: var(--grey); }
+.money .ln .num { text-align: right; font-size: 26px; color: var(--white); }
+.money .ln .num.n { color: var(--red); }
+.money .ln .num.p { color: var(--gold2); }
+
+.rank { position: absolute; left: 840px; top: 250px; width: 470px; height: 600px; display: flex; flex-direction: column; align-items: center; }
+.rank .lb { font-family: var(--mono); font-size: 13px; letter-spacing: 0.3em; color: var(--grey); }
+.rk2 { position: relative; width: 340px; height: 340px; margin-top: 14px; display: grid; place-items: center; }
+.rk2 svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.rk2 .sp { transform-box: view-box; transform-origin: 170px 170px; animation: spin 30s linear infinite; }
+.rk2 .v { position: relative; text-align: center; }
+.rk2 .v .from { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 50px; color: var(--grey2); }
+.rk2 .v .arrow { display: block; width: 34px; margin: 4px auto 14px; color: var(--gold); }
+.rk2 .v .to { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 150px; line-height: 0.85; color: var(--gold); text-shadow: 0 0 40px rgba(var(--gold-rgb), 0.5); }
+.rk2 .v small { display: block; font-size: 18px; letter-spacing: 0.3em; color: var(--white); }
+.rank .row3 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; width: 100%; margin-top: 20px; }
+.rank .row3 div { padding: 12px 16px; background: rgba(255, 255, 255, 0.04); }
+.rank .row3 small { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.rank .row3 .num { font-size: 34px; }
+
+.mail { position: absolute; left: 1350px; top: 250px; width: 514px; height: 600px; }
+.env { display: flex; gap: 14px; align-items: center; padding: 14px 16px; margin-bottom: 10px; background: rgba(255, 255, 255, 0.03); box-shadow: inset 3px 0 0 var(--gold); }
+.env .ic { width: 48px; height: 48px; display: grid; place-items: center; color: var(--gold); background: rgba(var(--gold-rgb), 0.1); }
+.env b { display: block; font-size: 17px; }
+.env span { font-size: 14px; color: var(--grey); }
+
+.others { position: absolute; left: 172px; right: 56px; top: 880px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.og { display: grid; grid-template-columns: 1fr 70px 1fr; align-items: center; height: 64px; padding: 0 14px; background: rgba(255, 255, 255, 0.03); font-size: 15px; }
+.og.me { box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.6); background: rgba(var(--gold-rgb), 0.08); }
+.og .t { display: flex; align-items: center; gap: 8px; }
+.og .t.r { flex-direction: row-reverse; text-align: right; }
+.og .t.wn { color: #fff; font-weight: 700; }
+.og .t.ls { color: var(--grey2); }
+.og .s { text-align: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 26px; }
+.ctl { position: absolute; right: 56px; bottom: 36px; display: flex; gap: 14px; }
+.lbx { position: absolute; left: 172px; top: 850px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.3em; color: var(--grey); }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="week" data-word="WEEK 04" data-shell="none">
+  <div class="hd2 in" style="--d:.05s"><span class="en">WEEKLY REPORT // 週結算</span><h1><span class="num">W04</span>週結算</h1></div>
+
+  <section class="pn g money in sl" style="--d:.2s">
+    <div class="pt"><span class="no">01</span><b>現金</b><span class="aux">每週淨額 <b class="num" style="font-size:20px">+15.0</b></span></div>
+    <div class="big"><span class="from">104.8</span><span class="to">119.8</span><em>萬</em></div>
+    <div class="delta">▲ +15.0 萬</div>
+    <div class="lines">
+      <div class="ln"><span>比賽收入 · 勝 2:1 暗影工作室</span><span class="num p">+16.0</span></div>
+      <div class="ln"><span>下注開獎 · 押天使 ×2.00、押北辰 ×1.70</span><span class="num p">+27.0</span></div>
+      <div class="ln"><span>贊助 · 名氣 12</span><span class="num">+9.6</span></div>
+      <div class="ln"><span>週薪 · 4 人</span><span class="num n">−20.6</span></div>
+      <div class="ln"><span>訓練中心維護 · Lv1</span><span class="num n">−2.0</span></div>
+      <div class="ln"><span>下注本金 · 5 萬＋10 萬</span><span class="num n">−15.0</span></div>
+    </div>
+  </section>
+
+  <section class="rank in pop" style="--d:.35s">
+    <span class="lb">積分榜名次</span>
+    <div class="rk2">
+      <svg viewBox="0 0 340 340"><circle cx="170" cy="170" r="160" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="2"/><g class="sp"><circle cx="170" cy="170" r="160" fill="none" stroke="#f0b54a" stroke-width="3" stroke-dasharray="40 30 4 30"/></g><circle cx="170" cy="170" r="140" fill="none" stroke="rgba(240,181,74,.25)" stroke-width="10"/></svg>
+      <div class="v"><span class="from">#7</span><span class="arrow" data-icon="up" data-size="34"></span><span class="to">5</span><small>第 5 名 · ▲2</small></div>
+    </div>
+    <div class="row3"><div><small>名氣</small><span class="num">10 → <span class="gd2">12</span></span></div><div><small>資金跑道</small><span class="num">7 → <span class="gd2">9</span> 週</span></div></div>
+  </section>
+
+  <section class="pn mail in sr" style="--d:.3s">
+    <div class="pt"><span class="no">02</span><b>新報告</b><span class="aux">下週平日可看</span></div>
+    <div class="env"><span class="ic"><span data-icon="flask" data-size="24"></span></span><div><b>研發報告 · 謝子睿</b><span>針對伏擊流累計 200 場，加成 +19</span></div></div>
+    <div class="env"><span class="ic"><span data-icon="target" data-size="24"></span></span><div><b>練習賽報告 · 謝子睿</b><span>對伏擊流 40 場 27 勝，估計勝率 67%</span></div></div>
+    <div class="env"><span class="ic"><span data-icon="search" data-size="24"></span></span><div><b>球探回報 · 廖芷晴</b><span>真實強度約 1508，比評分低 14</span></div></div>
+    <div class="env" style="box-shadow:inset 3px 0 0 rgba(255,255,255,.3)"><span class="ic" style="color:var(--white);background:rgba(255,255,255,.05)"><span data-icon="trophy" data-size="24"></span></span><div><b>聯賽 · 第 5 週對手</b><span>星河戰隊（第 6）· 押我方 ×1.80</span></div></div>
+  </section>
+
+  <div class="lbx in" style="--d:.5s">其他賽場 · OTHER RESULTS</div>
+  <section class="others">
+    <div class="og me in" style="--d:.55s"><span class="t wn"><span data-crest="天使戰隊" data-size="22"></span>天使戰隊</span><span class="s">2:1</span><span class="t r ls"><span data-crest="暗影工作室" data-foe data-size="22"></span>暗影工作室</span></div>
+    <div class="og in" style="--d:.6s"><span class="t wn"><span data-crest="雷霆電競" data-size="22"></span>雷霆電競</span><span class="s">3:0</span><span class="t r ls"><span data-crest="赤焰俱樂部" data-size="22"></span>赤焰俱樂部</span></div>
+    <div class="og in" style="--d:.65s"><span class="t wn"><span data-crest="北辰戰隊" data-size="22"></span>北辰戰隊</span><span class="s">2:1</span><span class="t r ls"><span data-crest="星河戰隊" data-size="22"></span>星河戰隊</span></div>
+    <div class="og in" style="--d:.7s"><span class="t wn"><span data-crest="鐵壁電競" data-size="22"></span>鐵壁電競</span><span class="s">2:1</span><span class="t r ls"><span data-crest="蒼穹電競" data-size="22"></span>蒼穹電競</span></div>
+  </section>
+
+  <div class="ctl in" style="--d:.8s"><a class="btn ghost"><b>看積分榜</b></a><a class="btn" href="squad.html"><b>進入第 5 週</b><span>NEXT WEEK</span></a></div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

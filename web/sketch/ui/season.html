@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：賽段結束</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 頒獎典禮：透視的三層頒獎台（我方站上季軍），聚光燈、金白紙花；兩側是本季數字與 MVP */
+.title { position: absolute; left: 0; right: 0; top: 70px; text-align: center; }
+.title .en { font-family: var(--mono); font-size: 15px; letter-spacing: 0.5em; color: var(--gold2); }
+.title h1 { margin: 6px 0 0; font-size: 92px; font-weight: 900; letter-spacing: 0.24em; margin-right: -0.24em; transform: skewX(-7deg); text-shadow: 0 0 40px rgba(var(--gold-rgb), 0.3), 0 8px 0 rgba(0, 0, 0, 0.4); }
+.spot { position: absolute; top: -60px; width: 340px; height: 1000px; background: linear-gradient(180deg, rgba(255, 236, 200, 0.16), transparent 80%); clip-path: polygon(42% 0, 58% 0, 100% 100%, 0 100%); pointer-events: none; }
+.stage3 { position: absolute; left: 50%; top: 300px; width: 1000px; height: 640px; margin-left: -500px; perspective: 1400px; transform: translate(calc(var(--mx) * -14px), calc(var(--my) * -6px)); }
+.pod { position: absolute; bottom: 120px; width: 300px; display: flex; flex-direction: column; align-items: center; }
+.pod .cr { margin-bottom: 18px; }
+.pod .nm { font-size: 28px; font-weight: 900; letter-spacing: 0.1em; transform: skewX(-7deg); margin-bottom: 14px; }
+.pod .blk { position: relative; width: 300px; display: flex; align-items: flex-start; justify-content: center; padding-top: 18px; background: linear-gradient(180deg, #2a3346, #10141c); box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.35), 0 40px 80px rgba(0, 0, 0, 0.6); }
+.pod .blk::before { content: ""; position: absolute; left: 0; right: 0; top: -40px; height: 40px; background: linear-gradient(180deg, #3a4458, #2a3346); transform-origin: 50% 100%; transform: perspective(600px) rotateX(55deg); }
+.pod .blk .num { font-size: 110px; line-height: 0.85; color: rgba(255, 255, 255, 0.85); }
+.pod.p1 { left: 350px; }
+.pod.p1 .blk { height: 260px; }
+.pod.p1 .blk .num { color: var(--gold); }
+.pod.p2 { left: 40px; }
+.pod.p2 .blk { height: 190px; }
+.pod.p3 { left: 660px; }
+.pod.p3 .blk { height: 140px; box-shadow: inset 0 3px 0 var(--gold), 0 0 60px rgba(var(--gold-rgb), 0.35), 0 40px 80px rgba(0, 0, 0, 0.6); background: linear-gradient(180deg, #3a3020, #14110c); }
+.pod.p3 .blk .num { color: var(--gold2); }
+.pod.p3 .nm { color: var(--gold); }
+.pod .tag2 { position: absolute; top: -170px; padding: 4px 14px; font-weight: 900; font-size: 15px; letter-spacing: 0.2em; color: var(--ink); background: var(--gold); transform: skewX(-14deg); }
+.pod .prize { margin-top: 10px; font-size: 15px; color: var(--grey); }
+.pod .prize .num { font-size: 26px; color: var(--white); line-height: 1; }
+
+.side2 { position: absolute; top: 330px; width: 330px; }
+.side2.l { left: 56px; }
+.side2.r { right: 56px; }
+.kv2 { padding: 16px 20px; margin-bottom: 12px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.25); }
+.kv2.g { box-shadow: inset 3px 0 0 var(--gold); background: rgba(var(--gold-rgb), 0.07); }
+.kv2 small { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; color: var(--grey); }
+.kv2 .num { font-size: 46px; line-height: 1.1; }
+.kv2 span { font-size: 15px; color: var(--grey); }
+.kv2 .num span { font-size: inherit; color: var(--gold2); }
+.mvp { display: flex; align-items: center; gap: 16px; }
+.mvp .av { width: 86px; height: 86px; }
+.mvp b { display: block; font-size: 30px; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); }
+.ctl { position: absolute; left: 0; right: 0; bottom: 44px; display: flex; justify-content: center; gap: 16px; }
+#confetti { position: absolute; inset: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="season" data-word="SEASON 01" data-shell="none">
+  <i class="spot" style="left:640px"></i><i class="spot" style="left:290px;opacity:.6"></i><i class="spot" style="left:950px;opacity:.6"></i>
+  <canvas id="confetti" width="1920" height="1080"></canvas>
+  <div class="title in" style="--d:.05s"><div class="en">SEASON 01 // AWARD CEREMONY</div><h1>頒獎典禮</h1></div>
+
+  <section class="stage3">
+    <div class="pod p2 in" style="--d:.5s"><span class="cr" style="width:110px;height:110px"><span data-crest="北辰戰隊" data-size="70"></span></span><span class="nm">北辰戰隊</span><div class="blk"><span class="num">2</span></div><div class="prize">亞軍 <span class="num">70</span> 萬</div></div>
+    <div class="pod p1 in" style="--d:.7s"><span class="cr" style="width:130px;height:130px"><span data-crest="雷霆電競" data-size="84"></span></span><span class="nm">雷霆電競</span><div class="blk"><span class="num">1</span></div><div class="prize">冠軍 <span class="num">120</span> 萬</div></div>
+    <div class="pod p3 in" style="--d:.3s"><span class="tag2">天使戰隊 · 季軍</span><span class="cr" style="width:120px;height:120px"><span data-crest="天使戰隊" data-size="78"></span></span><span class="nm">天使戰隊</span><div class="blk"><span class="num">3</span></div><div class="prize">季軍 <span class="num gd">45</span> 萬</div></div>
+  </section>
+
+  <section class="side2 l">
+    <div class="kv2 g in sl" style="--d:.9s"><small>最終名次</small><span class="num gd">#3</span> <span>例行賽第 4 → 季軍戰勝</span></div>
+    <div class="kv2 in sl" style="--d:.96s"><small>戰績</small><span class="num">6-0-3</span> <span>對位 16 勝 11 敗</span></div>
+    <div class="kv2 in sl" style="--d:1.02s"><small>名氣</small><span class="num">10 → <span class="gd2">21</span></span></div>
+  </section>
+  <section class="side2 r">
+    <div class="kv2 g in sr" style="--d:.9s"><small>本季 MVP</small><div class="mvp"><span class="av tinted"><span data-avatar="xzr" data-size="86"></span></span><div><b>謝子睿</b><span>先鋒 · 對位 8 勝 2 敗 · 評分 1518 → 1563</span></div></div></div>
+    <div class="kv2 in sr" style="--d:.96s"><small>期末現金</small><span class="num">158.6</span> <span>萬 · 含名次獎金 45 萬</span></div>
+    <div class="kv2 in sr" style="--d:1.02s"><small>下注</small><span class="num">+31.4</span> <span>萬 · 報酬率 +18%</span></div>
+  </section>
+
+  <div class="ctl in" style="--d:1.2s"><a class="btn ghost lg"><b>回顧賽季</b></a><a class="btn lg" href="squad.html"><b>進入休賽期</b><span>SEASON 02</span></a></div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+<script type="module">
+  // 紙花：金與白兩種，慢慢飄落並翻轉
+  import { onFrame } from '../../../src/web/sketch/stage.ts';
+  const cv = document.getElementById('confetti');
+  const g = cv.getContext('2d');
+  const ps = Array.from({ length: 140 }, (_, i) => ({ x: (i * 397) % 1920, y: ((i * 211) % 1300) - 200, v: 0.8 + ((i * 7) % 10) / 6, w: 6 + (i % 5) * 2, a: i, c: i % 3 ? '#f0b54a' : '#eef2f6' }));
+  onFrame((t) => {
+    g.clearRect(0, 0, 1920, 1080);
+    for (const p of ps) {
+      const y = ((p.y + t * 60 * p.v) % 1300) - 120;
+      const x = p.x + Math.sin(t * 0.8 + p.a) * 30;
+      g.save();
+      g.translate(x, y);
+      g.rotate(t * p.v + p.a);
+      g.scale(1, Math.abs(Math.sin(t * 2 * p.v + p.a)));
+      g.fillStyle = p.c;
+      g.globalAlpha = 0.85;
+      g.fillRect(-p.w / 2, -3, p.w, 6);
+      g.restore();
+    }
+  });
+</script>
+</body>
+</html>

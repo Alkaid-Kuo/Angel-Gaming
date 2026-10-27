@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：財務</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 左上：現金大字＋資金跑道環；右上：資金曲線（週末現金折線＋每週淨額長條＋照目前速度的推估）；下排：固定收支、本賽段累計、帳本 */
+.cash { left: 0; top: 0; width: 500px; height: 420px; }
+.cash .big { display: flex; align-items: baseline; gap: 10px; }
+.cash .big .num { font-size: 120px; line-height: 0.85; }
+.cash .big em { font-style: normal; font-size: 28px; color: var(--grey); }
+.cash .dl { margin-top: 10px; font-family: var(--mono); font-size: 14px; letter-spacing: 0.16em; color: var(--red); }
+.rw { display: flex; align-items: center; gap: 22px; margin-top: 22px; }
+.rw .gauge2 { width: 150px; height: 150px; }
+.rw .gauge2 .num { font-size: 58px; }
+.rw .gauge2 small { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.rw p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--grey); }
+.rw p b { color: var(--white); }
+.rw p .rd { color: var(--red2); }
+
+.chart { left: 520px; top: 0; width: 1172px; height: 420px; }
+.chart svg { display: block; }
+.lg { display: flex; gap: 22px; font-size: 13px; color: var(--grey); }
+.lg i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; }
+
+.fix { left: 0; top: 444px; width: 500px; height: 322px; }
+.fx { display: grid; grid-template-columns: 110px 1fr 70px; align-items: center; gap: 10px; height: 30px; font-size: 15px; }
+.fx span:first-child { color: var(--grey); }
+.fx .bar { height: 12px; transform: skewX(-20deg); }
+.fx .num { text-align: right; font-size: 22px; }
+.fx.tot { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.1); height: 44px; }
+.fx.tot .num { font-size: 30px; }
+
+.cat { left: 520px; top: 444px; width: 560px; height: 322px; }
+.ct { display: grid; grid-template-columns: 90px 1fr 70px; align-items: center; gap: 10px; height: 30px; font-size: 15px; }
+.ct span:first-child { color: var(--grey); }
+.ct .two { position: relative; height: 10px; }
+.ct .two::before { content: ""; position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: rgba(255, 255, 255, 0.25); }
+.ct .two i { position: absolute; top: 0; bottom: 0; }
+.ct .two i.p { left: 50%; background: var(--white); }
+.ct .two i.n { right: 50%; background: var(--red); }
+.ct .num { text-align: right; font-size: 20px; }
+
+.led { left: 1104px; top: 444px; width: 588px; height: 322px; }
+.led .row { grid-template-columns: 60px 1fr 90px; min-height: 33px; font-size: 15px; }
+.led .row .num { text-align: right; font-size: 21px; }
+.led .row .wk { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; color: var(--grey2); }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="finance" data-word="FINANCE">
+  <div class="ph in" style="--d:.15s"><span class="en">FINANCE // 財務</span><h1>財務</h1><div class="sub">起始資金 <b>150</b> 萬 · 週結算後現金小於 0 就破產 · 金額單位：萬</div></div>
+
+  <section class="body">
+    <div class="pn g cash in" style="--d:.25s">
+      <div class="pt"><span class="no">01</span><b>現金</b><span class="en">CASH</span><span class="aux">第 3 週結算後</span></div>
+      <div class="big"><span class="num">104.8</span><em>萬</em></div>
+      <div class="dl">▼ 每週固定淨額 −14.6 萬</div>
+      <div class="rw">
+        <div class="gauge2"><svg viewBox="0 0 150 150"><circle cx="75" cy="75" r="64" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="12"/><circle cx="75" cy="75" r="64" fill="none" stroke="#f0b54a" stroke-width="12" stroke-dasharray="281.5 402" /><circle cx="75" cy="75" r="64" fill="none" stroke="#ff5d5d" stroke-width="12" stroke-dasharray="0 321.6 80.4 402"/><circle cx="75" cy="75" r="64" fill="none" stroke="#0b0e14" stroke-width="14" stroke-dasharray="2 38.2"/></svg>
+          <div class="v"><span class="num">7</span><small>WEEKS</small></div></div>
+        <p>資金跑道 <b>7 週</b>：照目前速度，<span class="rd">第 11 週</span>現金歸零。<br>賽段在第 9 週結束，名次獎金會先發再檢查。<br>紅色區＝剩 2 週以內，會開始警示。</p>
+      </div>
+    </div>
+
+    <div class="pn chart in sr" style="--d:.32s">
+      <div class="pt"><span class="no">02</span><b>資金曲線</b><span class="en">CASH FLOW</span><span class="aux"><span class="lg"><span><i style="background:#f0b54a"></i>週末現金</span><span><i style="background:#f0b54a;opacity:.45;height:2px;border-top:2px dashed #f0b54a;background:none"></i>照目前速度推估</span><span><i style="background:#eef2f6"></i>當週淨額＋</span><span><i style="background:#ff5d5d"></i>當週淨額−</span></span></span></div>
+      <svg width="1110" height="310" viewBox="0 0 1110 310">
+        <g stroke="rgba(255,255,255,.07)"><line x1="60" y1="31.0" x2="1100" y2="31.0"/><line x1="60" y1="84.1" x2="1100" y2="84.1"/><line x1="60" y1="137.1" x2="1100" y2="137.1"/><line x1="60" y1="190.2" x2="1100" y2="190.2"/></g>
+        <line x1="60" y1="230" x2="1100" y2="230" stroke="rgba(255,93,93,.5)" stroke-dasharray="4 6"/>
+        <g font-family="Share Tech Mono" font-size="12" fill="#5b6574" letter-spacing="1"><text x="0" y="35.0">150</text><text x="0" y="88.1">110</text><text x="0" y="141.1">70</text><text x="0" y="194.2">30</text><text x="0" y="234" fill="#ff5d5d">0</text></g>
+        <g font-family="Share Tech Mono" font-size="12" fill="#8b95a4" letter-spacing="2"><text x="88" y="300">休</text><text x="188" y="300">W1</text><text x="288" y="300">W2</text><text x="388" y="300">W3</text><text x="488" y="300" fill="#f0b54a">W4</text><text x="588" y="300">W5</text><text x="688" y="300">W6</text><text x="788" y="300">W7</text><text x="888" y="300">W8</text><text x="988" y="300">W9</text></g>
+        <g><rect x="80" y="230" width="34" height="22.8" fill="#ff5d5d" opacity=".8"/><rect x="180" y="230" width="34" height="15.1" fill="#ff5d5d" opacity=".8"/><rect x="280" y="228.4" width="34" height="1.6" fill="#eef2f6"/><rect x="380" y="230" width="34" height="23.6" fill="#ff5d5d" opacity=".8"/></g>
+        <path d="M97 53.8 L197 68.9 L297 67.4 L397 91.0 L397 230 L97 230 Z" fill="rgba(240,181,74,.08)"/>
+        <path d="M97 53.8 L197 68.9 L297 67.4 L397 91.0" fill="none" stroke="#f0b54a" stroke-width="3.5"/>
+        <path d="M397 91.0 L497 110.3 L597 129.7 L697 149.1 L797 168.4 L897 187.8 L997 207.2" fill="none" stroke="#f0b54a" stroke-width="2.5" stroke-dasharray="8 8" opacity=".55"/>
+        <g fill="#0b0e14" stroke="#ffd98a" stroke-width="2.5"><circle cx="97" cy="53.8" r="5"/><circle cx="197" cy="68.9" r="5"/><circle cx="297" cy="67.4" r="5"/><circle cx="397" cy="91.0" r="7" fill="#f0b54a"/></g>
+        <g font-family="Barlow Condensed" font-style="italic" font-weight="800" font-size="20" fill="#eef2f6"><text x="79" y="39.8">132.8</text><text x="179" y="54.900000000000006">121.4</text><text x="279" y="53.400000000000006">122.6</text><text x="379" y="77.0">104.8</text><text x="980" y="193.2" fill="#ffd98a" opacity=".8">17.2</text></g>
+        <g font-family="Barlow Condensed" font-style="italic" font-weight="700" font-size="15" fill="#ffa3a3"><text x="79" y="268.8">−17.2</text><text x="179" y="261.1">−11.4</text><text x="279" y="222.4" fill="#eef2f6">+1.2</text><text x="379" y="269.6">−17.8</text></g>
+      </svg>
+    </div>
+
+    <div class="pn fix in" style="--d:.4s">
+      <div class="pt"><span class="no">03</span><b>每週固定收支</b></div>
+      <div class="fx"><span>贊助</span><span class="bar" style="background:linear-gradient(90deg,#eef2f6 0 39%,transparent 39%)"></span><span class="num">+8.0</span></div>
+      <div class="fx"><span>謝子睿 週薪</span><span class="bar" style="background:linear-gradient(90deg,#ff5d5d 0 30%,transparent 30%)"></span><span class="num">−6.1</span></div>
+      <div class="fx"><span>邱明哲 週薪</span><span class="bar" style="background:linear-gradient(90deg,#ff5d5d 0 25%,transparent 25%)"></span><span class="num">−5.2</span></div>
+      <div class="fx"><span>徐承恩 週薪</span><span class="bar" style="background:linear-gradient(90deg,#ff5d5d 0 24%,transparent 24%)"></span><span class="num">−5.0</span></div>
+      <div class="fx"><span>林語彤 週薪</span><span class="bar" style="background:linear-gradient(90deg,#ff5d5d 0 21%,transparent 21%)"></span><span class="num">−4.3</span></div>
+      <div class="fx"><span>訓練中心 Lv1</span><span class="bar" style="background:linear-gradient(90deg,#ff5d5d 0 10%,transparent 10%)"></span><span class="num">−2.0</span></div>
+      <div class="fx tot"><span>淨額</span><span class="dim" style="font-size:13px">比賽收入、下注不算在內</span><span class="num rd">−14.6</span></div>
+    </div>
+
+    <div class="pn cat in" style="--d:.46s">
+      <div class="pt"><span class="no">04</span><b>本賽段累計</b><span class="aux">淨 <b class="num rd" style="font-size:20px">−45.2</b></span></div>
+      <div class="ct"><span>比賽收入</span><span class="two"><i class="p" style="width:19%"></i></span><span class="num">+24.0</span></div>
+      <div class="ct"><span>贊助</span><span class="two"><i class="p" style="width:19%"></i></span><span class="num">+24.0</span></div>
+      <div class="ct"><span>薪資</span><span class="two"><i class="n" style="width:48%"></i></span><span class="num rd">−61.8</span></div>
+      <div class="ct"><span>簽約金</span><span class="two"><i class="n" style="width:14%"></i></span><span class="num rd">−17.2</span></div>
+      <div class="ct"><span>訓練中心</span><span class="two"><i class="n" style="width:5%"></i></span><span class="num rd">−6.0</span></div>
+      <div class="ct"><span>下注</span><span class="two"><i class="n" style="width:5%"></i></span><span class="num rd">−6.2</span></div>
+      <div class="ct"><span>球探</span><span class="two"><i class="n" style="width:2%"></i></span><span class="num rd">−2.0</span></div>
+    </div>
+
+    <div class="pn led in sr" style="--d:.52s">
+      <div class="pt"><span class="no">05</span><b>帳本</b><span class="en">LEDGER</span><span class="aux">最近 7 筆</span></div>
+      <div class="rows">
+        <div class="row"><span class="wk">W03</span><span>週薪（4 人）</span><span class="num rd">−20.6</span></div>
+        <div class="row"><span class="wk">W03</span><span>訓練中心維護</span><span class="num rd">−2.0</span></div>
+        <div class="row"><span class="wk">W03</span><span>贊助（名氣 10）</span><span class="num">+8.0</span></div>
+        <div class="row"><span class="wk">W03</span><span>比賽收入 · 敗 0:3 鐵壁電競</span><span class="num">+3.0</span></div>
+        <div class="row"><span class="wk">W03</span><span>下注 · 押天使（未中）</span><span class="num rd">−6.2</span></div>
+        <div class="row"><span class="wk">W02</span><span>球探 · 賴星宇</span><span class="num rd">−1.0</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="design-note">完整 UI · 財務</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：創立戰隊</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 創立戰隊：左邊即時預覽（隊徽在金環上、隊名大字）；右邊表單：名稱、外形、配色、圖騰。配色只給金、白、墨三種組合 */
+.hd2 { position: absolute; left: 56px; top: 50px; }
+.hd2 .en { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 14px; letter-spacing: 0.32em; color: var(--gold2); }
+.hd2 .en::before { content: ""; width: 34px; height: 3px; background: var(--gold); transform: skewX(-30deg); }
+.hd2 h1 { margin: 2px 0 0; font-size: 70px; line-height: 1; font-weight: 900; letter-spacing: 0.08em; transform: skewX(-7deg); transform-origin: 0 100%; }
+.pre { position: absolute; left: 120px; top: 210px; width: 760px; height: 760px; display: flex; flex-direction: column; align-items: center; transform: translate(calc(var(--mx) * -14px), calc(var(--my) * -8px)); }
+.pre .halo { position: relative; width: 420px; height: 420px; display: grid; place-items: center; }
+.pre .halo svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.pre .halo .sp { transform-box: view-box; transform-origin: 210px 210px; animation: spin 40s linear infinite; }
+.pre .halo .big svg { position: static; width: auto; height: auto; filter: drop-shadow(0 0 30px rgba(var(--gold-rgb), 0.4)) drop-shadow(0 30px 40px rgba(0, 0, 0, 0.6)); }
+.pre .name { margin-top: 26px; font-size: 92px; font-weight: 900; letter-spacing: 0.14em; transform: skewX(-7deg); text-shadow: 0 8px 0 rgba(0, 0, 0, 0.4); }
+.pre .sub { margin-top: 6px; font-family: var(--en); font-style: italic; font-weight: 700; font-size: 24px; letter-spacing: 0.45em; color: var(--gold); }
+.pre .facts { display: flex; gap: 30px; margin-top: 24px; font-size: 15px; color: var(--grey); }
+.pre .facts b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 28px; color: var(--white); margin-left: 6px; }
+
+.form { left: 960px; top: 190px; width: 904px; position: absolute; }
+.form .lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; letter-spacing: 0.26em; color: var(--grey); margin: 20px 0 10px; }
+.input { display: flex; align-items: center; height: 70px; padding: 0 22px; font-size: 34px; font-weight: 900; letter-spacing: 0.12em; background: rgba(var(--ink-rgb), 0.7); box-shadow: inset 0 0 0 2px var(--gold), 0 0 24px rgba(var(--gold-rgb), 0.2); }
+.input i { width: 3px; height: 38px; margin-left: 6px; background: var(--gold); animation: blink 1s steps(1) infinite; }
+.input small { margin-left: auto; font-family: var(--mono); font-size: 13px; font-weight: 400; letter-spacing: 0.2em; color: var(--grey); }
+.opts { display: grid; gap: 10px; }
+.opts.c4 { grid-template-columns: repeat(4, 1fr); }
+.opts.c6 { grid-template-columns: repeat(6, 1fr); }
+.opts.c10 { grid-template-columns: repeat(10, 1fr); }
+.opt { position: relative; height: 96px; display: grid; place-items: center; background: rgba(255, 255, 255, 0.03); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); cursor: pointer; }
+.opt.on { background: rgba(var(--gold-rgb), 0.1); box-shadow: inset 0 0 0 2px var(--gold), 0 0 20px rgba(var(--gold-rgb), 0.25); }
+.opts.c6 .opt { height: 78px; }
+.opts.c10 .opt { height: 72px; }
+.sw { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 13px; color: var(--grey); }
+.sw i { display: flex; width: 54px; height: 28px; transform: skewX(-16deg); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2); }
+.sw i b { flex: 1; }
+.opt.on .sw { color: #fff; }
+.adv { display: flex; align-items: center; gap: 16px; margin-top: 22px; padding-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 15px; color: var(--grey); }
+.adv .seed { padding: 8px 16px; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 22px; color: var(--white); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2); }
+.adv .btn { margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="create" data-word="NEW TEAM" data-shell="none">
+  <div class="hd2 in"><span class="en">NEW TEAM // 創立戰隊</span><h1>創立戰隊</h1></div>
+
+  <section class="pre in pop" style="--d:.15s">
+    <div class="halo">
+      <svg viewBox="0 0 420 420"><circle cx="210" cy="210" r="200" fill="none" stroke="rgba(240,181,74,.5)" stroke-width="4"/><g class="sp"><circle cx="210" cy="210" r="186" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="5" stroke-dasharray="2 9"/></g><circle cx="210" cy="210" r="166" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="1"/></svg>
+      <span class="big" id="preview"></span>
+    </div>
+    <div class="name">天使戰隊</div>
+    <div class="sub">ANGEL GAMING</div>
+    <div class="facts"><span>起始資金<b>150</b> 萬</span><span>聯賽<b>8</b> 隊</span><span>賽段<b>9</b> 週</span></div>
+  </section>
+
+  <section class="pn g form in sr" style="--d:.25s">
+    <div class="pt"><span class="no">01</span><b>戰隊設定</b><span class="aux">之後在設定裡還能改隊徽</span></div>
+    <div class="lbl"><span>戰隊名稱</span><span>2～6 字</span></div>
+    <div class="input">天使戰隊<i></i><small>ANGEL GAMING</small></div>
+    <div class="lbl"><span>隊徽外形</span></div>
+    <div class="opts c4" data-shapes></div>
+    <div class="lbl"><span>配色</span><span>介面固定用天使金；隊徽只在金、白、墨之間配</span></div>
+    <div class="opts c6">
+      <div class="opt on"><span class="sw"><i><b style="background:#eef2f6"></b><b style="background:#f0b54a"></b></i>白金</span></div>
+      <div class="opt"><span class="sw"><i><b style="background:#1c2535"></b><b style="background:#f0b54a"></b></i>墨金</span></div>
+      <div class="opt"><span class="sw"><i><b style="background:#f0b54a"></b><b style="background:#0b0e14"></b></i>金墨</span></div>
+      <div class="opt"><span class="sw"><i><b style="background:#1c2535"></b><b style="background:#eef2f6"></b></i>墨白</span></div>
+      <div class="opt"><span class="sw"><i><b style="background:#8b95a4"></b><b style="background:#f0b54a"></b></i>灰金</span></div>
+      <div class="opt"><span class="sw"><i><b style="background:#eef2f6"></b><b style="background:#1c2535"></b></i>白墨</span></div>
+    </div>
+    <div class="lbl"><span>圖騰</span></div>
+    <div class="opts c10" data-emblems></div>
+    <div class="adv"><span>進階：亂數種子</span><span class="seed">7</span><span>同一個種子，聯賽與選手每次都一樣</span><a class="btn lg" href="../cyber.html"><b>創立戰隊</b><span>START</span></a></div>
+  </section>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+<script type="module">
+  // 外形與圖騰的選項用真的隊徽畫出來（白金配色）
+  import { crestSvg, EMBLEM_NAMES } from '../../../src/web/club/art.ts';
+  const base = { shape: 0, primary: '#eef2f6', secondary: '#f0b54a', emblem: 'wings' };
+  document.getElementById('preview').innerHTML = crestSvg(base, 250);
+  document.querySelector('[data-shapes]').innerHTML = [0, 1, 2, 3].map((s) => `<div class="opt${s === 0 ? ' on' : ''}">${crestSvg({ ...base, shape: s }, 62)}</div>`).join('');
+  document.querySelector('[data-emblems]').innerHTML = EMBLEM_NAMES.map((e) => `<div class="opt${e === 'wings' ? ' on' : ''}">${crestSvg({ ...base, emblem: e, primary: '#1c2535' }, 42)}</div>`).join('');
+</script>
+</body>
+</html>

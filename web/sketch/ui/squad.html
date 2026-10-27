@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：戰隊</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 出賽名單：三張卡沿弧線排開，中間的大將最高；每張卡上方是對位名稱 */
+.lineup { position: absolute; left: 0; top: 40px; width: 800px; height: 560px; perspective: 1500px; }
+.ls { position: absolute; top: 60px; width: 236px; transform-style: preserve-3d; }
+.ls.s1 { left: 20px; transform: rotateY(16deg) translateZ(-40px); }
+.ls.s2 { left: 282px; top: 30px; transform: translateZ(10px); }
+.ls.s3 { left: 544px; transform: rotateY(-16deg) translateZ(-40px); }
+.ls .lb { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.ls .lb b { font-size: 34px; font-weight: 900; letter-spacing: 0.12em; transform: skewX(-7deg); }
+.ls .lb .num { font-size: 30px; color: var(--gold); }
+.ls .lb span { font-family: var(--en); font-weight: 600; font-size: 15px; letter-spacing: 0.3em; color: var(--grey2); }
+.ls .vsr { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding: 8px 12px; background: rgba(var(--red-rgb), 0.06); box-shadow: inset 0 0 0 1px rgba(var(--red-rgb), 0.35); }
+.ls .vsr span { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: var(--grey); }
+.ls .vsr b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 20px; color: var(--red2); }
+.lineup .hint { position: absolute; left: 20px; top: 0; display: flex; gap: 10px; }
+.drag { position: absolute; left: 20px; bottom: 0; display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--grey); }
+
+/* 陣容 */
+.roster { left: 860px; top: 0; width: 832px; height: 476px; }
+.roster .row { grid-template-columns: 54px 1.4fr 1fr 0.8fr 0.8fr 0.9fr 172px; min-height: 64px; }
+.roster .row .who { display: flex; flex-direction: column; }
+.roster .row .who b { font-size: 21px; font-weight: 900; letter-spacing: 0.06em; }
+.roster .row .who span { font-size: 13px; color: var(--grey); display: inline-flex; align-items: center; gap: 5px; }
+.roster .row .ver { display: flex; align-items: baseline; gap: 6px; }
+.roster .row .ver .num { font-size: 24px; }
+.roster .row .act { display: flex; gap: 8px; justify-content: flex-end; }
+.roster .row.empty { color: var(--grey2); background: none; box-shadow: inset 0 0 0 1px dashed; outline: 1px dashed rgba(255, 255, 255, 0.14); outline-offset: -1px; }
+.st-tag { font-size: 13px; font-weight: 900; letter-spacing: 0.14em; padding: 3px 10px; transform: skewX(-14deg); display: inline-block; }
+.st-tag.on { background: var(--gold); color: var(--ink); }
+.st-tag.bn { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); color: var(--grey); }
+
+/* 本週對手 */
+.opp { left: 860px; top: 500px; width: 832px; height: 266px; }
+.opp .grid { display: grid; grid-template-columns: 120px 1fr 250px; gap: 22px; align-items: center; }
+.opp .nm { font-size: 32px; font-weight: 900; letter-spacing: 0.08em; transform: skewX(-7deg); display: inline-block; }
+.opp .meta { margin-top: 4px; font-size: 15px; color: var(--grey); }
+.opp .meta b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 22px; color: var(--white); }
+.opp .pub { display: flex; gap: 8px; margin-top: 12px; }
+.opp .pub span { padding: 6px 12px; font-size: 14px; color: var(--grey); background: rgba(255, 255, 255, 0.04); }
+.opp .pub span b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 18px; color: var(--white); margin-left: 6px; }
+.opp .side { display: flex; flex-direction: column; gap: 12px; align-items: flex-end; }
+.opp .odds { text-align: right; }
+.opp .odds small { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.24em; color: var(--grey); }
+.opp .odds .num { font-size: 46px; line-height: 1; }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="squad" data-word="SQUAD">
+  <div class="ph in" style="--d:.15s"><span class="en">SQUAD // 戰隊管理</span><h1>戰隊</h1><div class="sub">出賽名單 <b>3／3</b> · 陣容 <b>4／5</b> · 本週對手 <b class="rd">暗影工作室</b> · 名單在比賽日 20:00 鎖定</div></div>
+
+  <section class="body">
+    <div class="lineup">
+      <div class="hint in" style="--d:.3s"><span class="chip g">出賽名單 LINEUP</span><span class="chip">同一比賽日每人只打一場</span></div>
+      <div class="ls s1 in" style="--d:.35s">
+        <div class="lb"><span class="num">01</span><b>先鋒</b><span>VANGUARD</span></div>
+        <div class="pc t3 sel"><div class="top2"><span class="ver">v3</span><span>黃金 · GOLD</span></div>
+          <div class="por tinted"><span data-avatar="xzr" data-size="176"></span></div>
+          <div class="nm"><b>謝子睿</b><span class="ly"><i data-lineage="push" data-size="15"></i>強攻流</span></div>
+          <div class="st"><span class="num">1518</span><small>RATING</small><span class="wg"><span class="num">2-1</span> <small>W-L</small></span></div></div>
+        <div class="vsr"><span>對位</span><b>？？？</b></div>
+      </div>
+      <div class="ls s2 in" style="--d:.42s">
+        <div class="lb"><span class="num">02</span><b>中堅</b><span>CENTER</span></div>
+        <div class="pc t2 sel"><div class="top2"><span class="ver">v2</span><span>白銀 · SILVER</span></div>
+          <div class="por tinted"><span data-avatar="qmz2" data-size="176"></span></div>
+          <div class="nm"><b>邱明哲</b><span class="ly"><i data-lineage="balance" data-size="15"></i>均衡流</span></div>
+          <div class="st"><span class="num">1478</span><small>RATING</small><span class="wg"><span class="num">1-2</span> <small>W-L</small></span></div></div>
+        <div class="vsr"><span>對位</span><b>？？？</b></div>
+      </div>
+      <div class="ls s3 in" style="--d:.49s">
+        <div class="lb"><span class="num">03</span><b>大將</b><span>CAPTAIN</span></div>
+        <div class="pc t2 sel"><div class="top2"><span class="ver">v2</span><span>白銀 · SILVER</span></div>
+          <div class="por tinted"><span data-avatar="xce" data-size="176"></span></div>
+          <div class="nm"><b>徐承恩</b><span class="ly"><i data-lineage="turtle" data-size="15"></i>龜守流</span></div>
+          <div class="st"><span class="num">1479</span><small>RATING</small><span class="wg"><span class="num">1-2</span> <small>W-L</small></span></div></div>
+        <div class="vsr"><span>對位</span><b>？？？</b></div>
+      </div>
+      <div class="drag in" style="--d:.6s"><span data-icon="swap" data-size="18"></span>把右邊陣容的人拖到出賽位，或先點出賽位再點人；選到已上場的人會互換位置。</div>
+    </div>
+
+    <div class="pn roster in sr" style="--d:.4s">
+      <div class="pt"><span class="no">02</span><b>陣容</b><span class="en">ROSTER</span><span class="aux">4／5 人 · 週薪合計 <b class="num">20.6</b> 萬</span></div>
+      <div class="rows">
+        <div class="row hd"><span></span><span>選手</span><span>版本</span><span>評分</span><span>戰績</span><span>週薪</span><span style="text-align:right">狀態</span></div>
+        <div class="row me"><span class="av tinted" style="width:46px;height:46px"><span data-avatar="xzr" data-size="46"></span></span><span class="who"><b>謝子睿</b><span><i data-lineage="push" data-size="13"></i>強攻流</span></span><span class="ver"><span class="num gd">v3</span><small class="dim">黃金</small></span><span class="num" style="font-size:26px">1518</span><span class="num dim" style="font-size:22px">2-1</span><span><span class="num" style="font-size:22px">6.1</span> <small class="dim">萬</small></span><span class="act"><span class="st-tag on">先鋒</span></span></div>
+        <div class="row"><span class="av tinted" style="width:46px;height:46px"><span data-avatar="qmz2" data-size="46"></span></span><span class="who"><b>邱明哲</b><span><i data-lineage="balance" data-size="13"></i>均衡流</span></span><span class="ver"><span class="num">v2</span><small class="dim">白銀</small></span><span class="num" style="font-size:26px">1478</span><span class="num dim" style="font-size:22px">1-2</span><span><span class="num" style="font-size:22px">5.2</span> <small class="dim">萬</small></span><span class="act"><span class="st-tag on">中堅</span></span></div>
+        <div class="row"><span class="av tinted" style="width:46px;height:46px"><span data-avatar="xce" data-size="46"></span></span><span class="who"><b>徐承恩</b><span><i data-lineage="turtle" data-size="13"></i>龜守流</span></span><span class="ver"><span class="num">v2</span><small class="dim">白銀</small></span><span class="num" style="font-size:26px">1479</span><span class="num dim" style="font-size:22px">1-2</span><span><span class="num" style="font-size:22px">5.0</span> <small class="dim">萬</small></span><span class="act"><span class="st-tag on">大將</span></span></div>
+        <div class="row"><span class="av tinted" style="width:46px;height:46px"><span data-avatar="lyt" data-size="46"></span></span><span class="who"><b>林語彤</b><span><i data-lineage="ranged" data-size="13"></i>遠程流</span></span><span class="ver"><span class="num dim">v1</span><small class="dim">青銅</small></span><span class="num" style="font-size:26px">1441</span><span class="num dim" style="font-size:22px">0-0</span><span><span class="num" style="font-size:22px">4.3</span> <small class="dim">萬</small></span><span class="act"><span class="st-tag bn">替補</span></span></div>
+        <div class="row empty"><span style="width:46px;height:46px;border-radius:50%;border:2px dashed rgba(255,255,255,.18)"></span><span style="grid-column:span 5">空位 · 陣容上限 5 人，補一名替補可避免傷停與輪替不足</span><span class="act"><a class="btn sm ghost" href="market.html"><b>去市場</b></a></span></div>
+      </div>
+    </div>
+
+    <div class="pn opp r in" style="--d:.5s">
+      <div class="pt"><span class="no">TARGET</span><b>本週對手</b><span class="en">W04 · 20:00</span><span class="aux">名單比賽日才公開</span></div>
+      <div class="grid">
+        <span class="cr foe" style="width:112px;height:112px"><span data-crest="暗影工作室" data-foe data-size="72"></span></span>
+        <div>
+          <span class="nm">暗影工作室</span>
+          <div class="meta">數據派 · 評分約 <b>1490</b> ± 40 · <b>2</b> 勝 <b>1</b> 敗 · 積分第 3</div>
+          <div class="pub"><span>洪立安<b>1496</b></span><span>曾柏翰<b>1488</b></span><span>廖芷晴<b>1522</b></span><span class="rd">大將剛換人</span></div>
+        </div>
+        <div class="side">
+          <div class="odds"><small>押我方贏</small><span class="num gd">×2.00</span></div>
+          <a class="btn sm ghost" href="market.html"><b>派球探 · 1萬</b></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="design-note">完整 UI · 戰隊</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

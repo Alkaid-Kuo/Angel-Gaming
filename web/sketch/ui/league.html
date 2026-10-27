@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：聯賽</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 上：賽段時間軸（休、1～7、準、決）；左：積分榜；右上：本週賽程；右下：季後賽樹狀圖 */
+.tl { position: absolute; left: 0; top: -12px; width: 1692px; display: flex; align-items: center; gap: 0; }
+.tl .wk { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.tl .wk::before { content: ""; position: absolute; top: 22px; left: -50%; right: 50%; height: 2px; background: rgba(255, 255, 255, 0.12); }
+.tl .wk:first-child::before { display: none; }
+.tl .wk.past::before, .tl .wk.cur::before { background: var(--gold); }
+.tl .hx { position: relative; z-index: 1; width: 46px; height: 46px; display: grid; place-items: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 20px; color: var(--grey); background: var(--ink2);
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.15); }
+.tl .past .hx { color: var(--white); background: #222a39; }
+.tl .cur .hx { color: var(--ink); background: var(--gold); }
+.tl .po .hx { font-family: var(--zh); font-style: normal; font-size: 16px; font-weight: 900; }
+.tl .r { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 15px; letter-spacing: 0.1em; }
+.tl .r.w { color: var(--gold2); }
+.tl .r.l { color: var(--grey2); }
+
+.tbl { left: 0; top: 76px; width: 900px; height: 690px; }
+.tbl .row { grid-template-columns: 44px 40px 1fr 110px 80px 70px 130px; min-height: 55px; }
+.tbl .row .rk { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 28px; color: var(--grey); }
+.tbl .row.top4 .rk { color: var(--white); }
+.tbl .row .nm { font-size: 20px; font-weight: 700; letter-spacing: 0.06em; }
+.tbl .row .nm small { font-size: 13px; color: var(--grey2); margin-left: 8px; font-weight: 500; }
+.tbl .row .num { font-size: 24px; }
+.tbl .row .pts { font-size: 32px; text-align: right; }
+.form { display: flex; gap: 5px; justify-content: flex-end; }
+.form i { width: 24px; height: 24px; display: grid; place-items: center; font-style: normal; font-family: var(--en); font-weight: 800; font-size: 13px; transform: skewX(-12deg); }
+.form i.w { background: var(--white); color: var(--ink); }
+.form i.l { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); color: var(--grey); }
+.tbl .row.me .rk, .tbl .row.me .pts { color: var(--gold); }
+.tbl .note { margin-top: 10px; font-size: 14px; color: var(--grey); display: flex; gap: 20px; }
+
+.wkm { left: 924px; top: 76px; width: 768px; height: 330px; }
+.mt { display: grid; grid-template-columns: 1fr 60px 1fr; align-items: center; height: 58px; padding: 0 16px; margin-bottom: 6px; background: rgba(255, 255, 255, 0.03); }
+.mt.me { background: linear-gradient(90deg, rgba(var(--gold-rgb), 0.18), rgba(var(--gold-rgb), 0.04)); box-shadow: inset 4px 0 0 var(--gold); }
+.mt .t { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: 0.04em; }
+.mt .t.r { flex-direction: row-reverse; }
+.mt .t small { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 18px; color: var(--grey); }
+.mt .vs { text-align: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 22px; color: var(--grey2); }
+.mt.me .vs { color: var(--gold); }
+
+.br { left: 924px; top: 430px; width: 768px; height: 336px; }
+.bk { position: relative; height: 214px; }
+.bk .m { position: absolute; width: 250px; }
+.bk .m .sl { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; margin-bottom: 4px; background: rgba(255, 255, 255, 0.04); font-size: 16px; font-weight: 700; }
+.bk .m .sl .sd { font-family: var(--en); font-style: italic; font-weight: 800; color: var(--grey); width: 18px; }
+.bk .m .sl.foe { box-shadow: inset 3px 0 0 var(--red); }
+.bk .m .sl.tbd { color: var(--grey2); font-weight: 500; }
+.bk .m .lb { font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; color: var(--grey); margin-bottom: 6px; }
+.bk svg.lines { position: absolute; inset: 0; }
+.bk .cup { position: absolute; right: 18px; top: 30px; text-align: center; color: var(--gold); }
+.bk .cup b { display: block; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 24px; letter-spacing: 0.1em; color: var(--white); margin-top: 6px; }
+.bk .cup small { font-size: 13px; color: var(--grey); }
+.path { margin-top: 6px; padding: 10px 14px; font-size: 15px; color: var(--grey); background: rgba(var(--gold-rgb), 0.07); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.35); }
+.path b { color: var(--gold2); }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="league" data-word="LEAGUE">
+  <div class="ph in" style="--d:.15s"><span class="en">LEAGUE // 新創聯賽 · SEASON 01</span><h1>聯賽</h1><div class="sub">例行賽第 <b>4</b>／7 週 · 8 隊單循環 · 前 <b>4</b> 名進季後賽 · 勝 3 分、平 1 分，同分比對位勝場差</div></div>
+
+  <section class="body">
+    <div class="tl in" style="--d:.2s">
+      <div class="wk past po"><span class="hx">休</span><span class="r l">—</span></div>
+      <div class="wk past"><span class="hx">1</span><span class="r l">L 1:2</span></div>
+      <div class="wk past"><span class="hx">2</span><span class="r w">W 2:1</span></div>
+      <div class="wk past"><span class="hx">3</span><span class="r l">L 0:3</span></div>
+      <div class="wk cur"><span class="hx">4</span><span class="r w">本週</span></div>
+      <div class="wk"><span class="hx">5</span><span class="r l"></span></div>
+      <div class="wk"><span class="hx">6</span><span class="r l"></span></div>
+      <div class="wk"><span class="hx">7</span><span class="r l"></span></div>
+      <div class="wk po"><span class="hx">準</span><span class="r l">準決賽</span></div>
+      <div class="wk po"><span class="hx">決</span><span class="r l">決賽</span></div>
+    </div>
+
+    <div class="pn tbl in" style="--d:.28s">
+      <div class="pt"><span class="no">01</span><b>積分榜</b><span class="en">STANDINGS</span><span class="aux">第 3 週後</span></div>
+      <div class="rows">
+        <div class="row hd"><span>#</span><span></span><span>戰隊</span><span>勝-平-敗</span><span>勝場差</span><span></span><span style="text-align:right">近況　積分</span></div>
+        <div class="row top4"><span class="rk">1</span><span data-crest="雷霆電競" data-size="30"></span><span class="nm">雷霆電競<small>豪門</small></span><span class="num">3-0-0</span><span class="num">+5</span><span class="form"><i class="w">W</i><i class="w">W</i><i class="w">W</i></span><span class="num pts">9</span></div>
+        <div class="row top4"><span class="rk">2</span><span data-crest="北辰戰隊" data-size="30"></span><span class="nm">北辰戰隊<small>數據派</small></span><span class="num">2-0-1</span><span class="num">+2</span><span class="form"><i class="w">W</i><i class="l">L</i><i class="w">W</i></span><span class="num pts">6</span></div>
+        <div class="row top4 foe"><span class="rk">3</span><span data-crest="暗影工作室" data-foe data-size="30"></span><span class="nm rd">暗影工作室<small>本週對手</small></span><span class="num">2-0-1</span><span class="num">+2</span><span class="form"><i class="l">L</i><i class="w">W</i><i class="w">W</i></span><span class="num pts">6</span></div>
+        <div class="row top4 cut"><span class="rk">4</span><span data-crest="鐵壁電競" data-size="30"></span><span class="nm">鐵壁電競<small>守財奴</small></span><span class="num">2-0-1</span><span class="num">+1</span><span class="form"><i class="w">W</i><i class="w">W</i><i class="l">L</i></span><span class="num pts">6</span></div>
+        <div class="row"><span class="rk">5</span><span data-crest="蒼穹電競" data-size="30"></span><span class="nm">蒼穹電競<small>青訓派</small></span><span class="num">1-0-2</span><span class="num">−1</span><span class="form"><i class="l">L</i><i class="w">W</i><i class="l">L</i></span><span class="num pts">3</span></div>
+        <div class="row"><span class="rk">6</span><span data-crest="星河戰隊" data-size="30"></span><span class="nm">星河戰隊<small>青訓派</small></span><span class="num">1-0-2</span><span class="num">−2</span><span class="form"><i class="l">L</i><i class="l">L</i><i class="w">W</i></span><span class="num pts">3</span></div>
+        <div class="row me"><span class="rk">7</span><span data-crest="天使戰隊" data-size="30"></span><span class="nm">天使戰隊<small>我方</small></span><span class="num">1-0-2</span><span class="num">−3</span><span class="form"><i class="l">L</i><i class="w">W</i><i class="l">L</i></span><span class="num pts">3</span></div>
+        <div class="row"><span class="rk">8</span><span data-crest="赤焰俱樂部" data-size="30"></span><span class="nm">赤焰俱樂部<small>豪門</small></span><span class="num">0-0-3</span><span class="num">−4</span><span class="form"><i class="l">L</i><i class="l">L</i><i class="l">L</i></span><span class="num pts">0</span></div>
+      </div>
+      <div class="note"><span>虛線以上進季後賽</span><span>名次獎金 1 名 120 萬 … 8 名 5 萬</span></div>
+    </div>
+
+    <div class="pn wkm in sr" style="--d:.34s">
+      <div class="pt"><span class="no">02</span><b>本週賽程</b><span class="en">W04</span><span class="aux">比賽日 20:00 · 4 場同時開打</span></div>
+      <div class="mt me"><span class="t"><span data-crest="天使戰隊" data-size="30"></span>天使戰隊<small>7</small></span><span class="vs">VS</span><span class="t r"><span data-crest="暗影工作室" data-foe data-size="30"></span><span class="rd">暗影工作室</span><small>3</small></span></div>
+      <div class="mt"><span class="t"><span data-crest="雷霆電競" data-size="30"></span>雷霆電競<small>1</small></span><span class="vs">VS</span><span class="t r"><span data-crest="赤焰俱樂部" data-size="30"></span>赤焰俱樂部<small>8</small></span></div>
+      <div class="mt"><span class="t"><span data-crest="北辰戰隊" data-size="30"></span>北辰戰隊<small>2</small></span><span class="vs">VS</span><span class="t r"><span data-crest="星河戰隊" data-size="30"></span>星河戰隊<small>6</small></span></div>
+      <div class="mt"><span class="t"><span data-crest="鐵壁電競" data-size="30"></span>鐵壁電競<small>4</small></span><span class="vs">VS</span><span class="t r"><span data-crest="蒼穹電競" data-size="30"></span>蒼穹電競<small>5</small></span></div>
+    </div>
+
+    <div class="pn br in sr" style="--d:.42s">
+      <div class="pt"><span class="no">03</span><b>季後賽</b><span class="en">PLAYOFFS</span><span class="aux">如果今天結束（預測）</span></div>
+      <div class="bk">
+        <svg class="lines" viewBox="0 0 700 240"><path d="M250 44 H300 V122 H350 M250 160 H300 V122" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="2"/><path d="M600 122 H640" stroke="rgba(240,181,74,.6)" stroke-width="2"/></svg>
+        <div class="m" style="left:0;top:0"><div class="lb">準決賽 · W08</div><div class="sl"><span class="sd">1</span><span data-crest="雷霆電競" data-size="22"></span>雷霆電競</div><div class="sl"><span class="sd">4</span><span data-crest="鐵壁電競" data-size="22"></span>鐵壁電競</div></div>
+        <div class="m" style="left:0;top:118px"><div class="lb">準決賽 · W08</div><div class="sl"><span class="sd">2</span><span data-crest="北辰戰隊" data-size="22"></span>北辰戰隊</div><div class="sl foe"><span class="sd">3</span><span data-crest="暗影工作室" data-foe data-size="22"></span>暗影工作室</div></div>
+        <div class="m" style="left:350px;top:58px"><div class="lb">決賽 · W09</div><div class="sl tbd"><span class="sd"></span>準決賽勝方</div><div class="sl tbd"><span class="sd"></span>準決賽勝方</div></div>
+        <div class="cup"><span data-icon="trophy" data-size="52"></span><b>CHAMPION</b><small>冠軍 120 萬</small></div>
+      </div>
+      <div class="path">我方第 7，離第 4 差 <b>3</b> 分。這週贏暗影，就會跟他們同分比勝場差。</div>
+    </div>
+  </section>
+
+  <div class="design-note">完整 UI · 聯賽</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

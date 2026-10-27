@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：轉會市場</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 自由球員三張卡（選中的那張浮起、金框）＋右側比較與簽約後財務試算＋下方各隊名單 */
+.tabbar { position: absolute; left: 0; top: -10px; display: flex; align-items: center; gap: 20px; }
+.fa { position: absolute; top: 56px; width: 260px; perspective: 1400px; }
+.fa .pc { transform: rotateY(var(--ry, 0deg)); }
+.fa .pc.sel { transform: translateY(-18px); }
+.fa .price { display: flex; justify-content: space-between; margin-top: 16px; padding: 0 4px; }
+.fa .price div { display: flex; flex-direction: column; }
+.fa .price small { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.fa .price .num { font-size: 26px; line-height: 1.1; }
+.fa .bt { display: flex; gap: 10px; margin-top: 14px; }
+.fa .bt .btn { flex: 1; padding: 0 10px; }
+
+.cmp { left: 860px; top: -10px; width: 832px; height: 440px; }
+.cmp .hdr { display: grid; grid-template-columns: 1fr 170px 1fr; align-items: center; gap: 10px; margin-bottom: 14px; }
+.cmp .who { display: flex; align-items: center; gap: 14px; }
+.cmp .who.r { flex-direction: row-reverse; text-align: right; }
+.cmp .who b { display: block; font-size: 26px; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); }
+.cmp .who small { font-size: 13px; color: var(--grey); }
+.cmp .mid { text-align: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 30px; color: var(--gold); }
+.cmp .line { display: grid; grid-template-columns: 70px 1fr 120px 1fr 70px; align-items: center; gap: 10px; height: 44px; }
+.cmp .line .num { font-size: 24px; }
+.cmp .line .l { text-align: right; }
+.cmp .line .k { text-align: center; font-size: 14px; letter-spacing: 0.14em; color: var(--grey); }
+.cmp .bar { height: 8px; background: rgba(255, 255, 255, 0.07); transform: skewX(-20deg); position: relative; }
+.cmp .bar i { position: absolute; top: 0; bottom: 0; background: var(--white); }
+.cmp .bar.lft i { right: 0; }
+.cmp .bar.rgt i { left: 0; }
+.cmp .bar i.g { background: var(--gold); }
+.cmp .intel { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 12px 16px; background: rgba(var(--gold-rgb), 0.08); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.4); font-size: 15px; color: var(--grey); }
+.cmp .intel b { color: var(--white); }
+.cmp .intel .num { font-size: 26px; color: var(--gold2); }
+
+.sim { left: 860px; top: 452px; width: 832px; height: 314px; }
+.sim .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.sim .k small { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.sim .k .ch { display: flex; align-items: baseline; gap: 10px; margin-top: 4px; }
+.sim .k .ch .num { font-size: 22px; color: var(--grey); text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.3); }
+.sim .k .ch .to { font-size: 38px; color: #fff; text-decoration: none; }
+.sim .k .ch .to.bad { color: var(--red); }
+.sim .k .ch i { font-style: normal; color: var(--grey2); }
+.sim .warn { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px 16px; font-size: 15px; color: var(--red2); background: rgba(var(--red-rgb), 0.07); box-shadow: inset 0 0 0 1px rgba(var(--red-rgb), 0.45); }
+.sim .go { display: flex; justify-content: flex-end; gap: 14px; margin-top: 18px; }
+
+.others { left: 0; top: 560px; width: 820px; height: 206px; }
+.others .row { grid-template-columns: 150px 1fr 70px 90px 120px; min-height: 40px; font-size: 15px; }
+.others .row .num { font-size: 20px; }
+.others .row a { justify-self: end; font-size: 14px; color: var(--gold2); text-decoration: none; letter-spacing: 0.1em; }
+.others .tm { display: flex; align-items: center; gap: 8px; color: var(--grey); }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="market" data-word="RECRUIT">
+  <div class="ph in" style="--d:.15s"><span class="en">RECRUIT // 轉會市場</span><h1>轉會市場</h1><div class="sub">自由球員 <b>3</b> 名 · 先到先簽 · 簽約金＝4 週薪資 · 陣容 <b>4／5</b></div></div>
+
+  <section class="body">
+    <div class="tabbar in" style="--d:.2s"><div class="tabs"><a class="on">自由球員<i>3</i></a><a>各隊名單<i>28</i></a><a>球探報告<i>2</i></a></div><span class="chip">排序：評分 ▾</span></div>
+
+    <div class="fa in" style="left:0;--d:.3s">
+      <div class="pc t2 sel"><div class="top2"><span class="ver">v2</span><span>白銀 · SILVER</span></div>
+        <div class="por tinted"><span data-avatar="lxy" data-size="176"></span></div>
+        <div class="note">球探：真實約 <b>1561</b><br>±35 · 被低估</div>
+        <div class="nm"><b>賴星宇</b><span class="ly"><i data-lineage="cavalry" data-size="15"></i>騎襲流</span></div>
+        <div class="st"><span class="num">1515</span><small>RATING</small><span class="wg"><span class="num">22</span> <small>歲</small></span></div></div>
+      <div class="price"><div><small>簽約金</small><span class="num">21.2<small class="dim" style="font-size:14px"> 萬</small></span></div><div style="text-align:right"><small>週薪</small><span class="num">5.3<small class="dim" style="font-size:14px"> 萬</small></span></div></div>
+      <div class="bt"><a class="btn sm"><b>簽約</b></a><a class="btn sm ghost"><b>詳情</b></a></div>
+    </div>
+    <div class="fa in" style="left:290px;--ry:-6deg;--d:.36s">
+      <div class="pc t3"><div class="top2"><span class="ver">v3</span><span>黃金 · GOLD</span></div>
+        <div class="por tinted"><span data-avatar="zkw" data-size="176"></span></div>
+        <div class="nm"><b>張凱文</b><span class="ly"><i data-lineage="shield" data-size="15"></i>盾牆流</span></div>
+        <div class="st"><span class="num">1532</span><small>RATING</small><span class="wg"><span class="num">25</span> <small>歲</small></span></div></div>
+      <div class="price"><div><small>簽約金</small><span class="num">27.2<small class="dim" style="font-size:14px"> 萬</small></span></div><div style="text-align:right"><small>週薪</small><span class="num">6.8<small class="dim" style="font-size:14px"> 萬</small></span></div></div>
+      <div class="bt"><a class="btn sm ghost"><b>簽約</b></a><a class="btn sm ghost"><b>派球探 1萬</b></a></div>
+    </div>
+    <div class="fa in" style="left:580px;--ry:-12deg;--d:.42s">
+      <div class="pc t1"><div class="top2"><span class="ver">v1</span><span>青銅 · BRONZE</span></div>
+        <div class="por tinted"><span data-avatar="wpy" data-size="176"></span></div>
+        <div class="nm"><b>吳品妤</b><span class="ly"><i data-lineage="ambush" data-size="15"></i>伏擊流</span></div>
+        <div class="st"><span class="num">1430</span><small>RATING</small><span class="wg"><span class="num">19</span> <small>歲</small></span></div></div>
+      <div class="price"><div><small>簽約金</small><span class="num">15.6<small class="dim" style="font-size:14px"> 萬</small></span></div><div style="text-align:right"><small>週薪</small><span class="num">3.9<small class="dim" style="font-size:14px"> 萬</small></span></div></div>
+      <div class="bt"><a class="btn sm ghost"><b>簽約</b></a><a class="btn sm ghost"><b>派球探 1萬</b></a></div>
+    </div>
+
+    <div class="pn g cmp in sr" style="--d:.3s">
+      <div class="pt"><span class="no">COMPARE</span><b>跟替補比</b><span class="aux">選中：賴星宇</span></div>
+      <div class="hdr">
+        <div class="who"><span class="av tinted" style="width:62px;height:62px"><span data-avatar="lxy" data-size="62"></span></span><div><b>賴星宇</b><small>騎襲流 · v2 · 自由球員</small></div></div>
+        <div class="mid">VS</div>
+        <div class="who r"><span class="av tinted" style="width:62px;height:62px"><span data-avatar="lyt" data-size="62"></span></span><div><b>林語彤</b><small>遠程流 · v1 · 我方替補</small></div></div>
+      </div>
+      <div class="line"><span class="num l gd">1515</span><span class="bar lft"><i class="g" style="width:78%"></i></span><span class="k">公開評分</span><span class="bar rgt"><i style="width:52%"></i></span><span class="num">1441</span></div>
+      <div class="line"><span class="num l">v2</span><span class="bar lft"><i style="width:40%"></i></span><span class="k">版本</span><span class="bar rgt"><i style="width:20%"></i></span><span class="num">v1</span></div>
+      <div class="line"><span class="num l">5.3</span><span class="bar lft"><i style="width:66%"></i></span><span class="k">週薪（萬）</span><span class="bar rgt"><i style="width:54%"></i></span><span class="num">4.3</span></div>
+      <div class="line"><span class="num l">v4</span><span class="bar lft"><i style="width:80%"></i></span><span class="k">流派上限</span><span class="bar rgt"><i style="width:100%"></i></span><span class="num">v5</span></div>
+      <div class="intel"><span data-icon="search" data-size="22"></span><span>球探報告（W03）：真實強度約 <span class="num">1561</span> ± 35，比公開評分高 <b>46</b>。騎襲流高風險高報酬，版本越高越強。</span></div>
+    </div>
+
+    <div class="pn sim in sr" style="--d:.4s">
+      <div class="pt"><span class="no">SIMULATE</span><b>簽下之後</b><span class="aux">簽約金 <b class="num" style="font-size:20px">21.2</b> 萬 · 週薪 <b class="num" style="font-size:20px">5.3</b> 萬</span></div>
+      <div class="grid">
+        <div class="k"><small>現金</small><div class="ch"><span class="num">104.8</span><i>→</i><span class="num to">83.6</span></div></div>
+        <div class="k"><small>每週淨額</small><div class="ch"><span class="num">−14.6</span><i>→</i><span class="num to bad">−19.9</span></div></div>
+        <div class="k"><small>資金跑道</small><div class="ch"><span class="num">7 週</span><i>→</i><span class="num to bad">4 週</span></div></div>
+      </div>
+      <div class="warn"><span data-icon="warn" data-size="20"></span>資金跑道會降到 4 週。之後要靠贏球收入或下注把每週淨額拉回來，否則第 8 週前可能破產。</div>
+      <div class="go"><a class="btn ghost"><b>再想想</b></a><a class="btn"><b>簽下賴星宇</b><span>SIGN</span></a></div>
+    </div>
+
+    <div class="pn others in" style="--d:.5s">
+      <div class="pt"><span class="no">ROSTERS</span><b>各隊名單</b><span class="aux">別隊選手只能派球探，M5 才開放轉會</span></div>
+      <div class="rows">
+        <div class="row"><span class="tm"><span data-crest="雷霆電競" data-size="20"></span>雷霆電競</span><span>宋子豪 · 遠程流</span><span class="num">v4</span><span class="num">1602</span><a>派球探 ›</a></div>
+        <div class="row"><span class="tm"><span data-crest="北辰戰隊" data-size="20"></span>北辰戰隊</span><span>黃思妍 · 騎襲流</span><span class="num">v3</span><span class="num">1544</span><a>派球探 ›</a></div>
+        <div class="row foe"><span class="tm"><span data-crest="暗影工作室" data-foe data-size="20"></span><span class="rd">暗影工作室</span></span><span>廖芷晴 · 伏擊流 <span class="rd">· 新大將</span></span><span class="num">v3</span><span class="num">1522</span><a>派球探 ›</a></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="design-note">完整 UI · 轉會市場</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

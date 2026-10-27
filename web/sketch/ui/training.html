@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：訓練基地</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 左：訓練中心（場數環＋等級＋升級）；中：本週排程；右：新增排程；下：三欄報告 */
+.fac { left: 0; top: 0; width: 520px; height: 470px; }
+.ringbox { position: relative; width: 280px; height: 280px; margin: 0 auto; }
+
+.ringbox svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+.ringbox .spin { transform-box: view-box; transform-origin: 150px 150px; animation: spin 40s linear infinite; }
+.ringbox .v { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.ringbox .v .num { font-size: 92px; line-height: 0.85; }
+.ringbox .v small { font-family: var(--mono); font-size: 12px; letter-spacing: 0.24em; color: var(--grey); margin-top: 6px; }
+.ringbox .v span { font-size: 15px; color: var(--grey); margin-top: 2px; }
+.lv { display: flex; align-items: center; gap: 16px; margin-top: 10px; }
+.lv .fl3 { display: flex; flex-direction: column-reverse; gap: 4px; }
+.lv .fl3 i { width: 46px; height: 10px; background: rgba(255, 255, 255, 0.1); transform: skewX(-24deg); }
+.lv .fl3 i.on { background: var(--gold); box-shadow: 0 0 10px rgba(var(--gold-rgb), 0.6); }
+.lv .t b { display: block; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 34px; line-height: 1; }
+.lv .t span { font-size: 14px; color: var(--grey); }
+.lv .btn { margin-left: auto; }
+
+.sch { left: 540px; top: 0; width: 560px; height: 470px; }
+.job { display: grid; grid-template-columns: 48px 1fr 70px; gap: 6px 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.job .ic { width: 48px; height: 48px; display: grid; place-items: center; color: var(--gold2); background: rgba(var(--gold-rgb), 0.08); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.35); grid-row: span 2; }
+.job .ic.w { color: var(--white); background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2); }
+.job b { font-size: 18px; font-weight: 900; letter-spacing: 0.06em; }
+.job b small { font-weight: 500; font-size: 14px; color: var(--grey); margin-left: 8px; letter-spacing: 0.04em; }
+.job .num { text-align: right; font-size: 26px; grid-row: span 2; }
+.job .meter { margin-right: 4px; }
+.sum { display: flex; justify-content: space-between; margin-top: 14px; font-size: 15px; color: var(--grey); }
+.sum b { color: var(--white); }
+
+.new { left: 1120px; top: 0; width: 572px; height: 470px; }
+.new .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; color: var(--grey); margin: 6px 0 6px; }
+.pick { display: flex; gap: 12px; }
+.pick .av { width: 52px; height: 52px; opacity: 0.45; }
+.pick .av.on { opacity: 1; box-shadow: 0 0 0 3px var(--gold), 0 0 0 7px rgba(var(--gold-rgb), 0.25); }
+.seg2 { display: flex; gap: 8px; }
+.seg2 span { flex: 1; height: 40px; display: grid; place-items: center; font-size: 16px; font-weight: 700; letter-spacing: 0.12em; color: var(--grey); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); transform: skewX(-14deg); }
+.seg2 span.on { color: var(--ink); background: var(--gold); box-shadow: none; }
+.styles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.styles span { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; font-size: 14px; color: var(--grey); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.styles span.on { color: #fff; box-shadow: inset 0 0 0 2px var(--gold); background: rgba(var(--gold-rgb), 0.1); }
+.styles span.on svg { color: var(--gold); }
+.runs { display: flex; align-items: center; gap: 16px; }
+.runs .meter { flex: 1; height: 10px; }
+.runs .num { font-size: 30px; }
+.new .go { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 14px; color: var(--grey); }
+
+.rep { left: 0; top: 494px; width: 1692px; height: 272px; }
+.rep .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.rep .col h4 { margin: 0 0 10px; display: flex; align-items: center; gap: 8px; font-size: 17px; letter-spacing: 0.12em; }
+.rep .col h4 small { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey2); margin-left: auto; font-weight: 400; }
+.rep .it { padding: 10px 14px; margin-bottom: 8px; background: rgba(255, 255, 255, 0.03); font-size: 15px; color: var(--grey); line-height: 1.55; }
+.rep .it b { color: var(--white); }
+.rep .it .num { font-size: 22px; color: var(--gold2); }
+.rep .it.new2 { box-shadow: inset 3px 0 0 var(--gold); }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="training" data-word="TRAINING">
+  <div class="ph in" style="--d:.15s"><span class="en">TRAINING // 訓練基地</span><h1>訓練基地</h1><div class="sub">訓練中心 <b>Lv1</b> · 本週可跑 <b>200</b> 場 · 已排 <b>160</b> · 這週排的工作，下週平日才看得到報告</div></div>
+
+  <section class="body">
+    <div class="pn g fac in" style="--d:.25s">
+      <div class="pt"><span class="no">01</span><b>訓練中心</b><span class="en">FACILITY</span></div>
+      <div class="ringbox">
+        <svg viewBox="0 0 300 300">
+          <circle cx="150" cy="150" r="132" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="16"/>
+          <circle cx="150" cy="150" r="132" fill="none" stroke="rgba(238,242,246,.55)" stroke-width="16" stroke-dasharray="663 830" transform="rotate(-90 150 150)"/>
+          <circle cx="150" cy="150" r="132" fill="none" stroke="#f0b54a" stroke-width="16" stroke-dasharray="0 663 166 830" transform="rotate(-90 150 150)"/>
+          <circle cx="150" cy="150" r="132" fill="none" stroke="#0b0e14" stroke-width="18" stroke-dasharray="2 39.4"/>
+          <g class="spin"><circle cx="150" cy="150" r="148" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="1.5" stroke-dasharray="3 9"/></g>
+          <circle cx="150" cy="150" r="108" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="1"/>
+        </svg>
+        <div class="v"><span class="num">40</span><small>RUNS LEFT</small><span>本週剩餘場數 ／ 200</span></div>
+      </div>
+      <div class="lv">
+        <div class="fl3"><i class="on"></i><i></i><i></i></div>
+        <div class="t"><b>Lv1</b><span>維護 2.0 萬／週</span></div>
+        <a class="btn sm ghost"><b>升 Lv2 · 120萬</b></a>
+      </div>
+    </div>
+
+    <div class="pn sch in" style="--d:.32s">
+      <div class="pt"><span class="no">02</span><b>本週排程</b><span class="aux">已排 <b>160</b>／200 場</span></div>
+      <div class="job"><span class="ic"><span data-icon="flask" data-size="24"></span></span><b>戰術研發<small>謝子睿 · 針對伏擊流</small></b><span class="num">80</span><div class="meter g" style="--v:40%"><i></i></div></div>
+      <div class="job"><span class="ic w"><span data-icon="swords" data-size="24"></span></span><b>練習賽<small>謝子睿 vs 伏擊流陪練</small></b><span class="num">40</span><div class="meter" style="--v:20%"><i></i></div></div>
+      <div class="job"><span class="ic"><span data-icon="flask" data-size="24"></span></span><b>戰術研發<small>徐承恩 · 泛用</small></b><span class="num">40</span><div class="meter g" style="--v:20%"><i></i></div></div>
+      <div class="job"><span class="ic w"><span data-icon="search" data-size="24"></span></span><b>球探<small>暗影工作室 · 廖芷晴</small></b><span class="num" style="font-size:18px">1萬</span><div class="meter" style="--v:100%"><i></i></div></div>
+      <div class="sum"><span>研發半飽和約 <b>100</b> 場；越練越慢</span><span>泛用上限 <b>+12</b> · 針對上限 <b>+36</b></span></div>
+    </div>
+
+    <div class="pn new in sr" style="--d:.38s">
+      <div class="pt"><span class="no">03</span><b>新增排程</b><span class="en">SCHEDULE</span></div>
+      <div class="lbl">選手</div>
+      <div class="pick">
+        <span class="av tinted"><span data-avatar="xzr" data-size="58"></span></span>
+        <span class="av tinted on"><span data-avatar="qmz2" data-size="58"></span></span>
+        <span class="av tinted"><span data-avatar="xce" data-size="58"></span></span>
+        <span class="av tinted"><span data-avatar="lyt" data-size="58"></span></span>
+      </div>
+      <div class="lbl">項目</div>
+      <div class="seg2"><span>練習賽</span><span class="on">戰術研發</span><span>泛用研發</span></div>
+      <div class="lbl">針對流派</div>
+      <div class="styles">
+        <span class="on"><i data-lineage="ambush" data-size="16"></i>伏擊流</span><span><i data-lineage="push" data-size="16"></i>強攻流</span><span><i data-lineage="ranged" data-size="16"></i>遠程流</span><span><i data-lineage="shield" data-size="16"></i>盾牆流</span>
+        <span><i data-lineage="cavalry" data-size="16"></i>騎襲流</span><span><i data-lineage="swarm" data-size="16"></i>人海流</span><span><i data-lineage="turtle" data-size="16"></i>龜守流</span><span><i data-lineage="balance" data-size="16"></i>均衡流</span>
+      </div>
+      <div class="lbl">場數</div>
+      <div class="runs"><div class="meter g" style="--v:100%;--m:100%"><i></i></div><span class="num">40</span></div>
+      <div class="go"><span>邱明哲 · 針對伏擊流 · 用掉剩下的 40 場</span><a class="btn sm"><b>排入</b></a></div>
+    </div>
+
+    <div class="pn rep in" style="--d:.46s">
+      <div class="pt"><span class="no">04</span><b>報告</b><span class="aux">上週排的工作 · W03</span></div>
+      <div class="cols">
+        <div class="col"><h4><span data-icon="search" data-size="18"></span>球探報告<small>誤差 ±35</small></h4>
+          <div class="it new2"><b>賴星宇</b>（自由球員）真實強度約 <span class="num">1561</span>，比公開評分高 <b>46</b>。</div>
+          <div class="it"><b>洪立安</b>（暗影工作室）真實強度約 <span class="num">1470</span>，比公開評分低 <b>26</b>。</div></div>
+        <div class="col"><h4><span data-icon="swords" data-size="18"></span>練習賽報告<small>樣本越多越準</small></h4>
+          <div class="it new2"><b>謝子睿 vs 伏擊流陪練</b> 40 場 <b>26 勝</b>：對伏擊流估計勝率 <span class="num">65%</span> ± 8%。</div>
+          <div class="it"><b>徐承恩 vs 騎襲流陪練</b> 40 場 18 勝：估計勝率 45% ± 8%。</div></div>
+        <div class="col"><h4><span data-icon="flask" data-size="18"></span>研發報告<small>升版後失效</small></h4>
+          <div class="it new2"><b>謝子睿 · 針對伏擊流</b> 累計 120 場，加成 <span class="num">+14</span>（上限 +36）。</div>
+          <div class="it"><b>徐承恩 · 泛用</b> 累計 60 場，加成 +5（上限 +12）。</div></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="design-note">完整 UI · 訓練基地</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：比賽日</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 比賽日演出（中堅戰進行中）：上方比分板；中央兩個鏡頭對望，中間是 VS 與進行中的轉圈；下方三條對位，先鋒已分勝負、大將還沒揭曉 */
+.hud { position: absolute; left: 56px; right: 56px; top: 34px; display: flex; align-items: center; justify-content: space-between; font-family: var(--mono); font-size: 14px; letter-spacing: 0.3em; color: var(--grey); }
+.hud b { color: var(--gold2); font-weight: 400; }
+.hud .live { display: flex; align-items: center; gap: 10px; color: var(--white); }
+.hud .live i { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: blink 1s infinite; }
+
+.score { position: absolute; left: 50%; top: 84px; transform: translateX(-50%); display: flex; align-items: center; gap: 30px; }
+.score .tm { display: flex; align-items: center; gap: 18px; }
+.score .tm.r { flex-direction: row-reverse; }
+.score .tm b { font-size: 34px; font-weight: 900; letter-spacing: 0.1em; transform: skewX(-7deg); }
+.score .sc { display: flex; align-items: center; gap: 18px; padding: 0 30px; height: 100px; background: var(--panel); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.45); clip-path: polygon(24px 0, calc(100% - 24px) 0, 100% 50%, calc(100% - 24px) 100%, 24px 100%, 0 50%); }
+.score .sc .num { font-size: 96px; line-height: 1; }
+.score .sc .num.me { color: var(--gold); text-shadow: 0 0 30px rgba(var(--gold-rgb), 0.5); }
+.score .sc i { font-style: normal; font-family: var(--en); font-weight: 700; font-size: 40px; color: var(--grey2); }
+
+.duel { position: absolute; left: 0; right: 0; top: 230px; height: 470px; transform: translate(calc(var(--mx) * -14px), calc(var(--my) * -6px)); }
+.side { position: absolute; top: 0; width: 640px; display: flex; flex-direction: column; align-items: center; }
+.side.l { left: 170px; }
+.side.r { right: 170px; }
+.ln2 { position: relative; width: 330px; height: 330px; }
+.ln2 .lens { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; background: #1a2130; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 0 12px rgba(var(--gold-rgb), 0.14), 0 0 0 13px rgba(var(--gold-rgb), 0.55), 0 40px 90px rgba(0, 0, 0, 0.7), 0 0 110px rgba(var(--gold-rgb), 0.28); }
+.ln2 .lens .avatar { position: absolute; left: -10px; top: 6px; width: 350px; height: 350px; }
+.side.r .ln2 .lens { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.6), 0 0 0 12px rgba(var(--red-rgb), 0.12), 0 0 0 13px rgba(var(--red-rgb), 0.55), 0 40px 90px rgba(0, 0, 0, 0.7), 0 0 110px rgba(var(--red-rgb), 0.18); }
+.side.r .ln2 .lens.tinted::after { background: linear-gradient(165deg, #e9edf2 0%, #6b7586 45%, #1b2230 100%); }
+.ln2 svg { position: absolute; left: -40px; top: -40px; width: 410px; height: 410px; overflow: visible; }
+.ln2 .sp { transform-box: view-box; transform-origin: 205px 205px; animation: spin 6s linear infinite; }
+.side .nm { margin-top: 26px; font-size: 54px; font-weight: 900; letter-spacing: 0.08em; transform: skewX(-7deg); }
+.side .inf { display: flex; align-items: center; gap: 14px; margin-top: 6px; font-size: 16px; color: var(--grey); }
+.side .inf .num { font-size: 30px; color: var(--white); }
+.side .inf i { display: inline-flex; vertical-align: -2px; margin-right: 4px; }
+.mid { position: absolute; left: 50%; top: 60px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; width: 360px; }
+.mid .rd2 { font-family: var(--mono); font-size: 14px; letter-spacing: 0.4em; color: var(--gold2); }
+.mid h2 { margin: 6px 0 0; font-size: 64px; font-weight: 900; letter-spacing: 0.14em; transform: skewX(-7deg); }
+.mid .vs { margin-top: 16px; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 120px; line-height: 0.8; color: transparent; -webkit-text-stroke: 2px rgba(var(--gold-rgb), 0.85); text-shadow: 0 0 40px rgba(var(--gold-rgb), 0.3); }
+.mid .prob { width: 100%; margin-top: 26px; }
+.mid .prob .lb2 { display: flex; justify-content: space-between; font-size: 13px; color: var(--grey); margin-bottom: 8px; }
+.mid .prob .lb2 b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 22px; color: var(--white); }
+.mid .prob .bar2 { display: flex; height: 12px; transform: skewX(-20deg); }
+.mid .prob .bar2 i:first-child { width: 47%; background: var(--gold); }
+.mid .prob .bar2 i:last-child { flex: 1; background: rgba(var(--red-rgb), 0.7); }
+.mid .st { margin-top: 18px; display: flex; align-items: center; gap: 10px; font-size: 17px; letter-spacing: 0.2em; color: var(--white); }
+.mid .st i { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: blink 0.8s infinite; }
+
+.bouts { position: absolute; left: 170px; right: 170px; bottom: 120px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.bt2 { position: relative; display: grid; grid-template-columns: 50px 1fr 50px; align-items: center; gap: 12px; height: 92px; padding: 0 18px; background: var(--panel); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%); }
+.bt2 .av { width: 50px; height: 50px; }
+.bt2 .c { text-align: center; }
+.bt2 .c small { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.3em; color: var(--grey); }
+.bt2 .c b { font-size: 20px; font-weight: 900; letter-spacing: 0.08em; }
+.bt2 .c b i { font-style: normal; color: var(--grey2); margin: 0 8px; font-family: var(--en); }
+.bt2.won { box-shadow: inset 0 0 0 2px var(--gold); background: linear-gradient(115deg, rgba(var(--gold-rgb), 0.18), rgba(var(--gold-rgb), 0) 50%), var(--panel); }
+.bt2.won .stamp { position: absolute; right: 70px; top: -6px; font-size: 20px; padding: 2px 12px; }
+.bt2.now { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.7); }
+.bt2.now::after { content: "LIVE"; position: absolute; right: 74px; top: 6px; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 14px; letter-spacing: 0.2em; color: var(--red); animation: blink 1s infinite; }
+.bt2 .hid { width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; font-family: var(--en); font-weight: 800; font-size: 22px; color: var(--grey2); box-shadow: inset 0 0 0 2px dashed; outline: 2px dashed rgba(255, 255, 255, 0.2); outline-offset: -2px; }
+
+.ctl { position: absolute; right: 56px; bottom: 36px; display: flex; gap: 14px; }
+.cap { position: absolute; left: 56px; bottom: 44px; font-size: 15px; color: var(--grey); }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="match" data-word="MATCH DAY" data-shell="none">
+  <div class="hud in" style="--d:.05s"><span>W04 <b>//</b> 中央競技場 <b>//</b> 例行賽</span><span class="live"><i></i>LIVE · 3 場對位，先拿 2 勝的隊伍獲勝</span></div>
+
+  <div class="score in" style="--d:.15s">
+    <div class="tm"><span class="cr" style="width:84px;height:84px"><span data-crest="天使戰隊" data-size="54"></span></span><b>天使戰隊</b></div>
+    <div class="sc"><span class="num me">1</span><i>:</i><span class="num">0</span></div>
+    <div class="tm r"><span class="cr foe" style="width:84px;height:84px"><span data-crest="暗影工作室" data-foe data-size="54"></span></span><b class="rd">暗影工作室</b></div>
+  </div>
+
+  <section class="duel">
+    <div class="side l in sl" style="--d:.3s">
+      <div class="ln2"><svg viewBox="0 0 410 410"><circle cx="205" cy="205" r="196" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="2" stroke-dasharray="3 8"/><g class="sp"><circle cx="205" cy="205" r="196" fill="none" stroke="#f0b54a" stroke-width="4" stroke-dasharray="180 1052"/></g></svg>
+        <div class="lens tinted"><span data-avatar="qmz2" data-size="350"></span></div></div>
+      <div class="nm">邱明哲</div>
+      <div class="inf"><span><i data-lineage="balance" data-size="16"></i> 均衡流</span><span>v2</span><span class="num">1478</span></div>
+    </div>
+    <div class="mid in pop" style="--d:.45s">
+      <span class="rd2">BOUT 02 · CENTER</span>
+      <h2>中堅戰</h2>
+      <span class="vs">VS</span>
+      <div class="prob"><div class="lb2"><span>公開評分推估勝率</span></div><div class="lb2"><b>47%</b><b style="color:var(--red2)">53%</b></div><div class="bar2"><i></i><i></i></div></div>
+      <div class="st"><i></i>對戰中</div>
+    </div>
+    <div class="side r in sr" style="--d:.3s">
+      <div class="ln2"><svg viewBox="0 0 410 410"><circle cx="205" cy="205" r="196" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="2" stroke-dasharray="3 8"/><g class="sp" style="animation-direction:reverse"><circle cx="205" cy="205" r="196" fill="none" stroke="#ff5d5d" stroke-width="4" stroke-dasharray="180 1052"/></g></svg>
+        <div class="lens tinted"><span data-avatar="cbh" data-size="350"></span></div></div>
+      <div class="nm">曾柏翰</div>
+      <div class="inf"><span><i data-lineage="shield" data-size="16"></i> 盾牆流</span><span>v2</span><span class="num">1488</span></div>
+    </div>
+  </section>
+
+  <section class="bouts">
+    <div class="bt2 won in" style="--d:.6s"><span class="av tinted"><span data-avatar="xzr" data-size="50"></span></span><span class="c"><small>01 先鋒</small><b>謝子睿<i>vs</i>洪立安</b></span><span class="av foe tinted"><span data-avatar="hla" data-size="50"></span></span><span class="stamp w">WIN</span></div>
+    <div class="bt2 now in" style="--d:.68s"><span class="av tinted"><span data-avatar="qmz2" data-size="50"></span></span><span class="c"><small>02 中堅</small><b>邱明哲<i>vs</i>曾柏翰</b></span><span class="av foe tinted"><span data-avatar="cbh" data-size="50"></span></span></div>
+    <div class="bt2 in" style="--d:.76s"><span class="av tinted"><span data-avatar="xce" data-size="50"></span></span><span class="c"><small>03 大將</small><b>徐承恩<i>vs</i>？？？</b></span><span class="hid">?</span></div>
+  </section>
+
+  <div class="cap in" style="--d:.9s">對手的大將在中堅戰結束後揭曉</div>
+  <div class="ctl in" style="--d:.9s"><a class="btn ghost"><b>加速 ×2</b></a><a class="btn ghost"><b>跳過</b><span>SKIP</span></a></div>
+  <div class="design-note" style="left:auto;right:56px;top:66px;bottom:auto">完整 UI · 比賽日（進行中）</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+<script type="module" src="../../../src/web/sketch/fill.ts"></script>
+</body>
+</html>
