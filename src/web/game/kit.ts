@@ -37,6 +37,9 @@ export interface Ctx {
 
 export { esc, icon, wan };
 
+/** 單獨發布的試玩版（打包時設 VITE_STANDALONE=1）：沒有首頁與舊介面，不放這兩個連結 */
+export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
+
 /** 隊徽可選的配色（介面主色固定是金，隊徽只在金、白、墨之間配） */
 export const CREST_SCHEMES: { name: string; primary: string; secondary: string }[] = [
   { name: '白金', primary: '#eef2f6', secondary: '#f0b54a' },

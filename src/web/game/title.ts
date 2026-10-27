@@ -2,7 +2,7 @@
 import { weekLabel } from '../manage/format.ts';
 import type { SaveInfo } from '../manage/store.ts';
 import { CREST_SHAPE_COUNT, EMBLEM_NAMES, crestSvg, type CrestSpec } from '../club/art.ts';
-import { CREST_SCHEMES, esc, icon, wan } from './kit.ts';
+import { CREST_SCHEMES, STANDALONE, esc, icon, wan } from './kit.ts';
 
 export interface Draft {
   name: string;
@@ -27,7 +27,7 @@ export function titleScreen(save: SaveInfo | null, crest: CrestSpec): string {
     <section class="menu in">
       ${save ? `<button class="btn" data-act="continue"><b>繼續</b><span class="info">${esc(save.teamName)} · ${status} · ${wan(save.cash)}萬</span></button>` : ''}
       <button class="btn ${save ? 'ghost' : ''}" data-act="to-create"><b>創立新戰隊</b><span class="info">${save ? '會覆蓋目前的存檔' : '從休賽期開始'}</span></button>
-      <div class="row4"><label class="btn ghost"><b>匯入存檔</b><input id="import" type="file" accept=".json,application/json" hidden></label><a class="btn ghost" href="./club.html"><b>舊版介面</b></a><a class="btn ghost" href="./index.html"><b>回首頁</b></a></div>
+      <div class="row4"><label class="btn ghost"><b>匯入存檔</b><input id="import" type="file" accept=".json,application/json" hidden></label>${STANDALONE ? '' : '<a class="btn ghost" href="./club.html"><b>舊版介面</b></a><a class="btn ghost" href="./index.html"><b>回首頁</b></a>'}</div>
     </section>
     <div class="ver">M4 PROTOTYPE · 比賽目前是假比賽（依選手隱藏強度擲骰）· 數值都還在調整</div>
     <div class="press">${save ? 'ENTER 繼續' : ''}</div>

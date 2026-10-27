@@ -10,7 +10,7 @@ import { dust, initStage, still } from '../sketch/stage.ts';
 import { hubPanels, hubTags } from './hub.ts';
 import { financeScreen, inboxScreen, leagueScreen } from './info.ts';
 import type { Ctx, GameUi, Screen } from './kit.ts';
-import { esc, icon, myCrest, newGameUi, wan } from './kit.ts';
+import { STANDALONE, esc, icon, myCrest, newGameUi, wan } from './kit.ts';
 import { bettingScreen, trainingScreen } from './ops.ts';
 import { rail, topBar } from './shell.ts';
 import { buildScenes, snapshot, type Scene } from './show.ts';
@@ -97,10 +97,10 @@ function modalHtml(): string {
   let inner: string;
   if (modal.kind === 'menu')
     inner = `<div class="pt"><span class="no">MENU</span><b>選單</b></div><div class="menu-list">
-      <button data-act="export">${icon('download', 22)}<b>匯出存檔</b><small>下載成 .json 備份</small></button>
+      ${STANDALONE ? '' : `<button data-act="export">${icon('download', 22)}<b>匯出存檔</b><small>下載成 .json 備份</small></button>`}
       <button data-act="speed">${icon('skip', 22)}<b>演出速度：${prefs.fast ? '快速' : '一般'}</b><small>點一下切換</small></button>
       <button data-act="to-title">${icon('exit', 22)}<b>回到標題畫面</b><small>進度已自動存檔</small></button>
-      <a href="./club.html">${icon('chart', 22)}<b>舊版介面</b><small>同一份存檔</small></a></div>
+      ${STANDALONE ? '' : `<a href="./club.html">${icon('chart', 22)}<b>舊版介面</b><small>同一份存檔</small></a>`}</div>
       <div class="foot"><button class="btn ghost sm" data-act="close-modal"><b>關閉</b></button></div>`;
   else
     inner = `<div class="pt"><span class="no">CONFIRM</span><b>${esc(modal.title)}</b></div><p>${esc(modal.text)}</p><div class="foot"><button class="btn ghost" data-act="close-modal"><b>取消</b></button><button class="btn" data-act="confirm-ok"><b>${esc(modal.ok)}</b></button></div>`;

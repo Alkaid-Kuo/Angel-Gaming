@@ -889,3 +889,8 @@ p.big { font-size: 17px; line-height: 1.7; }
 
 /* 截圖模式（網址帶 ?still）：所有動畫與轉場直接跳到結束狀態 */
 .still *, .still *::before, .still *::after { animation-delay: 0s !important; animation-duration: 0s !important; transition-duration: 0s !important; }
+
+/* 系統設定減少動態：關掉動畫與轉場（元素直接停在完成狀態） */
+@media (prefers-reduced-motion: reduce) {
+  #stage *, #stage *::before, #stage *::after { animation: none !important; transition: none !important; }
+}
