@@ -6,10 +6,9 @@
 <title>設計稿 E：環形競技台</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
 <link rel="stylesheet" href="./stage.css">
+<link rel="stylesheet" href="./angel.css">
 <style>
-/* 配色（沿用原版）：墨黑底、白、天使金為唯一主色；冰藍只用在細線與數據，紅色只用在警示 */
-#stage { --ink: #0b0e14; --ink2: #131823; --white: #eef2f6; --paper: #e9edf2; --grey: #8b95a4; --grey2: #5b6574; --gold: #f0b54a; --gold2: #ffd98a; --gold3: #b9832a; --ice: #7fd8ff; --red: #ff5d5d;
-  --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --en: "Barlow Condensed", "Noto Sans TC", sans-serif; --mono: "Share Tech Mono", monospace; color: var(--white); font-family: var(--zh); }
+/* 配色、字型、頂列與標籤元件見 angel.css（E、A 共用規格） */
 .bg { position: absolute; inset: 0; background: radial-gradient(1300px 820px at 50% 40%, #1c2535 0%, #0e131c 52%, #07090d 100%); }
 .bigword { position: absolute; left: 50%; top: 70px; transform: translateX(-50%) translate(calc(var(--mx) * -14px), calc(var(--my) * -8px)); font-family: var(--en); font-weight: 800; font-style: italic; font-size: 430px; line-height: 0.8; letter-spacing: 0.02em; color: transparent; -webkit-text-stroke: 2px rgba(255, 255, 255, 0.045); white-space: nowrap; }
 .beams i { position: absolute; top: -100px; width: 240px; height: 900px; background: linear-gradient(180deg, rgba(255, 236, 200, 0.11), transparent 75%); transform: skewX(-12deg); animation: beam 7s ease-in-out infinite; }
@@ -27,7 +26,7 @@
   -webkit-mask-image: radial-gradient(circle, #000 18%, transparent 46%); }
 .ring { left: -900px; top: -900px; width: 1800px; height: 1800px; border-radius: 50%; transform: rotateX(90deg); border: 5px solid rgba(240, 181, 74, 0.75); box-shadow: 0 0 60px rgba(240, 181, 74, 0.35), inset 0 0 60px rgba(240, 181, 74, 0.18); }
 .ring i { position: absolute; inset: 40px; border-radius: 50%; border: 6px dotted rgba(255, 255, 255, 0.14); animation: spin 80s linear infinite; }
-.ring b { position: absolute; inset: 300px; border-radius: 50%; border: 3px dashed rgba(127, 216, 255, 0.25); animation: spinr 120s linear infinite; }
+.ring b { position: absolute; inset: 300px; border-radius: 50%; border: 3px dashed rgba(255, 255, 255, 0.16); animation: spinr 120s linear infinite; }
 .ring em { position: absolute; inset: 560px; border-radius: 50%; border: 2px solid rgba(240, 181, 74, 0.35); }
 .spot { width: 300px; height: 300px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 217, 138, 0.55), rgba(240, 181, 74, 0.12) 40%, transparent 70%); transform-origin: 0 0; }
 .otile { transform-origin: 0 0; }
@@ -58,24 +57,18 @@
 .lens { position: absolute; left: 790px; top: 250px; width: 340px; height: 340px; border-radius: 50%; overflow: hidden; background: #1a2130;
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 0 13px rgba(240, 181, 74, 0.14), 0 0 0 14px rgba(240, 181, 74, 0.5), 0 40px 90px rgba(0, 0, 0, 0.7), 0 0 120px rgba(240, 181, 74, 0.25); }
 .lens .avatar { position: absolute; left: -15px; top: 8px; width: 370px; height: 370px; filter: grayscale(1) contrast(1.2) brightness(1.05); }
-.lens::after { content: ""; position: absolute; inset: 0; background: linear-gradient(165deg, #f3d29a 0%, #b98a45 45%, #1b2230 100%); mix-blend-mode: color; opacity: 0.88; }
+.lens::after { content: ""; position: absolute; inset: 0; background: var(--tint); mix-blend-mode: color; opacity: 0.88; }
 .lens::before { content: ""; position: absolute; inset: 0; z-index: 2; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 2px, transparent 2px 5px), radial-gradient(circle at 50% 40%, transparent 55%, rgba(11, 14, 20, 0.65)); }
 .scan { position: absolute; left: 0; right: 0; height: 80px; z-index: 3; background: linear-gradient(180deg, transparent, rgba(255, 230, 170, 0.28), transparent); animation: scan 4.2s ease-in-out infinite; }
 @keyframes scan { 0% { top: -80px; } 60%, 100% { top: 340px; } }
 .orb { position: absolute; width: 100px; height: 100px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(11, 14, 20, 0.88); border: 2px solid var(--gold); box-shadow: 0 0 24px rgba(240, 181, 74, 0.35); }
 .orb b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 34px; line-height: 1; color: var(--gold2); }
 .orb span { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
-.orb.ice { border-color: var(--ice); box-shadow: 0 0 24px rgba(127, 216, 255, 0.3); }
-.orb.ice b { color: var(--white); }
+.orb.w { border-color: var(--white); box-shadow: 0 0 24px rgba(255, 255, 255, 0.18); }
+.orb.w b { color: var(--white); }
 
 /* ── 左下：名牌 ── */
 .plate { position: absolute; left: 70px; top: 712px; transform: translate(calc(var(--mx) * -30px), calc(var(--my) * -14px)); }
-.tags { display: flex; gap: 6px; }
-.tags span { padding: 5px 18px; font-weight: 900; font-size: 16px; letter-spacing: 0.18em; transform: skewX(-14deg); }
-.tags span > i { display: inline-block; font-style: normal; transform: skewX(14deg); }
-.tags .g { background: var(--gold); color: var(--ink); }
-.tags .w { background: var(--white); color: var(--ink); }
-.tags .o { border: 2px solid var(--gold); color: var(--gold2); padding: 3px 16px; }
 .plate h1 { margin: 4px 0 0; font-size: 100px; line-height: 1; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); text-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 0 40px rgba(240, 181, 74, 0.25); }
 .roman { font-family: var(--en); font-style: italic; font-weight: 700; font-size: 26px; letter-spacing: 0.45em; color: var(--gold); margin-top: 2px; }
 .stats { display: flex; align-items: flex-end; gap: 24px; margin-top: 10px; }
@@ -95,7 +88,7 @@
 .lu { display: flex; gap: 10px; margin-top: 18px; }
 .lu div { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; color: var(--grey); letter-spacing: 0.15em; }
 .cp { width: 56px; height: 56px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px var(--white), 0 0 0 5px rgba(240, 181, 74, 0.5); }
-.cp .avatar { width: 56px; height: 56px; display: block; filter: grayscale(0.4); }
+.cp .avatar { width: 56px; height: 56px; display: block; }
 .vs { display: flex; align-items: center; justify-content: center; gap: 12px; }
 .vs .t { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .vs .cc { width: 100px; height: 100px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, #2a3346, #10141c); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8), 0 0 0 9px rgba(240, 181, 74, 0.18), 0 20px 40px rgba(0, 0, 0, 0.5); }
@@ -113,30 +106,6 @@
 .go .btn b { font-size: 36px; font-weight: 900; letter-spacing: 0.12em; line-height: 1; }
 .go .btn span { font-family: var(--en); font-weight: 700; font-size: 14px; letter-spacing: 0.35em; margin-top: 4px; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(11, 14, 20, 0.9), 0 0 70px rgba(240, 181, 74, 0.95); } }
-
-/* ── 頂列 ── */
-.top { position: absolute; left: 0; right: 0; top: 0; height: 112px; display: flex; align-items: center; padding: 0 56px; gap: 22px; background: linear-gradient(180deg, rgba(5, 7, 10, 0.85), transparent); }
-.team { display: flex; align-items: center; gap: 16px; }
-.team .crest { filter: drop-shadow(0 0 16px rgba(240, 181, 74, 0.45)); }
-.team b { display: block; font-size: 36px; font-weight: 900; letter-spacing: 0.14em; line-height: 1.1; }
-.team small { font-family: var(--mono); font-size: 13px; letter-spacing: 0.28em; color: var(--grey); }
-.slash { width: 3px; height: 56px; background: linear-gradient(var(--gold), transparent); transform: skewX(-22deg); margin: 0 6px; }
-.wk { display: flex; align-items: baseline; gap: 10px; }
-.wk b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 56px; line-height: 1; color: var(--gold); }
-.wk span { font-family: var(--en); font-weight: 600; font-size: 21px; letter-spacing: 0.2em; color: var(--grey); }
-.res { margin-left: auto; display: flex; align-items: center; gap: 28px; }
-.funds { text-align: right; }
-.funds .lb { font-family: var(--mono); font-size: 12px; letter-spacing: 0.3em; color: var(--grey); }
-.funds b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 52px; line-height: 0.9; }
-.funds b small { font-family: var(--zh); font-style: normal; font-size: 18px; color: var(--grey); margin-left: 4px; }
-.funds .dl { font-family: var(--mono); font-size: 13px; color: var(--red); letter-spacing: 0.1em; }
-.gauge { position: relative; width: 70px; height: 70px; }
-.gauge svg { position: absolute; inset: 0; transform: rotate(-90deg); }
-.gauge b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 27px; }
-.gl { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: var(--grey); line-height: 1.5; }
-.gl b { display: block; font-family: var(--zh); font-size: 16px; letter-spacing: 0.1em; color: var(--white); }
-.icon-btn { position: relative; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; border: 2px solid rgba(255, 255, 255, 0.25); color: var(--white); }
-.icon-btn em { position: absolute; right: -4px; top: -4px; min-width: 24px; height: 24px; border-radius: 12px; background: var(--red); font-style: normal; font-family: var(--en); font-weight: 700; font-size: 16px; display: grid; place-items: center; }
 
 /* ── 底部跑馬燈 ── */
 .ticker { position: absolute; left: -30px; right: -30px; bottom: 20px; height: 42px; display: flex; align-items: center; background: rgba(5, 7, 10, 0.75); border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.1); transform: skewX(-14deg); overflow: hidden; }
@@ -179,12 +148,12 @@
         <circle cx="320" cy="320" r="288" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="20" stroke-dasharray="3 147.8"/></g>
       <circle cx="320" cy="320" r="262" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/>
       <circle cx="320" cy="320" r="262" fill="none" stroke="url(#gold)" stroke-width="9" stroke-linecap="round" stroke-dasharray="700 1646" transform="rotate(-90 320 320)"/>
-      <g class="rf"><circle cx="320" cy="320" r="238" fill="none" stroke="rgba(127,216,255,.55)" stroke-width="2" stroke-dasharray="50 100 12 70 160 330 24 760"/></g>
+      <g class="rf"><circle cx="320" cy="320" r="238" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2" stroke-dasharray="50 100 12 70 160 330 24 760"/></g>
       <path d="M 320 30 L 320 52 M 320 588 L 320 610 M 30 320 L 52 320 M 588 320 L 610 320" stroke="#f0b54a" stroke-width="3"/>
     </svg>
     <div class="lens in" style="--d:.25s"><span data-avatar="xzr" data-jersey="#3a4458" data-size="370"></span><i class="scan"></i></div>
     <div class="orb in" style="left:1090px;top:182px;--d:.9s"><b>1518</b><span>RATING</span></div>
-    <div class="orb ice in" style="left:730px;top:182px;--d:1s"><b>v3</b><span>GOLD</span></div>
+    <div class="orb w in" style="left:730px;top:182px;--d:1s"><b>v3</b><span>GOLD</span></div>
   </section>
 
   <section class="scene"><div class="world">
@@ -209,15 +178,15 @@
       <h2>比賽日</h2>
       <div class="sub">對手名單比賽日才公開</div>
       <div class="lu">
-        <div><span class="cp"><span data-avatar="xzr" data-jersey="#3a4458" data-size="56"></span></span>先鋒</div>
-        <div><span class="cp"><span data-avatar="qmz2" data-jersey="#3a4458" data-size="56"></span></span>中堅</div>
-        <div><span class="cp"><span data-avatar="xce" data-jersey="#3a4458" data-size="56"></span></span>大將</div>
+        <div><span class="cp tinted"><span data-avatar="xzr" data-jersey="#3a4458" data-size="56"></span></span>先鋒</div>
+        <div><span class="cp tinted"><span data-avatar="qmz2" data-jersey="#3a4458" data-size="56"></span></span>中堅</div>
+        <div><span class="cp tinted"><span data-avatar="xce" data-jersey="#3a4458" data-size="56"></span></span>大將</div>
       </div>
     </div>
     <div class="vs">
       <div class="t"><span class="cc"><span data-crest="天使戰隊" data-primary="#eef2f6" data-secondary="#f0b54a" data-size="66"></span></span><b>天使戰隊</b></div>
       <div class="x"><b>VS</b><span>ODDS ×2.00</span></div>
-      <div class="t op"><span class="cc"><span data-crest="暗影工作室" data-size="66"></span></span><b>暗影工作室</b></div>
+      <div class="t op"><span class="cc"><span data-crest="暗影工作室" data-primary="#2a1416" data-secondary="#ff5d5d" data-size="66"></span></span><b>暗影工作室</b></div>
     </div>
     <div class="go">
       <svg viewBox="0 0 206 206">
@@ -236,7 +205,7 @@
     <div class="wk"><b>W04</b><span>/ 09 · REGULAR</span></div>
     <div class="res">
       <div class="funds"><div class="lb">FUNDS</div><b>104.8<small>萬</small></b><div class="dl">▼ 14.6 / WEEK</div></div>
-      <div class="gauge"><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="#7fd8ff" stroke-width="6" stroke-linecap="round" stroke-dasharray="61 182"/></svg><b>10</b></div>
+      <div class="gauge"><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="#eef2f6" stroke-width="6" stroke-linecap="round" stroke-dasharray="61 182"/></svg><b>10</b></div>
       <div class="gl"><b>名氣</b>REP</div>
       <div class="gauge"><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="#f0b54a" stroke-width="6" stroke-linecap="round" stroke-dasharray="64 182"/></svg><b>7</b></div>
       <div class="gl"><b>資金跑道</b>WEEKS</div>
