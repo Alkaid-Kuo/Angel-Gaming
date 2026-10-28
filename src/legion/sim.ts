@@ -14,6 +14,7 @@ import {
   UNITS,
   VERSUS,
   BOMBARD,
+  GROUND_FAST,
   SIEGE,
   LADDER_KINDS,
   LADDER_LAYER,
@@ -2085,7 +2086,7 @@ export class LegionMatch {
    */
   private moveCenter(r: Regiment, nx: number, ny: number): void {
     const t = this.terrainAt(nx, ny);
-    if (!(r.layer === 0 && t !== T.River && t < T.Building)) {
+    if (!(r.layer === 0 && GROUND_FAST[t] === 1)) {
       const [fx, fy] = tileXY(r.x, r.y, this.map.width, this.map.height);
       const [tx, ty] = tileXY(nx, ny, this.map.width, this.map.height);
       if (fx !== tx || fy !== ty) {
@@ -2457,7 +2458,7 @@ export class LegionMatch {
   private stepAt(layer: number, x: number, y: number, nx: number, ny: number, cavalry: boolean): number {
     const t = this.terrainAt(nx, ny);
     // 地面層在平地類地形之間：最常見的情況，不用查來源格；河流與建築哪一層都進不去
-    if (layer === 0 && t !== T.River && t < T.Building) return 0;
+    if (layer === 0 && GROUND_FAST[t] === 1) return 0;
     if (t === T.River || t === T.Building) return -1;
     const [fx, fy] = tileXY(x, y, this.map.width, this.map.height);
     const [tx, ty] = tileXY(nx, ny, this.map.width, this.map.height);

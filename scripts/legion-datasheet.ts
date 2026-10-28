@@ -131,6 +131,8 @@ p(`| ${TERRAIN_NAMES[7]} | 不可 | — | 擋視線、擋衝鋒 |`);
 p(`| ${TERRAIN_NAMES[8]} | 只有牆頂（層 1） | ×1 | 牆頂高度 ＝ 地面 ＋ ${WALL_LEVELS} 階；擋視線、擋衝鋒 |`);
 p(`| ${TERRAIN_NAMES[9]} | 可（騎兵不可） | ×${terrainSpeed(T.Stair, 'sword') / 100} | 進入即在地面與牆頂之間換層 |`);
 p(`| ${TERRAIN_NAMES[10]} | 牆頂可；地面看城門 | ×1 | 擋視線、擋衝鋒 |`);
+p(`| ${TERRAIN_NAMES[11]} | 可 | ×1 | 城內的地面 |`);
+p(`| ${TERRAIN_NAMES[12]} | 可 | ×${terrainSpeed(T.Rubble, 'sword') / 100} | 擋騎兵衝鋒 |`);
 p();
 p(`視線：建築、城牆與較高的地形擋視線；河流（高度 0）與樹林不擋視線（樹林另有隱蔽）。`);
 p();

@@ -389,9 +389,20 @@ export const T = {
   Stair: 9,
   /** 門樓：牆頂（層 1）永遠可走；地面（層 0）由城門狀態決定 */
   Gatehouse: 10,
+  /** 石板地：城內鋪石的街道、廣場與院落，移動 ×1 */
+  Paved: 11,
+  /** 瓦礫：坍塌城牆的碎石堆，移動 ×0.6，擋得住騎兵衝鋒 */
+  Rubble: 12,
 } as const;
 
-export const TERRAIN_NAMES = ['平地', '道路', '樹林', '高地', '淺灘', '河流', '橋', '建築', '城牆', '樓梯', '門樓'] as const;
+export const TERRAIN_NAMES = ['平地', '道路', '樹林', '高地', '淺灘', '河流', '橋', '建築', '城牆', '樓梯', '門樓', '石板地', '瓦礫'] as const;
+
+/** 地面層的一般地形（地面層之間走動不涉及換層）：1 = 是。尋路與士兵移動的快速路徑用 */
+export const GROUND_FAST: Uint8Array = (() => {
+  const a = new Uint8Array(256);
+  for (const t of [T.Plain, T.Road, T.Forest, T.Hill, T.Shallow, T.Bridge, T.Paved, T.Rubble]) a[t] = 1;
+  return a;
+})();
 
 /** 層：0 地面、1 牆頂（之後塔樓可擴）。牆頂高度 ＝ 地面高度 ＋ WALL_LEVELS 階 */
 export const GROUND_LAYER = 0;
@@ -455,7 +466,7 @@ export function stepLayer(layer: number, fromT: number, toT: number, cavalry: bo
 
 /** 擋得住騎兵衝鋒的地形（樓梯、城牆、門樓都算） */
 export function stopsCavalry(t: number): boolean {
-  return t === T.Forest || t === T.Shallow || t === T.Stair || !walkable(t);
+  return t === T.Forest || t === T.Shallow || t === T.Stair || t === T.Rubble || !walkable(t);
 }
 
 /** 地形移動倍率（百分比） */
@@ -469,6 +480,8 @@ export function terrainSpeed(t: number, kind: UnitKind): number {
     case T.Shallow:
     case T.Stair:
       return 50;
+    case T.Rubble:
+      return 60;
     default:
       return 100;
   }
@@ -485,6 +498,8 @@ export function terrainCost(t: number): number {
     case T.Shallow:
     case T.Stair:
       return 200;
+    case T.Rubble:
+      return 170;
     default:
       return 100;
   }

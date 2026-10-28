@@ -2,7 +2,7 @@
 // 引擎 0.4 起分層：搜尋狀態是（格, 層），索引 = 格 + 層 × 格數；地面層不經樓梯不會進入牆頂層，
 // 沒有城牆的地圖（大河谷）搜尋範圍與結果和單層版完全相同。
 import { idiv } from '../shared/intmath.ts';
-import { T, TILE, stepLayer, terrainCost, walkableAny, walkableAt } from './config.ts';
+import { GROUND_FAST, T, TILE, stepLayer, terrainCost, walkableAny, walkableAt } from './config.ts';
 import { tileXY, type LegionMap } from './map.ts';
 
 const SQRT2 = 141;
@@ -24,9 +24,9 @@ export interface PathEnv {
   readonly linkCost: number;
 }
 
-/** 地面層的快速路徑：平地類地形（0～6 扣掉河流）在層 0 之間移動不用查 stepLayer */
+/** 地面層的快速路徑：地面層的一般地形（平地、道路、樹林、高地、淺灘、橋、石板地、瓦礫）之間移動不用查 stepLayer */
 function groundFast(layer: number, t: number): boolean {
-  return layer === 0 && t !== T.River && t < T.Building;
+  return layer === 0 && GROUND_FAST[t] === 1;
 }
 
 /** 從地形 fromT（層 layer）踏進 toT 後的層；-1 不能走。open = 目的格的城門開著 */

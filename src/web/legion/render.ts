@@ -112,6 +112,8 @@ function paintTerrain(meta: LegionMeta): HTMLCanvasElement {
     [T.Wall]: [176, 168, 148],
     [T.Stair]: [196, 182, 146],
     [T.Gatehouse]: [150, 132, 104],
+    [T.Paved]: [148, 140, 122],
+    [T.Rubble]: [128, 118, 102],
   };
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
