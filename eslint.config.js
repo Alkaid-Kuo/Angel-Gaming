@@ -48,8 +48,8 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/core/**', 'src/mapgen/**', 'src/path/**', 'src/replay/**', 'src/shared/**', 'src/config/**', 'src/legion/**', 'src/manage/**', 'bots/**'],
-    ignores: ['src/legion/runner.ts'],
+    files: ['src/core/**', 'src/mapgen/**', 'src/path/**', 'src/replay/**', 'src/shared/**', 'src/config/**', 'src/legion/**', 'src/shooter/**', 'src/manage/**', 'bots/**'],
+    ignores: ['src/legion/runner.ts', 'src/shooter/runner.ts'],
     rules: deterministicRules,
   },
   {
