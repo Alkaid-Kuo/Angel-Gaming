@@ -55,13 +55,16 @@ function spawnRow(xs: readonly number[], y: number, facing: number): MapSpawn[] 
 /**
  * 沙城（參照 Dust2）。120×120 格。
  *
- *   B 點 ── B 門 ── CT 中路 ── CT 出生 ─┐
+ *   B 點 ── B 門 ── CT 中路 ─ CT 斜坡 ─ CT 出生 ─┐
  *    │                │                  A 點 ── A 斜坡
  *   通道            中路門              │          │
  *    │                │              短道頂       A 長
  *   通道下 ───── T 中路               短道         │
  *    │                │                 │        長門
  *    └──── T 出生 ────┴──── 貓道 ───────┘   外長 ──┘
+ *
+ * CT 出生與 CT 中路不直接相通，改經西側的 CT 斜坡：T 出生區與 CT 出生區之間沒有任何直線視線
+ *（中路門往北的直線被 CT 中路北緣的牆擋住；進斜坡的線一定往西北走，到不了 CT 出生）。
  */
 export const DUST_LAYOUT: MapLayout = {
   id: 'dust',
@@ -93,6 +96,7 @@ export const DUST_LAYOUT: MapLayout = {
     // CT 側與 B
     A('ctSpawn', 'CT 出生', 56, 2, 84, 16),
     A('ctMid', 'CT 中路', 46, 16, 66, 38),
+    A('ctRamp', 'CT 斜坡', 46, 10, 56, 16),
     A('bDoors', 'B 門', 32, 26, 48, 32),
     A('bSite', 'B 點', 8, 20, 32, 44),
   ],
@@ -111,6 +115,8 @@ export const DUST_LAYOUT: MapLayout = {
     R(95, 101, 97, 103),
     // 貓道口的矮牆（擋住中路直接看貓道深處）
     R(66, 62, 67, 64),
+    // CT 中路北緣：封掉與 CT 出生的直接相連，只留西側 x 46～51 通 CT 斜坡
+    R(52, 16, 66, 18),
   ],
   sites: [
     { id: 'A', x0: 90, y0: 8, x1: 104, y1: 22 },

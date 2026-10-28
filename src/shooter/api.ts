@@ -69,6 +69,8 @@ export interface WeaponInfo {
   readonly spread: number;
   readonly movingMul: number;
   readonly scoped: boolean;
+  /** 開鏡時的基礎散佈（度 ×100）；無鏡為 null */
+  readonly scopedSpread: number | null;
 }
 
 export interface GrenadeInfo {
@@ -92,9 +94,12 @@ export interface RulesInfo {
   readonly turnDegPerSec: number;
   readonly bodyRadius: number;
   readonly footstepRange: number;
+  /** 友軍傷害（%）：子彈打到隊友的傷害比例；隊友會擋子彈 */
+  readonly friendlyFirePct: number;
   readonly roundsPerHalf: number;
   readonly winRounds: number;
   readonly freezeTicks: number;
+  /** 購買時間：從回合開始（凍結開始）算起，含凍結時間 */
   readonly buyTicks: number;
   readonly roundTicks: number;
   readonly bombTicks: number;
@@ -171,7 +176,7 @@ export interface RoundInfo {
   readonly phaseTicksLeft: number;
   readonly scoreT: number;
   readonly scoreCT: number;
-  /** 本回合是否仍可購買（凍結或 buyTicks 內且人在出生區） */
+  /** 本回合是否仍可購買（回合開始後 buyTicks 內、活著且人在出生區） */
   readonly canBuy: boolean;
   /** 回合已結束時的結果；其他為 null */
   readonly ended: { readonly winner: Team; readonly reason: RoundEndReason } | null;

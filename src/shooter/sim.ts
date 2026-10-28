@@ -1,5 +1,5 @@
-// CS 射擊模擬核心（規格書 v0.1；確定性、全整數）。步驟 1：移動碰撞、視錐視線、槍械、炸彈、回合流程、換邊、雜湊。
-// 經濟與道具在步驟 2、3：本步驟所有人開局手槍＋刀，比賽選項可指定測試用的主武器與甲值。
+// CS 射擊模擬核心（規格書 v0.2；確定性、全整數）。步驟 1：移動碰撞、視錐視線、槍械、炸彈、回合流程、換邊、雜湊。
+// 步驟 2：友軍傷害、經濟（金錢、購買、回合結算）。道具在步驟 3（本步驟只做購買與攜帶）。
 //
 // 每 tick：（決策 tick 先由驅動層套用指令）→ 轉身（上限）→ 移動（圓對格碰撞、沿牆滑動）→ 開火（hitscan；傷害同時結算）
 // → 換彈、冷卻、後座力回復 → 下包、拆包 → 撿炸彈 → 腳步聲 → 炸彈倒數 → 回合判定。
@@ -31,6 +31,7 @@ import {
   DECISION_INTERVAL,
   DEFUSE_KIT,
   ECONOMY,
+  FRIENDLY_FIRE_PCT,
   GRENADES,
   GRENADE_IDS,
   MOVE,
@@ -75,7 +76,6 @@ const STUCK_TICKS = 15;
 /** 散佈倍率（%）：蹲、靜步、跑的倍率由武器表的小數換成整數百分比 */
 const CROUCH_SPREAD = 70;
 const WALK_SPREAD = 120;
-const SCOPED_SPREAD = 10;
 const MOVING_PCT: Readonly<Record<WeaponId, number>> = Object.fromEntries(WEAPON_IDS.map((id) => [id, Math.round(WEAPONS[id].movingMul * 100)])) as Record<WeaponId, number>;
 
 export interface WeaponState {
@@ -231,14 +231,13 @@ export function armorSplit(damage: number, armor: number, pen: number): { readon
   return { hpLoss: damage - absorbed, armorLoss: absorbed };
 }
 
-/** 目前散佈（度 ×100）：站立 < 蹲（×0.7）；靜步 ×1.2、跑 ×movingMul；開鏡 ×0.1；再加後座力 */
+/** 目前散佈（度 ×100）：基礎值（開鏡改用 scopedSpread）× 姿勢倍率（站立 < 蹲 ×0.7；靜步 ×1.2、跑 ×movingMul），再加後座力 */
 export function spreadOf(p: Player): number {
   const w = WEAPONS[activeWeaponId(p)];
   const moving = p.vx !== 0 || p.vy !== 0;
   const mul = p.crouching ? CROUCH_SPREAD : moving ? (p.walking ? WALK_SPREAD : MOVING_PCT[w.id]) : 100;
-  let s = applyPercent(w.spread, mul);
-  if (p.scoped) s = applyPercent(s, SCOPED_SPREAD);
-  return s + p.recoil;
+  const base = p.scoped && w.scopedSpread !== null ? w.scopedSpread : w.spread;
+  return applyPercent(base, mul) + p.recoil;
 }
 
 export function activeWeaponId(p: Player): WeaponId {
@@ -353,6 +352,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       turnDegPerSec: VISION.turnDegPerSec,
       bodyRadius: VISION.bodyRadius,
       footstepRange: SOUND.footstepRange,
+      friendlyFirePct: FRIENDLY_FIRE_PCT,
       roundsPerHalf: opts.roundsPerHalf ?? ROUND.roundsPerHalf,
       winRounds: opts.winRounds ?? ROUND.winRounds,
       freezeTicks: ROUND.freezeTicks,
@@ -403,6 +403,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
         spread: w.spread,
         movingMul: w.movingMul,
         scoped: w.scopedSpeed !== null,
+        scopedSpread: w.scopedSpread,
       };
     }),
     grenades: GRENADE_IDS.map((id) => {
@@ -803,7 +804,7 @@ export class ShooterMatch {
     p.firePending = false;
     p.vx = 0;
     p.vy = 0;
-    if (killer >= 0 && killer !== p.id) this.players[killer].kills += 1;
+    if (killer >= 0 && this.players[killer].team !== p.team) this.players[killer].kills += 1;
     this.kills.push({ tick: this.tick, round: this.roundNumber, killer, victim: p.id, weapon });
     if (p.primary !== null) {
       this.items.push({ kind: 'weapon', weapon: { ...p.primary }, x: p.x, y: p.y });
@@ -933,7 +934,9 @@ export class ShooterMatch {
         const ang = normCdeg(p.facing + off);
         const hit = this.trace(p, icosC(ang), isinC(ang), maxLen);
         if (hit === null) continue;
-        hits.push({ attacker: p.id, victim: hit.victim, damage: damageAt(def, hit.dist), pen: def.armorPen, weapon: wid });
+        const dmg = damageAt(def, hit.dist);
+        const friendly = this.players[hit.victim].team === p.team;
+        hits.push({ attacker: p.id, victim: hit.victim, damage: friendly ? applyPercent(dmg, FRIENDLY_FIRE_PCT) : dmg, pen: def.armorPen, weapon: wid });
       }
       p.recoil += def.recoilStep;
       const heavy = wid === 'ak' || wid === 'm4' || wid === 'awp';
@@ -957,13 +960,13 @@ export class ShooterMatch {
     for (const p of this.players) if (p.alive && p.hp <= 0) this.die(p, killedBy[p.id], killWeapon[p.id] ?? 'knife');
   }
 
-  /** 子彈射線：牆前第一個敵人（隊友不擋子彈、不受傷；步驟 1 不做友軍傷害） */
+  /** 子彈射線：牆前第一個人，不分敵我（隊友會擋子彈；傷害打 FRIENDLY_FIRE_PCT 折扣由呼叫端處理） */
   private trace(p: Player, cx: number, cy: number, maxLen: number): { victim: number; dist: number } | null {
     const wall = rayWallDistance(this.map, p.x, p.y, cx, cy, maxLen);
     let best = -1;
     let bestT = wall;
     for (const q of this.players) {
-      if (!q.alive || q.team === p.team) continue;
+      if (!q.alive || q.id === p.id) continue;
       const rx = q.x - p.x;
       const ry = q.y - p.y;
       const t = tdiv(rx * cx + ry * cy, 10000);
@@ -1119,9 +1122,6 @@ export class ShooterMatch {
       if (known || (me.alive && !blind && this.itemVisible(me, it.x, it.y))) items.push({ kind: it.kind, weapon: it.weapon?.id ?? null, x: it.x, y: it.y });
     }
     const w = activeState(me);
-    const inZone = inRect(this.map.spawnZones[me.team], cellOf(me.x), cellOf(me.y));
-    // 購買時間：凍結結束後 buyTicks 內（CS 的 mp_buytime 從凍結結束起算）
-    const buyWindow = this.phase === 'freeze' || (this.phase === 'live' && this.tick - this.liveStartTick < ROUND.buyTicks);
     return {
       tick: this.tick,
       round: {
@@ -1131,7 +1131,7 @@ export class ShooterMatch {
         phaseTicksLeft: Math.max(0, this.phaseEnd - this.tick),
         scoreT: this.score[this.groupOf('T')],
         scoreCT: this.score[this.groupOf('CT')],
-        canBuy: me.alive && inZone && buyWindow,
+        canBuy: this.canBuy(me),
         ended: this.ended === null ? null : { winner: this.ended.winner, reason: this.ended.reason },
       },
       me: {
@@ -1169,6 +1169,13 @@ export class ShooterMatch {
       chat,
       enemiesAlive: foes.filter((e) => e.alive).length,
     };
+  }
+
+  /** 可購買：活著、人在出生區、回合開始（凍結開始）後 buyTicks 內（CS 的 mp_buytime；凍結 15 秒＋開打後 5 秒） */
+  canBuy(p: Player): boolean {
+    if (!p.alive || (this.phase !== 'freeze' && this.phase !== 'live')) return false;
+    if (this.tick - this.roundStartTick >= ROUND.buyTicks) return false;
+    return inRect(this.map.spawnZones[p.team], cellOf(p.x), cellOf(p.y));
   }
 
   private itemVisible(me: Player, x: number, y: number): boolean {

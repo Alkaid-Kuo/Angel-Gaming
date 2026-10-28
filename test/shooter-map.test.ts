@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MAP_ID, MAPS, cellOf, dumpAscii, inRect, isSolidCell, reachable, regionsAt } from '../src/shooter/map.ts';
 import { TEAM_SIZE, UNIT } from '../src/shooter/config.ts';
+import { lineOfSight } from '../src/shooter/vision.ts';
 
 const map = MAPS[DEFAULT_MAP_ID]();
 
@@ -59,6 +60,28 @@ describe('沙城地圖', () => {
       if (seen[i] === 1) reached += 1;
     }
     expect(reached).toBe(open);
+  });
+
+  it('T 出生區與 CT 出生區之間沒有任何直線視線（兩區可走格中心兩兩檢查）', () => {
+    const cells = (t: 'T' | 'CT'): [number, number][] => {
+      const z = map.spawnZones[t];
+      const out: [number, number][] = [];
+      for (let y = z.y0; y < z.y1; y++) for (let x = z.x0; x < z.x1; x++) if (!isSolidCell(map, x, y)) out.push([x * UNIT + UNIT / 2, y * UNIT + UNIT / 2]);
+      return out;
+    };
+    const ts = cells('T');
+    const cts = cells('CT');
+    expect(ts.length).toBeGreaterThan(100);
+    expect(cts.length).toBeGreaterThan(100);
+    const seen: string[] = [];
+    for (const [ax, ay] of ts) for (const [bx, by] of cts) if (lineOfSight(map, ax, ay, bx, by)) seen.push(`(${ax}, ${ay}) → (${bx}, ${by})`);
+    expect(seen.slice(0, 5)).toEqual([]);
+  });
+
+  it('CT 出生經 CT 斜坡通 CT 中路（不直接相連）', () => {
+    expect(regionsAt(map, 50 * UNIT + 500, 12 * UNIT + 500)).toContain('ctRamp');
+    for (let x = 52; x < 66; x++) expect(isSolidCell(map, x, 16)).toBe(true);
+    expect(isSolidCell(map, 48, 16)).toBe(false);
   });
 
   it('區域查詢：T 出生點在 tSpawn，A 點中心在 aSite', () => {

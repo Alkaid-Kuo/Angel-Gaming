@@ -4,7 +4,8 @@ import { cdegDiff, iatan2, iatan2C, icosC, isinC } from '../src/shared/geom.ts';
 import { iatan2 as legionIatan2 } from '../src/legion/geom.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
 import { SCENARIOS } from '../src/shooter/acceptance.ts';
-import { ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS } from '../src/shooter/config.ts';
+import { FRIENDLY_FIRE_PCT, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS } from '../src/shooter/config.ts';
+import { applyPercent } from '../src/shared/intmath.ts';
 import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
 import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterController } from '../src/shooter/runner.ts';
@@ -26,7 +27,7 @@ function live(opts: Partial<ShooterMatchOptions> = {}): ShooterMatch {
   return m;
 }
 
-/** 把其他人移到各自出生區的邊上、面對牆，不干擾測試（兩個出生區之間經中路有直線視線） */
+/** 把其他人移到各自出生區的邊上、面對牆，不干擾測試 */
 function parkOthers(m: ShooterMatch, keep: readonly number[]): void {
   m.players.forEach((p, i) => {
     if (keep.includes(i)) return;
@@ -171,7 +172,7 @@ describe('視野公平（引擎強制）', () => {
 
   it('CT 沒看見時不知道炸彈在哪（unknown）；T 知道', () => {
     const m = live();
-    // CT 出生區面向北牆：什麼都看不到（出生區之間經中路有直線視線，先轉開）
+    // CT 出生區面向北牆：什麼都看不到
     for (let i = TEAM_SIZE; i < PLAYER_COUNT; i++) m.teleport(i, m.players[i].x, 2500, 270);
     const cto = m.observe(5);
     expect(cto.bomb.state).toBe('unknown');
@@ -320,6 +321,72 @@ describe('武器', () => {
     expect(carrier.plantTicks).toBe(0);
     for (let i = 0; i < ROUND.plantTicks; i++) m.step();
     expect(m.phase).toBe('live');
+  });
+});
+
+describe('友軍傷害與狙擊鏡', () => {
+  it('隊友挨子彈只扣 30%，而且會擋住後面的敵人', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(1, x, y - 5 * UNIT, 90); // 隊友擋在 5 格前
+    m.teleport(5, x, y - 10 * UNIT, 90);
+    parkOthers(m, [0, 1, 5]);
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 10 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.players[1].hp).toBe(100 - applyPercent(damageAt(WEAPONS.pistol, 5 * UNIT), FRIENDLY_FIRE_PCT));
+    expect(m.players[5].hp).toBe(100);
+  });
+
+  it('隊殺不算擊殺數', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(1, x, y - 3 * UNIT, 90);
+    parkOthers(m, [0, 1]);
+    m.players[1].hp = 1;
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 3 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.players[1].alive).toBe(false);
+    expect(m.players[0].kills).toBe(0);
+    expect(m.kills.at(-1)).toMatchObject({ killer: 0, victim: 1 });
+  });
+
+  it('狙擊槍開鏡散佈是武器表的 scopedSpread（0.2°），未開鏡 25°', () => {
+    expect(WEAPONS.awp.scopedSpread).toBe(20);
+    expect(WEAPONS.awp.spread).toBe(2500);
+    for (const w of Object.values(WEAPONS)) if (w.id !== 'awp') expect(w.scopedSpread).toBeNull();
+  });
+
+  /** 狙擊手在 A 長南端朝北對 45 格外的靜止目標開 40 槍，回傳命中次數 */
+  function sniperHits(scoped: boolean): number {
+    const m = live({ defaultLoadout: { T: 'awp' } });
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    m.teleport(5, x, y - 45 * UNIT, 90);
+    parkOthers(m, [0, 5]);
+    m.players[5].hp = 1_000_000;
+    if (scoped) m.applyCommands(0, [{ type: 'scope', on: true }]);
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 45 * UNIT }]);
+    let hits = 0;
+    for (let i = 0; i < 40; i++) {
+      const p = m.players[0];
+      p.cooldown = 0;
+      p.primary!.mag = WEAPONS.awp.magazine;
+      expect(p.scoped).toBe(scoped);
+      const before = m.players[5].hp;
+      m.applyCommands(0, [{ type: 'fire', on: true }]);
+      m.step();
+      if (m.players[5].hp < before) hits += 1;
+    }
+    return hits;
+  }
+
+  it('開鏡 45 格外對靜止目標的命中率明顯高於未開鏡（固定種子）', () => {
+    const on = sniperHits(true);
+    const off = sniperHits(false);
+    expect(on).toBeGreaterThanOrEqual(36);
+    expect(off).toBeLessThanOrEqual(8);
   });
 });
 

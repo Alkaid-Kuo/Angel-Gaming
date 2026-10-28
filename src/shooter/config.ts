@@ -62,6 +62,7 @@ export const ROUND = {
   roundsPerHalf: 12,
   winRounds: 13,
   freezeTicks: ticks(15),
+  /** 購買時間：從凍結開始（回合開始）算 20 秒＝凍結 15 秒＋開打後 5 秒（CS 的 mp_buytime）；且人在出生區 */
   buyTicks: ticks(20),
   roundTicks: ticks(115),
   bombTicks: ticks(40),
@@ -111,7 +112,7 @@ export interface WeaponDef {
   /** 持槍移動速度（座標單位／tick） */
   readonly speed: number;
   /**
-   * 散佈（度 ×100）：站立靜止的基礎值；蹲 ×0.7、靜步 ×1.2、跑 ×movingMul、開鏡 ×0.1；
+   * 散佈（度 ×100）：站立靜止的基礎值；蹲 ×0.7、靜步 ×1.2、跑 ×movingMul；
    * 連射每發加 recoilStep，停火後每 tick 回復 recoilDecay
    */
   readonly spread: number;
@@ -120,19 +121,21 @@ export interface WeaponDef {
   readonly recoilDecay: number;
   /** 狙擊鏡：開鏡後的移動速度；null = 無鏡 */
   readonly scopedSpeed: number | null;
+  /** 開鏡時的基礎散佈（度 ×100，取代 spread；蹲、走、跑倍率照乘）；null = 無鏡 */
+  readonly scopedSpread: number | null;
 }
 
 const rpm = (n: number): number => Math.max(1, Math.round((TPS * 60) / n));
 
 export const WEAPONS: Readonly<Record<WeaponId, WeaponDef>> = {
-  pistol: { id: 'pistol', name: '手槍', slot: 'secondary', teams: [], price: 0, damage: 30, pellets: 1, fireTicks: rpm(400), automatic: false, magazine: 20, reserve: 120, reloadTicks: ticks(2.2), armorPen: 50, falloffPer10: 8, range: 40, killReward: 300, speed: speedFromUnits(240), spread: 120, movingMul: 3, recoilStep: 60, recoilDecay: 12, scopedSpeed: null },
-  deagle: { id: 'deagle', name: '沙漠之鷹', slot: 'secondary', teams: ['T', 'CT'], price: 700, damage: 54, pellets: 1, fireTicks: rpm(267), automatic: false, magazine: 7, reserve: 35, reloadTicks: ticks(2.2), armorPen: 93, falloffPer10: 6, range: 50, killReward: 300, speed: speedFromUnits(230), spread: 90, movingMul: 5, recoilStep: 150, recoilDecay: 10, scopedSpeed: null },
-  smg: { id: 'smg', name: '衝鋒槍', slot: 'primary', teams: ['T', 'CT'], price: 1250, damage: 26, pellets: 1, fireTicks: rpm(857), automatic: true, magazine: 30, reserve: 120, reloadTicks: ticks(2.1), armorPen: 60, falloffPer10: 10, range: 30, killReward: 600, speed: speedFromUnits(240), spread: 150, movingMul: 1.6, recoilStep: 25, recoilDecay: 10, scopedSpeed: null },
-  shotgun: { id: 'shotgun', name: '霰彈槍', slot: 'primary', teams: ['T', 'CT'], price: 1050, damage: 26, pellets: 8, fireTicks: rpm(68), automatic: false, magazine: 8, reserve: 32, reloadTicks: ticks(0.6), armorPen: 50, falloffPer10: 30, range: 8, killReward: 900, speed: speedFromUnits(220), spread: 700, movingMul: 1.2, recoilStep: 0, recoilDecay: 20, scopedSpeed: null },
-  ak: { id: 'ak', name: 'AK', slot: 'primary', teams: ['T'], price: 2700, damage: 36, pellets: 1, fireTicks: rpm(600), automatic: true, magazine: 30, reserve: 90, reloadTicks: ticks(2.5), armorPen: 77, falloffPer10: 2, range: 70, killReward: 300, speed: speedFromUnits(215), spread: 80, movingMul: 6, recoilStep: 45, recoilDecay: 8, scopedSpeed: null },
-  m4: { id: 'm4', name: 'M4', slot: 'primary', teams: ['CT'], price: 3100, damage: 33, pellets: 1, fireTicks: rpm(666), automatic: true, magazine: 30, reserve: 90, reloadTicks: ticks(3.1), armorPen: 70, falloffPer10: 2, range: 70, killReward: 300, speed: speedFromUnits(215), spread: 70, movingMul: 6, recoilStep: 35, recoilDecay: 9, scopedSpeed: null },
-  awp: { id: 'awp', name: '狙擊槍', slot: 'primary', teams: ['T', 'CT'], price: 4750, damage: 115, pellets: 1, fireTicks: rpm(41), automatic: false, magazine: 10, reserve: 30, reloadTicks: ticks(3.7), armorPen: 97, falloffPer10: 1, range: 120, killReward: 100, speed: speedFromUnits(200), spread: 2500, movingMul: 8, recoilStep: 0, recoilDecay: 100, scopedSpeed: speedFromUnits(100) },
-  knife: { id: 'knife', name: '刀', slot: 'knife', teams: [], price: 0, damage: 40, pellets: 1, fireTicks: rpm(90), automatic: false, magazine: 0, reserve: 0, reloadTicks: 0, armorPen: 85, falloffPer10: 0, range: 1, killReward: 1500, speed: speedFromUnits(250), spread: 0, movingMul: 1, recoilStep: 0, recoilDecay: 0, scopedSpeed: null },
+  pistol: { id: 'pistol', name: '手槍', slot: 'secondary', teams: [], price: 0, damage: 30, pellets: 1, fireTicks: rpm(400), automatic: false, magazine: 20, reserve: 120, reloadTicks: ticks(2.2), armorPen: 50, falloffPer10: 8, range: 40, killReward: 300, speed: speedFromUnits(240), spread: 120, movingMul: 3, recoilStep: 60, recoilDecay: 12, scopedSpeed: null, scopedSpread: null },
+  deagle: { id: 'deagle', name: '沙漠之鷹', slot: 'secondary', teams: ['T', 'CT'], price: 700, damage: 54, pellets: 1, fireTicks: rpm(267), automatic: false, magazine: 7, reserve: 35, reloadTicks: ticks(2.2), armorPen: 93, falloffPer10: 6, range: 50, killReward: 300, speed: speedFromUnits(230), spread: 90, movingMul: 5, recoilStep: 150, recoilDecay: 10, scopedSpeed: null, scopedSpread: null },
+  smg: { id: 'smg', name: '衝鋒槍', slot: 'primary', teams: ['T', 'CT'], price: 1250, damage: 26, pellets: 1, fireTicks: rpm(857), automatic: true, magazine: 30, reserve: 120, reloadTicks: ticks(2.1), armorPen: 60, falloffPer10: 10, range: 30, killReward: 600, speed: speedFromUnits(240), spread: 150, movingMul: 1.6, recoilStep: 25, recoilDecay: 10, scopedSpeed: null, scopedSpread: null },
+  shotgun: { id: 'shotgun', name: '霰彈槍', slot: 'primary', teams: ['T', 'CT'], price: 1050, damage: 26, pellets: 8, fireTicks: rpm(68), automatic: false, magazine: 8, reserve: 32, reloadTicks: ticks(0.6), armorPen: 50, falloffPer10: 30, range: 8, killReward: 900, speed: speedFromUnits(220), spread: 700, movingMul: 1.2, recoilStep: 0, recoilDecay: 20, scopedSpeed: null, scopedSpread: null },
+  ak: { id: 'ak', name: 'AK', slot: 'primary', teams: ['T'], price: 2700, damage: 36, pellets: 1, fireTicks: rpm(600), automatic: true, magazine: 30, reserve: 90, reloadTicks: ticks(2.5), armorPen: 77, falloffPer10: 2, range: 70, killReward: 300, speed: speedFromUnits(215), spread: 80, movingMul: 6, recoilStep: 45, recoilDecay: 8, scopedSpeed: null, scopedSpread: null },
+  m4: { id: 'm4', name: 'M4', slot: 'primary', teams: ['CT'], price: 3100, damage: 33, pellets: 1, fireTicks: rpm(666), automatic: true, magazine: 30, reserve: 90, reloadTicks: ticks(3.1), armorPen: 70, falloffPer10: 2, range: 70, killReward: 300, speed: speedFromUnits(215), spread: 70, movingMul: 6, recoilStep: 35, recoilDecay: 9, scopedSpeed: null, scopedSpread: null },
+  awp: { id: 'awp', name: '狙擊槍', slot: 'primary', teams: ['T', 'CT'], price: 4750, damage: 115, pellets: 1, fireTicks: rpm(41), automatic: false, magazine: 10, reserve: 30, reloadTicks: ticks(3.7), armorPen: 97, falloffPer10: 1, range: 120, killReward: 100, speed: speedFromUnits(200), spread: 2500, movingMul: 8, recoilStep: 0, recoilDecay: 100, scopedSpeed: speedFromUnits(100), scopedSpread: 20 },
+  knife: { id: 'knife', name: '刀', slot: 'knife', teams: [], price: 0, damage: 40, pellets: 1, fireTicks: rpm(90), automatic: false, magazine: 0, reserve: 0, reloadTicks: 0, armorPen: 85, falloffPer10: 0, range: 1, killReward: 1500, speed: speedFromUnits(250), spread: 0, movingMul: 1, recoilStep: 0, recoilDecay: 0, scopedSpeed: null, scopedSpread: null },
 };
 
 export const MOVE = {
@@ -143,6 +146,8 @@ export const MOVE = {
 } as const;
 
 export const ARMOR = { price: 650, points: 100 } as const;
+/** 友軍傷害（%，待審）：子彈打到隊友只造成這個比例的傷害；隊友會擋子彈（子彈打到第一個人就停） */
+export const FRIENDLY_FIRE_PCT = 30;
 export const DEFUSE_KIT = { price: 400, team: 'CT' as Team } as const;
 
 // ───────── 經濟 ─────────
@@ -163,6 +168,7 @@ export const ECONOMY = {
   planterBonus: 300,
   defuserBonus: 300,
   grenadeKillReward: 300,
+  /** 隊殺、自殺（扣在擊殺者／死者身上） */
   teamKillPenalty: -300,
 } as const;
 
