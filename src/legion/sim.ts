@@ -4,7 +4,7 @@
 import { Hasher } from '../shared/hash.ts';
 import { idiv, isqrt, roundHalfEven, tdiv } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
-import type { EnemyRegiment, Flank, FlagState, GateInfo, GateStatus, LadderInfo, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RamInfo, RegimentStatus, Structures } from './api.ts';
+import type { BombardInfo, EnemyRegiment, Flank, FlagState, GateInfo, GateStatus, LadderInfo, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RamInfo, RegimentStatus, Structures } from './api.ts';
 import {
   RULES,
   T,
@@ -13,6 +13,7 @@ import {
   UNIT_KINDS,
   UNITS,
   VERSUS,
+  BOMBARD,
   LADDER_KINDS,
   LADDER_LAYER,
   RAM,
@@ -431,6 +432,10 @@ export class LegionMatch {
   private pathEnv: PathEnv | null = null;
   /** 衝車（攻城地圖才有） */
   ram: RamRuntime | null = null;
+  /** 砲擊支援：飛行中的砲彈、攻方剩餘發數、下一發可以下令的 tick（-1 = 這張地圖沒有砲擊支援） */
+  shells: { readonly x: number; readonly y: number; readonly landAt: number }[] = [];
+  bombardsLeft = 0;
+  bombardReadyAt = -1;
 
   constructor(setup: LegionSetup) {
     const mapFactory = MAPS[setup.mapId ?? defaultMapId(setup.mode)];
@@ -447,6 +452,10 @@ export class LegionMatch {
       this.gates.push({ id: i, kind: g.kind, x0: g.x0, y0: g.y0, x1: g.x1, y1: g.y1, cx: idiv((g.x0 + g.x1) * TILE, 2), cy: idiv((g.y0 + g.y1) * TILE, 2), owner: this.map.defender, hp: hpMax, hpMax, state: 'closed', timer: 0 });
     });
     if (this.gates.length > 0 || this.map.defender >= 0) this.pathEnv = { open: this.gateMask, links: this.ladderLinks, linkCost: RULES.ladder.pathCost };
+    if (this.map.bombardFrom !== undefined && this.map.defender >= 0) {
+      this.bombardsLeft = BOMBARD.shells;
+      this.bombardReadyAt = 0;
+    }
     if (this.map.ram !== undefined && this.map.defender >= 0 && setup.deployments.length === 2) {
       this.ram = { id: 0, owner: 1 - this.map.defender, x: this.map.ram.x, y: this.map.ram.y, facing: normDeg(this.map.ram.facing), crew: -1, gate: -1, contactSince: -1 };
     }
@@ -722,7 +731,86 @@ export class LegionMatch {
   }
 
   structures(): Structures {
-    return { gates: this.gates.map((g) => this.gateInfo(g)), ladders: this.ladders.map((l) => this.ladderInfo(l)), ram: this.ramInfo() };
+    return {
+      gates: this.gates.map((g) => this.gateInfo(g)),
+      ladders: this.ladders.map((l) => this.ladderInfo(l)),
+      ram: this.ramInfo(),
+      bombards: this.shells.map((s): BombardInfo => ({ x: s.x, y: s.y, landIn: s.landAt - this.tick, radius: BOMBARD.radius })),
+      bombardsLeft: this.bombardsLeft,
+      bombardReadyIn: this.bombardReadyAt < 0 ? 0 : Math.max(0, this.bombardReadyAt - this.tick),
+    };
+  }
+
+  // ───────── 砲擊支援 ─────────
+
+  /** 落點在砲擊陰影裡：從落點往來向走 shadow 距離內碰到城牆或門樓（落點那一格不算） */
+  bombardShadowed(x: number, y: number): boolean {
+    const from = this.map.bombardFrom;
+    if (from === undefined) return false;
+    const [tx0, ty0] = tileXY(x, y, this.map.width, this.map.height);
+    const step = 250;
+    for (let d = step; d <= BOMBARD.shadow; d += step) {
+      const [ox, oy] = offset(from, d);
+      const [tx, ty] = tileXY(x + ox, y + oy, this.map.width, this.map.height);
+      if (tx === tx0 && ty === ty0) continue;
+      const t = this.terrainAt(x + ox, y + oy);
+      if (t === T.Wall || t === T.Gatehouse) return true;
+    }
+    return false;
+  }
+
+  private bombardCommand(p: number, c: Record<string, unknown>): void {
+    const type = 'bombard';
+    if (this.bombardReadyAt < 0) return this.rejectCmd(p, type, '這張地圖沒有砲擊支援');
+    if (!this.isAttacker(p)) return this.rejectCmd(p, type, '只有攻方有砲擊支援');
+    if (this.bombardsLeft <= 0) return this.rejectCmd(p, type, '砲擊用完了');
+    if (this.tick < this.bombardReadyAt) return this.rejectCmd(p, type, '砲擊冷卻中');
+    const x = typeof c.x === 'number' && Number.isFinite(c.x) ? roundHalfEven(c.x) : null;
+    const y = typeof c.y === 'number' && Number.isFinite(c.y) ? roundHalfEven(c.y) : null;
+    if (x === null || y === null) return this.rejectCmd(p, type, '座標不合法');
+    if (x < 0 || y < 0 || x >= this.map.width * TILE || y >= this.map.height * TILE) return this.rejectCmd(p, type, '落點在地圖外');
+    if (this.bombardShadowed(x, y)) return this.rejectCmd(p, type, '落點在城牆的砲擊陰影裡');
+    this.shells.push({ x, y, landAt: this.tick + BOMBARD.delay });
+    this.bombardsLeft -= 1;
+    this.bombardReadyAt = this.tick + BOMBARD.cooldown;
+    this.emit({ type: 'bombard', tick: this.tick, x, y, state: 'fired', hit: 0 });
+  }
+
+  /** 砲彈落地：半徑內所有士兵（任何層，敵我不分）扣血；不打城門、不打牆 */
+  private landShells(): void {
+    const keep: { x: number; y: number; landAt: number }[] = [];
+    const attacker = this.map.defender >= 0 ? 1 - this.map.defender : -1;
+    const r2 = BOMBARD.radius * BOMBARD.radius;
+    for (const sh of this.shells) {
+      if (sh.landAt > this.tick) {
+        keep.push(sh);
+        continue;
+      }
+      let hit = 0;
+      for (const s of this.soldiers) {
+        if (!s.alive || (s.x - sh.x) * (s.x - sh.x) + (s.y - sh.y) * (s.y - sh.y) > r2) continue;
+        hit += 1;
+        this.shellDamage(s, BOMBARD.damage, attacker);
+      }
+      this.emit({ type: 'bombard', tick: this.tick, x: sh.x, y: sh.y, state: 'landed', hit });
+    }
+    this.shells = keep;
+  }
+
+  /** 砲擊傷害：不算任何兵團的戰功；打死敵兵算進攻方的擊殺與戰果 */
+  private shellDamage(e: Soldier, amount: number, attacker: number): void {
+    e.hp -= amount;
+    const t = this.regiments[e.reg];
+    t.lastHit = this.tick;
+    if (e.hp > 0) return;
+    e.alive = false;
+    e.target = -1;
+    e.climb = -1;
+    this.players[e.owner].losses += 1;
+    if (attacker >= 0 && e.owner !== attacker) {
+      this.players[attacker].kills += 1;
+      this.players[attacker].killValue += idiv(t.def.cost * 1000, t.men0);
+    }
   }
 
   // ───────── 衝車 ─────────
@@ -1231,6 +1319,10 @@ export class LegionMatch {
       n += 1;
       if (typeof c === 'object' && c !== null && (c as { type?: unknown }).type === 'gate') {
         this.gateCommand(p, c as Record<string, unknown>);
+        continue;
+      }
+      if (typeof c === 'object' && c !== null && (c as { type?: unknown }).type === 'bombard') {
+        this.bombardCommand(p, c as Record<string, unknown>);
         continue;
       }
       this.applyCommand(p, c, false);
@@ -1748,6 +1840,7 @@ export class LegionMatch {
     this.grid.build(this.soldiers);
     this.combat();
     this.resolveProjectiles();
+    if (this.shells.length > 0) this.landShells();
     this.cleanup();
     this.computeVision();
     if (this.mode === 'capture') this.stepFlags();
@@ -3060,6 +3153,7 @@ export class LegionMatch {
       case 'gate':
       case 'ladder':
       case 'ramHit':
+      case 'bombard':
         return true;
     }
   }
@@ -3088,6 +3182,10 @@ export class LegionMatch {
     for (const g of this.gates) h.int(g.hp).str(g.state).int(g.timer);
     for (const l of this.ladders) h.int(l.id).int(l.top).int(l.foot).int(l.progress).bool(l.built).int(l.nextEntry);
     if (this.ram !== null) h.int(this.ram.x).int(this.ram.y).int(this.ram.facing).int(this.ram.crew).int(this.ram.gate).int(this.ram.contactSince);
+    if (this.bombardReadyAt >= 0) {
+      h.int(this.bombardsLeft).int(this.bombardReadyAt);
+      for (const s of this.shells) h.int(s.x).int(s.y).int(s.landAt);
+    }
     for (const r of this.regiments) if (r.building >= 0 || r.toppling >= 0 || r.xferLadder >= 0) h.int(r.building).int(r.toppling).int(r.toppleT).int(r.xferLadder);
     for (const p of this.players) h.int(p.score);
     return h.digest();

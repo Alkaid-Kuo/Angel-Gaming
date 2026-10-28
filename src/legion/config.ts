@@ -331,6 +331,20 @@ export const RAM = {
   blockHalf: 90,
 } as const;
 
+/**
+ * 砲擊支援（引擎 0.4，數字待審）：攻方每場 shells 發、冷卻 cooldown；下令後 delay 落地，半徑 radius 內敵我不分每人扣 damage；
+ * 不打城門、不打牆。陰影：從落點往砲擊來向走 shadow 距離內碰到城牆或門樓（落點那一格不算）就打不到。
+ * damage 規格沒有給，暫定 500（長槍兵血量的一半），待試打。
+ */
+export const BOMBARD = {
+  shells: 3,
+  cooldown: 60 * TPS,
+  delay: 5 * TPS,
+  radius: 3000,
+  damage: 500,
+  shadow: 4000,
+} as const;
+
 /** 能架雲梯的兵種 */
 export const LADDER_KINDS: readonly UnitKind[] = ['sword', 'shield', 'spear', 'light'];
 

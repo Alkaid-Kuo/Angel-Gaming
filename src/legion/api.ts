@@ -250,12 +250,25 @@ export interface RamInfo {
   readonly nextHit: number;
 }
 
+/** 砲擊落點（雙方都看得到） */
+export interface BombardInfo {
+  readonly x: number;
+  readonly y: number;
+  /** 還要幾個 tick 落地 */
+  readonly landIn: number;
+  readonly radius: number;
+}
+
 /** 城池上的物件（雙方都看得到） */
 export interface Structures {
   readonly gates: readonly GateInfo[];
   readonly ladders: readonly LadderInfo[];
   /** 衝車（攻城地圖才有，只有一台） */
   readonly ram: RamInfo | null;
+  /** 飛行中的砲擊、攻方剩餘發數與冷卻（沒有砲擊支援的地圖：[]、0、0） */
+  readonly bombards: readonly BombardInfo[];
+  readonly bombardsLeft: number;
+  readonly bombardReadyIn: number;
 }
 
 export interface FlagState {
@@ -293,6 +306,8 @@ export type LegionEvent =
   | { readonly type: 'withdraw'; readonly tick: number; readonly reg: number; readonly at: number }
   /** 城門狀態改變（開門中、開、關門中、關、被破壞） */
   | { readonly type: 'gate'; readonly tick: number; readonly gate: number; readonly state: GateStatus }
+  /** 砲擊：下令（fired）與落地（landed，hit = 被打到的人數） */
+  | { readonly type: 'bombard'; readonly tick: number; readonly x: number; readonly y: number; readonly state: 'fired' | 'landed'; readonly hit: number }
   /** 衝車撞了城門一下（hp = 撞完剩下的血量） */
   | { readonly type: 'ramHit'; readonly tick: number; readonly gate: number; readonly hp: number }
   /** 雲梯：開始架、架好、架設取消、被推倒（fell = 摔下來的人數） */
@@ -369,7 +384,9 @@ export type LegionCommand =
  */
 export type LegionSideCommand =
   /** 守方開門、關門 */
-  { readonly type: 'gate'; readonly gate: number; readonly action: 'open' | 'close' };
+  | { readonly type: 'gate'; readonly gate: number; readonly action: 'open' | 'close' }
+  /** 攻方砲擊支援：落點 (x, y)；5 秒後落地、半徑 3 格敵我不分；每場 3 發、冷卻 60 秒；落點在城牆陰影裡會被拒絕 */
+  | { readonly type: 'bombard'; readonly x: number; readonly y: number };
 
 /** decide() 可以回傳的所有指令 */
 export type LegionOrder = LegionCommand | LegionSideCommand;
