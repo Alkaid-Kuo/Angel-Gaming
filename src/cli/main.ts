@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// rts-sim：headless 模擬器 CLI。子指令 match、roundrobin、mapgen、bench、viewer；輸出 JSON。
+// rts-sim：headless 模擬器 CLI。子指令 match、roundrobin、mapgen、bench、viewer、shooter（CS 射擊）；輸出 JSON。
 // 結束碼：0 成功、1 參數錯誤、2 選手載入失敗、3 引擎內部錯誤。
 import { randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -15,6 +15,10 @@ import { BatchController, resolveKnobs, type BotController } from '../sandbox/co
 import { loadBotFile, type BotFile } from '../sandbox/node-loader.ts';
 import { OfficialController } from '../sandbox/official.ts';
 import { runMatch } from '../sandbox/runner.ts';
+import { WEAPONS, WEAPON_IDS, type Team, type WeaponId } from '../shooter/config.ts';
+import { DEFAULT_MAP_ID, MAPS as SHOOTER_MAPS, dumpAscii } from '../shooter/map.ts';
+import { ShooterBatchController, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOutput } from '../shooter/runner.ts';
+import { PLAYER_COUNT } from '../shooter/sim.ts';
 import { renderPng } from './png.ts';
 import { eloFromWins, gameOutput, summarize, type BotInfo, type GameOutput } from './stats.ts';
 
@@ -351,6 +355,176 @@ async function cmdBench(args: Args): Promise<void> {
   );
 }
 
+// ───────── CS 射擊 ─────────
+
+function shooterBotFiles(args: Args): BotFile[] {
+  const paths = args.get('bots') ?? [join(packageRoot(), 'bots', 'shooter-practice.js')];
+  if (paths.length < 1 || paths.length > 2) throw new ArgError('shooter 的 --bots 要 1 或 2 個選手檔案（第一個是玩家 0～4、第二個是玩家 5～9）');
+  return paths.map((p) => loadBotFile(p));
+}
+
+function shooterMapArg(args: Args): string {
+  const id = one(args, 'map') ?? one(args, 'id') ?? DEFAULT_MAP_ID;
+  if (SHOOTER_MAPS[id] === undefined) throw new ArgError(`未知地圖：${id}（可用：${Object.keys(SHOOTER_MAPS).join('／')}）`);
+  return id;
+}
+
+/** --loadout ak,m4：T、CT 的開局主武器（測試用）；只給一個就兩邊相同 */
+function shooterLoadoutArg(args: Args): Partial<Record<Team, WeaponId>> | undefined {
+  const s = one(args, 'loadout');
+  if (s === undefined) return undefined;
+  const parts = s.split(',');
+  if (parts.length > 2) throw new ArgError('--loadout 格式為 T主武器,CT主武器（例如 ak,m4）');
+  for (const w of parts) {
+    if (!(WEAPON_IDS as readonly string[]).includes(w) || WEAPONS[w as WeaponId].slot !== 'primary') throw new ArgError(`--loadout：${w} 不是主武器`);
+  }
+  return { T: parts[0] as WeaponId, CT: (parts[1] ?? parts[0]) as WeaponId };
+}
+
+function playShooter(files: readonly BotFile[], seed: number, mapId: string, loadout: Partial<Record<Team, WeaponId>> | undefined, record: boolean): ShooterRunOutput {
+  const map = SHOOTER_MAPS[mapId]();
+  const pick = (pid: number): BotFile => files[pid < PLAYER_COUNT / 2 ? 0 : files.length - 1];
+  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(pick(pid).compiled, pick(pid).label, seed, pid, map));
+  const knobs = controllers.map((c) => resolveKnobs(c.declaration, undefined, c.label));
+  return runShooterMatch({ seed, mapId, defaultLoadout: loadout, controllers, knobs, record });
+}
+
+function shooterSummary(run: ShooterRunOutput): Record<string, unknown> {
+  const r = run.result;
+  return {
+    winner: r.winner === null ? 'draw' : r.winner === 0 ? 'players0-4' : 'players5-9',
+    score: r.score,
+    rounds: r.rounds.length,
+    ticks: r.ticks,
+    wallMs: Math.round(run.wallMs),
+    finalHash: run.finalHash,
+    roundLog: r.rounds.map((x) => `${x.number}:${x.winner}:${x.reason}`),
+    players: r.stats.map((s, pid) => {
+      const rt = run.runtime[pid];
+      return { playerId: pid, kills: s.kills, deaths: s.deaths, exceptions: rt.exceptions, timeouts: rt.timeouts, decideMsMax: Math.round(rt.decideMsMax * 100) / 100, errors: rt.errors };
+    }),
+  };
+}
+
+function cmdShooterMatch(args: Args): void {
+  knownArgs(args, ['seed', 'bots', 'map', 'replay', 'loadout', 'out']);
+  const seed = intArg(args, 'seed', randomInt(0, 2 ** 31), 0)!;
+  const files = shooterBotFiles(args);
+  const mapId = shooterMapArg(args);
+  const replayPath = one(args, 'replay');
+  const run = playShooter(files, seed, mapId, shooterLoadoutArg(args), replayPath !== undefined);
+  if (replayPath !== undefined && run.replay !== null) {
+    mkdirSync(dirname(resolve(replayPath)), { recursive: true });
+    writeFileSync(replayPath, JSON.stringify(run.replay));
+  }
+  emit({ seed, map: mapId, bots: files.map((f) => f.path), ...shooterSummary(run) }, one(args, 'out'));
+}
+
+function cmdShooterBatch(args: Args): void {
+  knownArgs(args, ['games', 'seed', 'bots', 'map', 'loadout', 'out']);
+  const games = intArg(args, 'games', 10, 1)!;
+  const seed = intArg(args, 'seed', 1, 0)!;
+  const files = shooterBotFiles(args);
+  const mapId = shooterMapArg(args);
+  const loadout = shooterLoadoutArg(args);
+  const wins = [0, 0];
+  let draws = 0;
+  const roundWins: Record<Team, number> = { T: 0, CT: 0 };
+  const reasons: Record<string, number> = {};
+  let rounds = 0;
+  let ticks = 0;
+  let wall = 0;
+  let maxWall = 0;
+  const list: Record<string, unknown>[] = [];
+  for (let i = 0; i < games; i++) {
+    const run = playShooter(files, seed + i, mapId, loadout, false);
+    const r = run.result;
+    if (r.winner === null) draws += 1;
+    else wins[r.winner] += 1;
+    for (const x of r.rounds) {
+      roundWins[x.winner] += 1;
+      const key = `${x.winner}:${x.reason}`;
+      reasons[key] = (reasons[key] ?? 0) + 1;
+    }
+    rounds += r.rounds.length;
+    ticks += r.ticks;
+    wall += run.wallMs;
+    if (run.wallMs > maxWall) maxWall = run.wallMs;
+    list.push({ seed: seed + i, score: r.score, rounds: r.rounds.length, ticks: r.ticks, wallMs: Math.round(run.wallMs), finalHash: run.finalHash });
+  }
+  emit(
+    {
+      games,
+      seedFrom: seed,
+      map: mapId,
+      bots: files.map((f) => f.path),
+      matchWins: { 'players0-4': wins[0], 'players5-9': wins[1], draws },
+      roundWins,
+      roundReasons: reasons,
+      avgRounds: Math.round((rounds / games) * 10) / 10,
+      avgTicks: Math.round(ticks / games),
+      avgGameWallMs: Math.round(wall / games),
+      maxGameWallMs: Math.round(maxWall),
+      list,
+    },
+    one(args, 'out'),
+  );
+}
+
+function cmdShooterReplay(file: string | undefined, args: Args): void {
+  knownArgs(args, ['out']);
+  if (file === undefined) throw new ArgError('shooter replay 需要回放檔路徑');
+  let replay: ShooterReplay;
+  try {
+    replay = JSON.parse(readFileSync(file, 'utf8')) as ShooterReplay;
+  } catch (e) {
+    throw new ArgError(`無法讀取回放 ${file}：${(e as Error).message}`);
+  }
+  if (replay.kind !== 'shooter') throw new ArgError(`${file} 不是射擊回放`);
+  const t0 = performance.now();
+  const r = runShooterReplay(replay);
+  const expected = replay.result?.finalHash ?? null;
+  const ok = r.desyncTick === null && (expected === null || expected === r.finalHash);
+  emit({ file, ok, desyncTick: r.desyncTick, finalHash: r.finalHash, expectedFinalHash: expected, score: r.result.score, rounds: r.result.rounds.length, wallMs: Math.round(performance.now() - t0) }, one(args, 'out'));
+  if (!ok) throw new Error('回放不同步');
+}
+
+function cmdShooterMap(args: Args): void {
+  knownArgs(args, ['id', 'map', 'out']);
+  const text = `${dumpAscii(SHOOTER_MAPS[shooterMapArg(args)]())}\n`;
+  const out = one(args, 'out');
+  if (out === undefined) process.stdout.write(text);
+  else writeFileSync(out, text);
+}
+
+/** shooter 子指令：match／batch／replay file.json／map */
+function cmdShooter(argv: readonly string[]): void {
+  const sub = argv[0];
+  let rest = argv.slice(1);
+  let file: string | undefined;
+  if (sub === 'replay' && rest.length > 0 && !rest[0].startsWith('--')) {
+    file = rest[0];
+    rest = rest.slice(1);
+  }
+  const { args } = parseArgs(['shooter', ...rest]);
+  switch (sub) {
+    case 'match':
+      cmdShooterMatch(args);
+      return;
+    case 'batch':
+      cmdShooterBatch(args);
+      return;
+    case 'replay':
+      cmdShooterReplay(file, args);
+      return;
+    case 'map':
+      cmdShooterMap(args);
+      return;
+    default:
+      throw new ArgError(`shooter 的子指令必須是 match／batch／replay／map，收到 ${sub ?? '（無）'}`);
+  }
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -411,12 +585,18 @@ const USAGE = `用法：
   rts-sim roundrobin --mode 1v1|ffa4 --bots a.js b.js ... [--games 每組場數] [--seed S] [--knobs JSON|@檔案] [--exec official|batch] [--out F]
   rts-sim mapgen     --mode 1v1|ffa4 [--seed S] [--format ascii|png] [--validate N] [--out F]
   rts-sim bench      --mode 1v1|ffa4 [--games N] [--exec batch|official] [--seed S] [--bot F] [--out F]
-  rts-sim viewer     [--port 8000] [--host 127.0.0.1|0.0.0.0] [--dir D]`;
+  rts-sim viewer     [--port 8000] [--host 127.0.0.1|0.0.0.0] [--dir D]
+  rts-sim shooter match  [--seed N] [--bots a.js [b.js]] [--map dust] [--replay out.json] [--loadout ak,m4] [--out F]
+  rts-sim shooter batch  [--games N] [--seed S] [--bots a.js [b.js]] [--map dust] [--loadout ak,m4] [--out F]
+  rts-sim shooter replay file.json
+  rts-sim shooter map    [--id dust]`;
 
 async function main(): Promise<number> {
   let parsed: { command: string; args: Args };
+  const argv = process.argv.slice(2);
   try {
-    parsed = parseArgs(process.argv.slice(2));
+    // shooter 有自己的子指令（replay 還有位置參數），參數交給 cmdShooter 解析
+    parsed = argv[0] === 'shooter' ? { command: 'shooter', args: new Map() } : parseArgs(argv);
   } catch (e) {
     process.stderr.write(`${(e as Error).message}\n${USAGE}\n`);
     return 1;
@@ -437,6 +617,9 @@ async function main(): Promise<number> {
         return 0;
       case 'viewer':
         await cmdViewer(parsed.args);
+        return 0;
+      case 'shooter':
+        cmdShooter(argv.slice(1));
         return 0;
       case 'help':
       case '--help':
