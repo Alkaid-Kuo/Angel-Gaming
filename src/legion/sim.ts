@@ -90,6 +90,17 @@ export interface Soldier {
   climb: number;
   climbT: number;
   climbUp: boolean;
+  /** 還沒跟上的軍團換層：欠的那一次的序號（見 Regiment.xfers；-1 = 都跟上了） */
+  owe: number;
+}
+
+/** 軍團中心的一次換層：經過的雲梯（-1 = 樓梯）、樓梯格中心、換到哪一層 */
+export interface LayerXfer {
+  seq: number;
+  ladder: number;
+  x: number;
+  y: number;
+  to: number;
 }
 
 export interface DashState {
@@ -129,6 +140,9 @@ export interface Regiment {
   stairY: number;
   /** 中心最近經過的雲梯（-1 = 沒有）：還在另一層的士兵到梯腳（或梯口）排隊爬 */
   xferLadder: number;
+  /** 中心換層的紀錄（最近 4 次）與下一次的序號：落後的士兵照順序走過每一次換層的地方 */
+  xfers: LayerXfer[];
+  xseq: number;
   /** 正在架的雲梯、正在推倒的雲梯（-1 = 沒有）與推倒的開始 tick、讀條進度 */
   building: number;
   toppling: number;
@@ -520,7 +534,7 @@ export class LegionMatch {
         this.regiments.push(reg);
         for (let k = 0; k < def.men; k++) {
           const id = this.soldiers.length;
-          this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x: sp.x, y: sp.y, layer: 0, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: false, ord: k, sx: sp.x, sy: sp.y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0, climb: -1, climbT: 0, climbUp: true });
+          this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x: sp.x, y: sp.y, layer: 0, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: false, ord: k, sx: sp.x, sy: sp.y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0, climb: -1, climbT: 0, climbUp: true, owe: -1 });
           reg.parked.push(id);
         }
         return undefined;
@@ -555,7 +569,7 @@ export class LegionMatch {
       this.regiments.push(reg);
       for (let k = 0; k < def.men; k++) {
         const id = this.soldiers.length;
-        this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x, y, layer, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: true, ord: k, sx: x, sy: y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0, climb: -1, climbT: 0, climbUp: true });
+        this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x, y, layer, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: true, ord: k, sx: x, sy: y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0, climb: -1, climbT: 0, climbUp: true, owe: -1 });
         reg.slots.push(id);
       }
       this.layout(reg, true);
@@ -586,6 +600,8 @@ export class LegionMatch {
       stairX: -1,
       stairY: -1,
       xferLadder: -1,
+      xfers: [],
+      xseq: 0,
       building: -1,
       toppling: -1,
       toppleSince: 0,
@@ -1874,7 +1890,10 @@ export class LegionMatch {
       so.spd = dx === 0 && dy === 0 ? 0 : isqrt(dx * dx + dy * dy);
       so.x = this.nx[so.id];
       so.y = this.ny[so.id];
-      so.layer = this.nl[so.id];
+      if (so.layer !== this.nl[so.id]) {
+        so.layer = this.nl[so.id];
+        if (so.owe >= 0) this.settleOwe(so);
+      }
     }
     this.grid.build(this.soldiers);
     this.combat();
@@ -2081,6 +2100,41 @@ export class LegionMatch {
   }
 
   /**
+   * 記下中心這一次換層（中心已經換到 r.layer）：還在另一層、也沒欠著別次的士兵，欠這一次。
+   * 士兵照順序走過欠的每一次換層的地方，所以中心連續換層（爬雲梯上牆、再走樓梯下到城裡）時，還在牆外排隊的人
+   * 會先爬梯、再走同一座樓梯下來，不會因為和中心同層就直直走向隊形位置、被城牆擋在外面。
+   * 從原路折返（同一架雲梯、同一座樓梯）時，還欠上一次的人就不用過去再回來。
+   */
+  private noteXfer(r: Regiment, ladder: number, x: number, y: number): void {
+    const seq = r.xseq;
+    const to = r.layer;
+    const prev = this.xferOf(r, seq - 1);
+    const back = prev !== null && (ladder >= 0 ? prev.ladder === ladder : prev.ladder < 0 && Math.abs(prev.x - x) <= 4 * TILE && Math.abs(prev.y - y) <= 4 * TILE);
+    r.xfers.push({ seq, ladder, x, y, to });
+    if (r.xfers.length > 4) r.xfers.shift();
+    r.xseq = seq + 1;
+    for (const sid of r.slots) {
+      const s = this.soldiers[sid];
+      if (!s.alive) continue;
+      if (back && s.owe === seq - 1) s.owe = s.layer === to ? -1 : seq;
+      else if (s.owe < 0 && s.layer !== to) s.owe = seq;
+    }
+  }
+
+  private xferOf(r: Regiment, seq: number): LayerXfer | null {
+    for (const q of r.xfers) if (q.seq === seq) return q;
+    return null;
+  }
+
+  /** 士兵換層之後：到了欠的那一次的目的層就換欠下一次（都跟上了 = -1）；紀錄已經丟掉或雲梯倒了就不再欠 */
+  private settleOwe(s: Soldier): void {
+    const r = this.regiments[s.reg];
+    const q = this.xferOf(r, s.owe);
+    if (q === null || (q.ladder >= 0 && this.ladderById(q.ladder) === null)) s.owe = -1;
+    else if (s.layer === q.to) s.owe = s.owe + 1 < r.xseq ? s.owe + 1 : -1;
+  }
+
+  /**
    * 移動軍團中心：中心跨格時依 stepLayer 更新層（踏進樓梯換層並記下樓梯位置，讓還在另一層的士兵知道要從哪裡上下）。
    * 中心本身不被地形擋（路徑已經保證可走）；不能走的跨格就維持原層。
    */
@@ -2092,7 +2146,10 @@ export class LegionMatch {
       if (fx !== tx || fy !== ty) {
         const nl = stepLayer(r.layer, this.terrainAt(r.x, r.y), t, r.def.cavalry, this.gateMask[ty * this.map.width + tx] === 1);
         if (nl >= 0) {
-          r.layer = nl;
+          if (nl !== r.layer) {
+            r.layer = nl;
+            this.noteXfer(r, -1, tx * TILE + TILE / 2, ty * TILE + TILE / 2);
+          }
           if (t === T.Stair) {
             r.stairX = tx * TILE + TILE / 2;
             r.stairY = ty * TILE + TILE / 2;
@@ -2107,6 +2164,7 @@ export class LegionMatch {
             r.xferLadder = l.id;
             r.stairX = -1;
             r.stairY = -1;
+            this.noteXfer(r, l.id, l.tx, l.ty);
           }
         }
       }
@@ -2370,8 +2428,20 @@ export class LegionMatch {
     // 和軍團不在同一層（軍團已經上牆、自己還在地面，或反過來）：先走到軍團經過的樓梯換層，不追人；
     // 已經站在樓梯上就照常走向隊形位置（踏出樓梯的那一步才換層）
     // 經雲梯換層：走到梯腳（在地面）或梯口（在牆頂）排隊，輪到就上梯
-    const xfer = r.xferLadder >= 0 && s.layer !== r.layer ? this.ladderById(r.xferLadder) : null;
-    const offLayer = s.layer !== r.layer && (r.stairX >= 0 || xfer !== null);
+    // 欠著中心的某一次換層：照順序走過去（雲梯倒了、紀錄丟了就不再欠，改用下面的舊規則）
+    if (s.owe >= 0) this.settleOwe(s);
+    const via = s.owe >= 0 ? this.xferOf(r, s.owe) : null;
+    let xfer: LadderRuntime | null = null;
+    let stairX = -1;
+    let stairY = -1;
+    if (via !== null) {
+      if (via.ladder >= 0) xfer = this.ladderById(via.ladder);
+      else [stairX, stairY] = [via.x, via.y];
+    } else if (s.layer !== r.layer) {
+      if (r.xferLadder >= 0) xfer = this.ladderById(r.xferLadder);
+      else [stairX, stairY] = [r.stairX, r.stairY];
+    }
+    const offLayer = xfer !== null || stairX >= 0;
     if (offLayer) {
       chase = 0;
       if (xfer !== null) {
@@ -2389,9 +2459,9 @@ export class LegionMatch {
           this.nl[s.id] = LADDER_LAYER;
           return;
         }
-      } else if (this.terrainAt(s.x, s.y) !== T.Stair) {
-        gx = r.stairX;
-        gy = r.stairY;
+      } else if (via !== null || this.terrainAt(s.x, s.y) !== T.Stair) {
+        gx = stairX;
+        gy = stairY;
       }
     }
     // 弓兵被貼身：拉不開弓，上前近戰（站著射箭的弓兵平常不追）
@@ -2444,11 +2514,22 @@ export class LegionMatch {
       const running = dashing && !r.dash!.aligning;
       if (running && (r.dash!.def.kind === 'charge' ? stopsCavalry(this.terrainAt(nx, ny)) : this.stepAt(layer, x, y, nx, ny, cav) < 0)) {
         s.dashing = false;
-      } else [x, y, layer] = this.slide(x, y, nx, ny, layer, cav);
+      } else {
+        [x, y, layer] = this.slide(x, y, nx, ny, layer, cav);
+        // 和軍團中心同層、也沒欠換層的人不自己踏上（走下）樓梯：不然隊形前排會先換到另一層、沒有換層紀錄可以回來，卡在牆頂或牆後
+        if (layer !== s.layer && s.layer === r.layer && s.owe < 0) {
+          [x, y, layer] = [s.x, s.y, s.layer];
+          s.dashing = false;
+        }
+      }
     }
     // 槍林、盾牆：原地不動、不被推開（霸體）；衝刺中、突擊擠進敵陣時不和敵兵互推
     const hold = r.brace === 2 || r.wall === 2;
-    if (r.nearEnemy && !hold) [x, y, layer] = this.separate(s, x, y, layer, cav, dashing || r.penetrateUntil > this.tick);
+    if (r.nearEnemy && !hold) {
+      const [px, py, pl] = this.separate(s, x, y, layer, cav, dashing || r.penetrateUntil > this.tick);
+      // 被擠的時候也一樣：同層、沒欠換層的人不會被擠上（擠下）樓梯
+      if (pl === layer || s.layer !== r.layer || s.owe >= 0) [x, y, layer] = [px, py, pl];
+    }
     this.nx[s.id] = x;
     this.ny[s.id] = y;
     this.nl[s.id] = layer;
@@ -3258,6 +3339,7 @@ export class LegionMatch {
       // 層只在非 0 時納入：沒有城牆的地圖雜湊值與 0.3 完全相同
       if (s.layer !== 0) h.int(s.layer);
       if (s.climb >= 0) h.int(s.climb).int(s.climbT).bool(s.climbUp);
+      if (s.owe >= 0) h.int(s.owe);
     }
     for (const r of this.regiments) {
       h.int(r.x).int(r.y).int(r.facing).str(r.formation).int(r.width).int(r.depth).int(r.switchUntil).int(r.corridor).int(r.slots.length).int(r.target).int(r.fireTarget);
@@ -3266,6 +3348,10 @@ export class LegionMatch {
       if (r.dash !== null) h.int(r.dash.dir).int(r.dash.left).int(r.dash.speed).int(r.dash.boost).bool(r.dash.aligning);
       if (r.volley !== null) h.int(r.volley.x).int(r.volley.y).int(r.volley.until);
       if (r.layer !== 0) h.int(r.layer).int(r.stairX).int(r.stairY);
+      if (r.xseq > 0) {
+        h.int(r.xseq);
+        for (const q of r.xfers) h.int(q.seq).int(q.ladder).int(q.x).int(q.y).int(q.to);
+      }
     }
     for (const p of this.projectiles) h.int(p.t1).int(p.target).int(p.dmg).int(p.x1).int(p.y1);
     for (const f of this.flags) h.int(f.owner).int(f.capturer).int(f.progress).int(f.contested ? 1 : 0);
