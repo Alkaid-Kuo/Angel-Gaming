@@ -15,7 +15,7 @@ import { BatchController, resolveKnobs, type BotController } from '../sandbox/co
 import { loadBotFile, type BotFile } from '../sandbox/node-loader.ts';
 import { OfficialController } from '../sandbox/official.ts';
 import { runMatch } from '../sandbox/runner.ts';
-import { WEAPONS, WEAPON_IDS, type Team, type WeaponId } from '../shooter/config.ts';
+import { TPS as SHOOTER_TPS, WEAPONS, WEAPON_IDS, type Team, type WeaponId } from '../shooter/config.ts';
 import { DEFAULT_MAP_ID, MAPS as SHOOTER_MAPS, dumpAscii } from '../shooter/map.ts';
 import { ShooterBatchController, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOutput } from '../shooter/runner.ts';
 import { PLAYER_COUNT } from '../shooter/sim.ts';
@@ -451,6 +451,9 @@ function cmdShooterBatch(args: Args): void {
   const groupRoundWins = [0, 0];
   // 經濟統計：依陣營與依組別的回合開局平均金錢總和、全買回合數
   const econ = { T: { money: 0, fullBuy: 0 }, CT: { money: 0, fullBuy: 0 }, g0: { money: 0, fullBuy: 0 }, g1: { money: 0, fullBuy: 0 } };
+  // 道具統計：依陣營與依組別的投擲數、閃光讓敵人／自己隊致盲的 tick 數
+  const nade = () => ({ throws: 0, flashEnemyTicks: 0, flashTeamTicks: 0 });
+  const nades = { T: nade(), CT: nade(), g0: nade(), g1: nade() };
   let draws = 0;
   const roundWins: Record<Team, number> = { T: 0, CT: 0 };
   const reasons: Record<string, number> = {};
@@ -473,6 +476,11 @@ function cmdShooterBatch(args: Args): void {
         for (const e of [side, grp]) {
           e.money += x.money[g];
           if (x.fullBuy[g]) e.fullBuy += 1;
+        }
+        for (const e of [x.tGroup === g ? nades.T : nades.CT, g === 0 ? nades.g0 : nades.g1]) {
+          e.throws += x.throws[g];
+          e.flashEnemyTicks += x.flashEnemyTicks[g];
+          e.flashTeamTicks += x.flashTeamTicks[g];
         }
       }
       const key = `${x.winner}:${x.reason}`;
@@ -497,6 +505,12 @@ function cmdShooterBatch(args: Args): void {
         (Object.entries({ T: econ.T, CT: econ.CT, 'players0-4': econ.g0, 'players5-9': econ.g1 }) as [string, { money: number; fullBuy: number }][]).map(([k, e]) => [
           k,
           { avgRoundStartMoney: rounds === 0 ? 0 : Math.round(e.money / rounds), fullBuyRate: rounds === 0 ? 0 : Math.round((e.fullBuy / rounds) * 1000) / 1000 },
+        ]),
+      ),
+      grenades: Object.fromEntries(
+        (Object.entries({ T: nades.T, CT: nades.CT, 'players0-4': nades.g0, 'players5-9': nades.g1 }) as [string, ReturnType<typeof nade>][]).map(([k, e]) => [
+          k,
+          { avgThrowsPerRound: rounds === 0 ? 0 : Math.round((e.throws / rounds) * 100) / 100, flashEnemyBlindSec: Math.round((e.flashEnemyTicks / SHOOTER_TPS) * 10) / 10, flashTeamBlindSec: Math.round((e.flashTeamTicks / SHOOTER_TPS) * 10) / 10 },
         ]),
       ),
       roundReasons: reasons,

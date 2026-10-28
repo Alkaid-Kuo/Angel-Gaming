@@ -3,7 +3,10 @@
 // T 的持彈者走最近的炸彈點下包，其他 T 跟去同一點；炸彈掉了由最近的 T 去撿；下包後守在炸彈旁。
 // CT 分兩點守（預設 3 人 A、2 人 B），炸彈下了就去拆。
 // 任何人看到敵人就瞄準開火（有效射程內站定，太遠邊走邊打）；沒看到就看移動方向，聽到敵方聲音就轉向聲音。
-// 購買（各買各的，沒有團隊協調）：錢 ≥ 全買門檻就買步槍＋護甲（CT 加拆彈器）；錢 ≥ 衝鋒槍＋護甲就半買；否則 eco（只在手槍局買護甲）。
+// 購買（各買各的，沒有團隊協調）：錢 ≥ 全買門檻就買步槍＋護甲（CT 加拆彈器），再多買一顆道具（T 煙霧、CT 閃光）；
+// 錢 ≥ 衝鋒槍＋護甲就半買；否則 eco（只在手槍局買護甲）。
+// 道具（v3，只有兩條、不是戰術）：T 下包前離目標炸彈點中心 15 格內且看得到中心，朝中心丟煙霧；
+// CT 雷達或視野出現 10～20 格的敵人，朝它的方向全力丟閃光。每回合各一次。
 
 /** @typedef {import('../src/shooter/api.ts').ShooterInitData} InitData */
 /** @typedef {import('../src/shooter/api.ts').ShooterHelpers} Helpers */
@@ -30,12 +33,14 @@ export default class ShooterPractice {
     /** 連續看見目前目標的決策次數 */
     this.seen = 0;
     this.target = -1;
+    /** 本回合是否已經丟過道具 */
+    this.thrown = false;
   }
 
   declare() {
     return {
       name: 'shooter-practice',
-      version: '2',
+      version: '3',
       style: '陪練',
       knobs: [
         { key: 'reaction', name: '反應', description: '看到敵人後等幾次決策（每次 0.1 秒）才開火', min: 0, max: 5, default: 1, integer: true },
@@ -105,10 +110,12 @@ export default class ShooterPractice {
       this.site = null;
       this.seen = 0;
       this.target = -1;
+      this.thrown = false;
     }
     /** @type {Command[]} */
     const out = [];
     if (obs.round.canBuy) this.buy(obs, out);
+    if (!this.thrown) this.throwNade(obs, out);
     if (me.loadout.primary !== null && me.weapon !== me.loadout.primary) out.push({ type: 'switch', slot: 'primary' });
     else if (me.loadout.primary === null && me.weapon === 'knife' && me.loadout.secondary !== null) out.push({ type: 'switch', slot: 'secondary' });
 
@@ -174,6 +181,8 @@ export default class ShooterPractice {
       if (primary === null || this.price(primary) < this.price(rifle)) items.push(rifle);
       if (needArmor) items.push('armor');
       if (me.team === 'CT' && !me.loadout.kit) items.push('kit');
+      const nade = me.team === 'T' ? 'smoke' : 'flash';
+      if (!me.loadout.grenades.includes(nade)) items.push(nade);
     } else if (me.money >= this.price('smg') + rules.armorPrice) {
       if (primary === null) items.push('smg');
       if (needArmor) items.push('armor');
@@ -182,6 +191,36 @@ export default class ShooterPractice {
       if (pistolRound && needArmor) items.push('armor');
     }
     if (items.length > 0) out.push({ type: 'buy', items });
+  }
+
+  /**
+   * 每回合最多丟一次：T 在目標炸彈點 15 格內朝點中心丟煙霧（下包前、沒看到敵人、看得到中心）；
+   * CT 看到或雷達上有 10～20 格內的敵人就朝它全力丟閃光
+   * @param {Observation} obs
+   * @param {Command[]} out
+   */
+  throwNade(obs, out) {
+    const me = obs.me;
+    const range = this.data.rules.grenadeRules.maxThrowRange * UNIT;
+    if (me.team === 'T') {
+      if (obs.round.phase !== 'live' || this.site === null || obs.enemies.length > 0 || !me.loadout.grenades.includes('smoke')) return;
+      const s = this.siteRect(this.site);
+      const cx = ((s.x0 + s.x1) * UNIT) / 2;
+      const cy = ((s.y0 + s.y1) * UNIT) / 2;
+      const d = this.h.dist(me.x, me.y, cx, cy);
+      if (d > 15 * UNIT || !this.h.clearLine(me.x, me.y, cx, cy)) return;
+      out.push({ type: 'throw', grenade: 'smoke', deg: this.h.angleTo(me.x, me.y, cx, cy), power: Math.min(100, Math.round((d / range) * 100)) });
+      this.thrown = true;
+      return;
+    }
+    if ((obs.round.phase !== 'live' && obs.round.phase !== 'planted') || !me.loadout.grenades.includes('flash')) return;
+    for (const e of [...obs.enemies, ...obs.radar]) {
+      const d = this.h.dist(me.x, me.y, e.x, e.y);
+      if (d < 10 * UNIT || d > 20 * UNIT) continue;
+      out.push({ type: 'throw', grenade: 'flash', deg: this.h.angleTo(me.x, me.y, e.x, e.y), power: 100 });
+      this.thrown = true;
+      return;
+    }
   }
 
   /** @param {Observation} obs */
