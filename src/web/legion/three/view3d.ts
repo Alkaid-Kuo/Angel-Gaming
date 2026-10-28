@@ -2,7 +2,7 @@
 // 觀戰畫面換一個繪製器就能用。世界層（地形、城池、士兵、托盤與地面範圍）用 Three.js；資訊層（軍團旗標、特效文字、倒數）畫在疊在上面的 2D 畫布。
 // 鏡頭沿用 2D 的 cam（中心、每格像素）：拉遠是 66° 的高空俯視、拉近慢慢壓低到 32°；中景以下可以水平轉 ±35°（右鍵拖曳或 [ ]），全圖固定北朝上。
 import * as THREE from 'three';
-import { FORMATION_NAMES, RULES, T, TILE, TPS, UNITS, type UnitKind } from '../../../legion/config.ts';
+import { DASH, FORMATION_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, UNITS, stopsCavalry, walkable, type UnitKind } from '../../../legion/config.ts';
 import { MAPS, type LegionMap } from '../../../legion/map.ts';
 import { drawUnitIcon } from '../icons.ts';
 import { DOWN_BIT, LAYER_SHIFT, REG_MASK, type LegionFrame, type LegionMeta, type RegFrame } from '../protocol.ts';
@@ -87,6 +87,8 @@ export class Legion3DView implements BattleView {
   /** 每團士兵多數所在的層（托盤畫在牆頂還是地面） */
   private regLayer = new Map<number, number>();
   private regTop = new Map<number, number>();
+  /** 瞄準預覽的文字（地面標示畫完後由資訊層畫） */
+  private aimText: { x: number; z: number; text: string; color: string }[] = [];
   /** 使用者轉的水平角與俯角微調 */
   private yaw = 0;
   private tilt = 0;
@@ -800,12 +802,113 @@ export class Legion3DView implements BattleView {
         this.lineAt(ex, ez, ex - Math.cos(a - 0.5) * 0.9, ez - Math.sin(a - 0.5) * 0.9, 0.22, c, 0.9);
       }
     }
+    if (opt.aim) this.aimMarks(opt.aim, alpha);
+    if (opt.order) {
+      const c = new THREE.Color(0xbfdbfe);
+      const a = opt.order.from;
+      const b = opt.order.to;
+      const x0 = a.x / TILE;
+      const z0 = a.y / TILE;
+      const x1 = b.x / TILE;
+      const z1 = b.y / TILE;
+      const ang = Math.atan2(z1 - z0, x1 - x0);
+      this.lineAt(x0, z0, x1, z1, 0.18, c, 0.9);
+      this.lineAt(x1, z1, x1 - Math.cos(ang + 0.5) * 0.9, z1 - Math.sin(ang + 0.5) * 0.9, 0.18, c, 0.9);
+      this.lineAt(x1, z1, x1 - Math.cos(ang - 0.5) * 0.9, z1 - Math.sin(ang - 0.5) * 0.9, 0.18, c, 0.9);
+    }
     // 特效的地面圈
     for (const e of this.effects) {
       if (e.kind !== 'ring') continue;
       const p = (now - e.t0) / e.life;
       if (p < 0 || p > 1) continue;
       this.ringAt(e.x / TILE, e.y / TILE, (e.size ?? 3) * (0.3 + p * 0.9), 0.18, new THREE.Color(e.color), 1 - p, 0);
+    }
+  }
+
+  private terrainAt(x: number, y: number): number {
+    const tx = Math.floor(x / TILE);
+    const ty = Math.floor(y / TILE);
+    if (tx < 0 || ty < 0 || tx >= this.meta.width || ty >= this.meta.height) return T.River;
+    return this.meta.terrain[ty * this.meta.width + tx];
+  }
+
+  /**
+   * 技能瞄準（照 2D）：衝刺畫隊形寬度的路線帶與中線（騎兵的助跑段是虛線），會被地形擋下的位置打叉；
+   * 齊射畫射程圈與落點圈（超出射程變紅）；槍林畫正面扇形。冷卻中畫成灰色。文字由資訊層畫（aimText）
+   */
+  private aimMarks(aim: { ids: readonly number[]; to: { x: number; y: number } }, alpha: number): void {
+    this.aimText = [];
+    for (const id of aim.ids) {
+      const p = this.regAt(id, alpha);
+      const r = this.regById.get(id);
+      if (p === null || r === undefined) continue;
+      const kind = this.kindOf[id];
+      const cd = r.skillCd > 0;
+      const color = new THREE.Color(cd ? 0x94a3b8 : 0xfde68a);
+      const css = cd ? '#cbd5e1' : '#fde68a';
+      const ang = Math.atan2(aim.to.y - p.y, aim.to.x - p.x);
+      const x = p.x / TILE;
+      const z = p.y / TILE;
+      const layer = this.regLayer.get(id) ?? 0;
+      const dash = kind === 'sword' ? DASH.assault : kind === 'light' ? DASH.infiltrate : kind === 'lightCav' ? DASH.lightCav : kind === 'heavyCav' ? DASH.heavyCav : null;
+      if (dash !== null) {
+        const cav = dash.kind === 'charge';
+        const fx = Math.cos(ang);
+        const fy = Math.sin(ang);
+        const hw = Math.max(500, r.halfW);
+        const lanes = Math.max(3, Math.round((hw * 2) / 500) + 1);
+        const stops: { d: number; l: number; t: number }[] = [];
+        for (let i = 0; i < lanes; i++) {
+          const l = -hw + (2 * hw * i) / (lanes - 1);
+          for (let d = 250; d <= dash.dist; d += 250) {
+            const tt = this.terrainAt(p.x + fx * d - fy * l, p.y + fy * d + fx * l);
+            if (cav ? stopsCavalry(tt) : !walkable(tt)) {
+              stops.push({ d, l, t: tt });
+              break;
+            }
+          }
+        }
+        const len = dash.dist / TILE;
+        this.rectAt(x + fx * len * 0.5, z + fy * len * 0.5, ang, len / 2, hw / TILE, color, 0.1, 0, layer);
+        const run = Math.min(dash.dist, dash.runup) / TILE;
+        if (run > 0) this.lineAt(x, z, x + fx * run, z + fy * run, 0.14, color, 0.9, layer, 1);
+        const ex = x + fx * len;
+        const ez = z + fy * len;
+        this.lineAt(x + fx * run, z + fy * run, ex, ez, 0.24, color, 0.95, layer);
+        this.lineAt(ex, ez, ex - Math.cos(ang + 0.5) * 0.9, ez - Math.sin(ang + 0.5) * 0.9, 0.22, color, 0.95, layer);
+        this.lineAt(ex, ez, ex - Math.cos(ang - 0.5) * 0.9, ez - Math.sin(ang - 0.5) * 0.9, 0.22, color, 0.95, layer);
+        const red = new THREE.Color(0xf87171);
+        for (const st of stops) {
+          const sx = (p.x + fx * st.d - fy * st.l) / TILE;
+          const sz = (p.y + fy * st.d + fx * st.l) / TILE;
+          this.lineAt(sx - 0.3, sz - 0.3, sx + 0.3, sz + 0.3, 0.1, red, 0.95);
+          this.lineAt(sx + 0.3, sz - 0.3, sx - 0.3, sz + 0.3, 0.1, red, 0.95);
+        }
+        this.aimText.push({ x: ex, z: ez, text: `${len.toFixed(0)} 格`, color: css });
+        if (stops.length > 0) {
+          const first = stops.reduce((a, b) => (a.d <= b.d ? a : b));
+          this.aimText.push({ x: (p.x + fx * first.d - fy * first.l) / TILE, z: (p.y + fy * first.d + fx * first.l) / TILE, text: `約 ${Math.round((stops.length * 100) / lanes)}% 的人會被${TERRAIN_NAMES[first.t]}擋下`, color: '#fca5a5' });
+        }
+        if (cd) this.aimText.push({ x, z, text: `冷卻 ${Math.ceil(r.skillCd / TPS)} 秒`, color: '#cbd5e1' });
+      } else if (kind === 'archer') {
+        const lvAt = (q: number, w: number): number => this.meta.heights[Math.floor(w / TILE) * this.meta.width + Math.floor(q / TILE)] ?? 0;
+        const lv = Math.max(-RULES.height.clamp, Math.min(RULES.height.clamp, lvAt(p.x, p.y) - lvAt(aim.to.x, aim.to.y)));
+        const range = (UNITS.archer.range + RULES.height.rangePerLevel * lv) / TILE;
+        const tx = aim.to.x / TILE;
+        const tz = aim.to.y / TILE;
+        const ok = Math.hypot(tx - x, tz - z) <= range;
+        this.ringAt(x, z, range, 0.08, new THREE.Color(0xfde68a), 0.5, layer);
+        const c = cd ? new THREE.Color(0x94a3b8) : ok ? new THREE.Color(0xfde68a) : new THREE.Color(0xf87171);
+        this.ringAt(tx, tz, RULES.volley.radius / TILE, 0.14, c, 0.95, 0, 0, Math.PI * 2, 0.15);
+        this.aimText.push({ x: tx, z: tz, text: cd ? `冷卻 ${Math.ceil(r.skillCd / TPS)} 秒` : ok ? '齊射' : '超出射程', color: cd ? '#cbd5e1' : ok ? '#fde68a' : '#f87171' });
+      } else if (kind === 'spear') {
+        const R = (r.halfD + UNITS.spear.reach) / TILE;
+        const half = RULES.flank.frontHalf * DEG;
+        this.ringAt(x, z, R, 0.12, color, 0.9, layer, ang - half, ang + half, 0.18);
+        this.aimText.push({ x: x + Math.cos(ang) * R, z: z + Math.sin(ang) * R, text: r.status === 'braced' || r.status === 'bracing' ? '收槍林' : '槍林', color: css });
+      } else if (kind === 'shield') {
+        this.aimText.push({ x, z, text: r.status === 'walled' || r.status === 'walling' ? '收盾牆' : '盾牆', color: css });
+      }
     }
   }
 
@@ -1055,15 +1158,18 @@ export class Legion3DView implements BattleView {
       ctx.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
       ctx.strokeRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
     }
-    if (opt.order) {
-      const [ax, ay] = this.toScreen(opt.order.from.x, opt.order.from.y);
-      const [bx, by] = this.toScreen(opt.order.to.x, opt.order.to.y);
-      ctx.strokeStyle = '#a5f3fc';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
-      ctx.stroke();
+    if (opt.aim) {
+      ctx.font = `600 12px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      for (const a of this.aimText) {
+        const sp = this.screenOf(a.x, a.z, this.city.surfaceAt(a.x, a.z) + 0.6);
+        if (sp === null) continue;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillText(a.text, sp[0] + 1, sp[1] - 7);
+        ctx.fillStyle = a.color;
+        ctx.fillText(a.text, sp[0], sp[1] - 8);
+      }
     }
   }
 }
