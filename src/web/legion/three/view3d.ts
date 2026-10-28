@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { DASH, FORMATION_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, UNITS, stopsCavalry, walkable, type UnitKind } from '../../../legion/config.ts';
 import { MAPS, type LegionMap } from '../../../legion/map.ts';
 import { drawUnitIcon } from '../icons.ts';
+import type { RamInfo } from '../../../legion/api.ts';
 import { DOWN_BIT, LAYER_SHIFT, REG_MASK, type LegionFrame, type LegionMeta, type RegFrame } from '../protocol.ts';
 import { DASH_COLOR, DASH_NAME, TAG, TEAM, TEAM_LIGHT, type Camera, type DrawOptions } from '../render.ts';
 import type { BattleView } from '../view.ts';
@@ -526,7 +527,7 @@ export class Legion3DView implements BattleView {
       this.drawFallen();
       this.drawArrows(f, alpha);
       this.drawGroundMarks(f, alpha, now, opt);
-      this.siege.update(f.structures, f.flags.map((q) => q.owner), this.team, now, f.tick);
+      this.siege.update(f.structures, f.flags.map((q) => q.owner), this.team, now, f.tick, this.ramAt(alpha));
     }
     this.decals.end();
     this.ground.update(now);
@@ -542,10 +543,58 @@ export class Legion3DView implements BattleView {
     this.drawOrders(opt);
   }
 
+  /** 兩幀之間插值的衝車位置與朝向（引擎每 tick 才動一次，不插值會一頓一頓的） */
+  private ramAt(alpha: number): RamInfo | null {
+    const b = this.cur?.structures.ram ?? null;
+    const a = this.prev?.structures.ram ?? null;
+    if (b === null || a === null) return b;
+    let df = b.facing - a.facing;
+    if (df > 180) df -= 360;
+    if (df < -180) df += 360;
+    return { ...b, x: a.x + (b.x - a.x) * alpha, y: a.y + (b.y - a.y) * alpha, facing: a.facing + df * alpha };
+  }
+
+  /**
+   * 推衝車：引擎把衝車放在推車那團的正前方（規格書 18.5），整團排在車後。畫面上把那團編號最小的幾個人
+   * 移到車尾與車側的推車位置（離原位兩格以內），看起來是人在推車；其餘的人照原位。回傳 士兵 id → 位置（格）
+   */
+  private pushers(f: LegionFrame, alpha: number): Map<number, { x: number; z: number; rot: number }> {
+    const out = new Map<number, { x: number; z: number; rot: number }>();
+    const q = this.ramAt(alpha);
+    if (q === null || q.crew === null) return out;
+    const ids: number[] = [];
+    const s = f.soldiers;
+    for (let i = 0; i < s.length; i += 4) if ((s[i + 3] & REG_MASK) === q.crew && (s[i + 3] & DOWN_BIT) === 0) ids.push(s[i]);
+    ids.sort((a, b) => a - b);
+    // 車身長 2.2、寬 1.3：車尾兩排、兩側各兩個
+    const slots: [number, number][] = [
+      [-1.35, -0.4],
+      [-1.35, 0.4],
+      [-1.35, 0],
+      [-1.75, -0.25],
+      [-1.75, 0.25],
+      [-0.4, -0.85],
+      [-0.4, 0.85],
+      [0.4, -0.85],
+      [0.4, 0.85],
+    ];
+    const a = (q.facing * Math.PI) / 180;
+    const fx = Math.cos(a);
+    const fz = Math.sin(a);
+    const cx = q.x / TILE;
+    const cz = q.y / TILE;
+    ids.slice(0, slots.length).forEach((id, k) => {
+      const [along, side] = slots[k];
+      out.set(id, { x: cx + fx * along - fz * side, z: cz + fz * along + fx * side, rot: -a });
+    });
+    return out;
+  }
+
   private drawSoldiers(f: LegionFrame, alpha: number, now: number, opt: DrawOptions): void {
     const s = f.soldiers;
     const sol = this.soldiers;
     sol.begin();
+    const push = this.pushers(f, alpha);
     const facing = new Map<number, number>();
     const layerCount = new Map<number, [number, number, number]>();
     const top = new Map<number, number>();
@@ -574,13 +623,14 @@ export class Legion3DView implements BattleView {
       const kind = this.kindOf[reg];
       const routed = r.status === 'routed';
       const pose: Pose = kind === 'spear' && (r.status === 'braced' || r.status === 'bracing') ? 'brace' : kind === 'shield' && (r.status === 'walled' || r.status === 'walling') ? 'wall' : 'stand';
-      const wx = x / TILE;
-      const wz = y / TILE;
+      const pu = push.get(id);
+      const wx = pu?.x ?? x / TILE;
+      const wz = pu?.z ?? y / TILE;
       let wy = this.heightAt(wx, wz, layer);
       const moving = r.status === 'moving' || r.status === 'attacking' || r.status === 'charging' || r.dashing !== null || routed;
       if (moving) wy += Math.abs(Math.sin(now * 0.012 + id * 1.7)) * 0.03;
       top.set(reg, Math.max(top.get(reg) ?? -Infinity, wy + (kind === 'lightCav' || kind === 'heavyCav' ? 0.95 : 0.65)));
-      sol.add(kind, pose, { x: wx, y: wy, z: wz, rot: -(fa + (routed ? 180 : 0)) * DEG, down: (flags & DOWN_BIT) !== 0, shade: routed ? 0.72 : 1, team: routed ? null : this.team[this.ownerOf[reg]] });
+      sol.add(kind, pose, { x: wx, y: wy, z: wz, rot: pu?.rot ?? -(fa + (routed ? 180 : 0)) * DEG, down: (flags & DOWN_BIT) !== 0, shade: routed ? 0.72 : 1, team: routed ? null : this.team[this.ownerOf[reg]] });
     }
     sol.end();
     // 樹林裡的軍團：附近的樹冠變淡（v2：隱蔽處樹冠透明度 .4；沒隱蔽的淡一點，看得到人就好）

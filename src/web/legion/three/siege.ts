@@ -129,13 +129,13 @@ export class Siege {
     }
   }
 
-  update(s: Structures, flagOwner: readonly number[], team: readonly THREE.Color[], now: number, tick: number): void {
+  update(s: Structures, flagOwner: readonly number[], team: readonly THREE.Color[], now: number, tick: number, ramAt: RamInfo | null = s.ram): void {
     for (const d of this.doors) {
       const g = s.gates.find((q) => q.x0 === d.gate.x0 && q.y0 === d.gate.y0);
       this.placeDoor(d, g);
     }
     this.placeLadders(s.ladders);
-    if (this.ram !== null) this.placeRam(s.ram, now);
+    if (this.ram !== null) this.placeRam(ramAt, now);
     // 石彈：落地前從攻方那一側飛過來
     while (this.stones.length < s.bombards.length) {
       const m = new THREE.Mesh(this.stoneGeo, this.stoneMat);
@@ -215,9 +215,10 @@ export class Siege {
       const run = Math.max(0.3, hor - 0.5);
       const full = Math.atan2(ty - fy, run);
       const len = Math.hypot(run, ty - fy) + 0.25;
+      // 角度從「朝牆的水平方向」量起：架設中從 π（平放在地上、梯頂朝外）往上立到 full（靠在牆上）；被推倒往外倒回 π
       let pitch = full;
-      if (!l.built) pitch = full * Math.max(0.05, l.progress / l.buildTicks);
-      else if (l.topple >= 0) pitch = full + (Math.PI - full) * 0.55 * (l.topple / RULES.ladder.toppleTicks);
+      if (!l.built) pitch = Math.PI - (Math.PI - full) * Math.min(1, l.progress / l.buildTicks);
+      else if (l.topple >= 0) pitch = full + (Math.PI - full) * Math.min(1, l.topple / RULES.ladder.toppleTicks);
       const yaw = Math.atan2(-(tz - fz), tx - fx);
       m.position.set(fx, fy, fz);
       m.rotation.set(0, yaw, pitch, 'YXZ');
