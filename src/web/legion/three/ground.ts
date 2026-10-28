@@ -18,8 +18,8 @@ const MOAT_BED = -0.6;
 const SHALLOW_BED = -0.04;
 /** 沙盤板底 */
 const BASE_Y = -2.2;
-/** 3D 的畫風：smooth 平滑起伏、lowpoly 切面低多邊形（每個面一個顏色、平面著色） */
-export type Style = 'smooth' | 'lowpoly';
+/** 每格幾個頂點間隔 */
+const RES = 2;
 /** 地表貼圖每格幾個像素 */
 const PX = 12;
 
@@ -83,21 +83,14 @@ export class Ground {
   readonly terrain: THREE.Mesh;
 
   readonly map: LegionMap;
-  readonly style: Style;
-  /** 每格幾個頂點間隔（低多邊形 1、平滑 2） */
-  private readonly res: number;
-  /** 地表貼圖的像素（低多邊形用來取每個面的顏色） */
-  private texPixels: ImageData | null = null;
 
-  constructor(map: LegionMap, style: Style = 'smooth') {
+  constructor(map: LegionMap) {
     this.map = map;
-    this.style = style;
-    this.res = style === 'lowpoly' ? 1 : 2;
     const { width: w, height: h, terrain, heights } = map;
     this.w = w;
     this.h = h;
-    this.vw = w * this.res + 1;
-    this.vh = h * this.res + 1;
+    this.vw = w * RES + 1;
+    this.vh = h * RES + 1;
     const decor = map.decor ?? [];
     this.moat = new Uint8Array(w * h);
     for (const d of decor) if (d.kind === 'moat') for (let y = d.y0; y < d.y1; y++) for (let x = d.x0; x < d.x1; x++) this.moat[y * w + x] = 1;
@@ -118,7 +111,7 @@ export class Ground {
     const wgt = new Float32Array(vw * vh);
     const exact = new Float32Array(vw * vh).fill(NaN);
     const amp = new Float32Array(vw * vh);
-    const tilesOf = (i: number, n: number): number[] => (i % this.res === 0 ? [i / this.res - 1, i / this.res].filter((t) => t >= 0 && t < n) : [Math.floor(i / this.res)]);
+    const tilesOf = (i: number, n: number): number[] => (i % RES === 0 ? [i / RES - 1, i / RES].filter((t) => t >= 0 && t < n) : [Math.floor(i / RES)]);
     for (let j = 0; j < vh; j++) {
       const tys = tilesOf(j, h);
       for (let i = 0; i < vw; i++) {
@@ -151,7 +144,7 @@ export class Ground {
       }
     }
     for (let v = 0; v < vw * vh; v++) nat[v] *= wgt[v];
-    const sigma = 0.95 * this.res;
+    const sigma = 0.95 * RES;
     const r = Math.ceil(sigma * 2.5);
     const kernel = new Float32Array(2 * r + 1);
     let ks = 0;
@@ -170,15 +163,15 @@ export class Ground {
         const v = j * vw + i;
         if (!Number.isNaN(exact[v])) this.hf[v] = exact[v];
         else {
-          const x = i / this.res;
-          const z = j / this.res;
+          const x = i / RES;
+          const z = j / RES;
           const base = wgt[v] > 1e-4 ? nat[v] / wgt[v] : 0;
           this.hf[v] = base + (fbm(x / 9, z / 9, 3) - 0.5) * 2 * amp[v] + (vnoise(x / 2.5, z / 2.5, 9) - 0.5) * amp[v] * 0.5;
         }
       }
     }
     this.texture = this.paintTexture(decor);
-    this.terrain = style === 'lowpoly' ? this.buildFaceted() : this.buildTerrain();
+    this.terrain = this.buildTerrain();
     this.group.add(this.terrain);
     this.waterNormal = waterNormalMap();
     this.water = this.buildWater();
@@ -189,8 +182,8 @@ export class Ground {
 
   /** 地面高度（格座標，雙線性） */
   heightAt(x: number, z: number): number {
-    const fx = Math.min(this.vw - 1.001, Math.max(0, x * this.res));
-    const fz = Math.min(this.vh - 1.001, Math.max(0, z * this.res));
+    const fx = Math.min(this.vw - 1.001, Math.max(0, x * RES));
+    const fz = Math.min(this.vh - 1.001, Math.max(0, z * RES));
     const i = Math.floor(fx);
     const j = Math.floor(fz);
     const u = fx - i;
@@ -199,7 +192,19 @@ export class Ground {
     const b = this.hf[j * this.vw + i + 1];
     const c = this.hf[(j + 1) * this.vw + i];
     const d = this.hf[(j + 1) * this.vw + i + 1];
-    return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+    // 和網格的三角形切法一致（見 buildTerrain），放在地上的東西才不會懸空或陷進去
+    if (Math.abs(a - d) < Math.abs(b - c)) return u >= v ? a + (b - a) * u + (d - b) * v : a + (c - a) * v + (d - c) * u;
+    return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
+  }
+
+  /** 一圈範圍內最低的地面（放石頭、樹、灌木：坡上低的那一側也貼地） */
+  lowestAround(x: number, z: number, r: number): number {
+    let y = this.heightAt(x, z);
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      y = Math.min(y, this.heightAt(x + Math.cos(a) * r, z + Math.sin(a) * r));
+    }
+    return y;
   }
 
   /** 該格照格子的地面高度（城牆、建物站在這上面） */
@@ -355,7 +360,7 @@ export class Ground {
       }
     }
     // 4. 城內：石板地（邊緣照格子，筆直）與院子
-    const stone = small((i) => (builtTile(terrain[i]) ? (terrain[i] === T.Building ? PAL.cliffDark : PAL.paving) : null));
+    const stone = small((i) => (builtTile(terrain[i]) ? (terrain[i] === T.Building ? 0x857f74 : PAL.paving) : null));
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(stone, 0, 0, W, H);
     ctx.fillStyle = hex(PAL.court);
@@ -402,7 +407,6 @@ export class Ground {
       }
     }
     ctx.putImageData(img, 0, 0);
-    if (this.style === 'lowpoly') this.texPixels = img;
     const tex = new THREE.CanvasTexture(cv);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
@@ -425,8 +429,8 @@ export class Ground {
     for (let j = 0; j < vh; j++) {
       for (let i = 0; i < vw; i++) {
         const v = j * vw + i;
-        const x = i / this.res;
-        const z = j / this.res;
+        const x = i / RES;
+        const z = j / RES;
         pos[v * 3] = x;
         pos[v * 3 + 1] = hf[v];
         pos[v * 3 + 2] = z;
@@ -436,8 +440,8 @@ export class Ground {
         const hr = hf[j * vw + Math.min(vw - 1, i + 1)];
         const hu = hf[Math.max(0, j - 1) * vw + i];
         const hd = hf[Math.min(vh - 1, j + 1) * vw + i];
-        const nx = (hl - hr) * this.res * 0.5;
-        const nz = (hu - hd) * this.res * 0.5;
+        const nx = (hl - hr) * RES * 0.5;
+        const nz = (hu - hd) * RES * 0.5;
         const len = Math.hypot(nx, 1, nz);
         nor[v * 3] = nx / len;
         nor[v * 3 + 1] = 1 / len;
@@ -503,108 +507,6 @@ export class Ground {
     return mesh;
   }
 
-  /** 切面低多邊形的地形：每格兩個三角形（頂點略微錯開），每個面一個顏色（取地表貼圖在面中心的顏色），陡坡換成土層或石砌色 */
-  private buildFaceted(): THREE.Mesh {
-    const { vw, vh, hf, w, h } = this;
-    const img = this.texPixels!;
-    const terrain = this.map.terrain;
-    const isBuilt = (tx: number, ty: number): boolean => tx >= 0 && ty >= 0 && tx < w && ty < h && (builtTile(terrain[ty * w + tx]) || this.moat[ty * w + tx] === 1);
-    const court = new Uint8Array(w * h);
-    for (const d of this.map.decor ?? []) if (d.kind === 'court') for (let y = d.y0; y < d.y1; y++) for (let x = d.x0; x < d.x1; x++) court[y * w + x] = 1;
-    // 頂點略微錯開（城內與護城河邊不錯開，牆腳與街道保持筆直）
-    const jit = (i: number, j: number, k: number): number => {
-      if (i === 0 || j === 0 || i === vw - 1 || j === vh - 1) return 0;
-      if (isBuilt(i - 1, j - 1) || isBuilt(i, j - 1) || isBuilt(i - 1, j) || isBuilt(i, j)) return 0;
-      return (rand(i, j, k) - 0.5) * 0.36;
-    };
-    const P = (i: number, j: number): [number, number, number] => [i + jit(i, j, 1), hf[j * vw + i], j + jit(i, j, 2)];
-    const tris = (vw - 1) * (vh - 1) * 2;
-    const pos = new Float32Array(tris * 9);
-    const nor = new Float32Array(tris * 9);
-    const colr = new Float32Array(tris * 9);
-    const stone = col(PAL.stone);
-    const earth = col(PAL.cliff);
-    const c = new THREE.Color();
-    let q = 0;
-    const face = (a: [number, number, number], b: [number, number, number], d: [number, number, number]): void => {
-      const ux = b[0] - a[0];
-      const uy = b[1] - a[1];
-      const uz = b[2] - a[2];
-      const vx = d[0] - a[0];
-      const vy = d[1] - a[1];
-      const vz = d[2] - a[2];
-      let nx = uy * vz - uz * vy;
-      let ny = uz * vx - ux * vz;
-      let nz = ux * vy - uy * vx;
-      const len = Math.hypot(nx, ny, nz) || 1;
-      nx /= len;
-      ny /= len;
-      nz /= len;
-      if (ny < 0) {
-        nx = -nx;
-        ny = -ny;
-        nz = -nz;
-        [b, d] = [d, b];
-      }
-      const cx = (a[0] + b[0] + d[0]) / 3;
-      const cz = (a[2] + b[2] + d[2]) / 3;
-      const px = Math.min(img.width - 1, Math.max(0, Math.floor(cx * PX)));
-      const pz = Math.min(img.height - 1, Math.max(0, Math.floor(cz * PX)));
-      const o = (pz * img.width + px) * 4;
-      const ftx = Math.min(w - 1, Math.max(0, Math.floor(cx)));
-      const ftz = Math.min(h - 1, Math.max(0, Math.floor(cz)));
-      const ft = terrain[ftz * w + ftx];
-      if (builtTile(ft) && ft !== T.Building) {
-        // 城內：每格一個顏色（石板地、院子），不照貼圖的石板縫
-        c.set(court[ftz * w + ftx] === 1 ? PAL.court : PAL.paving).multiplyScalar(0.96 + rand(ftx, ftz, 7) * 0.08);
-      } else c.setRGB(img.data[o] / 255, img.data[o + 1] / 255, img.data[o + 2] / 255, THREE.SRGBColorSpace);
-      const steep = Math.min(1, Math.max(0, (1 - ny - 0.2) / 0.25));
-      if (steep > 0) {
-        const tx = Math.min(w - 1, Math.max(0, Math.floor(cx)));
-        const tz = Math.min(h - 1, Math.max(0, Math.floor(cz)));
-        const k = tz * w + tx;
-        c.lerp(builtTile(this.map.terrain[k]) || this.moat[k] === 1 ? stone : earth, steep);
-      }
-      for (const p of [a, b, d]) {
-        pos[q] = p[0];
-        pos[q + 1] = p[1];
-        pos[q + 2] = p[2];
-        nor[q] = nx;
-        nor[q + 1] = ny;
-        nor[q + 2] = nz;
-        colr[q] = c.r;
-        colr[q + 1] = c.g;
-        colr[q + 2] = c.b;
-        q += 3;
-      }
-    };
-    for (let j = 0; j < vh - 1; j++) {
-      for (let i = 0; i < vw - 1; i++) {
-        const a = P(i, j);
-        const b = P(i + 1, j);
-        const cc = P(i, j + 1);
-        const d = P(i + 1, j + 1);
-        // 對角線交錯，切面不會排成同一個方向
-        if ((i + j) % 2 === 0) {
-          face(a, cc, d);
-          face(a, d, b);
-        } else {
-          face(a, cc, b);
-          face(b, cc, d);
-        }
-      }
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-    g.setAttribute('color', new THREE.BufferAttribute(colr, 3));
-    g.computeBoundingSphere();
-    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true }));
-    mesh.receiveShadow = true;
-    mesh.castShadow = true;
-    return mesh;
-  }
-
   private buildWater(): THREE.Mesh {
     const { w, h } = this;
     const g = new THREE.PlaneGeometry(w, h, 1, 1);
@@ -612,8 +514,7 @@ export class Ground {
     g.translate(w / 2, WATER_Y, h / 2);
     const uv = g.getAttribute('uv') as THREE.BufferAttribute;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (w / 6), uv.getY(i) * (h / 6));
-    const low = this.style === 'lowpoly';
-    const mat = new THREE.MeshStandardMaterial({ color: low ? 0x4a7f8c : PAL.water, transparent: true, opacity: low ? 0.8 : 0.68, roughness: low ? 0.5 : 0.16, metalness: 0, normalMap: low ? null : this.waterNormal, normalScale: new THREE.Vector2(0.35, 0.35), depthWrite: false });
+    const mat = new THREE.MeshStandardMaterial({ color: PAL.water, transparent: true, opacity: 0.68, roughness: 0.48, metalness: 0, normalMap: this.waterNormal, normalScale: new THREE.Vector2(0.12, 0.12), depthWrite: false });
     const m = new THREE.Mesh(g, mat);
     m.receiveShadow = true;
     m.renderOrder = 1;
@@ -644,7 +545,7 @@ export class Ground {
         if (Math.max(h0, h1) < WATER_Y) b.quad([x0, WATER_Y, z0], [x1, WATER_Y, z1], [x1, Math.max(h0, h1), z1], [x0, Math.max(h0, h1), z0], waterC, out);
       }
     };
-    const step = 1 / this.res;
+    const step = 1 / RES;
     const line = (n: number, f: (t: number) => [number, number]): [number, number][] => Array.from({ length: Math.round(n / step) + 1 }, (_, k) => f(k * step));
     edge(line(w, (t) => [t, 0]), [0, 0, -1]);
     edge(line(w, (t) => [t, h]), [0, 0, 1]);

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { T } from '../../../legion/config.ts';
 import type { LegionMap, MapDecor } from '../../../legion/map.ts';
 import { Builder, type V3 } from './builder.ts';
-import { Ground, WALL_H, type Style } from './ground.ts';
+import { Ground, WALL_H, WATER_Y } from './ground.ts';
 import { PAL, col, rand, vary } from './palette.ts';
 import { brickTexture, roof, roofTexture } from './roofs.ts';
 
@@ -29,6 +29,9 @@ export class City {
   private readonly wallMass: Uint8Array;
   private readonly stairs: Stair[] = [];
   private readonly stairAt: Int16Array;
+  /** 橋面：每格屬於哪座橋（-1 ＝ 不是橋）與每座橋的橋面高度 */
+  private readonly bridgeAt: Int16Array;
+  private readonly decks: { readonly alongX: boolean; readonly p0: number; readonly p1: number; readonly yAt: (t: number) => number }[] = [];
   private readonly materials: THREE.Material[] = [];
   /** 城門的位置（門扇由攻城物件那邊畫）：門洞外側那一面 */
   readonly gatePortals: { readonly r: Rect; readonly alongX: boolean; readonly outerAt: number; readonly y: number; readonly top: number }[] = [];
@@ -37,7 +40,7 @@ export class City {
   private readonly ground: Ground;
   private readonly team: readonly string[];
 
-  constructor(map: LegionMap, ground: Ground, team: readonly string[], style: Style = 'smooth') {
+  constructor(map: LegionMap, ground: Ground, team: readonly string[]) {
     this.map = map;
     this.ground = ground;
     this.team = team;
@@ -48,10 +51,9 @@ export class City {
     for (const a of arches) for (let y = a.y0; y < a.y1; y++) for (let x = a.x0; x < a.x1; x++) this.wallMass[y * w + x] = 2;
     for (const g of map.gates) for (let y = g.y0; y < g.y1; y++) for (let x = g.x0; x < g.x1; x++) this.wallMass[y * w + x] = 3;
     this.stairAt = new Int16Array(w * h).fill(-1);
-    // 低多邊形：不用貼圖，只靠色塊與切面
-    const low = style === 'lowpoly';
-    const brick = new THREE.MeshStandardMaterial({ map: low ? null : brickTexture(), vertexColors: true, roughness: 0.92, metalness: 0 });
-    const roofMat = new THREE.MeshStandardMaterial({ map: low ? null : roofTexture(), vertexColors: true, roughness: low ? 0.9 : 0.8, metalness: 0 });
+    this.bridgeAt = new Int16Array(w * h).fill(-1);
+    const brick = new THREE.MeshStandardMaterial({ map: brickTexture(), vertexColors: true, roughness: 0.92, metalness: 0 });
+    const roofMat = new THREE.MeshStandardMaterial({ map: roofTexture(), vertexColors: true, roughness: 0.8, metalness: 0 });
     const plain = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
     this.materials.push(brick, roofMat, plain);
     const walls = new Builder();
@@ -109,6 +111,23 @@ export class City {
     const s = this.stairs[k];
     const t = s.alongX ? (x - s.r.x0) / (s.r.x1 - s.r.x0) : (z - s.r.y0) / (s.r.y1 - s.r.y0);
     return s.y0 + (s.y1 - s.y0) * Math.min(1, Math.max(0, t));
+  }
+
+  /** 橋面的高度（不在橋上回傳 null） */
+  bridgeHeight(x: number, z: number): number | null {
+    const tx = Math.floor(x);
+    const ty = Math.floor(z);
+    if (tx < 0 || ty < 0 || tx >= this.map.width || ty >= this.map.height) return null;
+    const k = this.bridgeAt[ty * this.map.width + tx];
+    if (k < 0) return null;
+    const d = this.decks[k];
+    const t = ((d.alongX ? x : z) - d.p0) / (d.p1 - d.p0);
+    return d.yAt(Math.min(1, Math.max(0, t)));
+  }
+
+  /** 地面層站的高度：馬道上沿石階、橋上是橋面，其他是地面 */
+  surfaceAt(x: number, z: number): number {
+    return this.stairHeight(x, z) ?? this.bridgeHeight(x, z) ?? this.ground.heightAt(x, z);
   }
 
   private mass(x: number, y: number): number {
@@ -394,13 +413,16 @@ export class City {
       const yA = alongX ? this.ground.heightAt(r.x0 - 0.5, midY + 0.5) : this.ground.heightAt(midX + 0.5, r.y0 - 0.5);
       const yB = alongX ? this.ground.heightAt(r.x1 + 0.5, midY + 0.5) : this.ground.heightAt(midX + 0.5, r.y1 + 0.5);
       const deck = Math.max(yA, yB, 0.45) + 0.12;
-      const stone = u1 - u0 >= 3;
+      const stone = u1 - u0 >= 2.5;
       const body = stone ? col(PAL.stone) : col(PAL.wood);
       const dark = stone ? col(PAL.stone).multiplyScalar(0.7) : col(PAL.woodDark);
       const P = (p: number, y: number, u: number): V3 => (alongX ? [p, y, u] : [u, y, p]);
       // 橋面微微拱起
       const N = 8;
       const yAt = (t: number): number => deck + Math.sin(t * Math.PI) * (stone ? 0.22 : 0.08);
+      const k = this.decks.length;
+      this.decks.push({ alongX, p0, p1, yAt });
+      for (let y = r.y0; y < r.y1; y++) for (let x = r.x0; x < r.x1; x++) this.bridgeAt[y * w + x] = k;
       for (let k = 0; k < N; k++) {
         const ta = k / N;
         const tb = (k + 1) / N;
@@ -417,12 +439,46 @@ export class City {
           b.quad(P(pa, yAt(ta), ui), P(pb, yAt(tb), ui), P(pb, yAt(tb) + 0.3, ui), P(pa, yAt(ta) + 0.3, ui), dark, alongX ? [0, 0, -sg] : [-sg, 0, 0]);
           b.quad(P(pa, yAt(ta) + 0.3, uu), P(pb, yAt(tb) + 0.3, uu), P(pb, yAt(tb) + 0.3, ui), P(pa, yAt(ta) + 0.3, ui), body, [0, 1, 0]);
         }
-        // 橋身側面（石橋到水底，木橋是薄板加橋墩）
-        const bot = stone ? -0.5 : deck - 0.15;
+        // 木橋：橋面下一層薄板
+        if (!stone) for (const [uu, sg] of [
+          [u0, -1],
+          [u1, 1],
+        ] as const) b.quad(P(pa, yAt(ta), uu), P(pb, yAt(tb), uu), P(pb, deck - 0.15, uu), P(pa, deck - 0.15, uu), body, alongX ? [0, 0, sg] : [sg, 0, 0]);
+      }
+      if (stone) {
+        // 石拱橋：兩側立面是橋面以下、拱以上的牆；拱從兩岸起拱，下面是水
+        const a0 = alongX ? r.x0 : r.y0;
+        const a1 = alongX ? r.x1 : r.y1;
+        const spring = WATER_Y - 0.2;
+        const crown = Math.min(deck - 0.22, spring + (a1 - a0) * 0.5);
+        const bot = -0.7;
+        const M = 12;
+        const arc: [number, number][] = Array.from({ length: M + 1 }, (_, k) => [a0 + ((a1 - a0) * k) / M, spring + (crown - spring) * Math.sin((Math.PI * k) / M)]);
+        const top: [number, number][] = Array.from({ length: N + 1 }, (_, k) => [p1 - ((p1 - p0) * k) / N, yAt(1 - k / N)]);
+        const contour = [new THREE.Vector2(p0, bot), new THREE.Vector2(a0, bot), ...arc.map(([p, y]) => new THREE.Vector2(p, y)), new THREE.Vector2(a1, bot), new THREE.Vector2(p1, bot), ...top.map(([p, y]) => new THREE.Vector2(p, y))];
+        const tris = THREE.ShapeUtils.triangulateShape(contour, []);
         for (const [uu, sg] of [
           [u0, -1],
           [u1, 1],
-        ] as const) b.quad(P(pa, yAt(ta), uu), P(pb, yAt(tb), uu), P(pb, bot, uu), P(pa, bot, uu), body, alongX ? [0, 0, sg] : [sg, 0, 0]);
+        ] as const) {
+          const out: V3 = alongX ? [0, 0, sg] : [sg, 0, 0];
+          for (const [i, j, k] of tris) b.tri(P(contour[i].x, contour[i].y, uu), P(contour[j].x, contour[j].y, uu), P(contour[k].x, contour[k].y, uu), body, out);
+        }
+        // 拱腹
+        for (let k = 0; k < M; k++) {
+          const [pa, ya] = arc[k];
+          const [pb, yb] = arc[k + 1];
+          b.quad(P(pa, ya, u0), P(pb, yb, u0), P(pb, yb, u1), P(pa, ya, u1), dark, [0, -1, 0]);
+        }
+        // 兩端接到岸上的橋台
+        for (const [pe, pi] of [
+          [p0, a0],
+          [p1, a1],
+        ] as const) {
+          const [x0, , z0] = P(Math.min(pe, pi), 0, u0);
+          const [x1, , z1] = P(Math.max(pe, pi), 0, u1);
+          b.box(Math.min(x0, x1), bot, Math.min(z0, z1), Math.max(x0, x1), Math.min(yAt(0), yAt(1)) - 0.02, Math.max(z0, z1), body, undefined, [false, false, true, true, false, false]);
+        }
       }
       if (!stone) {
         for (let p = p0 + 0.8; p < p1 - 0.5; p += 1.2) for (const uu of [u0 + 0.2, u1 - 0.3]) {

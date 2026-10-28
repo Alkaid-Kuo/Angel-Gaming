@@ -2,14 +2,14 @@
 // 觀戰畫面換一個繪製器就能用。世界層（地形、城池、士兵、托盤與地面範圍）用 Three.js；資訊層（軍團旗標、特效文字、倒數）畫在疊在上面的 2D 畫布。
 // 鏡頭沿用 2D 的 cam（中心、每格像素）：拉遠是 66° 的高空俯視、拉近慢慢壓低到 32°；中景以下可以水平轉 ±35°（右鍵拖曳或 [ ]），全圖固定北朝上。
 import * as THREE from 'three';
-import { FORMATION_NAMES, RULES, TILE, TPS, UNITS, type UnitKind } from '../../../legion/config.ts';
+import { FORMATION_NAMES, RULES, T, TILE, TPS, UNITS, type UnitKind } from '../../../legion/config.ts';
 import { MAPS, type LegionMap } from '../../../legion/map.ts';
 import { drawUnitIcon } from '../icons.ts';
 import { DOWN_BIT, LAYER_SHIFT, REG_MASK, type LegionFrame, type LegionMeta, type RegFrame } from '../protocol.ts';
 import { DASH_COLOR, DASH_NAME, TAG, TEAM, TEAM_LIGHT, type Camera, type DrawOptions } from '../render.ts';
 import type { BattleView } from '../view.ts';
 import { City } from './city.ts';
-import { Ground, type Style } from './ground.ts';
+import { Ground } from './ground.ts';
 import { Nature } from './nature.ts';
 import { PAL } from './palette.ts';
 import { Siege } from './siege.ts';
@@ -39,14 +39,8 @@ const PITCH_FAR = 66 * DEG;
 const PITCH_NEAR = 32 * DEG;
 const MAX_YAW = 35 * DEG;
 const MAX_SCALE = 140;
-
-function savedStyle(): Style {
-  try {
-    return localStorage.getItem('legion.style') === 'lowpoly' ? 'lowpoly' : 'smooth';
-  } catch {
-    return 'smooth';
-  }
-}
+/** 主光從西北上方照下來（v2 第七節） */
+const SUN_DIR = new THREE.Vector3(-0.55, 0.62, -0.45).normalize();
 
 /** 依地圖名稱找回地圖（meta 只有名稱；城門洞、建物外觀要從地圖資料拿） */
 function mapByName(name: string): LegionMap {
@@ -70,12 +64,10 @@ export class Legion3DView implements BattleView {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(34, 1, 0.5, 2000);
   private readonly sun: THREE.DirectionalLight;
-  private ground!: Ground;
-  private city!: City;
-  private nature!: Nature;
-  private siege!: Siege;
-  private styleName: Style;
-  private readonly hemi: THREE.HemisphereLight;
+  private readonly ground: Ground;
+  private readonly city: City;
+  private readonly nature: Nature;
+  private readonly siege: Siege;
   private readonly soldiers: Soldiers;
   private readonly fallen: Soldiers;
   private readonly arrows = new Arrows(800);
@@ -125,20 +117,24 @@ export class Legion3DView implements BattleView {
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.scene.background = new THREE.Color(PAL.bg);
     // 光：西北上方的暖色主光、天空與地面的半球光（v2 第七節）
-    this.hemi = new THREE.HemisphereLight(0xe9eff6, 0x5a5040, 1.15);
-    this.scene.add(this.hemi);
+    this.scene.add(new THREE.HemisphereLight(0xe9eff6, 0x5a5040, 1.15));
     this.sun = new THREE.DirectionalLight(0xfff0dc, 2.7);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
-    this.sun.shadow.bias = -0.0003;
-    this.sun.shadow.normalBias = 0.03;
+    this.sun.shadow.bias = -0.00015;
+    this.sun.shadow.normalBias = 0.012;
+    this.sun.shadow.radius = 2;
     this.scene.add(this.sun, this.sun.target);
-    // 世界（地形、城池、樹、攻城物件；換畫風時整組重建）
-    this.styleName = savedStyle();
-    this.buildWorld();
+    // 世界：地形、城池、樹、攻城物件
+    this.ground = new Ground(this.map);
+    this.city = new City(this.map, this.ground, meta.players.map((p) => p.color));
+    this.nature = new Nature(this.map, this.ground);
+    this.siege = new Siege(this.city, this.ground, meta.mode === 'capture' || meta.mode === 'siege' ? meta.flags : [], this.map.ram !== undefined);
+    this.scene.add(this.ground.group, this.city.group, this.nature.group, this.siege.group);
+    this.buildDeploy();
     const cap: Partial<Record<UnitKind, number>> = {};
     for (const r of meta.regs) cap[r.kind] = (cap[r.kind] ?? 0) + r.men0;
     this.soldiers = new Soldiers(cap);
@@ -149,51 +145,12 @@ export class Legion3DView implements BattleView {
     if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__v3d = { view: this, scene: this.scene };
   }
 
-  /** 畫風：smooth 平滑起伏（城磚、瓦壟貼圖）、lowpoly 切面低多邊形（純色塊、平面著色） */
-  get style(): Style {
-    return this.styleName;
-  }
-
-  setStyle(s: Style): void {
-    if (s === this.styleName) return;
-    this.styleName = s;
-    this.disposeWorld();
-    this.buildWorld();
-    try {
-      localStorage.setItem('legion.style', s);
-    } catch {
-      // 記不住也沒關係
-    }
-  }
-
-  private buildWorld(): void {
-    const s = this.styleName;
-    const meta = this.meta;
-    this.ground = new Ground(this.map, s);
-    this.city = new City(this.map, this.ground, meta.players.map((p) => p.color), s);
-    this.nature = new Nature(this.map, this.ground, s);
-    this.siege = new Siege(this.city, this.ground, meta.mode === 'capture' || meta.mode === 'siege' ? meta.flags : [], this.map.ram !== undefined);
-    this.scene.add(this.ground.group, this.city.group, this.nature.group, this.siege.group);
-    this.buildDeploy();
-    // 低多邊形：色塊不要被 ACES 壓灰，主光的明暗差拉大讓切面看得出來
-    const low = s === 'lowpoly';
-    this.renderer.toneMapping = low ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = low ? 0.95 : 1.05;
-    this.hemi.intensity = low ? 0.9 : 1.15;
-    this.sun.intensity = low ? 3.0 : 2.7;
-  }
-
-  private disposeWorld(): void {
-    this.scene.remove(this.ground.group, this.city.group, this.nature.group, this.siege.group);
+  dispose(): void {
+    for (const d of this.disposers) d();
     this.ground.dispose();
     this.city.dispose();
     this.nature.dispose();
     this.siege.dispose();
-  }
-
-  dispose(): void {
-    for (const d of this.disposers) d();
-    this.disposeWorld();
     this.soldiers.dispose();
     this.fallen.dispose();
     this.arrows.dispose();
@@ -355,18 +312,61 @@ export class Legion3DView implements BattleView {
     c.lookAt(this.cam.x, this.targetY, this.cam.y);
     c.updateProjectionMatrix();
     c.updateMatrixWorld();
-    // 陰影只算看得到的那一塊（拉近時陰影比較細）
-    const half = Math.min(170, Math.max(14, (cw / this.cam.scale) * 0.8));
+    this.fitShadow(cw, ch);
+  }
+
+  /**
+   * 陰影只算看得到的那一塊：畫面四角與中心射到地面的點，換到光的座標系取外框（往光源那側多留一段，畫面外的高樓影子也照得進來），
+   * 外框對齊陰影貼圖的像素格，鏡頭移動時陰影邊緣不會閃。
+   */
+  private fitShadow(cw: number, ch: number): void {
+    const center = new THREE.Vector3(this.cam.x, this.targetY, this.cam.y);
     const sc = this.sun.shadow.camera;
-    sc.left = -half;
-    sc.right = half;
-    sc.top = half;
-    sc.bottom = -half;
+    this.sun.position.copy(center).add(SUN_DIR.clone().multiplyScalar(150));
+    this.sun.target.position.copy(center);
+    this.sun.target.updateMatrixWorld();
+    sc.position.copy(this.sun.position);
+    sc.lookAt(center);
+    sc.updateMatrixWorld();
+    const inv = sc.matrixWorldInverse;
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    const far = this.camera.position.distanceTo(center) * 2.5;
+    const p = new THREE.Vector3();
+    for (const [sx, sy] of [
+      [0, 0],
+      [cw, 0],
+      [0, ch],
+      [cw, ch],
+      [cw / 2, ch / 2],
+    ]) {
+      this.ray.setFromCamera(new THREE.Vector2((sx / cw) * 2 - 1, -(sy / ch) * 2 + 1), this.camera);
+      const o = this.ray.ray.origin;
+      const d = this.ray.ray.direction;
+      const t = d.y < -1e-3 ? Math.min(far, (this.targetY - 0.5 - o.y) / d.y) : far;
+      for (const lift of [0, 4]) {
+        p.copy(o).addScaledVector(d, t);
+        p.y += lift;
+        p.applyMatrix4(inv);
+        x0 = Math.min(x0, p.x);
+        x1 = Math.max(x1, p.x);
+        y0 = Math.min(y0, p.y);
+        y1 = Math.max(y1, p.y);
+      }
+    }
+    const m = 3;
+    const size = Math.max(x1 - x0, y1 - y0) + m * 2;
+    const texel = size / this.sun.shadow.mapSize.x;
+    const snap = (v: number): number => Math.round(v / texel) * texel;
+    sc.left = snap(x0 - m);
+    sc.right = sc.left + size;
+    sc.bottom = snap(y0 - m);
+    sc.top = sc.bottom + size;
     sc.near = 1;
-    sc.far = 400;
+    sc.far = 420;
     sc.updateProjectionMatrix();
-    this.sun.position.set(this.cam.x - 70, this.targetY + 120, this.cam.y - 60);
-    this.sun.target.position.set(this.cam.x, this.targetY, this.cam.y);
   }
 
   /** 右鍵拖曳（純觀戰）或 [ ] 鍵：水平轉、上下壓 */
@@ -496,11 +496,11 @@ export class Legion3DView implements BattleView {
         const len = Math.hypot(tx - fx, tz - fz) || 1;
         const along = ((x - fx) * (tx - fx) + (z - fz) * (tz - fz)) / len;
         const d = Math.abs((x - fx) * (tz - fz) - (z - fz) * (tx - fx)) / len;
-        if (best === null || d < best.d) best = { d, t: Math.max(0, Math.min(1, along / Math.max(0.3, len - 0.5))), y0: this.ground.heightAt(fx, fz), y1: this.city.wallTop(Math.floor(tx), Math.floor(tz)) };
+        if (best === null || d < best.d) best = { d, t: Math.max(0, Math.min(1, along / Math.max(0.3, len - 0.5))), y0: this.city.surfaceAt(fx, fz), y1: this.city.wallTop(Math.floor(tx), Math.floor(tz)) };
       }
       if (best !== null) return best.y0 + (best.y1 - best.y0) * best.t;
     }
-    return this.city.stairHeight(x, z) ?? this.ground.heightAt(x, z);
+    return this.city.surfaceAt(x, z);
   }
 
   // ───────── 畫面 ─────────
@@ -581,6 +581,17 @@ export class Legion3DView implements BattleView {
       sol.add(kind, pose, { x: wx, y: wy, z: wz, rot: -(fa + (routed ? 180 : 0)) * DEG, down: (flags & DOWN_BIT) !== 0, shade: routed ? 0.72 : 1, team: routed ? null : this.team[this.ownerOf[reg]] });
     }
     sol.end();
+    // 樹林裡的軍團：附近的樹冠變淡（v2：隱蔽處樹冠透明度 .4；沒隱蔽的淡一點，看得到人就好）
+    const fades: { x: number; z: number; r: number; amount: number }[] = [];
+    for (const r of this.field) {
+      if (!this.shown(r.id, opt.viewer) || r.status === 'routed') continue;
+      const tx = Math.floor(r.x / TILE);
+      const ty = Math.floor(r.y / TILE);
+      if (tx < 0 || ty < 0 || tx >= this.meta.width || ty >= this.meta.height) continue;
+      if (this.meta.terrain[ty * this.meta.width + tx] !== T.Forest) continue;
+      fades.push({ x: r.x / TILE, z: r.y / TILE, r: r.rad / TILE + 1.2, amount: r.concealed ? 0.6 : 0.45 });
+    }
+    this.nature.fadeAround(fades);
     this.regLayer.clear();
     for (const [reg, c] of layerCount) this.regLayer.set(reg, c[1] > c[0] && c[1] >= c[2] ? 1 : c[2] > c[0] ? 2 : 0);
     this.regTop = top;
@@ -608,8 +619,8 @@ export class Legion3DView implements BattleView {
       const [x0, y0, x1, y1, t0, t1] = [a[i] / TILE, a[i + 1] / TILE, a[i + 2] / TILE, a[i + 3] / TILE, a[i + 4], a[i + 5]];
       const u = Math.max(0, Math.min(1, (t - t0) / Math.max(1, t1 - t0)));
       const len = Math.hypot(x1 - x0, y1 - y0);
-      const h0 = this.ground.heightAt(x0, y0) + 0.5;
-      const h1 = this.ground.heightAt(x1, y1) + 0.4;
+      const h0 = this.city.surfaceAt(x0, y0) + 0.5;
+      const h1 = this.city.surfaceAt(x1, y1) + 0.4;
       const at = (k: number, out: THREE.Vector3): THREE.Vector3 => out.set(x0 + (x1 - x0) * k, h0 + (h1 - h0) * k + Math.sin(Math.PI * k) * len * 0.22, y0 + (y1 - y0) * k);
       at(u, p);
       at(Math.min(1, u + 0.02), q);
@@ -811,7 +822,7 @@ export class Legion3DView implements BattleView {
           if (mask !== null && mask[y * w + x] !== 1) continue;
           const t = this.meta.terrain[y * w + x];
           const top = t === 8 || t === 10 ? 1 : 0;
-          const P = (xx: number, zz: number): THREE.Vector3 => new THREE.Vector3(xx, (top === 1 ? this.city.wallTop(x, y) : this.ground.heightAt(xx, zz)) + 0.05, zz);
+          const P = (xx: number, zz: number): THREE.Vector3 => new THREE.Vector3(xx, (top === 1 ? this.city.wallTop(x, y) : this.city.surfaceAt(xx, zz)) + 0.05, zz);
           d.tri(P(x, y), P(x + 1, y), P(x + 1, y + 1), c, 0.22);
           d.tri(P(x, y), P(x + 1, y + 1), P(x, y + 1), c, 0.22);
         }
@@ -849,7 +860,7 @@ export class Legion3DView implements BattleView {
     }
     for (const l of f.structures.ladders) {
       if (l.built && l.topple < 0) continue;
-      const p = this.screenOf(l.footX / TILE, l.footY / TILE, this.ground.heightAt(l.footX / TILE, l.footY / TILE) + 0.5);
+      const p = this.screenOf(l.footX / TILE, l.footY / TILE, this.city.surfaceAt(l.footX / TILE, l.footY / TILE) + 0.5);
       if (p === null) continue;
       const k = l.built ? l.topple / RULES.ladder.toppleTicks : l.progress / l.buildTicks;
       ctx.beginPath();
@@ -859,7 +870,7 @@ export class Legion3DView implements BattleView {
       ctx.stroke();
     }
     for (const b of f.structures.bombards) {
-      const p = this.screenOf(b.x / TILE, b.y / TILE, this.ground.heightAt(b.x / TILE, b.y / TILE) + 0.6);
+      const p = this.screenOf(b.x / TILE, b.y / TILE, this.city.surfaceAt(b.x / TILE, b.y / TILE) + 0.6);
       if (p === null) continue;
       ctx.font = `800 ${Math.round(Math.max(13, Math.min(22, this.cam.scale * 1.2)))}px ${font}`;
       ctx.textAlign = 'center';
@@ -879,7 +890,7 @@ export class Legion3DView implements BattleView {
       const st = f.flags[i];
       const x = fl.x / TILE;
       const z = fl.y / TILE;
-      const p = this.screenOf(x, z, this.ground.heightAt(x, z) + 3.6);
+      const p = this.screenOf(x, z, this.city.surfaceAt(x, z) + 3.6);
       if (p === null) return;
       const label =
         this.meta.mode === 'siege'

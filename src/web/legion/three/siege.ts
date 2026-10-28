@@ -115,7 +115,7 @@ export class Siege {
     for (const f of flags) {
       const x = f.x / TILE;
       const z = f.y / TILE;
-      const y = ground.heightAt(x, z);
+      const y = city.surfaceAt(x, z);
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 3.2, 8), poleMat);
       pole.position.set(x, y + 1.6, z);
       pole.castShadow = true;
@@ -150,7 +150,7 @@ export class Siege {
       const f = 1 - Math.max(0, Math.min(1, bb.landIn / BOMBARD.delay));
       const lx = bb.x / TILE;
       const lz = bb.y / TILE;
-      const ly = this.ground.heightAt(lx, lz);
+      const ly = this.city.surfaceAt(lx, lz);
       const sx = lx - 45;
       m.position.set(sx + (lx - sx) * f, ly + 0.3 + Math.sin(f * Math.PI) * 22 * (1 - f * 0.35), lz);
       m.rotation.set(tick * 0.3, tick * 0.2, 0);
@@ -208,7 +208,7 @@ export class Siege {
       const fz = l.footY / TILE;
       const tx = l.x / TILE;
       const tz = l.y / TILE;
-      const fy = this.ground.heightAt(fx, fz);
+      const fy = this.city.surfaceAt(fx, fz);
       const ty = this.city.wallTop(Math.floor(tx), Math.floor(tz)) + 0.35;
       // 梯腳在地面格中心、梯頂靠在牆的外緣（牆格中心往外半格）
       const hor = Math.hypot(tx - fx, tz - fz);
@@ -231,7 +231,7 @@ export class Siege {
     if (q === null) return;
     const x = q.x / TILE;
     const z = q.y / TILE;
-    r.group.position.set(x, this.ground.heightAt(x, z), z);
+    r.group.position.set(x, this.city.surfaceAt(x, z), z);
     r.group.rotation.set(0, (-q.facing * Math.PI) / 180, 0);
     // 撞門：撞木前後擺
     r.log.position.x = q.gate !== null ? Math.sin(now * 0.006) * 0.35 : 0;

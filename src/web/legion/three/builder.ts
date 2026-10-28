@@ -43,6 +43,27 @@ export class Builder {
     }
   }
 
+  /** 每個頂點各自的法線與顏色（平滑曲面，例如樹冠）；正面朝法線那一側 */
+  triSmooth(a: V3, b: V3, c: V3, na: V3, nb: V3, nc: V3, ca: THREE.Color, cb: THREE.Color, cc: THREE.Color): void {
+    const ux = b[0] - a[0];
+    const uy = b[1] - a[1];
+    const uz = b[2] - a[2];
+    const vx = c[0] - a[0];
+    const vy = c[1] - a[1];
+    const vz = c[2] - a[2];
+    const fx = uy * vz - uz * vy;
+    const fy = uz * vx - ux * vz;
+    const fz = ux * vy - uy * vx;
+    const flip = fx * (na[0] + nb[0] + nc[0]) + fy * (na[1] + nb[1] + nc[1]) + fz * (na[2] + nb[2] + nc[2]) < 0;
+    const pts: [V3, V3, THREE.Color][] = flip ? [[a, na, ca], [c, nc, cc], [b, nb, cb]] : [[a, na, ca], [b, nb, cb], [c, nc, cc]];
+    for (const [p, n, col] of pts) {
+      this.pos.push(p[0], p[1], p[2]);
+      this.nor.push(n[0], n[1], n[2]);
+      this.col.push(col.r, col.g, col.b);
+      this.uv.push(p[0] + p[2], p[1]);
+    }
+  }
+
   /** 四邊形 a b c d（依序繞一圈） */
   quad(a: V3, b: V3, c: V3, d: V3, color: THREE.Color, out?: V3, uvs?: readonly [number, number][]): void {
     this.tri(a, b, c, color, out, uvs === undefined ? undefined : [uvs[0], uvs[1], uvs[2]]);

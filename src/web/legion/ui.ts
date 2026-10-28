@@ -163,8 +163,6 @@ export class LegionScreen {
     if (this.control) this.control.r = next;
     next.clamp();
     this.el.view3d.textContent = on ? '2D' : '3D';
-    this.el.style3d.classList.toggle('hidden', !on);
-    if (this.r3d !== null) this.el.style3d.textContent = this.r3d.style === 'smooth' ? '低多邊形' : '平滑';
     this.el.view3d.title = on ? '切回 2D 俯視（M）' : '切到 3D 沙盤（M）；右鍵拖曳或 [ ] 轉鏡頭';
     try {
       localStorage.setItem('legion.view', on ? '3d' : '2d');
@@ -227,7 +225,6 @@ export class LegionScreen {
       <button data-act="intent" data-el="intent" class="active" title="放大時在軍團旗標下顯示 AI 意圖（I）；滑鼠指著或選中的軍團一律顯示">意圖</button>
       <button data-act="fit" title="看全圖（Home）">全圖</button>
       <button data-act="view3d" data-el="view3d" title="切到 3D 沙盤（M）；右鍵拖曳或 [ ] 轉鏡頭">3D</button>
-      <button data-act="style3d" data-el="style3d" class="hidden" title="3D 畫風：平滑起伏／切面低多邊形">低多邊形</button>
       <span class="sep"></span>
       <button data-act="help" title="規則說明（H）">說明</button>
       <button data-act="replay" title="下載這場比賽的回放檔">回放</button>
@@ -477,11 +474,6 @@ export class LegionScreen {
         return;
       case 'view3d':
         void this.set3D(this.r === this.r2d);
-        return;
-      case 'style3d':
-        if (this.r3d === null) return;
-        this.r3d.setStyle(this.r3d.style === 'smooth' ? 'lowpoly' : 'smooth');
-        this.el.style3d.textContent = this.r3d.style === 'smooth' ? '低多邊形' : '平滑';
         return;
       case 'replay':
         this.send({ type: 'replay' });
