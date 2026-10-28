@@ -128,6 +128,7 @@ export default class SiegeSparring extends LegionBase {
    */
   deploy(data, helpers) {
     this.setup(data, helpers);
+    if (data.map.defender < 0) return this.deployOpen();
     this.attacker = data.map.defender >= 0 && data.map.defender !== this.p;
     const g = this.mainGate;
     const foe = data.map.spawns[1 - this.p];
@@ -157,6 +158,27 @@ export default class SiegeSparring extends LegionBase {
       out.push({ type: s.type, x: s.x, y: s.y, facing: s.facing, ...(s.layer === 1 ? { layer: 1 } : {}), ...(s.formation ? { formation: s.formation } : {}), ...(s.width ? { width: s.width } : {}) });
     }
     return out;
+  }
+
+  /**
+   * 不是攻城地圖（佔點、殲滅）：一般的陣容，照己方布陣條帶排進去（沒有城可以守或攻，不走下面的城池布陣）
+   * @returns {import('./base.js').Deployment[]}
+   */
+  deployOpen() {
+    /** @type {[UnitKind, string][]} */
+    const wish = [['light', 'scout'], ['archer', 'archer'], ['archer', 'archer'], ['shield', 'shield'], ['sword', 'line'], ['spear', 'line'], ['spear', 'line'], ['sword', 'line'], ['spear', 'line']];
+    const list = this.buy(wish, [['spear', 'line'], ['sword', 'line']]);
+    const lineYs = [0, -8, 8, -16, 16, -24];
+    let li = 0;
+    let ai = 0;
+    /** @type {import('./base.js').PlanEntry[]} */
+    const plan = list.map((e) => {
+      if (e.role === 'line') return { ...e, tx: 17, ty: Math.max(8, Math.min(92, 50 + lineYs[li++ % 6] * 1.15)), facing: 0, formation: /** @type {FormationKind} */ (e.type === 'spear' ? 'square' : 'line') };
+      if (e.role === 'archer') return { ...e, tx: 9, ty: [44, 56, 50][ai++ % 3], facing: 0, width: 12 };
+      if (e.role === 'shield') return { ...e, tx: 11, ty: 50, facing: 0 };
+      return { ...e, tx: 9, ty: 32, facing: 0 };
+    });
+    return this.deployFrom(plan);
   }
 
   /**
@@ -427,9 +449,10 @@ export default class SiegeSparring extends LegionBase {
     for (const l of s.ladders) {
       if (l.owner === this.p || !l.built || l.topple >= 0) continue;
       const mouth = { x: l.x, y: l.y };
-      const tops = obs.regiments.filter((r) => r.layer === 1 && !r.routed && !busy.has(r.id) && r.kind !== 'archer').sort((a, b) => this.dist(a, mouth) - this.dist(b, mouth));
-      const r = tops[0] || obs.regiments.filter((q) => q.layer === 1 && !q.routed && !busy.has(q.id)).sort((a, b) => this.dist(a, mouth) - this.dist(b, mouth))[0];
-      if (!r || this.dist(r, mouth) > 40 * TILE) continue;
+      // 梯口 40 格內的牆頂團：近戰團優先、沒有才派弓兵（最近的那個）
+      const tops = obs.regiments.filter((r) => r.layer === 1 && !r.routed && !busy.has(r.id) && this.dist(r, mouth) <= 40 * TILE).sort((a, b) => this.dist(a, mouth) - this.dist(b, mouth));
+      const r = tops.find((q) => q.kind !== 'archer') || tops[0];
+      if (!r) continue;
       busy.add(r.id);
       if (this.dist(r, mouth) > 1200 + (r.radius || 0) * 0.5) this.send(out, 7, { type: 'move', id: r.id, x: l.x, y: l.y }, '趕去推倒雲梯', 10);
       else this.send(out, 8, /** @type {any} */ ({ type: 'topple', id: r.id, ladder: l.id }), '推倒雲梯', 30);

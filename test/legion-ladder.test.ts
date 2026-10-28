@@ -1,6 +1,7 @@
 // 引擎 0.4 步驟 3：雲梯（架設、通過量、推倒、摔傷、再架）。測試圖見 legion-castle-map.ts。
 import { describe, expect, it } from 'vitest';
 import { LADDER_LAYER, RULES, T, UNITS, WALL_LAYER } from '../src/legion/config.ts';
+import { LegionMatch } from '../src/legion/sim.ts';
 import { WALL_X, castleMap, castleMatch, hpOf, rejected, run, tileAt } from './legion-castle-map.ts';
 
 const map = castleMap('test-ladder');
@@ -249,3 +250,24 @@ function teleportRedToMouth(m: ReturnType<typeof castleMatch>['m']): void {
     s.y = 7500;
   }
 }
+
+describe('軍團戰 0.4：換層紀錄', () => {
+  it('後備入場清掉換層紀錄：入場的士兵不會照撤回前的紀錄去走樓梯、雲梯', () => {
+    const m = new LegionMatch({ seed: 7, mode: 'capture', deployments: [[{ type: 'sword', x: 10000, y: 20000 }, { type: 'spear', reserve: true }], [{ type: 'spear', x: 230000, y: 20000 }]] });
+    const reserve = m.regiments.find((r) => r.owner === 0 && r.reserve)!;
+    // 假裝這一團撤回前留下過換層紀錄（爬雲梯上牆、走樓梯下來）
+    reserve.xfers = [{ seq: 1, ladder: 0, x: 20500, y: 6500, to: 1 }, { seq: 2, ladder: -1, x: 21500, y: 4500, to: 0 }];
+    reserve.xseq = 3;
+    for (const sid of reserve.parked) m.soldiers[sid].owe = 1;
+    m.applyCommands(0, [{ type: 'summon', id: reserve.id }]);
+    run(m, RULES.capture.enterTicks + 2);
+    expect(reserve.reserve).toBe(false);
+    expect(reserve.xfers).toEqual([]);
+    expect(reserve.xseq).toBe(0);
+    expect(reserve.slots.length).toBe(UNITS.spear.men);
+    for (const sid of reserve.slots) {
+      expect(m.soldiers[sid].owe).toBe(-1);
+      expect(m.soldiers[sid].layer).toBe(0);
+    }
+  });
+});

@@ -1499,6 +1499,9 @@ export class LegionMatch {
       r.layer = 0;
       r.stairX = -1;
       r.stairY = -1;
+      // 換層紀錄也清掉：不然入場的士兵（都在地面）會照舊紀錄去走上一次的樓梯、雲梯
+      r.xfers = [];
+      r.xseq = 0;
       r.px = r.x;
       r.py = r.y;
       r.facing = r.owner === 0 ? 0 : 180;
@@ -1512,6 +1515,7 @@ export class LegionMatch {
         const so = this.soldiers[sid];
         so.alive = true;
         so.layer = 0;
+        so.owe = -1;
         so.ord = i;
         so.cd = 0;
         so.target = -1;
