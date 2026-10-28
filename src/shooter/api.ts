@@ -155,7 +155,11 @@ export interface ShooterHelpers {
 // ───────── 觀察資料 ─────────
 
 export type RoundPhase = 'freeze' | 'live' | 'planted' | 'over';
-export type BombState = 'carried' | 'dropped' | 'planting' | 'planted' | 'defusing' | 'defused' | 'exploded';
+/**
+ * unknown：CT 在下包前沒看見炸彈（不知道在誰身上、有沒有掉）。下包後、拆除或引爆後全員可知。
+ * 下包中／拆包中只有自己隊伍或親眼看見時才會顯示，否則照「carried／unknown」與「planted」。
+ */
+export type BombState = 'unknown' | 'carried' | 'dropped' | 'planting' | 'planted' | 'defusing' | 'defused' | 'exploded';
 export type RoundEndReason = 'elimination' | 'bomb' | 'defuse' | 'timeout';
 
 export interface RoundInfo {
@@ -335,8 +339,8 @@ export type ShooterCommand =
   | { readonly type: 'defuse' }
   /** 撿起腳邊的掉落物 */
   | { readonly type: 'pickup' }
-  /** 丟掉手上武器（刀不可丟） */
-  | { readonly type: 'drop' }
+  /** 丟掉手上武器（刀不可丟）；bomb = true 改為丟炸彈（傳給隊友用） */
+  | { readonly type: 'drop'; readonly bomb?: boolean }
   | { readonly type: 'buy'; readonly items: readonly BuyItem[] }
   /** 丟雷：方向與力道（0～100，對應投擲距離） */
   | { readonly type: 'throw'; readonly grenade: GrenadeId; readonly deg: number; readonly power: number }
