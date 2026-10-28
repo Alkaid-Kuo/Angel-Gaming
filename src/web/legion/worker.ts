@@ -7,6 +7,7 @@ import marshalSource from '../../../bots/legion-marshal.js?raw';
 import marshalV2Source from '../../../bots/legion-marshal-v2.js?raw';
 import pushSource from '../../../bots/legion-push.js?raw';
 import rangedSource from '../../../bots/legion-ranged.js?raw';
+import siegeSource from '../../../bots/legion-siege.js?raw';
 import type { LegionEvent } from '../../legion/api.ts';
 import { TPS, UNITS } from '../../legion/config.ts';
 import { MAPS, defaultMapId } from '../../legion/map.ts';
@@ -30,6 +31,7 @@ const compiled: Record<BotKey, CompiledBot> = {
   marshal: compileBot(marshalSource, 'legion-marshal.js'),
   general2: compileBot(generalV2Source, 'legion-general-v2.js'),
   marshal2: compileBot(marshalV2Source, 'legion-marshal-v2.js'),
+  siege: compileBot(siegeSource, 'legion-siege.js'),
 };
 const SIDES = ['藍方', '紅方'];
 const COLORS = ['#3b82f6', '#ef4444'];
