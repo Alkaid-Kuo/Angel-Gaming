@@ -96,6 +96,8 @@ class Game {
       else if (act === 'home') home();
     });
     this.raf = requestAnimationFrame((t) => this.frame(t));
+    // 切到別的分頁：玩家模式自動暫停（Worker 不會停，回來時不要已經被打死）
+    document.addEventListener('visibilitychange', this.onHidden);
     // 除錯掛勾（瀏覽器驗收用，開發模式或網址帶 ?debug）：只有主執行緒本來就有的畫面資料，沒有引擎
     if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera };
   }
@@ -164,7 +166,17 @@ class Game {
     this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, speed: SPEEDS[this.speedIdx], xray: this.xray });
   }
 
+  private readonly onHidden = (): void => {
+    if (document.hidden && !this.meta.spectate && !this.paused && this.over === null) {
+      this.paused = true;
+      this.post({ type: 'pause', paused: true });
+      this.hud.setPaused(true);
+      this.input.releaseAll();
+    }
+  };
+
   dispose(): void {
+    document.removeEventListener('visibilitychange', this.onHidden);
     cancelAnimationFrame(this.raf);
     this.input.dispose();
     this.root.innerHTML = '';
