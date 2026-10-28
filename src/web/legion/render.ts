@@ -108,7 +108,7 @@ function paintTerrain(meta: LegionMeta): HTMLCanvasElement {
     [T.Shallow]: [104, 150, 170],
     [T.River]: [44, 86, 128],
     [T.Bridge]: [120, 92, 62],
-    [T.Building]: [150, 82, 58],
+    [T.Building]: [124, 112, 98],
     [T.Wall]: [176, 168, 148],
     [T.Stair]: [196, 182, 146],
     [T.Gatehouse]: [150, 132, 104],
@@ -223,13 +223,13 @@ function paintTerrain(meta: LegionMeta): HTMLCanvasElement {
       }
     }
   }
-  // 房舍：紅瓦屋頂（屋脊亮線、南側陰影）
+  // 房舍：灰瓦屋頂（屋脊亮線、南側陰影；不用紅色，免得和紅方搞混）
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (at(x, y) !== T.Building) continue;
       const px = x * TPX;
       const py = y * TPX;
-      g.fillStyle = 'rgba(255,210,170,0.25)';
+      g.fillStyle = 'rgba(255,250,235,0.18)';
       g.fillRect(px, py + TPX / 2 - 1, TPX, 2);
       if (at(x, y + 1) !== T.Building) {
         g.fillStyle = 'rgba(20,10,5,0.45)';
@@ -555,6 +555,7 @@ export class LegionRenderer {
     const s = this.cam.scale;
     ctx.imageSmoothingEnabled = s < TPX;
     ctx.drawImage(this.terrain, this.sx(0), this.sy(0), this.meta.width * s, this.meta.height * s);
+    if (s >= 14) this.drawGrid(cw, ch);
     const f = this.cur;
     if (f === null) return;
     // 開戰前標出布陣區
@@ -600,6 +601,48 @@ export class LegionRenderer {
     this.drawEffects(now);
     this.drawOrders(opt);
     if (opt.aim) this.drawAim(opt.aim, alpha);
+  }
+
+  /** 拉近時的格線（測試用）：每格一條細線、每 10 格一條粗線並標出格座標 */
+  private drawGrid(cw: number, ch: number): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    const x0 = Math.max(0, Math.floor(this.cam.x - cw / 2 / s));
+    const x1 = Math.min(this.meta.width, Math.ceil(this.cam.x + cw / 2 / s));
+    const y0 = Math.max(0, Math.floor(this.cam.y - ch / 2 / s));
+    const y1 = Math.min(this.meta.height, Math.ceil(this.cam.y + ch / 2 / s));
+    for (const major of [false, true]) {
+      ctx.strokeStyle = major ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.14)';
+      ctx.lineWidth = major ? 1.2 : 1;
+      ctx.beginPath();
+      for (let x = x0; x <= x1; x++) {
+        if ((x % 10 === 0) !== major) continue;
+        const px = Math.round(this.sx(x * TILE)) + 0.5;
+        ctx.moveTo(px, this.sy(y0 * TILE));
+        ctx.lineTo(px, this.sy(y1 * TILE));
+      }
+      for (let y = y0; y <= y1; y++) {
+        if ((y % 10 === 0) !== major) continue;
+        const py = Math.round(this.sy(y * TILE)) + 0.5;
+        ctx.moveTo(this.sx(x0 * TILE), py);
+        ctx.lineTo(this.sx(x1 * TILE), py);
+      }
+      ctx.stroke();
+    }
+    ctx.font = `600 11px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    for (let x = Math.ceil(x0 / 10) * 10; x <= x1; x += 10) {
+      for (let y = Math.ceil(y0 / 10) * 10; y <= y1; y += 10) {
+        const label = `${x},${y}`;
+        const px = this.sx(x * TILE) + 3;
+        const py = this.sy(y * TILE) + 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(px - 2, py - 1, ctx.measureText(label).width + 4, 13);
+        ctx.fillStyle = '#f1f5f9';
+        ctx.fillText(label, px, py);
+      }
+    }
   }
 
   /** 世界座標 → 螢幕座標 */

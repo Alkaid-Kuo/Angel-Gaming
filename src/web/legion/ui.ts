@@ -941,7 +941,7 @@ export class LegionScreen {
       const r = this.r.reg(id);
       const p = this.meta.players[s.owner];
       if (r !== undefined)
-        html = `<b style="color:${p.color}">${esc(p.side)} ${esc(s.name)}</b>　${r.men}/${s.men0} 人・${FORMATION_NAMES[r.formation]}・高度 ${this.heightAt(r.x, r.y)} 階<br>${STATUS_NAME[r.status]}${r.concealed ? '・<span class="hint">埋伏中（敵方看不到）</span>' : ''}${r.level > 1 ? `・${r.level} 級老兵` : ''}${r.intent && (this.viewer < 0 || this.viewer === s.owner) ? `<br><span class="muted">意圖：${esc(r.intent)}</span>` : ''}`;
+        html = `<b style="color:${p.color}">${esc(p.side)} ${esc(s.name)}</b>　${r.men}/${s.men0} 人・${FORMATION_NAMES[r.formation]}・高度 ${this.heightAt(r.x, r.y)} 階・位置 (${(r.x / TILE).toFixed(1)}, ${(r.y / TILE).toFixed(1)})<br>${STATUS_NAME[r.status]}${r.concealed ? '・<span class="hint">埋伏中（敵方看不到）</span>' : ''}${r.level > 1 ? `・${r.level} 級老兵` : ''}${r.intent && (this.viewer < 0 || this.viewer === s.owner) ? `<br><span class="muted">意圖：${esc(r.intent)}</span>` : ''}`;
     } else {
       const w = this.r.toWorld(this.mouse.x, this.mouse.y);
       const tx = Math.floor(w.x / TILE);
@@ -964,7 +964,7 @@ export class LegionScreen {
         } else {
           const hgt = this.meta.heights[ty * this.meta.width + tx];
           const tip = [TERRAIN_TIP[t], t === T.River || t === T.Building || t === T.Wall ? '' : HEIGHT_TIP].filter((x) => x !== '').join('<br>');
-          html = `<b>${TERRAIN_NAMES[t]}</b>　高度 ${hgt} 階<br><span class="muted">${tip}</span>`;
+          html = `<b>${TERRAIN_NAMES[t]}</b>　高度 ${hgt} 階　格 (${tx}, ${ty})<br><span class="muted">${tip}</span>`;
         }
       }
     }
