@@ -1,14 +1,14 @@
 // 軍團戰文字追蹤：跑一場，每隔幾秒印出每一團的位置、人數、狀態、指令、意圖，以及期間發生的事件（除錯用，上帝視角）。
 // 用法：
-//   node trace.ts <A.js> <B.js> [--mode annihilation|capture] [--seed S] [--swap] [--every 秒] [--until 秒]
+//   node trace.ts <A.js> <B.js> [--mode siege|capture] [--map 地圖id] [--seed S] [--swap] [--every 秒] [--until 秒]
 //                 [--side 0|1] [--events none|key|all] [--knobs-a JSON] [--knobs-b JSON]
-//   預設：A 坐藍方（playerId 0，西側）；--swap 讓 A 坐紅方。每 10 秒印一次，事件印 key（重要事件）。
+//   預設：攻城戰（石關城）、A 坐藍方（playerId 0，西側；攻城戰的攻方）；--swap 讓 A 坐紅方（守方）。每 10 秒印一次，事件印 key（重要事件）。
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { KnobValues } from './src/api/types.ts';
 import type { LegionEvent } from './src/legion/api.ts';
 import { MODE_NAMES, RULES, TILE, type LegionMode } from './src/legion/config.ts';
-import { MAPS, defaultMapId } from './src/legion/map.ts';
+import { LEAGUE_MAPS, MAPS, defaultMapId } from './src/legion/map.ts';
 import { LegionBatchController, LegionDriver } from './src/legion/runner.ts';
 import type { Regiment } from './src/legion/sim.ts';
 import { BotLoadError, compileBot } from './src/sandbox/compile.ts';
@@ -30,12 +30,14 @@ for (let i = 0; i < args.length; i++) {
     opts[a] = args[++i];
   } else positional.push(a);
 }
-const KNOWN = ['--mode', '--seed', '--swap', '--every', '--until', '--side', '--events', '--knobs-a', '--knobs-b'];
+const KNOWN = ['--mode', '--map', '--seed', '--swap', '--every', '--until', '--side', '--events', '--knobs-a', '--knobs-b'];
 for (const k of Object.keys(opts)) if (!KNOWN.includes(k)) fail(`不認得的參數 ${k}`, 1);
-if (positional.length !== 2) fail('用法：node trace.ts <A.js> <B.js> [--mode annihilation|capture] [--seed S] [--swap] [--every 秒] [--until 秒] [--side 0|1] [--events none|key|all] [--knobs-a JSON] [--knobs-b JSON]', 1);
+if (positional.length !== 2) fail('用法：node trace.ts <A.js> <B.js> [--mode siege|capture] [--map 地圖id] [--seed S] [--swap] [--every 秒] [--until 秒] [--side 0|1] [--events none|key|all] [--knobs-a JSON] [--knobs-b JSON]', 1);
 
-const mode = (opts['--mode'] ?? 'annihilation') as LegionMode;
-if (mode !== 'annihilation' && mode !== 'capture') fail('--mode 只能是 annihilation 或 capture', 1);
+const mode = (opts['--mode'] ?? 'siege') as LegionMode;
+if (mode !== 'siege' && mode !== 'capture') fail('--mode 只能是 siege 或 capture', 1);
+const mapId = opts['--map'] ?? defaultMapId(mode);
+if (!LEAGUE_MAPS[mode].includes(mapId)) fail(`--map 只能是 ${LEAGUE_MAPS[mode].join('、')}`, 1);
 const seed = Number(opts['--seed'] ?? 1);
 const every = Math.max(1, Math.round(Number(opts['--every'] ?? 10) * 10));
 const until = opts['--until'] !== undefined ? Math.round(Number(opts['--until']) * 10) : Infinity;
@@ -60,7 +62,7 @@ const entries = [
   { path: positional[1], knobs: knobsOf('--knobs-b'), tag: 'B' },
 ];
 const seats = swap ? [entries[1], entries[0]] : entries;
-const map = MAPS[defaultMapId(mode)]();
+const map = MAPS[mapId]();
 let ctrls: LegionBatchController[];
 let knobs: KnobValues[];
 try {
@@ -80,7 +82,7 @@ try {
 }
 
 const SIDE = ['藍', '紅'];
-const d = new LegionDriver({ seed, mode, controllers: ctrls, knobs, record: false });
+const d = new LegionDriver({ seed, mode, mapId, controllers: ctrls, knobs, record: false });
 const m = d.match;
 const out = (s: string): boolean => process.stdout.write(`${s}\n`);
 const t = (tick: number): string => `${(tick / 10).toFixed(1).padStart(6)}s`;
@@ -93,7 +95,7 @@ out(`${MODE_NAMES[mode]}（${mode}）・地圖 ${map.name}（${map.id}）・種�
 out(`藍方（playerId 0，西）= ${seats[0].tag} ${ctrls[0].label}；紅方（playerId 1，東）= ${seats[1].tag} ${ctrls[1].label}`);
 out('座標單位為格（1 格 = 1000），角度 0 = 東、90 = 南；血% 為全團剩餘血量 ÷ 目前人數的上限；「見」= 對手看得到這一團');
 
-const KEY = new Set(['deployRejected', 'rejected', 'impact', 'ambush', 'destroyed', 'levelUp', 'flag', 'enter', 'withdraw']);
+const KEY = new Set(['deployRejected', 'rejected', 'impact', 'ambush', 'destroyed', 'levelUp', 'flag', 'enter', 'withdraw', 'gate', 'ladder', 'ramHit', 'bombard']);
 function eventText(e: LegionEvent): string {
   switch (e.type) {
     case 'deployRejected':
@@ -120,6 +122,14 @@ function eventText(e: LegionEvent): string {
       return `入場 ${regName(e.reg)}（${e.at < 0 ? '出生點' : `補給站 ${e.at}`}）`;
     case 'withdraw':
       return `撤回 ${regName(e.reg)}（${e.at < 0 ? '出生點' : `補給站 ${e.at}`}）`;
+    case 'gate':
+      return `城門 ${e.gate} → ${e.state}`;
+    case 'ladder':
+      return `雲梯 ${e.ladder}（${SIDE[e.owner]}方）${e.state}${e.state === 'toppled' ? `，摔下 ${e.fell} 人` : ''}`;
+    case 'ramHit':
+      return `衝車撞城門 ${e.gate}，剩 ${e.hp}`;
+    case 'bombard':
+      return `砲擊 ${e.state === 'fired' ? '下令' : `落地（${e.hit} 人）`} (${(e.x / TILE).toFixed(1)}, ${(e.y / TILE).toFixed(1)})`;
   }
 }
 
@@ -168,7 +178,15 @@ function snapshot(): void {
   const kv = m.players.map((p) => Math.floor(p.killValue / 1000));
   const head = [`=== ${t(m.tick)}（tick ${m.tick}）`, `兵力 藍 ${m.strength(0)} / 紅 ${m.strength(1)}`, `戰果 藍 ${kv[0]} / 紅 ${kv[1]}`];
   if (mode === 'capture') head.push(`分數 藍 ${m.scoreOf(0)} / 紅 ${m.scoreOf(1)}`, `場上點數 藍 ${m.fieldCost(0)} / 紅 ${m.fieldCost(1)}`);
+  if (mode === 'siege') head.push(`剩 ${((m.timeLimitTicks - m.tick) / 10).toFixed(0)} 秒`);
   out(head.join('  '));
+  if (mode === 'siege') {
+    out(
+      `  旗：${m.flags.map((f) => `${f.id === 0 ? 'A' : 'B'} ${f.name} ${f.owner === m.map.defender ? '守方持有' : '攻方已佔'} 進度 ${f.progress}/${f.need}${m.flagOpen(f) ? '' : '（鎖定）'}${f.contested ? ' 爭奪中' : ''}`).join('｜')}`,
+    );
+    const st = m.structures();
+    out(`  城門：${st.gates.map((g) => `${g.kind} ${g.state} ${g.hp}/${g.hpMax}`).join('｜')}；雲梯 ${st.ladders.length} 座；衝車 ${st.ram === null ? '無' : `(${f1(st.ram.x)}, ${f1(st.ram.y)}) 推的團 ${st.ram.crew ?? '無'}`}；砲擊剩 ${st.bombardsLeft} 發`);
+  }
   if (mode === 'capture') {
     out(
       `  旗：${m.flags

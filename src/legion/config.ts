@@ -1,7 +1,7 @@
-// 軍團戰的規則數值（規格書 v0.4）。所有數值都是整數：座標單位 1 格 = 1000、時間單位 tick（每秒 10 tick）、
+// 軍團戰的規則數值（規格書 v0.4；引擎 0.4 起加上攻城戰，見選手規格書 v0.5）。所有數值都是整數：座標單位 1 格 = 1000、時間單位 tick（每秒 10 tick）、
 // 血量與攻擊 ×10、倍率與減免為百分比。對照規格書：docs/軍團戰 規格書 v0.4（草案）.md。
 
-export const LEGION_ENGINE_VERSION = '0.3.2';
+export const LEGION_ENGINE_VERSION = '0.4.0';
 export const TPS = 10;
 export const TILE = 1000;
 
@@ -348,7 +348,7 @@ export const BOMBARD = {
 /** 能架雲梯的兵種 */
 export const LADDER_KINDS: readonly UnitKind[] = ['sword', 'shield', 'spear', 'light'];
 
-/** 模式：攻城戰 siege、佔點 capture；殲滅戰 annihilation 只保留給引擎測試與情境測試（不進聯賽、參賽包、觀戰選單） */
+/** 模式：攻城戰 siege、佔點 capture；殲滅戰 annihilation 只保留給引擎內部測試（不進聯賽、參賽包、觀戰選單） */
 export type LegionMode = 'annihilation' | 'capture' | 'siege';
 export const MODE_NAMES: Readonly<Record<LegionMode, string>> = { annihilation: '殲滅戰', capture: '佔點', siege: '攻城戰' };
 /** 聯賽、參賽包、觀戰網頁用的模式（三場制：攻城、攻城、佔點） */

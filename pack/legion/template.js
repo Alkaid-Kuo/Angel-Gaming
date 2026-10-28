@@ -1,7 +1,9 @@
 // @ts-check
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 // 軍團戰選手範本：示範 declare／init／deploy／decide 的介面，可直接執行、通過沙盒檢查。
-// 不含任何戰術：布陣一組固定的合法兵力，開戰後全軍往對方出生點前進；佔點模式場上有空位就召喚後備。
+// 不含任何戰術：布陣一組固定的合法兵力，開戰後全軍往前走；佔點模式場上有空位就召喚後備。
+// 攻城戰（data.siege 不是 null）：攻方全軍朝目前能佔的旗（A 正門 → B 本陣）邊走邊打；守方原地不動。
+// 雲梯（ladder）、衝車（man）、砲擊（bombard）、開關城門（gate）的用法見 spec.md 第十八章。
 //
 // 規則摘要（完整規則見 spec.md）：
 //   - 單一檔案、ES2020 模組、不可 import、≤ 200 KB；default export 一個 class。
@@ -18,7 +20,7 @@
 /** @typedef {import('../src/legion/api.ts').Deployment} Deployment */
 /** @typedef {import('../src/legion/api.ts').UnitKind} UnitKind */
 
-/** 場上兵力（依序布陣；殲滅戰 500 點以內） @type {UnitKind[]} */
+/** 場上兵力（依序布陣；攻城戰 600、佔點場上 500 點以內） @type {UnitKind[]} */
 const FIELD = ['spear', 'spear', 'sword', 'sword', 'shield', 'archer', 'archer', 'lightCav', 'light'];
 /** 佔點模式的後備（總點數 1500 以內） @type {UnitKind[]} */
 const RESERVE = ['spear', 'spear', 'sword', 'sword', 'shield', 'archer', 'archer', 'lightCav', 'heavyCav', 'light'];
@@ -69,13 +71,14 @@ export default class TemplateBot {
   deploy(data, helpers) {
     const T = data.tileSize;
     const zone = data.map.deploy[data.playerId];
-    const west = data.playerId === 0;
+    // 布陣區在地圖西半就朝東、在東半就朝西（攻城戰守方的布陣區是城內）
+    const west = (zone.x0 + zone.x1) * T < data.map.width * T;
     const facing = west ? 0 : 180;
     // 布陣區內兩列：前列（靠近敵方）步兵、後列其他兵種
     const frontX = (west ? zone.x1 - 4 : zone.x0 + 4) * T;
     const backX = (west ? zone.x1 - 12 : zone.x0 + 12) * T;
     const spacing = data.knobs.spacing * T;
-    const midY = (data.map.height * T) / 2;
+    const midY = ((zone.y0 + zone.y1) * T) / 2;
     /** @type {Deployment[]} */
     const out = [];
     let spent = 0;
@@ -136,8 +139,12 @@ export default class TemplateBot {
       fieldCost += c;
       quota -= 1;
     }
-    // 場上閒著的團：往對方出生點前進（邊走邊打）
-    const goal = data.map.spawns[1 - obs.me];
+    // 攻城戰：守方原地不動；攻方往目前能佔的旗前進
+    const siege = data.siege;
+    if (siege !== null && obs.me === siege.defender) return cmds;
+    const open = obs.flags.find((f) => f.open);
+    // 場上閒著的團：往對方出生點（攻城戰：能佔的旗）前進（邊走邊打）
+    const goal = siege !== null && open !== undefined ? open : data.map.spawns[1 - obs.me];
     for (const r of obs.regiments) {
       if (quota <= 0) break;
       if (r.reserve || r.order !== 'idle') continue;
@@ -150,7 +157,7 @@ export default class TemplateBot {
   }
 }
 
-/** 可通行：不是河流（5）、建築（7）、城牆（8） @param {number} t */
+/** 地面可通行：不是河流（5）、建築（7）、城牆（8）、門樓（10） @param {number} t */
 function walkable(t) {
-  return t !== 5 && t !== 7 && t !== 8;
+  return t !== 5 && t !== 7 && t !== 8 && t !== 10;
 }

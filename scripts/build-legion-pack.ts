@@ -188,7 +188,7 @@ writeFileSync(
 );
 mkdirSync(join(out, 'versions'));
 writeFileSync(join(out, 'versions', '.keep'), '');
-writeFileSync(join(out, 'CHANGELOG.md'), '# CHANGELOG\n\n<!-- 每個版本一行：版本 | 殲滅戰對三隻陪練的勝率 | 佔點對三隻陪練的勝率 | 變更 -->\n');
+writeFileSync(join(out, 'CHANGELOG.md'), '# CHANGELOG\n\n<!-- 每個版本一行：版本 | 攻城戰（攻、守）對三隻陪練的勝率 | 佔點（大河谷、大草原）對三隻陪練的勝率 | 變更 -->\n');
 writeFileSync(join(out, 'BUGS.md'), '# BUGS\n\n<!-- 引擎漏洞、規格與引擎不一致、規格不清之處：現象、重現方式（指令、種子、第幾秒） -->\n');
 
 // ───────── 檢查與回報 ─────────

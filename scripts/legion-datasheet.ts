@@ -1,7 +1,7 @@
 // 軍團戰數值總表：直接讀引擎的數值（config.ts），產生 docs/軍團戰 數值總表.md。改了數值就重跑一次，文件永遠和程式一致。
 // 用法：node scripts/legion-datasheet.ts
 import { writeFileSync } from 'node:fs';
-import { DASH, FORMATION_NAMES, LEGION_ENGINE_VERSION, RULES, SPEED_SCALE, TPS, TERRAIN_NAMES, TILE, UNIT_KINDS, UNITS, VERSUS, type DashDef, type FormationKind, type UnitKind } from '../src/legion/config.ts';
+import { DASH, FORMATION_NAMES, LEGION_ENGINE_VERSION, RULES, SPEED_SCALE, T, TPS, TERRAIN_NAMES, TILE, UNIT_KINDS, UNITS, VERSUS, WALL_LEVELS, terrainSpeed, type DashDef, type FormationKind, type UnitKind } from '../src/legion/config.ts';
 import { formationShape } from '../src/legion/formation.ts';
 
 const OUT = 'docs/軍團戰 數值總表.md';
@@ -127,7 +127,10 @@ p(`| ${TERRAIN_NAMES[1]}、${TERRAIN_NAMES[6]} | 可 | ×1.25 | — |`);
 p(`| ${TERRAIN_NAMES[2]} | 可 | ×0.6（輕步兵 ×1） | 隱蔽；受到的遠程傷害 −${pct(RULES.terrain.forestRangedDR)}；擋下騎兵衝鋒 |`);
 p(`| ${TERRAIN_NAMES[4]} | 可 | ×0.5 | 受到的近戰傷害 ${x100(RULES.terrain.shallowMeleeTaken)}；不能衝鋒 |`);
 p(`| ${TERRAIN_NAMES[5]} | 不可 | — | 擋衝鋒（不擋視線） |`);
-p(`| ${TERRAIN_NAMES[7]}、${TERRAIN_NAMES[8]} | 不可 | — | 擋視線、擋衝鋒 |`);
+p(`| ${TERRAIN_NAMES[7]} | 不可 | — | 擋視線、擋衝鋒 |`);
+p(`| ${TERRAIN_NAMES[8]} | 只有牆頂（層 1） | ×1 | 牆頂高度 ＝ 地面 ＋ ${WALL_LEVELS} 階；擋視線、擋衝鋒 |`);
+p(`| ${TERRAIN_NAMES[9]} | 可（騎兵不可） | ×${terrainSpeed(T.Stair, 'sword') / 100} | 進入即在地面與牆頂之間換層 |`);
+p(`| ${TERRAIN_NAMES[10]} | 牆頂可；地面看城門 | ×1 | 擋視線、擋衝鋒 |`);
 p();
 p(`視線：建築、城牆與較高的地形擋視線；河流（高度 0）與樹林不擋視線（樹林另有隱蔽）。`);
 p();

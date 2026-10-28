@@ -1,6 +1,7 @@
 // 軍團戰對戰工具：兩隻選手對打多場（同一個種子雙方交換起點各打一場），印出勝負與基本統計。
+// 預設跑三組：攻城戰（石關城，交換座位＝攻守互換）、佔點（大河谷）、佔點（大草原）。
 // 用法：
-//   node match.ts <A.js> <B.js> [--mode annihilation|capture|both] [--games N] [--seed S]
+//   node match.ts <A.js> <B.js> [--mode siege|capture|both] [--map 地圖id] [--games N] [--seed S]
 //                 [--knobs-a '{"key":值}'] [--knobs-b '{"key":值}'] [--json] [--quiet]
 //   node match.ts --check <bot.js> [--knobs-a '{"key":值}']
 // 結束碼：0 成功、1 參數錯誤、2 選手載入失敗。
@@ -9,7 +10,7 @@ import { basename } from 'node:path';
 import type { KnobValues } from './src/api/types.ts';
 import type { LegionEvent } from './src/legion/api.ts';
 import { MODE_NAMES, type LegionMode } from './src/legion/config.ts';
-import { MAPS, defaultMapId, defaultTimeLimit } from './src/legion/map.ts';
+import { LEAGUE_MAPS, MAPS, defaultTimeLimit } from './src/legion/map.ts';
 import { LegionBatchController, LegionDriver } from './src/legion/runner.ts';
 import { LegionMatch, legionInitData } from './src/legion/sim.ts';
 import { BotLoadError, compileBot, type CompiledBot } from './src/sandbox/compile.ts';
@@ -38,8 +39,10 @@ interface Side {
 interface Game {
   readonly game: number;
   readonly seed: number;
-  /** A 坐的位置：0 藍方（西）、1 紅方（東） */
+  /** A 坐的位置：0 藍方（西）、1 紅方（東）；攻城戰的藍方是攻方 */
   readonly seatA: number;
+  /** 攻城戰：A 是攻方 */
+  readonly attackerA: boolean;
   /** A 的結果 */
   readonly outcome: 'win' | 'loss' | 'draw';
   readonly reason: string;
@@ -57,7 +60,7 @@ function usage(): never {
   return fail(
     [
       '用法：',
-      '  node match.ts <A.js> <B.js> [--mode annihilation|capture|both] [--games N] [--seed S] [--knobs-a JSON] [--knobs-b JSON] [--json] [--quiet]',
+      '  node match.ts <A.js> <B.js> [--mode siege|capture|both] [--map 地圖id] [--games N] [--seed S] [--knobs-a JSON] [--knobs-b JSON] [--json] [--quiet]',
       '  node match.ts --check <bot.js> [--knobs-a JSON]',
     ].join('\n'),
     1,
@@ -78,11 +81,18 @@ for (let i = 0; i < args.length; i++) {
     opts[a] = args[++i];
   } else positional.push(a);
 }
-for (const k of Object.keys(opts)) if (!FLAGS.has(k) && !['--mode', '--games', '--seed', '--knobs-a', '--knobs-b'].includes(k)) fail(`不認得的參數 ${k}`, 1);
+for (const k of Object.keys(opts)) if (!FLAGS.has(k) && !['--mode', '--map', '--games', '--seed', '--knobs-a', '--knobs-b'].includes(k)) fail(`不認得的參數 ${k}`, 1);
 
 const modeArg = opts['--mode'] ?? 'both';
-if (!['annihilation', 'capture', 'both'].includes(modeArg)) fail(`--mode 只能是 annihilation、capture 或 both，收到 ${modeArg}`, 1);
-const modes: LegionMode[] = modeArg === 'both' ? ['annihilation', 'capture'] : [modeArg as LegionMode];
+if (!['siege', 'capture', 'both'].includes(modeArg)) fail(`--mode 只能是 siege、capture 或 both，收到 ${modeArg}`, 1);
+/** 要跑的（模式, 地圖）組合：攻城戰石關城；佔點大河谷與大草原 */
+const ALL_BLOCKS: { mode: LegionMode; mapId: string }[] = [
+  ...LEAGUE_MAPS.siege.map((mapId) => ({ mode: 'siege' as LegionMode, mapId })),
+  ...LEAGUE_MAPS.capture.map((mapId) => ({ mode: 'capture' as LegionMode, mapId })),
+];
+const mapArg = opts['--map'];
+const blocks = ALL_BLOCKS.filter((b) => (modeArg === 'both' || b.mode === modeArg) && (mapArg === undefined || b.mapId === mapArg));
+if (blocks.length === 0) fail(`--map ${mapArg ?? ''} 不是 ${modeArg} 模式的地圖（可用：${ALL_BLOCKS.map((b) => `${b.mode}/${b.mapId}`).join('、')}）`, 1);
 const games = Number(opts['--games'] ?? 2);
 if (!Number.isInteger(games) || games < 1) fail('--games 必須是正整數', 1);
 const seed0 = Number(opts['--seed'] ?? 1);
@@ -111,7 +121,7 @@ function load(path: string, knobs: KnobValues | undefined): Entry {
   try {
     const compiled = compileBot(source, label);
     // 先建一次實例：檢查 declare()、deploy()、decide() 與旋鈕值
-    const probe = new LegionBatchController(compiled, label, MAPS['river-valley'](), 0, 0);
+    const probe = new LegionBatchController(compiled, label, MAPS['grand-valley'](), 0, 0);
     resolveKnobs(probe.declaration, knobs, label);
     return { path, label, compiled, knobs };
   } catch (e) {
@@ -125,10 +135,10 @@ function load(path: string, knobs: KnobValues | undefined): Entry {
 function check(entry: Entry): void {
   const lines: string[] = [];
   let ok = true;
-  const decl = new LegionBatchController(entry.compiled, entry.label, MAPS['river-valley'](), 0, 0).declaration;
+  const decl = new LegionBatchController(entry.compiled, entry.label, MAPS['grand-valley'](), 0, 0).declaration;
   lines.push(`${entry.label}：載入成功（${entry.compiled.sizeBytes} bytes），name=${decl.name}、version=${decl.version ?? ''}、旋鈕 ${decl.knobs.length} 顆`);
-  for (const mode of ['annihilation', 'capture'] as LegionMode[]) {
-    const map = MAPS[defaultMapId(mode)]();
+  for (const { mode, mapId } of ALL_BLOCKS) {
+    const map = MAPS[mapId]();
     for (const seat of [0, 1]) {
       const c = new LegionBatchController(entry.compiled, entry.label, map, seed0, seat);
       const knobs = resolveKnobs(c.declaration, entry.knobs, entry.label);
@@ -136,15 +146,15 @@ function check(entry: Entry): void {
       const ini = c.init(data);
       const dep = ini.killed ? null : c.deploy(data);
       const raw = dep === null || dep.killed ? [] : dep.value;
-      const m = new LegionMatch({ seed: seed0, mode, deployments: seat === 0 ? [raw, []] : [[], raw] });
+      const m = new LegionMatch({ seed: seed0, mode, mapId, deployments: seat === 0 ? [raw, []] : [[], raw] });
       const mine = m.regiments.filter((r) => r.owner === seat);
       const field = mine.filter((r) => !r.reserve);
       const reserve = mine.filter((r) => r.reserve);
       const cost = (rs: typeof mine): number => rs.reduce((s, r) => s + r.def.cost, 0);
       const rejected = m.events.filter((e): e is Extract<LegionEvent, { type: 'deployRejected' }> => e.type === 'deployRejected' && e.player === seat);
-      const seatName = seat === 0 ? '藍方' : '紅方';
+      const seatName = (seat === 0 ? '藍方' : '紅方') + (mode === 'siege' ? (seat === map.defender ? '（守方）' : '（攻方）') : '');
       lines.push(
-        `  ${MODE_NAMES[mode]}・${seatName}：init ${ini.elapsedMs.toFixed(1)} ms、deploy ${dep === null ? '未呼叫' : `${dep.elapsedMs.toFixed(1)} ms`}；場上 ${field.length} 團 ${cost(field)} 點` +
+        `  ${MODE_NAMES[mode]}・${map.name}・${seatName}：init ${ini.elapsedMs.toFixed(1)} ms、deploy ${dep === null ? '未呼叫' : `${dep.elapsedMs.toFixed(1)} ms`}；場上 ${field.length} 團 ${cost(field)} 點` +
           (mode === 'capture' ? `、後備 ${reserve.length} 團 ${cost(reserve)} 點` : '') +
           `；被拒 ${rejected.length} 團`,
       );
@@ -158,7 +168,7 @@ function check(entry: Entry): void {
     // 自己打自己 30 秒：檢查 decide 有沒有例外、逾時、被拒絕的指令
     const ctrls = [0, 1].map((i) => new LegionBatchController(entry.compiled, entry.label, map, seed0, i));
     const knobs = ctrls.map((c) => resolveKnobs(c.declaration, entry.knobs, entry.label));
-    const d = new LegionDriver({ seed: seed0, mode, controllers: ctrls, knobs, record: false });
+    const d = new LegionDriver({ seed: seed0, mode, mapId, controllers: ctrls, knobs, record: false });
     const rej = new Map<string, number>();
     d.match.eventTap = (e) => {
       if (e.type === 'rejected') rej.set(`${e.command}：${e.reason}`, (rej.get(`${e.command}：${e.reason}`) ?? 0) + 1);
@@ -168,7 +178,7 @@ function check(entry: Entry): void {
     const maxMs = Math.max(...rts.map((r) => r.decideMsMax));
     const exc = rts.reduce((s, r) => s + r.exceptions, 0);
     const killed = rts.some((r) => r.killed);
-    lines.push(`  ${MODE_NAMES[mode]}・自己打自己 30 秒：decide 最長 ${maxMs.toFixed(2)} ms、例外 ${exc} 次${killed ? '、有逾時（超過 50 ms）' : ''}、被拒絕的指令 ${[...rej.values()].reduce((s, n) => s + n, 0)} 個`);
+    lines.push(`  ${MODE_NAMES[mode]}・${map.name}・自己打自己 30 秒：decide 最長 ${maxMs.toFixed(2)} ms、例外 ${exc} 次${killed ? '、有逾時（超過 50 ms）' : ''}、被拒絕的指令 ${[...rej.values()].reduce((s, n) => s + n, 0)} 個`);
     for (const r of rts) for (const e of r.errors) lines.push(`    ${e}`);
     for (const [k, n] of rej) lines.push(`    被拒：${k} ×${n}`);
     if (exc > 0 || killed) ok = false;
@@ -180,12 +190,12 @@ function check(entry: Entry): void {
 
 // ───────── 對戰 ─────────
 
-function play(a: Entry, b: Entry, game: number, seed: number, mode: LegionMode, seatA: number): Game {
+function play(a: Entry, b: Entry, game: number, seed: number, mode: LegionMode, mapId: string, seatA: number): Game {
   const seats = seatA === 0 ? [a, b] : [b, a];
-  const map = MAPS[defaultMapId(mode)]();
+  const map = MAPS[mapId]();
   const ctrls = seats.map((s, i) => new LegionBatchController(s.compiled, s.label, map, seed, i));
   const knobs = ctrls.map((c, i) => resolveKnobs(c.declaration, seats[i].knobs, c.label));
-  const d = new LegionDriver({ seed, mode, controllers: ctrls, knobs, record: false });
+  const d = new LegionDriver({ seed, mode, mapId, controllers: ctrls, knobs, record: false });
   const m = d.match;
   const deployRejected = [0, 0];
   for (const e of m.events) if (e.type === 'deployRejected') deployRejected[e.player] += 1;
@@ -215,6 +225,7 @@ function play(a: Entry, b: Entry, game: number, seed: number, mode: LegionMode, 
     game,
     seed,
     seatA,
+    attackerA: mode === 'siege' && seatA !== map.defender,
     outcome: r.winner === null ? 'draw' : r.winner === seatA ? 'win' : 'loss',
     reason: r.reason,
     seconds: r.durationTicks / 10,
@@ -228,7 +239,7 @@ const avg = (xs: readonly number[]): number => (xs.length > 0 ? xs.reduce((s, x)
 const pct = (x: number): string => `${(x * 100).toFixed(1)}%`;
 
 function gameLine(g: Game, mode: LegionMode): string {
-  const score = mode === 'capture' ? `  分數 A ${g.a.score} / B ${g.b.score}` : '';
+  const score = mode === 'capture' ? `  分數 A ${g.a.score} / B ${g.b.score}` : mode === 'siege' ? `  A ${g.attackerA ? '攻' : '守'}` : '';
   const warn = [g.a.exceptions > 0 ? `A 例外 ${g.a.exceptions}` : '', g.b.exceptions > 0 ? `B 例外 ${g.b.exceptions}` : '', g.a.killed ? 'A 逾時' : '', g.b.killed ? 'B 逾時' : ''].filter((s) => s !== '').join('、');
   return `  #${String(g.game).padEnd(3)} 種子 ${String(g.seed).padEnd(5)} A=${g.seatA === 0 ? '藍' : '紅'}  ${OUTCOME[g.outcome]}  ${g.reason.padEnd(12)} ${g.seconds.toFixed(1).padStart(6)} 秒  戰果 A ${g.a.killValue} / B ${g.b.killValue}${score}${warn !== '' ? `  ⚠ ${warn}` : ''}`;
 }
@@ -249,7 +260,13 @@ function summarize(gs: readonly Game[], mode: LegionMode): Record<string, unknow
     deployRejected: gs.reduce((s, g) => s + g[k].deployRejected, 0),
     rejected: gs.reduce((s, g) => s + g[k].rejected, 0),
   });
-  return { games: gs.length, wins: w, losses: l, draws: dr, winRate: w / gs.length, points: (w + dr / 2) / gs.length, reasons, secondsAvg: avg(gs.map((g) => g.seconds)), a: sideSum('a'), b: sideSum('b') };
+  // 攻城戰：A 當攻方、當守方各自的戰績
+  const role = (att: boolean): Record<string, number> => {
+    const rs = gs.filter((g) => g.attackerA === att);
+    return { games: rs.length, wins: rs.filter((g) => g.outcome === 'win').length };
+  };
+  const siege = mode === 'siege' ? { asAttacker: role(true), asDefender: role(false) } : {};
+  return { games: gs.length, wins: w, losses: l, draws: dr, winRate: w / gs.length, points: (w + dr / 2) / gs.length, reasons, secondsAvg: avg(gs.map((g) => g.seconds)), ...siege, a: sideSum('a'), b: sideSum('b') };
 }
 
 function printSummary(a: Entry, b: Entry, mode: LegionMode, gs: readonly Game[], s: Record<string, unknown>): void {
@@ -259,6 +276,11 @@ function printSummary(a: Entry, b: Entry, mode: LegionMode, gs: readonly Game[],
   out.push(`  ── 小計：A 勝 ${s.wins}、敗 ${s.losses}、平 ${s.draws}（勝率 ${pct(s.winRate as number)}；平手算半場 ${pct(s.points as number)}）`);
   out.push(`     結束原因：${Object.entries(s.reasons as Record<string, number>).map(([k, n]) => `${k} ×${n}`).join('、')}；平均時間 ${(s.secondsAvg as number).toFixed(1)} 秒`);
   out.push(`     平均戰果：A ${sa.killValueAvg.toFixed(1)} / B ${sb.killValueAvg.toFixed(1)}` + (mode === 'capture' ? `；平均分數：A ${sa.scoreAvg.toFixed(1)} / B ${sb.scoreAvg.toFixed(1)}` : ''));
+  if (mode === 'siege') {
+    const at = s.asAttacker as Record<string, number>;
+    const df = s.asDefender as Record<string, number>;
+    out.push(`     攻城：A 當攻方 ${at.wins} / ${at.games} 勝、當守方 ${df.wins} / ${df.games} 勝`);
+  }
   for (const [k, e, x] of [['A', a, sa], ['B', b, sb]] as const) {
     out.push(`     ${k}（${e.label}）：decide 平均 ${x.decideMsAvg.toFixed(2)} ms、最長 ${x.decideMsMax.toFixed(2)} ms；例外 ${x.exceptions}、逾時 ${x.timeouts} 場、布陣被拒 ${x.deployRejected}、指令被拒 ${x.rejected}`);
   }
@@ -279,16 +301,17 @@ const B = load(positional[1], parseKnobs('--knobs-b'));
 const json = opts['--json'] !== undefined;
 const quiet = opts['--quiet'] !== undefined;
 const report: Record<string, unknown>[] = [];
-for (const mode of modes) {
-  if (!json) process.stdout.write(`== ${MODE_NAMES[mode]}（${mode}）：A = ${A.label}、B = ${B.label}，${games} 場，種子 ${seed0} 起（同一個種子雙方交換起點）\n`);
+for (const { mode, mapId } of blocks) {
+  const mapName = MAPS[mapId]().name;
+  if (!json) process.stdout.write(`== ${MODE_NAMES[mode]}（${mode}）・${mapName}（${mapId}）：A = ${A.label}、B = ${B.label}，${games} 場，種子 ${seed0} 起（同一個種子雙方交換起點${mode === 'siege' ? '＝攻守互換' : ''}）\n`);
   const gs: Game[] = [];
   for (let g = 0; g < games; g++) {
-    const res = play(A, B, g + 1, seed0 + Math.floor(g / 2), mode, g % 2);
+    const res = play(A, B, g + 1, seed0 + Math.floor(g / 2), mode, mapId, g % 2);
     gs.push(res);
     if (!json && !quiet) process.stdout.write(`${gameLine(res, mode)}\n`);
   }
   const s = summarize(gs, mode);
-  if (json) report.push({ mode, a: A.label, b: B.label, summary: s, games: gs });
+  if (json) report.push({ mode, map: mapId, a: A.label, b: B.label, summary: s, games: gs });
   else printSummary(A, B, mode, gs, s);
 }
 if (json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
