@@ -452,7 +452,8 @@ function cmdShooterBatch(args: Args): void {
   // 經濟統計：依陣營與依組別的回合開局平均金錢總和、全買回合數
   const econ = { T: { money: 0, fullBuy: 0 }, CT: { money: 0, fullBuy: 0 }, g0: { money: 0, fullBuy: 0 }, g1: { money: 0, fullBuy: 0 } };
   // 道具統計：依陣營與依組別的投擲數、閃光讓敵人／自己隊致盲的 tick 數
-  const nade = () => ({ throws: 0, flashEnemyTicks: 0, flashTeamTicks: 0 });
+  type NadeStat = { throws: number; flashEnemyTicks: number; flashTeamTicks: number };
+  const nade = (): NadeStat => ({ throws: 0, flashEnemyTicks: 0, flashTeamTicks: 0 });
   const nades = { T: nade(), CT: nade(), g0: nade(), g1: nade() };
   let draws = 0;
   const roundWins: Record<Team, number> = { T: 0, CT: 0 };
@@ -508,7 +509,7 @@ function cmdShooterBatch(args: Args): void {
         ]),
       ),
       grenades: Object.fromEntries(
-        (Object.entries({ T: nades.T, CT: nades.CT, 'players0-4': nades.g0, 'players5-9': nades.g1 }) as [string, ReturnType<typeof nade>][]).map(([k, e]) => [
+        (Object.entries({ T: nades.T, CT: nades.CT, 'players0-4': nades.g0, 'players5-9': nades.g1 }) as [string, NadeStat][]).map(([k, e]) => [
           k,
           { avgThrowsPerRound: rounds === 0 ? 0 : Math.round((e.throws / rounds) * 100) / 100, flashEnemyBlindSec: Math.round((e.flashEnemyTicks / SHOOTER_TPS) * 10) / 10, flashTeamBlindSec: Math.round((e.flashTeamTicks / SHOOTER_TPS) * 10) / 10 },
         ]),
