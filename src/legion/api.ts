@@ -85,9 +85,31 @@ export interface LegionInitData {
     readonly healPct: number;
     readonly healQuietTicks: number;
   };
+  /**
+   * 攻城戰的規則（其他模式為 null）：攻守座位、時限延長、兩面旗（A = map.flags[0] 城門、B = map.flags[1] 本陣）、
+   * 點數、後備開關，以及城門、雲梯、衝車、砲擊的數值
+   */
+  readonly siege: SiegeRules | null;
   readonly units: readonly UnitInfo[];
   /** 相剋加成（百分比）：versus[攻擊方][目標] */
   readonly versus: Readonly<Record<string, Readonly<Record<string, number>>>>;
+}
+
+export interface SiegeRules {
+  readonly attacker: number;
+  readonly defender: number;
+  readonly extendTicks: number;
+  readonly radius: number;
+  readonly captureA: number;
+  readonly captureB: number;
+  readonly budget: number;
+  readonly fieldCap: number;
+  readonly attackerReserve: boolean;
+  readonly defenderReserve: boolean;
+  readonly gate: { readonly mainHp: number; readonly sideHp: number; readonly openTicks: number; readonly closeTicks: number };
+  readonly ladder: { readonly kinds: readonly UnitKind[]; readonly buildTicks: number; readonly entryTicks: number; readonly climbTicks: number; readonly toppleTicks: number; readonly fallPct: number; readonly reach: number; readonly mouth: number; readonly clear: number };
+  readonly ram: { readonly speed: number; readonly hit: number; readonly hitTicks: number; readonly contact: number; readonly attach: number; readonly blockHalf: number };
+  readonly bombard: { readonly shells: number; readonly cooldown: number; readonly delay: number; readonly radius: number; readonly damage: number; readonly shadow: number; readonly from: number };
 }
 
 export interface Deployment {
@@ -283,8 +305,12 @@ export interface FlagState {
   readonly progress: number;
   /** 佔領者的圈內有敵人：暫停得分 */
   readonly contested: boolean;
-  /** 佔領後每秒得幾分 */
+  /** 佔領後每秒得幾分（攻城戰為 0） */
   readonly points: number;
+  /** 從零佔滿要幾個 tick（佔點各旗相同；攻城戰 A 15 秒、B 30 秒） */
+  readonly captureTicks: number;
+  /** 攻城戰：這面旗現在能不能佔（B 要等 A 佔下） */
+  readonly open: boolean;
 }
 
 export type Flank = 'front' | 'side' | 'rear';

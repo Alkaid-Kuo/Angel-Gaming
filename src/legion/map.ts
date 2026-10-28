@@ -2,7 +2,7 @@
 // 每一格另有高度階（0～5）：高度效果全部依高低差計算（規格書 v0.2 第七節）。殲滅戰用「河谷」，佔點用「大河谷」。
 import { hashInts } from '../shared/hash.ts';
 import { idiv } from '../shared/intmath.ts';
-import { T, TILE, WALL_LAYER, WALL_LEVELS, walkable, walkableTop, RULES } from './config.ts';
+import { SIEGE, T, TILE, WALL_LAYER, WALL_LEVELS, walkable, walkableTop, RULES } from './config.ts';
 import { isin } from './geom.ts';
 
 export interface DeployZone {
@@ -70,6 +70,8 @@ export interface LegionMap {
   readonly ram?: { readonly x: number; readonly y: number; readonly facing: number };
   /** 砲擊來向（度）：從落點指向攻方地圖邊緣的方向（攻方在西邊就是 180）；沒有就沒有砲擊支援 */
   readonly bombardFrom?: number;
+  /** 攻城戰攻方後備（開關打開時）在 A 旗佔下後的入場點：A 外側 */
+  readonly siegeEntry?: { readonly x: number; readonly y: number };
   /** 地面層：不可通行格 → 最近的可通行格（可通行格對應自己） */
   readonly snap: Int32Array;
   /** 牆頂層（城牆、門樓、樓梯）：非牆頂格 → 最近的牆頂格；沒有牆的地圖全是 -1 */
@@ -420,14 +422,14 @@ export function grandValley(): LegionMap {
   };
 }
 
-/** 各模式預設的地圖：殲滅戰用「河谷」，佔點用「大河谷」 */
+/** 各模式預設的地圖：殲滅戰用「河谷」，佔點用「大河谷」，攻城戰用「石關城」 */
 export function defaultMapId(mode: string): string {
-  return mode === 'capture' ? 'grand-valley' : 'river-valley';
+  return mode === 'capture' ? 'grand-valley' : mode === 'siege' ? 'stone-pass' : 'river-valley';
 }
 
 /** 各模式預設的時間上限（tick） */
 export function defaultTimeLimit(mode: string): number {
-  return mode === 'capture' ? RULES.capture.timeLimitTicks : RULES.timeLimitTicks;
+  return mode === 'capture' ? RULES.capture.timeLimitTicks : mode === 'siege' ? SIEGE.timeLimitTicks : RULES.timeLimitTicks;
 }
 
 /** 地圖不會變，產生一次後共用 */

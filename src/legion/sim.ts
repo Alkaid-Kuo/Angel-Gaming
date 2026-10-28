@@ -4,7 +4,7 @@
 import { Hasher } from '../shared/hash.ts';
 import { idiv, isqrt, roundHalfEven, tdiv } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
-import type { BombardInfo, EnemyRegiment, Flank, FlagState, GateInfo, GateStatus, LadderInfo, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RamInfo, RegimentStatus, Structures } from './api.ts';
+import type { BombardInfo, EnemyRegiment, SiegeRules, Flank, FlagState, GateInfo, GateStatus, LadderInfo, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RamInfo, RegimentStatus, Structures } from './api.ts';
 import {
   RULES,
   T,
@@ -14,6 +14,7 @@ import {
   UNITS,
   VERSUS,
   BOMBARD,
+  SIEGE,
   LADDER_KINDS,
   LADDER_LAYER,
   RAM,
@@ -293,6 +294,8 @@ export interface FlagRuntime {
   readonly x: number;
   readonly y: number;
   readonly points: number;
+  /** 從零佔滿要幾個 tick */
+  readonly need: number;
   owner: number;
   capturer: number;
   progress: number;
@@ -317,7 +320,8 @@ export interface PlayerState {
 export interface LegionResult {
   /** null = 平手 */
   readonly winner: number | null;
-  readonly reason: 'annihilation' | 'score' | 'time';
+  /** capture = 攻城戰攻方佔下本陣 */
+  readonly reason: 'annihilation' | 'score' | 'time' | 'capture';
   readonly durationTicks: number;
   /** 剩餘兵力（點數 × 剩餘人數比例） */
   readonly strength: readonly number[];
@@ -389,7 +393,8 @@ export class LegionMatch {
   readonly map: LegionMap;
   readonly mode: LegionMode;
   readonly seed: number;
-  readonly timeLimitTicks: number;
+  /** 時間上限（攻城戰佔下 A 旗會延長） */
+  timeLimitTicks: number;
   tick = 0;
   readonly rng: Prng;
   readonly soldiers: Soldier[] = [];
@@ -466,7 +471,12 @@ export class LegionMatch {
       this.players.push({ id: p, cost, score: 0, plan: '', planAt: -1, active: true, kills: 0, losses: 0, killValue: 0 });
     }
     for (let p = 0; p < n; p++) this.visible.push(new Uint8Array(this.regiments.length));
-    if (this.mode === 'capture') this.map.flags.forEach((f, i) => this.flags.push({ id: i, name: f.name, x: f.x, y: f.y, points: f.points, owner: -1, capturer: -1, progress: 0, contested: false }));
+    if (this.mode === 'capture') this.map.flags.forEach((f, i) => this.flags.push({ id: i, name: f.name, x: f.x, y: f.y, points: f.points, need: RULES.capture.captureTicks, owner: -1, capturer: -1, progress: 0, contested: false }));
+    if (this.mode === 'siege') {
+      if (this.map.defender < 0 || this.map.flags.length < 2 || n !== 2) throw new Error(`攻城戰要用有城的地圖（${this.map.id} 不行）`);
+      // A（城門）、B（本陣）一開始歸守方
+      this.map.flags.slice(0, 2).forEach((f, i) => this.flags.push({ id: i, name: f.name, x: f.x, y: f.y, points: 0, need: i === 0 ? SIEGE.captureA : SIEGE.captureB, owner: this.map.defender, capturer: -1, progress: 0, contested: false }));
+    }
     for (const r of this.regiments) this.layout(r, true);
     this.computeVision();
     this.checkVictory();
@@ -485,9 +495,9 @@ export class LegionMatch {
     const zone = this.map.deploy[p];
     const base = this.soldiers.length;
     const regBase = this.regiments.length;
-    const capture = this.mode === 'capture';
-    const budget = capture ? RULES.capture.budget : RULES.budget;
-    const cap = capture ? RULES.capture.fieldCap : RULES.budget;
+    const capture = this.reservesAllowed(p);
+    const budget = this.budgetOf(p);
+    const cap = this.fieldCapOf();
     let spent = 0;
     let onField = 0;
     const placed: Regiment[] = [];
@@ -499,7 +509,7 @@ export class LegionMatch {
       const def = UNITS[kind];
       if (spent + def.cost > budget) return reject(i, `點數超過 ${budget}`);
       // 後備：佔點模式才有；自己標成後備、或場上已經超過上限的
-      if (o.reserve === true && !capture) return reject(i, '只有佔點模式有後備');
+      if (o.reserve === true && !capture) return reject(i, this.mode === 'siege' ? '攻城戰沒有後備' : '只有佔點模式有後備');
       if (capture && (o.reserve === true || onField + def.cost > cap)) {
         const formation = typeof o.formation === 'string' && def.formations.includes(o.formation as FormationKind) ? (o.formation as FormationKind) : def.formations[0];
         const sp = this.map.spawns[p];
@@ -669,6 +679,31 @@ export class LegionMatch {
 
   initData(p: number, knobs: Readonly<Record<string, number>>): LegionInitData {
     return legionInitData(this.map, this.mode, p, knobs, this.timeLimitTicks);
+  }
+
+  /** 這一方有沒有後備兵力：佔點有；攻城戰看開關；殲滅戰沒有 */
+  reservesAllowed(p: number): boolean {
+    if (this.mode === 'capture') return true;
+    if (this.mode !== 'siege') return false;
+    return p === this.map.defender ? SIEGE.defenderReserve : SIEGE.attackerReserve;
+  }
+
+  /** 總點數 */
+  budgetOf(p: number): number {
+    if (this.mode === 'capture') return RULES.capture.budget;
+    if (this.mode === 'siege') return this.reservesAllowed(p) ? SIEGE.reserveBudget : SIEGE.budget;
+    return RULES.budget;
+  }
+
+  /** 場上點數上限 */
+  fieldCapOf(): number {
+    return this.mode === 'capture' ? RULES.capture.fieldCap : this.mode === 'siege' ? SIEGE.fieldCap : RULES.budget;
+  }
+
+  /** 後備入場點：出生點；攻城戰攻方在 A 旗佔下後改從 A 外側入場 */
+  private spawnOf(p: number): { x: number; y: number } {
+    if (this.mode === 'siege' && p !== this.map.defender && this.flags[0]?.owner === p && this.map.siegeEntry !== undefined) return this.map.siegeEntry;
+    return this.map.spawns[p];
   }
 
   regimentStatus(r: Regiment): RegimentStatus {
@@ -1274,10 +1309,10 @@ export class LegionMatch {
       me: p,
       regiments,
       enemies,
-      flags: this.flags.map((f): FlagState => ({ id: f.id, name: f.name, x: f.x, y: f.y, owner: f.owner, capturer: f.capturer, progress: f.progress, contested: f.contested, points: f.points })),
+      flags: this.flags.map((f): FlagState => ({ id: f.id, name: f.name, x: f.x, y: f.y, owner: f.owner, capturer: f.capturer, progress: f.progress, contested: f.contested, points: f.points, captureTicks: f.need, open: this.flagOpen(f) })),
       score: this.players.map((q) => this.scoreOf(q.id)),
       fieldCost: this.fieldCost(p),
-      fieldCap: this.mode === 'capture' ? RULES.capture.fieldCap : RULES.budget,
+      fieldCap: this.fieldCapOf(),
       structures: this.structures(),
       events,
     };
@@ -1346,12 +1381,12 @@ export class LegionMatch {
   }
 
   private reserveCommand(p: number, r: Regiment, type: string, c: Record<string, unknown>): void {
-    if (this.mode !== 'capture') return this.rejectCmd(p, type, '只有佔點模式有後備');
-    const cap = RULES.capture.fieldCap;
+    if (!this.reservesAllowed(p)) return this.rejectCmd(p, type, this.mode === 'siege' ? '攻城戰沒有後備' : '只有佔點模式有後備');
+    const cap = this.fieldCapOf();
     if (type === 'summon') {
       if (!r.reserve || r.enterAt >= 0) return this.rejectCmd(p, type, '不是待命的後備');
       if (this.fieldCost(p) + r.def.cost > cap) return this.rejectCmd(p, type, `場上超過 ${cap} 點，要在出生點或補給站換兵`);
-      const sp = this.map.spawns[p];
+      const sp = this.spawnOf(p);
       const [x, y] = this.freeSpot(p, sp.x, sp.y, r);
       this.scheduleEnter(r, x, y);
       return;
@@ -1813,7 +1848,7 @@ export class LegionMatch {
       r.py = r.y;
       r.pf = r.facing;
     }
-    if (this.mode === 'capture') this.stepReserves();
+    if (this.mode === 'capture' || (this.mode === 'siege' && (SIEGE.attackerReserve || SIEGE.defenderReserve))) this.stepReserves();
     if (this.gates.length > 0) this.stepGates();
     if (this.ladders.length > 0 || this.regiments.some((r) => r.toppling >= 0)) this.stepLadders();
     for (const r of this.regiments) if (!this.gone(r)) this.think(r);
@@ -1844,6 +1879,7 @@ export class LegionMatch {
     this.cleanup();
     this.computeVision();
     if (this.mode === 'capture') this.stepFlags();
+    else if (this.mode === 'siege') this.stepSiegeFlags();
     this.tick += 1;
     this.checkVictory();
   }
@@ -3049,6 +3085,50 @@ export class LegionMatch {
     }
   }
 
+  /** 攻城戰：這面旗現在能不能佔（佔點各旗都能；攻城戰 B 要等 A 被攻方佔下） */
+  flagOpen(f: FlagRuntime): boolean {
+    if (this.mode !== 'siege') return true;
+    const attacker = 1 - this.map.defender;
+    if (f.owner === attacker) return false;
+    return f.id === 0 || this.flags[0].owner === attacker;
+  }
+
+  /**
+   * 攻城戰的旗：只有攻方能佔；圈內只算地面層的士兵。攻方在、守方不在：進度增加；雙方都在：不動；攻方不在：倒退。
+   * A 佔下：正門永久開啟、時限延長。B 佔下：攻方勝（在 checkVictory 判定）
+   */
+  private stepSiegeFlags(): void {
+    const attacker = 1 - this.map.defender;
+    const r2 = SIEGE.radius * SIEGE.radius;
+    for (const f of this.flags) {
+      if (!this.flagOpen(f)) continue;
+      let att = false;
+      let def = false;
+      for (const s of this.soldiers) {
+        if (!s.alive || s.layer !== 0) continue;
+        if ((s.x - f.x) * (s.x - f.x) + (s.y - f.y) * (s.y - f.y) > r2) continue;
+        if (s.owner === attacker) att = true;
+        else def = true;
+        if (att && def) break;
+      }
+      f.contested = att && def;
+      if (att && !def) {
+        f.capturer = attacker;
+        f.progress += 1;
+        if (f.progress >= f.need) {
+          f.owner = attacker;
+          f.capturer = -1;
+          f.progress = 0;
+          this.emit({ type: 'flag', tick: this.tick, flag: f.id, owner: attacker });
+          if (f.id === 0) {
+            for (const g of this.gates) if (g.kind === 'main') this.forceGateOpen(g);
+            this.timeLimitTicks += SIEGE.extendTicks;
+          }
+        }
+      } else if (!att) this.decayFlag(f);
+    }
+  }
+
   /** 沒人在佔：進度倒退，到零就清掉正在佔領的一方 */
   private decayFlag(f: FlagRuntime): void {
     if (f.progress > 0) f.progress -= 1;
@@ -3092,6 +3172,12 @@ export class LegionMatch {
     const active = this.players.filter((p) => p.active);
     if (active.length < n) {
       finish(active.length === 1 ? active[0].id : null, 'annihilation');
+      return;
+    }
+    if (this.mode === 'siege') {
+      const attacker = 1 - this.map.defender;
+      if (this.flags[1].owner === attacker) return finish(attacker, 'capture');
+      if (this.tick >= this.timeLimitTicks) return finish(this.map.defender, 'time');
       return;
     }
     if (this.mode === 'capture') {
@@ -3192,13 +3278,34 @@ export class LegionMatch {
   }
 }
 
+/** 攻城戰的公開規則（開局資料用） */
+function siegeRules(m: LegionMap): SiegeRules {
+  const L = RULES.ladder;
+  return {
+    attacker: 1 - m.defender,
+    defender: m.defender,
+    extendTicks: SIEGE.extendTicks,
+    radius: SIEGE.radius,
+    captureA: SIEGE.captureA,
+    captureB: SIEGE.captureB,
+    budget: SIEGE.budget,
+    fieldCap: SIEGE.fieldCap,
+    attackerReserve: SIEGE.attackerReserve,
+    defenderReserve: SIEGE.defenderReserve,
+    gate: { mainHp: RULES.gate.mainHp, sideHp: RULES.gate.sideHp, openTicks: RULES.gate.openTicks, closeTicks: RULES.gate.closeTicks },
+    ladder: { kinds: LADDER_KINDS, buildTicks: L.buildTicks, entryTicks: L.entryTicks, climbTicks: L.climbTicks, toppleTicks: L.toppleTicks, fallPct: L.fallPct, reach: L.reach, mouth: L.mouth, clear: L.clear },
+    ram: { speed: RAM.speed, hit: RAM.hit, hitTicks: RAM.hitTicks, contact: RAM.contact, attach: RAM.attach, blockHalf: RAM.blockHalf },
+    bombard: { shells: BOMBARD.shells, cooldown: BOMBARD.cooldown, delay: BOMBARD.delay, radius: BOMBARD.radius, damage: BOMBARD.damage, shadow: BOMBARD.shadow, from: m.bombardFrom ?? -1 },
+  };
+}
+
 /** 開局資料（布陣前就要給選手，所以不依賴比賽物件） */
 export function legionInitData(m: LegionMap, mode: LegionMode, p: number, knobs: Readonly<Record<string, number>>, timeLimitTicks: number): LegionInitData {
   return {
     playerId: p,
     mode,
     knobs,
-    budget: mode === 'capture' ? RULES.capture.budget : RULES.budget,
+    budget: mode === 'capture' ? RULES.capture.budget : mode === 'siege' ? (SIEGE.attackerReserve || SIEGE.defenderReserve ? SIEGE.reserveBudget : SIEGE.budget) : RULES.budget,
     timeLimitTicks,
     ticksPerSecond: 10,
     decisionInterval: RULES.decisionInterval,
@@ -3228,6 +3335,7 @@ export function legionInitData(m: LegionMap, mode: LegionMode, p: number, knobs:
       healPct: RULES.capture.healPct,
       healQuietTicks: RULES.capture.healQuietTicks,
     },
+    siege: mode === 'siege' ? siegeRules(m) : null,
     units: UNIT_KINDS.map((k) => {
       const u = UNITS[k];
       const d = dashDefOf(k);

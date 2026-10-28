@@ -348,8 +348,31 @@ export const BOMBARD = {
 /** 能架雲梯的兵種 */
 export const LADDER_KINDS: readonly UnitKind[] = ['sword', 'shield', 'spear', 'light'];
 
-export type LegionMode = 'annihilation' | 'capture';
-export const MODE_NAMES: Readonly<Record<LegionMode, string>> = { annihilation: '殲滅戰', capture: '佔點' };
+/** 模式：攻城戰 siege、佔點 capture；殲滅戰 annihilation 只保留給引擎測試與情境測試（不進聯賽、參賽包、觀戰選單） */
+export type LegionMode = 'annihilation' | 'capture' | 'siege';
+export const MODE_NAMES: Readonly<Record<LegionMode, string>> = { annihilation: '殲滅戰', capture: '佔點', siege: '攻城戰' };
+/** 聯賽、參賽包、觀戰網頁用的模式（三場制：攻城、攻城、佔點） */
+export const LEAGUE_MODES: readonly LegionMode[] = ['siege', 'capture'];
+
+/**
+ * 攻城戰（引擎 0.4，規格 1.2）：兩面旗依序佔——A（地圖 flags[0]，城門）15 秒、B（flags[1]，本陣）30 秒；A 未佔下前 B 不能佔，
+ * 守方不能把 A 佔回去。A 佔下：正門永久開啟、時限延長 extendTicks（試打後定）。B 佔下攻方勝；時間到守方勝；全滅仍算勝利。
+ * 攻守各 600 點、場上 600、沒有後備；後備開關（attackerReserve／defenderReserve）先關（試打後才開）。
+ * 旗圈只算地面層的士兵（牆頂、爬梯中的不算佔旗也不算阻擋）。
+ */
+export const SIEGE = {
+  budget: 600,
+  fieldCap: 600,
+  timeLimitTicks: 8 * 60 * TPS,
+  extendTicks: 3 * 60 * TPS,
+  radius: 5000,
+  captureA: 15 * TPS,
+  captureB: 30 * TPS,
+  attackerReserve: false,
+  defenderReserve: false,
+  /** 後備開關打開時的總點數（場上仍是 fieldCap） */
+  reserveBudget: 900,
+} as const;
 
 /** 地形（「高地」只是高度 3 階以上的平地標籤，效果全部依高度計算） */
 export const T = {
