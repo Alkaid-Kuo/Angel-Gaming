@@ -43,8 +43,16 @@ describe('軍團戰 0.4：石關城', () => {
     expect(m.bombardFrom).toBe(180);
     const [rx] = tileXY(m.ram!.x, m.ram!.y, m.width, m.height);
     expect(rx).toBeLessThan(m.deploy[0].x1);
-    // 旗：A 在正門、B 在子城院落
-    expect(tileAt(m, m.flags[0].x, m.flags[0].y)).toBe(T.Gatehouse);
+    // 旗：A 在正門內的廣場（旗圈不跨城牆：圈內每一格都在郭城西牆以東）、B 在子城院落
+    expect(tileAt(m, m.flags[0].x, m.flags[0].y)).toBe(T.Paved);
+    const R = 5000;
+    for (let y = 0; y < m.height; y++) {
+      for (let x = 0; x < m.width; x++) {
+        if (Math.hypot((x + 0.5) * TILE - m.flags[0].x, (y + 0.5) * TILE - m.flags[0].y) > R) continue;
+        expect(x).toBeGreaterThanOrEqual(114);
+        expect(tt(x, y)).not.toBe(T.Wall);
+      }
+    }
     expect(tileAt(m, m.flags[1].x, m.flags[1].y)).toBe(T.Paved);
     // 東牆臨河，城的背後沒有路
     for (let y = 31; y < 109; y++) expect(tt(213, y)).toBe(T.River);
