@@ -2,7 +2,7 @@
 // 每一格另有高度階（0～5）：高度效果全部依高低差計算（規格書 v0.2 第七節）。殲滅戰用「河谷」，佔點用「大河谷」。
 import { hashInts } from '../shared/hash.ts';
 import { idiv } from '../shared/intmath.ts';
-import { T, TILE, walkable, RULES } from './config.ts';
+import { T, TILE, WALL_LAYER, WALL_LEVELS, walkable, walkableTop, RULES } from './config.ts';
 import { isin } from './geom.ts';
 
 export interface DeployZone {
@@ -52,10 +52,32 @@ export interface LegionMap {
   readonly supplies: readonly SupplyPoint[];
   /** 地標（解說用的地名），單位座標 */
   readonly landmarks: readonly FlagPoint[];
-  /** 不可通行格 → 最近的可通行格（可通行格對應自己） */
+  /** 地面層：不可通行格 → 最近的可通行格（可通行格對應自己） */
   readonly snap: Int32Array;
+  /** 牆頂層（城牆、門樓、樓梯）：非牆頂格 → 最近的牆頂格；沒有牆的地圖全是 -1 */
+  readonly snapTop: Int32Array;
   /** 1 = 緊鄰不可通行格（尋路加成本，讓隊形走在橋與淺灘的中間） */
   readonly edge: Uint8Array;
+  /**
+   * 地形與高度旋轉 180° 對稱：紅方的尋路與吸附在旋轉後的座標系計算再轉回來，讓雙方得到互為鏡像的結果。
+   * 不對稱的地圖（城池圖、測試圖）不能這樣算，雙方都用原座標系。
+   */
+  readonly symmetric: boolean;
+}
+
+/** 地圖的幾何與地標（snap、edge、snapTop、symmetric 由 finishMap 補上） */
+export type LegionMapSpec = Omit<LegionMap, 'snap' | 'snapTop' | 'edge' | 'symmetric'>;
+
+/** 補上尋路與吸附用的衍生陣列與對稱旗標 */
+export function finishMap(spec: LegionMapSpec): LegionMap {
+  const { terrain, heights, width: w, height: h } = spec;
+  return { ...spec, snap: buildSnap(terrain, w, h), snapTop: buildSnapTop(terrain, w, h), edge: buildEdge(terrain, w, h), symmetric: isSymmetric(terrain, heights) };
+}
+
+function isSymmetric(terrain: Uint8Array, heights: Uint8Array): boolean {
+  const n = terrain.length;
+  for (let i = 0; i < n; i++) if (terrain[i] !== terrain[n - 1 - i] || heights[i] !== heights[n - 1 - i]) return false;
+  return true;
 }
 
 type Painter = (x: number, y: number) => boolean;
@@ -138,12 +160,21 @@ function buildEdge(terrain: Uint8Array, w: number, h: number): Uint8Array {
 }
 
 function buildSnap(terrain: Uint8Array, w: number, h: number): Int32Array {
+  return nearestOf(terrain, w, h, walkable);
+}
+
+function buildSnapTop(terrain: Uint8Array, w: number, h: number): Int32Array {
+  return nearestOf(terrain, w, h, walkableTop);
+}
+
+/** 每一格 → 最近的符合 ok 的格（符合的對應自己；一格都沒有則全是 -1） */
+function nearestOf(terrain: Uint8Array, w: number, h: number, ok: (t: number) => boolean): Int32Array {
   const snap = new Int32Array(w * h).fill(-1);
   const queue = new Int32Array(w * h);
   let head = 0;
   let tail = 0;
   for (let i = 0; i < w * h; i++) {
-    if (walkable(terrain[i])) {
+    if (ok(terrain[i])) {
       snap[i] = i;
       queue[tail++] = i;
     }
@@ -248,7 +279,9 @@ export function riverValley(): LegionMap {
       { name: '紅方陣地', x: 150000, y: 50000 },
     ],
     snap: buildSnap(terrain, w, h),
+    snapTop: buildSnapTop(terrain, w, h),
     edge: buildEdge(terrain, w, h),
+    symmetric: true,
   };
 }
 
@@ -356,7 +389,9 @@ export function grandValley(): LegionMap {
       { name: '紅方陣地', x: W - 10000, y: H / 2 },
     ],
     snap: buildSnap(terrain, w, h),
+    snapTop: buildSnapTop(terrain, w, h),
     edge: buildEdge(terrain, w, h),
+    symmetric: true,
   };
 }
 
@@ -376,10 +411,15 @@ function once(make: () => LegionMap): () => LegionMap {
   return () => (cached ??= make());
 }
 
-export const MAPS: Readonly<Record<string, () => LegionMap>> = {
+export const MAPS: Record<string, () => LegionMap> = {
   'river-valley': once(riverValley),
   'grand-valley': once(grandValley),
 };
+
+/** 註冊地圖（測試用的最小地圖、之後的城池與平原圖）；同 id 覆蓋 */
+export function registerMap(map: LegionMap): void {
+  MAPS[map.id] = () => map;
+}
 
 /**
  * 座標 → 格：以地圖中心對稱（剛好落在格線上的點歸給靠近中心的那一格），
@@ -418,22 +458,32 @@ export function heightAt(map: LegionMap, x: number, y: number): number {
 /** 建築與城牆擋視線的高度 */
 const BLOCK_HEIGHT = 9;
 
+/** 某一層的高度：牆頂 ＝ 地面高度 ＋ WALL_LEVELS 階 */
+export function heightAtLayer(map: LegionMap, x: number, y: number, layer: number): number {
+  return heightAt(map, x, y) + (layer === WALL_LAYER ? WALL_LEVELS : 0);
+}
+
 /**
  * 視線是否被地形擋住：沿兩點連線每格取樣，中間任何一格的地形高過視線（雙方眼睛在各自高度 + 0.5 階）就看不到。
- * 樹林不擋視線（隱蔽另外計算）；建築、城牆擋視線。
+ * 樹林不擋視線（隱蔽另外計算）；建築、城牆、門樓擋視線。
+ * al、bl 是兩端的層：任一端在牆頂時，城牆與門樓改以牆頂實高擋（否則牆頂看不到沿牆的敵人）。
  */
-export function sightBlocked(map: LegionMap, ax: number, ay: number, bx: number, by: number): boolean {
+export function sightBlocked(map: LegionMap, ax: number, ay: number, bx: number, by: number, al = 0, bl = 0): boolean {
   const dx = bx - ax;
   const dy = by - ay;
   const steps = idiv(Math.max(Math.abs(dx), Math.abs(dy)), TILE);
   if (steps < 2) return false;
-  const ea = 2 * heightAt(map, ax, ay) + 1;
-  const eb = 2 * heightAt(map, bx, by) + 1;
+  const ea = 2 * heightAtLayer(map, ax, ay, al) + 1;
+  const eb = 2 * heightAtLayer(map, bx, by, bl) + 1;
+  const onTop = al === WALL_LAYER || bl === WALL_LAYER;
   for (let k = 1; k < steps; k++) {
     const x = ax + idiv(dx * k, steps);
     const y = ay + idiv(dy * k, steps);
     const t = terrainAt(map, x, y);
-    const hgt = t === T.Building || t === T.Wall ? BLOCK_HEIGHT : heightAt(map, x, y);
+    let hgt: number;
+    if (t === T.Building) hgt = BLOCK_HEIGHT;
+    else if (t === T.Wall || t === T.Gatehouse) hgt = onTop ? heightAt(map, x, y) + WALL_LEVELS : BLOCK_HEIGHT;
+    else hgt = heightAt(map, x, y);
     // 2 × 地形高度 > 視線高度（半階單位，乘上 steps 避免除法）
     if (2 * hgt * steps > ea * steps + (eb - ea) * k) return true;
   }

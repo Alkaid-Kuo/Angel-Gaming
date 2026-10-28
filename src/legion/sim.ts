@@ -13,10 +13,14 @@ import {
   UNIT_KINDS,
   UNITS,
   VERSUS,
+  WALL_LAYER,
+  WALL_LEVELS,
   dashDefOf,
+  stepLayer,
   stopsCavalry,
   terrainSpeed,
   walkable,
+  walkableAt,
   type DashDef,
   type DashKind,
   type FormationKind,
@@ -44,6 +48,8 @@ export interface Soldier {
   readonly k: number;
   x: number;
   y: number;
+  /** 層：0 地面、1 牆頂。踏進樓梯格時切換；近戰、碰撞、互擋只發生在同層 */
+  layer: number;
   hp: number;
   cd: number;
   /** 近戰目標（士兵 id）；-1 無 */
@@ -106,6 +112,11 @@ export interface Regiment {
   readonly men0: number;
   x: number;
   y: number;
+  /** 軍團中心所在的層（0 地面、1 牆頂）；中心沿路徑踏進樓梯時切換 */
+  layer: number;
+  /** 中心最近經過的樓梯格中心（-1 = 沒有）：還在另一層的士兵往這裡走來換層 */
+  stairX: number;
+  stairY: number;
   facing: number;
   /** tick 開始時的位置與朝向：軍團決策讀取其他軍團時一律用這組，處理順序不影響結果 */
   px: number;
@@ -141,6 +152,8 @@ export interface Regiment {
   pathGoalX: number;
   pathGoalY: number;
   repathAt: number;
+  /** 上次找不到路徑：這個 tick 之前對同一個目的地不再重算（另一層打不到的目標、沒有樓梯可上的牆） */
+  noPathUntil: number;
   /** 槍林 */
   brace: SetState;
   braceTimer: number;
@@ -332,6 +345,7 @@ export class LegionMatch {
   /** 士兵移動的緩衝區 */
   private nx = new Int32Array(0);
   private ny = new Int32Array(0);
+  private nl = new Int32Array(0);
   /** 本 tick 的效果佇列：[士兵 id, 傷害, 攻擊方軍團 id, 推移 x, 推移 y, 倒地（0/1）, 扣衝勁] */
   private hits: number[] = [];
   /** 近戰接觸事件：軍團對 → 上次發出的 tick */
@@ -398,7 +412,7 @@ export class LegionMatch {
         this.regiments.push(reg);
         for (let k = 0; k < def.men; k++) {
           const id = this.soldiers.length;
-          this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x: sp.x, y: sp.y, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: false, ord: k, sx: sp.x, sy: sp.y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0 });
+          this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x: sp.x, y: sp.y, layer: 0, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: false, ord: k, sx: sp.x, sy: sp.y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0 });
           reg.parked.push(id);
         }
         return undefined;
@@ -408,13 +422,18 @@ export class LegionMatch {
       const y = roundHalfEven(o.y);
       const [tx, ty] = tileXY(x, y, this.map.width, this.map.height);
       if (tx < zone.x0 || tx >= zone.x1 || ty < zone.y0 || ty >= zone.y1) return reject(i, '不在布陣區內');
-      if (!walkable(this.map.terrain[ty * this.map.width + tx])) return reject(i, '位置不可通行');
+      // 層（選填，預設地面）：牆頂只有城牆、門樓、樓梯格可布陣，而且騎兵不能上牆
+      const layer = o.layer === undefined ? 0 : o.layer;
+      if (layer !== 0 && layer !== WALL_LAYER) return reject(i, '層只能是 0（地面）或 1（牆頂）');
+      if (layer === WALL_LAYER && def.cavalry) return reject(i, '騎兵不能布陣在牆頂');
+      if (!walkableAt(this.map.terrain[ty * this.map.width + tx], layer)) return reject(i, '位置不可通行');
       const formation = typeof o.formation === 'string' && def.formations.includes(o.formation as FormationKind) ? (o.formation as FormationKind) : def.formations[0];
       const widthIn = typeof o.width === 'number' && Number.isFinite(o.width) ? Math.max(1, Math.min(def.men, Math.round(o.width))) : null;
       const facing = typeof o.facing === 'number' && Number.isFinite(o.facing) ? normDeg(Math.round(o.facing)) : p === 0 ? 0 : 180;
-      const reg = this.newRegiment(p, kind, x, y, facing, this.regiments.length - regBase, formation, widthIn);
+      const reg = this.newRegiment(p, kind, x, y, facing, this.regiments.length - regBase, formation, widthIn, layer);
       if (kind === 'shield' && (o.stance === 'raise' || o.stance === 'carry')) reg.stance = o.stance;
       for (const q of placed) {
+        if (q.layer !== layer) continue;
         const d2 = (q.x - x) * (q.x - x) + (q.y - y) * (q.y - y);
         const lim = idiv((q.rad + reg.rad) * 55, 100);
         if (d2 < lim * lim) return reject(i, `與第 ${placed.indexOf(q)} 個軍團重疊`);
@@ -425,7 +444,7 @@ export class LegionMatch {
       this.regiments.push(reg);
       for (let k = 0; k < def.men; k++) {
         const id = this.soldiers.length;
-        this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x, y, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: true, ord: k, sx: x, sy: y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0 });
+        this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x, y, layer, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: true, ord: k, sx: x, sy: y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0 });
         reg.slots.push(id);
       }
       this.layout(reg, true);
@@ -439,7 +458,7 @@ export class LegionMatch {
     return spent;
   }
 
-  private newRegiment(owner: number, kind: UnitKind, x: number, y: number, facing: number, k: number, formation: FormationKind, widthIn: number | null): Regiment {
+  private newRegiment(owner: number, kind: UnitKind, x: number, y: number, facing: number, k: number, formation: FormationKind, widthIn: number | null, layer = 0): Regiment {
     const def = UNITS[kind];
     const width = formation === 'line' && widthIn !== null ? widthIn : def.lineWidth;
     const depth = Math.max(2, Math.ceil(def.men / (formation === 'square' && widthIn !== null ? widthIn : def.squareWidth)));
@@ -452,6 +471,9 @@ export class LegionMatch {
       men0: def.men,
       x,
       y,
+      layer,
+      stairX: -1,
+      stairY: -1,
       facing,
       px: x,
       py: y,
@@ -479,6 +501,7 @@ export class LegionMatch {
       pathGoalX: x,
       pathGoalY: y,
       repathAt: 0,
+      noPathUntil: 0,
       brace: 0,
       braceTimer: 0,
       braceFacing: facing,
@@ -574,6 +597,16 @@ export class LegionMatch {
     return heightAt(this.map, x, y);
   }
 
+  /** 某一層的高度（牆頂 ＝ 地面 ＋ WALL_LEVELS 階）：射程、傷害、視野用這個；坡度移速只看地形高度 */
+  heightOfAt(x: number, y: number, layer: number): number {
+    return heightAt(this.map, x, y) + (layer === WALL_LAYER ? WALL_LEVELS : 0);
+  }
+
+  /** 一個落點所在的層：城牆格算牆頂，其餘算地面（齊射落點、volley 射程檢查用） */
+  private pointLayer(x: number, y: number): number {
+    return this.terrainAt(x, y) === T.Wall ? WALL_LAYER : 0;
+  }
+
   observe(p: number): LegionObservation {
     const regiments: OwnRegiment[] = [];
     const enemies: EnemyRegiment[] = [];
@@ -585,7 +618,7 @@ export class LegionMatch {
         for (const sid of r.parked) hp += this.soldiers[sid].hp;
         const x = r.enterAt >= 0 ? r.enterX : this.map.spawns[p].x;
         const y = r.enterAt >= 0 ? r.enterY : this.map.spawns[p].y;
-        regiments.push({ id: r.id, kind: r.kind, x, y, facing: r.facing, width: r.formation === 'square' ? r.shape.files : r.width, formation: r.formation, stance: r.stance, men: r.parked.length, men0: r.men0, hp, hpMax: this.hpMaxOf(r, r.parked.length), status: this.regimentStatus(r), order: 'idle', target: null, level: r.level, engaged: false, skillCooldown: 0, dashing: null, down: 0, routed: false, terrain: this.terrainAt(x, y), height: this.heightOf(x, y), radius: r.rad, reserve: true, enterIn: r.enterAt >= 0 ? r.enterAt - this.tick : -1 });
+        regiments.push({ id: r.id, kind: r.kind, x, y, facing: r.facing, width: r.formation === 'square' ? r.shape.files : r.width, formation: r.formation, stance: r.stance, men: r.parked.length, men0: r.men0, hp, hpMax: this.hpMaxOf(r, r.parked.length), status: this.regimentStatus(r), order: 'idle', target: null, level: r.level, engaged: false, skillCooldown: 0, dashing: null, down: 0, routed: false, terrain: this.terrainAt(x, y), height: this.heightOf(x, y), layer: 0, radius: r.rad, reserve: true, enterIn: r.enterAt >= 0 ? r.enterAt - this.tick : -1 });
         continue;
       }
       if (r.owner === p) {
@@ -619,7 +652,8 @@ export class LegionMatch {
           down,
           routed: r.routed,
           terrain: this.terrainAt(r.x, r.y),
-          height: this.heightOf(r.x, r.y),
+          height: this.heightOfAt(r.x, r.y, r.layer),
+          layer: r.layer,
           radius: r.rad,
           reserve: false,
           enterIn: -1,
@@ -642,7 +676,8 @@ export class LegionMatch {
           dashing: r.dash !== null ? r.dash.def.kind : null,
           routed: r.routed,
           terrain: this.terrainAt(r.x, r.y),
-          height: this.heightOf(r.x, r.y),
+          height: this.heightOfAt(r.x, r.y, r.layer),
+          layer: r.layer,
           radius: r.rad,
         });
       }
@@ -813,6 +848,9 @@ export class LegionMatch {
       r.enterAt = -1;
       r.x = r.enterX;
       r.y = r.enterY;
+      r.layer = 0;
+      r.stairX = -1;
+      r.stairY = -1;
       r.px = r.x;
       r.py = r.y;
       r.facing = r.owner === 0 ? 0 : 180;
@@ -825,6 +863,7 @@ export class LegionMatch {
       r.slots.forEach((sid, i) => {
         const so = this.soldiers[sid];
         so.alive = true;
+        so.layer = 0;
         so.ord = i;
         so.cd = 0;
         so.target = -1;
@@ -1045,7 +1084,7 @@ export class LegionMatch {
         const x = num(c.x);
         const y = num(c.y);
         if (x === null || y === null) return this.rejectCmd(p, type, '座標不合法');
-        const range = r.def.range + RULES.height.rangePerLevel * clampLevel(this.heightOf(r.x, r.y) - this.heightOf(x, y));
+        const range = this.rangeTo(r, x, y, this.pointLayer(x, y));
         if ((x - r.x) * (x - r.x) + (y - r.y) * (y - r.y) > range * range) return this.rejectCmd(p, type, '落點超出射程');
         r.volley = { x, y, until: this.tick + RULES.volley.duration };
         r.skillReadyAt = this.tick + RULES.volley.cooldown;
@@ -1114,7 +1153,7 @@ export class LegionMatch {
       }
       let cx = idiv(sx, r.slots.length);
       let cy = idiv(sy, r.slots.length);
-      if (!walkable(this.terrainAt(cx, cy))) {
+      if (!walkableAt(this.terrainAt(cx, cy), r.layer)) {
         let best = r.slots[0];
         let bestD = Infinity;
         for (const sid of r.slots) {
@@ -1169,6 +1208,7 @@ export class LegionMatch {
     if (this.nx.length < sol.length) {
       this.nx = new Int32Array(sol.length);
       this.ny = new Int32Array(sol.length);
+      this.nl = new Int32Array(sol.length);
     }
     for (const so of sol) if (so.alive) this.moveSoldier(so);
     for (const so of sol) {
@@ -1178,6 +1218,7 @@ export class LegionMatch {
       so.spd = dx === 0 && dy === 0 ? 0 : isqrt(dx * dx + dy * dy);
       so.x = this.nx[so.id];
       so.y = this.ny[so.id];
+      so.layer = this.nl[so.id];
     }
     this.grid.build(this.soldiers);
     this.combat();
@@ -1195,6 +1236,11 @@ export class LegionMatch {
     const [tx, ty] = tileXY(x, y, this.map.width, this.map.height);
     if (tx < 0 || ty < 0 || tx >= this.map.width || ty >= this.map.height) return T.River;
     return this.map.terrain[ty * this.map.width + tx];
+  }
+
+  /** 紅方在對稱地圖上以旋轉 180° 的座標系尋路與吸附（雙方互為鏡像）；不對稱的地圖不翻轉 */
+  private flipFor(owner: number): boolean {
+    return owner === 1 && this.map.symmetric;
   }
 
   private alive(id: number): Regiment | null {
@@ -1334,8 +1380,7 @@ export class LegionMatch {
     const dh = this.heightOf(nx, ny) - this.heightOf(r.x, r.y);
     if (dh < 0) d.boost = Math.min(RULES.height.dashMax, d.boost - dh * RULES.height.dashDown);
     else if (dh > 0) d.boost = Math.max(RULES.height.dashMin, d.boost - dh * RULES.height.dashUp);
-    r.x = nx;
-    r.y = ny;
+    this.moveCenter(r, nx, ny);
     d.travel += speed;
     d.left -= speed;
     d.speed = speed;
@@ -1371,9 +1416,33 @@ export class LegionMatch {
     r.slots.forEach((sid, i) => (this.soldiers[sid].ord = i));
   }
 
-  /** 射程（依自己與目標位置的高低差） */
-  private rangeTo(r: Regiment, x: number, y: number, fromX = r.x, fromY = r.y): number {
-    return r.def.range + RULES.height.rangePerLevel * clampLevel(this.heightOf(fromX, fromY) - this.heightOf(x, y));
+  /** 射程（依自己與目標位置的高低差；含層：牆頂 ＋3 階） */
+  private rangeTo(r: Regiment, x: number, y: number, tl: number, fromX = r.x, fromY = r.y, fl = r.layer): number {
+    return r.def.range + RULES.height.rangePerLevel * clampLevel(this.heightOfAt(fromX, fromY, fl) - this.heightOfAt(x, y, tl));
+  }
+
+  /**
+   * 移動軍團中心：中心跨格時依 stepLayer 更新層（踏進樓梯換層並記下樓梯位置，讓還在另一層的士兵知道要從哪裡上下）。
+   * 中心本身不被地形擋（路徑已經保證可走）；不能走的跨格就維持原層。
+   */
+  private moveCenter(r: Regiment, nx: number, ny: number): void {
+    const t = this.terrainAt(nx, ny);
+    if (!(r.layer === 0 && t !== T.River && t < T.Building)) {
+      const [fx, fy] = tileXY(r.x, r.y, this.map.width, this.map.height);
+      const [tx, ty] = tileXY(nx, ny, this.map.width, this.map.height);
+      if (fx !== tx || fy !== ty) {
+        const nl = stepLayer(r.layer, this.terrainAt(r.x, r.y), t, r.def.cavalry);
+        if (nl >= 0) {
+          r.layer = nl;
+          if (t === T.Stair) {
+            r.stairX = tx * TILE + TILE / 2;
+            r.stairY = ty * TILE + TILE / 2;
+          }
+        }
+      }
+    }
+    r.x = nx;
+    r.y = ny;
   }
 
   /** 目標在 t 方向上的伸展：沿 t 朝向為 halfD、側向為 halfW */
@@ -1386,7 +1455,7 @@ export class LegionMatch {
     const d = isqrt((t.px - r.x) * (t.px - r.x) + (t.py - r.y) * (t.py - r.y));
     const speed = this.baseSpeed(r);
     if (r.def.range > 0) {
-      const range = this.rangeTo(r, t.px, t.py);
+      const range = this.rangeTo(r, t.px, t.py, t.layer);
       if (d - idiv(t.rad, 2) <= range - 1000) {
         this.setFire(r, t.id);
         if (!this.fireStalled(r)) {
@@ -1394,6 +1463,11 @@ export class LegionMatch {
           return;
         }
       } else this.setFire(r, -1);
+      this.moveTo(r, t.px, t.py, 0, speed, false);
+      return;
+    }
+    // 目標在另一層（牆頂／地面）：打不到，一路走到它所在的格（路徑會經過樓梯），同層後再照常接戰
+    if (t.layer !== r.layer) {
       this.moveTo(r, t.px, t.py, 0, speed, false);
       return;
     }
@@ -1413,14 +1487,18 @@ export class LegionMatch {
   /** 沿路徑移動軍團中心；抵達（距終點 stopAt 以內）回傳 true */
   private moveTo(r: Regiment, gx: number, gy: number, stopAt: number, baseSpeed: number, routed: boolean): boolean {
     const dGoal2 = (gx - r.pathGoalX) * (gx - r.pathGoalX) + (gy - r.pathGoalY) * (gy - r.pathGoalY);
+    if (r.path.length === 0 && this.tick < r.noPathUntil && dGoal2 <= 2000 * 2000) return true;
     if (r.path.length === 0 || r.pathIdx >= r.path.length || dGoal2 > 2000 * 2000 || (this.tick >= r.repathAt && dGoal2 > 0)) {
-      const p = findPath(this.map, r.x, r.y, gx, gy, r.owner === 1);
+      const p = findPath(this.map, r.x, r.y, gx, gy, this.flipFor(r.owner), r.layer, r.def.cavalry);
       r.path = p ?? [];
       r.pathIdx = 0;
       r.pathGoalX = gx;
       r.pathGoalY = gy;
       r.repathAt = this.tick + 20;
-      if (r.path.length === 0) return true;
+      if (r.path.length === 0) {
+        r.noPathUntil = this.tick + 20;
+        return true;
+      }
     }
     const [wx, wy] = r.path[r.pathIdx];
     const last = r.pathIdx === r.path.length - 1;
@@ -1455,8 +1533,7 @@ export class LegionMatch {
     const [nx0, ny0] = stepToward(r.x, r.y, wx, wy, step);
     const step2 = this.slope(step, r.x, r.y, nx0, ny0);
     const [nx, ny] = step2 === step ? [nx0, ny0] : stepToward(r.x, r.y, wx, wy, Math.min(step2, remain));
-    r.x = nx;
-    r.y = ny;
+    this.moveCenter(r, nx, ny);
     r.moved = true;
     if (remain - step <= 0 && !last) r.pathIdx += 1;
     return false;
@@ -1468,7 +1545,9 @@ export class LegionMatch {
     let bestD = Infinity;
     for (const t of this.regiments) {
       if (this.gone(t) || t.owner === r.owner || this.visible[r.owner][t.id] !== 1) continue;
-      const lim = r.def.range > 0 ? this.rangeTo(r, t.px, t.py) : range;
+      // 近戰團自動索敵只看同層（站在牆下打不到牆頂，不要為它停下）；明確下 attack 仍可以指定另一層的目標
+      if (r.def.range === 0 && t.layer !== r.layer) continue;
+      const lim = r.def.range > 0 ? this.rangeTo(r, t.px, t.py, t.layer) : range;
       const d = isqrt((t.px - r.x) * (t.px - r.x) + (t.py - r.y) * (t.py - r.y)) - idiv(t.rad, 2);
       if (d <= lim && d < bestD) {
         bestD = d;
@@ -1492,10 +1571,10 @@ export class LegionMatch {
     return r.shape;
   }
 
-  /** 隊形縮窄：橫排兩端連線可通行的最大寬度（移動中多看前方）；最窄步兵 3 人、騎兵 2 騎；0 = 不用縮 */
+  /** 隊形縮窄：橫排兩端連線可通行的最大寬度（移動中多看前方）；最窄步兵 3 人、騎兵 2 騎、牆頂 1 人（縱隊）；0 = 不用縮 */
   private corridorWidth(r: Regiment, want: number): number {
     if (r.formation === 'circle') return 0;
-    const floor = Math.min(want, r.def.cavalry ? 2 : 3);
+    const floor = Math.min(want, r.layer === WALL_LAYER ? 1 : r.def.cavalry ? 2 : 3);
     const ahead = r.moved ? [0, 2000, 4000] : [0];
     const c = icos(r.facing);
     const s = isin(r.facing);
@@ -1505,7 +1584,7 @@ export class LegionMatch {
       for (const a of ahead) {
         const mx = r.x + tdiv(c * a, 10000);
         const my = r.y + tdiv(s * a, 10000);
-        if (!clearLine(this.map, mx + tdiv(s * half, 10000), my - tdiv(c * half, 10000), mx - tdiv(s * half, 10000), my + tdiv(c * half, 10000))) {
+        if (!clearLine(this.map, mx + tdiv(s * half, 10000), my - tdiv(c * half, 10000), mx - tdiv(s * half, 10000), my + tdiv(c * half, 10000), r.layer, r.def.cavalry)) {
           ok = false;
           break;
         }
@@ -1536,7 +1615,7 @@ export class LegionMatch {
       const lat = off[ord * 2 + 1];
       let x = r.x + tdiv(fwd * c - lat * s, 10000);
       let y = r.y + tdiv(fwd * s + lat * c, 10000);
-      if (!walkable(this.terrainAt(x, y))) [x, y] = snapPoint(this.map, x, y, r.owner === 1);
+      if (!walkableAt(this.terrainAt(x, y), r.layer)) [x, y] = snapPoint(this.map, x, y, this.flipFor(r.owner), r.layer);
       sol.sx = x;
       sol.sy = y;
       lag += Math.abs(sol.x - x) + Math.abs(sol.y - y);
@@ -1580,7 +1659,8 @@ export class LegionMatch {
           if (o.owner === s.owner || !o.alive) continue;
           if (skipDown && (o.downUntil > this.tick || s.struck.includes(id))) continue;
           const d = (o.x - s.x) * (o.x - s.x) + (o.y - s.y) * (o.y - s.y);
-          if (d < bestD || (d === bestD && id < best)) {
+          // 只找同層的敵兵（s.layer < 0 = 不限層，齊射落點用）；層的比較放在距離之後
+          if ((d < bestD || (d === bestD && id < best)) && (o.layer === s.layer || s.layer < 0)) {
             bestD = d;
             best = id;
           }
@@ -1616,11 +1696,21 @@ export class LegionMatch {
     let gx = s.sx;
     let gy = s.sy;
     let chase = this.chaseRadius(r);
+    // 和軍團不在同一層（軍團已經上牆、自己還在地面，或反過來）：先走到軍團經過的樓梯換層，不追人；
+    // 已經站在樓梯上就照常走向隊形位置（踏出樓梯的那一步才換層）
+    const offLayer = s.layer !== r.layer && r.stairX >= 0;
+    if (offLayer) {
+      chase = 0;
+      if (this.terrainAt(s.x, s.y) !== T.Stair) {
+        gx = r.stairX;
+        gy = r.stairY;
+      }
+    }
     // 弓兵被貼身：拉不開弓，上前近戰（站著射箭的弓兵平常不追）
-    if (chase === 0 && r.def.range > 0 && r.nearEnemy && r.dash === null && r.order !== 'move' && r.order !== 'follow' && this.nearestEnemy(s, RULES.ranged.pinned) >= 0) chase = RULES.ranged.pinned;
+    if (chase === 0 && !offLayer && r.def.range > 0 && r.nearEnemy && r.dash === null && r.order !== 'move' && r.order !== 'follow' && this.nearestEnemy(s, RULES.ranged.pinned) >= 0) chase = RULES.ranged.pinned;
     if (chase > 0) {
       let t = s.target >= 0 ? this.soldiers[s.target] : null;
-      if (t === null || !t.alive || this.tick >= s.nextRetarget) {
+      if (t === null || !t.alive || t.layer !== s.layer || this.tick >= s.nextRetarget) {
         s.target = this.nearestEnemy(s, chase);
         s.nextRetarget = this.tick + RULES.soldier.retarget;
         t = s.target >= 0 ? this.soldiers[s.target] : null;
@@ -1647,11 +1737,13 @@ export class LegionMatch {
     } else if (s.target >= 0) {
       s.target = -1;
     }
-    // 直線被地形擋住：先往軍團中心走
-    if (gx === s.sx && gy === s.sy && (this.tick + s.k) % 10 === 0) s.blocked = !clearLine(this.map, s.x, s.y, gx, gy);
-    if (s.blocked && gx === s.sx && gy === s.sy) [gx, gy] = snapPoint(this.map, r.x, r.y, r.owner === 1);
+    // 直線被地形擋住：先往軍團中心走（換層中的人直接走向樓梯，不用這條）
+    const cav = r.def.cavalry;
+    if (!offLayer && gx === s.sx && gy === s.sy && (this.tick + s.k) % 10 === 0) s.blocked = !clearLine(this.map, s.x, s.y, gx, gy, s.layer, cav);
+    if (!offLayer && s.blocked && gx === s.sx && gy === s.sy) [gx, gy] = snapPoint(this.map, r.x, r.y, this.flipFor(r.owner), s.layer);
     let x = s.x;
     let y = s.y;
+    let layer = s.layer;
     const dx = gx - x;
     const dy = gy - y;
     if (dx !== 0 || dy !== 0) {
@@ -1659,33 +1751,50 @@ export class LegionMatch {
       const [px, py] = stepToward(x, y, gx, gy, speed);
       const sp = dashing ? speed : this.slope(speed, x, y, px, py);
       const [nx, ny] = sp === speed ? [px, py] : stepToward(x, y, gx, gy, sp);
-      const t = dashing && !r.dash!.aligning ? this.terrainAt(nx, ny) : T.Plain;
-      if (dashing && (r.dash!.def.kind === 'charge' ? stopsCavalry(t) : !walkable(t))) {
-        // 衝刺中碰到擋衝刺的地形（騎兵：樹林、淺灘、河流、建築、城牆；步兵：河流、建築、城牆）：這個人停在邊上，退出衝刺
+      // 衝刺中（對準方向的階段不算）碰到擋衝刺的地形（騎兵：樹林、淺灘、河流、建築、城牆、樓梯、門樓；步兵：河流、建築、另一層的牆或地面）：
+      // 這個人停在邊上，退出衝刺
+      const running = dashing && !r.dash!.aligning;
+      if (running && (r.dash!.def.kind === 'charge' ? stopsCavalry(this.terrainAt(nx, ny)) : this.stepAt(layer, x, y, nx, ny, cav) < 0)) {
         s.dashing = false;
-      } else [x, y] = this.slide(x, y, nx, ny);
+      } else [x, y, layer] = this.slide(x, y, nx, ny, layer, cav);
     }
     // 槍林、盾牆：原地不動、不被推開（霸體）；衝刺中、突擊擠進敵陣時不和敵兵互推
     const hold = r.brace === 2 || r.wall === 2;
-    if (r.nearEnemy && !hold) [x, y] = this.separate(s, x, y, dashing || r.penetrateUntil > this.tick);
+    if (r.nearEnemy && !hold) [x, y, layer] = this.separate(s, x, y, layer, cav, dashing || r.penetrateUntil > this.tick);
     this.nx[s.id] = x;
     this.ny[s.id] = y;
+    this.nl[s.id] = layer;
   }
 
-  /** 從 (x, y) 往 (nx, ny)：不可通行就沿單一軸滑動，都不行就不動 */
-  private slide(x: number, y: number, nx: number, ny: number): [number, number] {
-    if (walkable(this.terrainAt(nx, ny))) return [nx, ny];
-    if (walkable(this.terrainAt(nx, y))) return [nx, y];
-    if (walkable(this.terrainAt(x, ny))) return [x, ny];
-    return [x, y];
+  /** 從 (x, y)（層 layer）跨到 (nx, ny) 後的層；-1 = 不能走。同一格內移動不換層 */
+  private stepAt(layer: number, x: number, y: number, nx: number, ny: number, cavalry: boolean): number {
+    const t = this.terrainAt(nx, ny);
+    // 地面層在平地類地形之間：最常見的情況，不用查來源格；河流與建築哪一層都進不去
+    if (layer === 0 && t !== T.River && t < T.Building) return 0;
+    if (t === T.River || t === T.Building) return -1;
+    const [fx, fy] = tileXY(x, y, this.map.width, this.map.height);
+    const [tx, ty] = tileXY(nx, ny, this.map.width, this.map.height);
+    if (fx === tx && fy === ty) return layer;
+    return stepLayer(layer, this.terrainAt(x, y), t, cavalry);
+  }
+
+  /** 從 (x, y)（層 layer）往 (nx, ny)：不可通行就沿單一軸滑動，都不行就不動；回傳新位置與新層 */
+  private slide(x: number, y: number, nx: number, ny: number, layer: number, cavalry: boolean): [number, number, number] {
+    let l = this.stepAt(layer, x, y, nx, ny, cavalry);
+    if (l >= 0) return [nx, ny, l];
+    l = this.stepAt(layer, x, y, nx, y, cavalry);
+    if (l >= 0) return [nx, y, l];
+    l = this.stepAt(layer, x, y, x, ny, cavalry);
+    if (l >= 0) return [x, ny, l];
+    return [x, y, layer];
   }
 
   private place(s: Soldier, nx: number, ny: number): void {
-    [s.x, s.y] = this.slide(s.x, s.y, nx, ny);
+    [s.x, s.y, s.layer] = this.slide(s.x, s.y, nx, ny, s.layer, this.regiments[s.reg].def.cavalry);
   }
 
-  /** 推擠：以自己移動後的位置對其他士兵 tick 開始時的位置；倒地的人不擋路 */
-  private separate(s: Soldier, x: number, y: number, ignoreEnemy: boolean): [number, number] {
+  /** 推擠：以自己移動後的位置對其他士兵 tick 開始時的位置；倒地的人不擋路；只和同層的人互推 */
+  private separate(s: Soldier, x: number, y: number, layer: number, cavalry: boolean, ignoreEnemy: boolean): [number, number, number] {
     const g = this.grid;
     const [qx, qy] = tileXY(x, y, g.w, g.h);
     const cx = Math.min(g.w - 1, Math.max(0, qx));
@@ -1705,7 +1814,8 @@ export class LegionMatch {
           const dx = x - o.x;
           const dy = y - o.y;
           const d2 = dx * dx + dy * dy;
-          if (d2 >= gap * gap) continue;
+          // 層的比較放在距離之後：絕大多數鄰兵在距離就被剔除，少讀一次屬性
+          if (d2 >= gap * gap || o.layer !== layer) continue;
           if (d2 === 0) {
             // 完全重疊：往己方那一側推（友軍依序號分兩邊）
             px -= side * idiv(gap, 4) * (friend && s.k > o.k ? -1 : 1);
@@ -1718,11 +1828,11 @@ export class LegionMatch {
         }
       }
     }
-    if (px === 0 && py === 0) return [x, y];
+    if (px === 0 && py === 0) return [x, y, layer];
     const lim = 200;
     px = Math.max(-lim, Math.min(lim, px));
     py = Math.max(-lim, Math.min(lim, py));
-    return this.slide(x, y, x + px, y + py);
+    return this.slide(x, y, x + px, y + py, layer, cavalry);
   }
 
   // ───────── 傷害計算 ─────────
@@ -1821,8 +1931,9 @@ export class LegionMatch {
     return best;
   }
 
-  private heightPct(ax: number, ay: number, bx: number, by: number, per: number): number {
-    return 100 + per * clampLevel(this.heightOf(ax, ay) - this.heightOf(bx, by));
+  /** 高低差加成（含層）：a 打 b，每高 1 階 +per%，上限 clamp 階 */
+  private heightPct(ax: number, ay: number, al: number, bx: number, by: number, bl: number, per: number): number {
+    return 100 + per * clampLevel(this.heightOfAt(ax, ay, al) - this.heightOfAt(bx, by, bl));
   }
 
   private damage(e: Soldier, amount: number, by: Regiment): void {
@@ -1891,7 +2002,7 @@ export class LegionMatch {
       if (r.nearEnemy) {
         let e = s.target >= 0 ? this.soldiers[s.target] : null;
         const reach2 = r.def.reach * r.def.reach;
-        if (e === null || !e.alive || (e.x - s.x) * (e.x - s.x) + (e.y - s.y) * (e.y - s.y) > reach2) {
+        if (e === null || !e.alive || e.layer !== s.layer || (e.x - s.x) * (e.x - s.x) + (e.y - s.y) * (e.y - s.y) > reach2) {
           const id = this.nearestEnemy(s, r.def.reach);
           e = id >= 0 ? this.soldiers[id] : null;
         }
@@ -1974,7 +2085,7 @@ export class LegionMatch {
     if (cav) {
       const vs = VERSUS[r.kind][t.kind] ?? 100;
       let pct = idiv(idiv(this.vetPct(r) * vs, 100) * FLANK_PCT[fl], 100);
-      pct = idiv(pct * this.heightPct(s.x, s.y, e.x, e.y, RULES.height.meleePerLevel), 100);
+      pct = idiv(pct * this.heightPct(s.x, s.y, s.layer, e.x, e.y, e.layer, RULES.height.meleePerLevel), 100);
       pct = idiv(pct * d.boost, 100);
       const dmg = idiv(idiv(d.def.impact * ratio, 100) * idiv(pct * this.takenPct(e, t, fl, false, s.x, s.y), 100), 100);
       this.queue(e, dmg, r, immune ? 0 : px, immune ? 0 : py, !immune, 0);
@@ -2022,7 +2133,7 @@ export class LegionMatch {
     const fl = this.flankOf(r, t);
     const vs = VERSUS[r.kind][t.kind] ?? 100;
     let pct = idiv(idiv(this.vetPct(r) * vs, 100) * FLANK_PCT[fl], 100);
-    pct = idiv(pct * this.heightPct(s.x, s.y, e.x, e.y, RULES.height.meleePerLevel), 100);
+    pct = idiv(pct * this.heightPct(s.x, s.y, s.layer, e.x, e.y, e.layer, RULES.height.meleePerLevel), 100);
     let cd = r.def.cooldown;
     let mom = 0;
     // 槍林：正面撞來的敵人越快傷害越高；正面攻速加成；刺中衝刺中的人扣衝勁
@@ -2060,7 +2171,7 @@ export class LegionMatch {
     const e = this.soldiers[t.slots[this.rng.nextInt(t.slots.length)]];
     const dx = e.x - s.x;
     const dy = e.y - s.y;
-    const range = this.rangeTo(r, e.x, e.y, s.x, s.y);
+    const range = this.rangeTo(r, e.x, e.y, e.layer, s.x, s.y, s.layer);
     if (dx * dx + dy * dy > range * range) return false;
     r.lastShot = this.tick;
     const d = isqrt(dx * dx + dy * dy);
@@ -2072,7 +2183,7 @@ export class LegionMatch {
       x1 += this.rng.range(-RULES.ranged.missSpread, RULES.ranged.missSpread);
       y1 += this.rng.range(-RULES.ranged.missSpread, RULES.ranged.missSpread);
     }
-    this.projectiles.push({ x0: s.x, y0: s.y, x1, y1, t0: this.tick, t1: this.tick + Math.max(2, idiv(d, RULES.ranged.arrowSpeed)), target: hit ? e.id : -1, dmg: this.arrowDamage(r, s, e.x, e.y), reg: r.id, owner: r.owner });
+    this.projectiles.push({ x0: s.x, y0: s.y, x1, y1, t0: this.tick, t1: this.tick + Math.max(2, idiv(d, RULES.ranged.arrowSpeed)), target: hit ? e.id : -1, dmg: this.arrowDamage(r, s, e.x, e.y, e.layer), reg: r.id, owner: r.owner });
     if (this.terrainAt(r.x, r.y) === T.Forest) r.revealedUntil = this.tick + RULES.vision.revealTicks;
     return true;
   }
@@ -2094,14 +2205,14 @@ export class LegionMatch {
     const dy = y1 - s.y;
     const d = isqrt(dx * dx + dy * dy);
     r.lastShot = this.tick;
-    this.projectiles.push({ x0: s.x, y0: s.y, x1, y1, t0: this.tick, t1: this.tick + Math.max(2, idiv(d, RULES.ranged.arrowSpeed)), target: -2, dmg: this.arrowDamage(r, s, x1, y1), reg: r.id, owner: r.owner });
+    this.projectiles.push({ x0: s.x, y0: s.y, x1, y1, t0: this.tick, t1: this.tick + Math.max(2, idiv(d, RULES.ranged.arrowSpeed)), target: -2, dmg: this.arrowDamage(r, s, x1, y1, this.pointLayer(x1, y1)), reg: r.id, owner: r.owner });
     if (this.terrainAt(r.x, r.y) === T.Forest) r.revealedUntil = this.tick + RULES.vision.revealTicks;
     return Math.max(1, idiv(r.def.cooldown, RULES.volley.rateDiv));
   }
 
-  /** 箭的傷害（減免在落地時算） */
-  private arrowDamage(r: Regiment, s: Soldier, x: number, y: number): number {
-    const pct = idiv(this.vetPct(r) * this.heightPct(s.x, s.y, x, y, RULES.height.rangedPerLevel), 100);
+  /** 箭的傷害（減免在落地時算）；tl = 目標所在的層 */
+  private arrowDamage(r: Regiment, s: Soldier, x: number, y: number, tl: number): number {
+    const pct = idiv(this.vetPct(r) * this.heightPct(s.x, s.y, s.layer, x, y, tl, RULES.height.rangedPerLevel), 100);
     return idiv(r.def.attack * pct, 100);
   }
 
@@ -2116,8 +2227,8 @@ export class LegionMatch {
       let e: Soldier | null = null;
       if (p.target >= 0) e = this.soldiers[p.target];
       else if (p.target === -2) {
-        // 齊射：落點附近最近的敵兵（看不到的也打得到）
-        const probe = { x: p.x1, y: p.y1, owner: p.owner } as Soldier;
+        // 齊射：落點附近最近的敵兵（看不到的也打得到；不分層）
+        const probe = { x: p.x1, y: p.y1, owner: p.owner, layer: -1 } as Soldier;
         const id = this.nearestEnemy(probe, RULES.volley.hitRadius);
         if (id >= 0) {
           e = this.soldiers[id];
@@ -2217,8 +2328,8 @@ export class LegionMatch {
             const det = o.kind === 'light' ? RULES.vision.concealDetectLight : RULES.vision.concealDetect;
             if (d - o.rad - t.rad <= det) v = 1;
           } else {
-            const sight = o.def.sight + RULES.height.sightPerLevel * Math.max(0, this.heightOf(o.x, o.y) - 1);
-            if (d - t.rad <= sight && !sightBlocked(this.map, o.x, o.y, t.x, t.y)) v = 1;
+            const sight = o.def.sight + RULES.height.sightPerLevel * Math.max(0, this.heightOfAt(o.x, o.y, o.layer) - 1);
+            if (d - t.rad <= sight && !sightBlocked(this.map, o.x, o.y, t.x, t.y, o.layer, t.layer)) v = 1;
           }
           if (v === 1) break;
         }
@@ -2395,6 +2506,8 @@ export class LegionMatch {
     for (const s of this.soldiers) {
       if (!s.alive) continue;
       h.int(s.id).int(s.x).int(s.y).int(s.hp).int(s.cd).int(s.target).int(s.downUntil).bool(s.dashing).int(s.mom).bool(s.firstHit).int(s.counterAt);
+      // 層只在非 0 時納入：沒有城牆的地圖雜湊值與 0.3 完全相同
+      if (s.layer !== 0) h.int(s.layer);
     }
     for (const r of this.regiments) {
       h.int(r.x).int(r.y).int(r.facing).str(r.formation).int(r.width).int(r.depth).int(r.switchUntil).int(r.corridor).int(r.slots.length).int(r.target).int(r.fireTarget);
@@ -2402,6 +2515,7 @@ export class LegionMatch {
       h.bool(r.routed).bool(r.destroyed).bool(r.reserve).int(r.enterAt).int(r.enterX).int(r.enterY).int(r.parked.length).int(r.revealedUntil).int(r.spottedSince).int(r.lastHidden).str(r.order).int(r.followId);
       if (r.dash !== null) h.int(r.dash.dir).int(r.dash.left).int(r.dash.speed).int(r.dash.boost).bool(r.dash.aligning);
       if (r.volley !== null) h.int(r.volley.x).int(r.volley.y).int(r.volley.until);
+      if (r.layer !== 0) h.int(r.layer).int(r.stairX).int(r.stairY);
     }
     for (const p of this.projectiles) h.int(p.t1).int(p.target).int(p.dmg).int(p.x1).int(p.y1);
     for (const f of this.flags) h.int(f.owner).int(f.capturer).int(f.progress).int(f.contested ? 1 : 0);

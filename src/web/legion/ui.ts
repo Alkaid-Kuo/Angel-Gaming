@@ -35,7 +35,9 @@ const TERRAIN_TIP = [
   '不可通行',
   '移動 ×1.25・只有 3 格寬',
   '不可通行・擋住視線',
-  '不可通行・擋住視線',
+  '只有牆頂（層 1）可走・擋住視線・牆頂高度 ＝ 地面 ＋ 3 階',
+  '地面與牆頂之間的樓梯：進入即換層・移動 ×0.5・騎兵不可',
+  '門樓：牆頂永遠可走；地面在城門開啟時可走・擋住視線',
 ];
 const SKILL_NAME: Record<SkillKind, string> = { brace: '槍林', assault: '突擊', shield: '持盾／舉盾／盾牆', volley: '齊射', infiltrate: '切入', charge: '衝鋒' };
 const HEIGHT_TIP = `每高 1 階：視野 +${RULES.height.sightPerLevel / TILE} 格、弓兵射程 +${RULES.height.rangePerLevel / TILE} 格、打較低的敵人傷害 +${RULES.height.rangedPerLevel}%（高低差最多算 ${RULES.height.clamp} 階）・上坡移動 ×${RULES.height.uphillSpeed / 100}、下坡 ×${RULES.height.downhillSpeed / 100}`;

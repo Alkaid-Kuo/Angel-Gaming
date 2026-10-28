@@ -110,6 +110,8 @@ function paintTerrain(meta: LegionMeta): HTMLCanvasElement {
     [T.Bridge]: [120, 92, 62],
     [T.Building]: [90, 90, 90],
     [T.Wall]: [70, 70, 70],
+    [T.Stair]: [150, 140, 120],
+    [T.Gatehouse]: [110, 96, 80],
   };
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {

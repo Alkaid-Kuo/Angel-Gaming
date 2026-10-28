@@ -299,17 +299,74 @@ export const T = {
   Bridge: 6,
   Building: 7,
   Wall: 8,
+  /** 樓梯：城內側與牆相鄰的格，進入即切換層（0↔1），速度 ×50%；騎兵不可進 */
+  Stair: 9,
+  /** 門樓：牆頂（層 1）永遠可走；地面（層 0）由城門狀態決定 */
+  Gatehouse: 10,
 } as const;
 
-export const TERRAIN_NAMES = ['平地', '道路', '樹林', '高地', '淺灘', '河流', '橋', '建築', '城牆'] as const;
+export const TERRAIN_NAMES = ['平地', '道路', '樹林', '高地', '淺灘', '河流', '橋', '建築', '城牆', '樓梯', '門樓'] as const;
 
+/** 層：0 地面、1 牆頂（之後塔樓可擴）。牆頂高度 ＝ 地面高度 ＋ WALL_LEVELS 階 */
+export const GROUND_LAYER = 0;
+export const WALL_LAYER = 1;
+export const WALL_LEVELS = 3;
+
+/**
+ * 城門狀態佔位（引擎 0.4 步驟 2 才做城門物件）：門關著時門樓格在地面層不可走。
+ * 這一步所有門樓都用這個預設值。
+ */
+export const GATE_OPEN_DEFAULT = false;
+
+/** 地面層（層 0、城門關閉）可走：沿用 0.3 的語意，給布陣檢查、吸附與觀戰網頁用 */
 export function walkable(t: number): boolean {
-  return t !== T.River && t !== T.Building && t !== T.Wall;
+  return t !== T.River && t !== T.Building && t !== T.Wall && t !== T.Gatehouse;
 }
 
-/** 擋得住騎兵衝鋒的地形 */
+/** 牆頂層（層 1）可走：城牆、門樓、樓梯 */
+export function walkableTop(t: number): boolean {
+  return t === T.Wall || t === T.Gatehouse || t === T.Stair;
+}
+
+/** 某一層可走（門樓在地面層依城門狀態） */
+export function walkableAt(t: number, layer: number, gateOpen = GATE_OPEN_DEFAULT): boolean {
+  if (layer === WALL_LAYER) return walkableTop(t);
+  return walkable(t) || (gateOpen && t === T.Gatehouse);
+}
+
+/** 任何一層可走（尋路終點是否合法） */
+export function walkableAny(t: number): boolean {
+  return walkable(t) || walkableTop(t);
+}
+
+/**
+ * 從地形 fromT（所在層 layer）踏進相鄰格 toT 後的層；不能走回傳 -1。
+ * 規則：踏進樓梯立即切換層；從樓梯往牆或往地面都可走，層由目的格決定；
+ * 城牆只有層 1；門樓層 1 永遠可走、層 0 看城門；騎兵不得進樓梯。
+ */
+export function stepLayer(layer: number, fromT: number, toT: number, cavalry: boolean, gateOpen = GATE_OPEN_DEFAULT): number {
+  switch (toT) {
+    case T.River:
+    case T.Building:
+      return -1;
+    case T.Wall:
+      return layer === WALL_LAYER || fromT === T.Stair ? WALL_LAYER : -1;
+    case T.Stair:
+      if (cavalry) return -1;
+      if (fromT === T.Stair) return layer;
+      return layer === WALL_LAYER ? GROUND_LAYER : WALL_LAYER;
+    case T.Gatehouse:
+      if (fromT === T.Stair) return layer === WALL_LAYER || !gateOpen ? WALL_LAYER : GROUND_LAYER;
+      if (layer === WALL_LAYER) return WALL_LAYER;
+      return gateOpen ? GROUND_LAYER : -1;
+    default:
+      return layer === GROUND_LAYER || fromT === T.Stair || (fromT === T.Gatehouse && gateOpen) ? GROUND_LAYER : -1;
+  }
+}
+
+/** 擋得住騎兵衝鋒的地形（樓梯、城牆、門樓都算） */
 export function stopsCavalry(t: number): boolean {
-  return t === T.Forest || t === T.Shallow || !walkable(t);
+  return t === T.Forest || t === T.Shallow || t === T.Stair || !walkable(t);
 }
 
 /** 地形移動倍率（百分比） */
@@ -321,6 +378,7 @@ export function terrainSpeed(t: number, kind: UnitKind): number {
     case T.Forest:
       return kind === 'light' ? 100 : 60;
     case T.Shallow:
+    case T.Stair:
       return 50;
     default:
       return 100;
@@ -336,6 +394,7 @@ export function terrainCost(t: number): number {
     case T.Forest:
       return 170;
     case T.Shallow:
+    case T.Stair:
       return 200;
     default:
       return 100;

@@ -54,7 +54,10 @@ export interface LegionInitData {
     readonly name: string;
     readonly width: number;
     readonly height: number;
-    /** 列優先的地形代碼：0 平地、1 道路、2 樹林、3 高地（高度 3 階以上的平地）、4 淺灘、5 河流、6 橋、7 建築、8 城牆 */
+    /**
+     * 列優先的地形代碼：0 平地、1 道路、2 樹林、3 高地（高度 3 階以上的平地）、4 淺灘、5 河流、6 橋、7 建築、8 城牆、
+     * 9 樓梯（進入即在地面與牆頂之間換層，速度 ×0.5，騎兵不可）、10 門樓（牆頂永遠可走；地面在城門開啟時可走）
+     */
     readonly terrain: readonly number[];
     /** 列優先的高度階（0～5） */
     readonly heights: readonly number[];
@@ -98,6 +101,8 @@ export interface Deployment {
   readonly formation?: FormationKind;
   /** 盾兵姿態（持盾或舉盾） */
   readonly stance?: ShieldStance;
+  /** 層（預設 0 地面）：1 = 牆頂，位置必須在城牆、門樓或樓梯格上，騎兵不可 */
+  readonly layer?: number;
   /** 佔點模式：放在後備（不用給位置）。場上超過上限的也會自動轉成後備 */
   readonly reserve?: boolean;
 }
@@ -151,9 +156,11 @@ export interface OwnRegiment {
   /** 正在倒地的人數 */
   readonly down: number;
   readonly routed: boolean;
-  /** 所在地形代碼與高度階 */
+  /** 所在地形代碼與高度階（高度含層：牆頂 ＝ 地面 ＋ 3 階） */
   readonly terrain: number;
   readonly height: number;
+  /** 所在層：0 地面、1 牆頂。近戰、衝刺、碰撞只發生在同層；射擊可跨層 */
+  readonly layer: number;
   /** 半徑（單位）：中心到最遠士兵 */
   readonly radius: number;
   /** 佔點模式：在後備（不在場上；位置是出生點）；還要幾個 tick 入場（-1 = 沒有排定） */
@@ -178,7 +185,10 @@ export interface EnemyRegiment {
   readonly dashing: DashKind | null;
   readonly routed: boolean;
   readonly terrain: number;
+  /** 高度含層（牆頂 ＝ 地面 ＋ 3 階） */
   readonly height: number;
+  /** 所在層：0 地面、1 牆頂 */
+  readonly layer: number;
   readonly radius: number;
 }
 
