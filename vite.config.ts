@@ -8,7 +8,7 @@ export default defineConfig({
     outDir: 'dist-web',
     emptyOutDir: true,
     target: 'es2022',
-    rollupOptions: { input: { main: 'web/index.html', legion: 'web/legion.html' } },
+    rollupOptions: { input: { main: 'web/index.html', legion: 'web/legion.html', legionMap3d: 'web/legion-map3d.html' } },
   },
   worker: {
     format: 'es',
