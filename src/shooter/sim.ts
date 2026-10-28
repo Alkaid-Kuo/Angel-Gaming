@@ -1,8 +1,9 @@
-// CS 射擊模擬核心（規格書 v0.2；確定性、全整數）。步驟 1：移動碰撞、視錐視線、槍械、炸彈、回合流程、換邊、雜湊。
-// 步驟 2：友軍傷害、經濟（金錢、購買、回合結算）。道具在步驟 3（本步驟只做購買與攜帶）。
+// CS 射擊模擬核心（規格書 v0.3；確定性、全整數）。步驟 1：移動碰撞、視錐視線、槍械、炸彈、回合流程、換邊、雜湊。
+// 步驟 2：友軍傷害、經濟（金錢、購買、回合結算）。步驟 3：道具（投擲、煙霧、閃光、手雷、燃燒）。
 //
-// 每 tick：（決策 tick 先由驅動層套用指令）→ 轉身（上限）→ 移動（圓對格碰撞、沿牆滑動）→ 開火（hitscan；傷害同時結算）
-// → 換彈、冷卻、後座力回復 → 下包、拆包 → 撿炸彈 → 腳步聲 → 炸彈倒數 → 回合判定。
+// 每 tick：（決策 tick 先由驅動層套用指令）→ 轉身（上限）→ 移動（圓對格碰撞、沿牆滑動）→ 致盲與投擲冷卻倒數
+// → 投射物飛行與生效（閃光、煙霧、手雷、燃燒點火）→ 煙霧撲滅火 → 開火（hitscan；傷害同時結算）
+// → 換彈、冷卻、後座力回復 → 火焰結算 → 下包、拆包 → 撿炸彈 → 腳步聲 → 炸彈倒數 → 回合判定。
 // 角度：內部朝向用百分度（0.01°），給選手的觀察資料是整數度。
 import { Hasher } from '../shared/hash.ts';
 import { cdegDiff, iatan2C, icosC, isinC, normCdeg, stepToward } from '../shared/geom.ts';
@@ -13,8 +14,10 @@ import type {
   BombInfo,
   BombState,
   DroppedItem,
+  AreaEffect,
   EnemyInfo,
   KnobValues,
+  ProjectileInfo,
   RadarContact,
   RoundEndReason,
   RoundPhase,
@@ -52,7 +55,7 @@ import {
 } from './config.ts';
 import { DEFAULT_MAP_ID, MAPS, cellOf, inRect, mapInfo, type Rect, type ShooterMap } from './map.ts';
 import { circleHitsWall, findPath } from './path.ts';
-import { distance, inCone, lineOfSight, quantizeDir, rayWallDistance, soundRange } from './vision.ts';
+import { distance, inCone, lineOfSight, quantizeDir, rayWallDistance, soundRange, type SightBlocker } from './vision.ts';
 
 export const PLAYER_COUNT = TEAM_SIZE * 2;
 /** 回放雜湊間隔（tick；沿用 RTS／軍團戰） */
@@ -108,8 +111,10 @@ export interface Player {
   kit: boolean;
   /** 金錢（0～maxMoney） */
   money: number;
-  /** 攜帶的道具（依購買順序；投擲在步驟 3） */
+  /** 攜帶的道具（依購買順序；投出後移除） */
   grenades: GrenadeId[];
+  /** 投擲冷卻剩餘 tick */
+  throwCd: number;
   primary: WeaponState | null;
   secondary: WeaponState | null;
   active: WeaponSlot;
@@ -161,6 +166,40 @@ export interface Item {
   readonly y: number;
 }
 
+/** 還沒生效的道具（飛行中或已落地等引信） */
+export interface Projectile {
+  readonly kind: GrenadeId;
+  readonly owner: number;
+  x: number;
+  y: number;
+  /** 飛行方向（×10000） */
+  dx: number;
+  dy: number;
+  /** 剩餘飛行距離（座標單位） */
+  left: number;
+  bounces: number;
+  moving: boolean;
+  /** 生效 tick（燃燒為上限） */
+  readonly fuseTick: number;
+}
+
+export interface Smoke {
+  readonly x: number;
+  readonly y: number;
+  readonly owner: number;
+  readonly startTick: number;
+  readonly endTick: number;
+}
+
+export interface Fire {
+  readonly x: number;
+  readonly y: number;
+  readonly owner: number;
+  readonly kind: GrenadeId;
+  readonly startTick: number;
+  readonly endTick: number;
+}
+
 interface Sound {
   readonly tick: number;
   readonly kind: SoundKind;
@@ -191,6 +230,12 @@ export interface RoundRecord {
   readonly money: readonly [number, number];
   /** 各組在購買時間結束時是否全買（≥ 4 人有步槍級主武器＋護甲） */
   readonly fullBuy: readonly [boolean, boolean];
+  /** 各組本回合投出的道具數 */
+  readonly throws: readonly [number, number];
+  /** 各組的閃光讓敵人致盲的總 tick 數（每人取實際增加的量） */
+  readonly flashEnemyTicks: readonly [number, number];
+  /** 各組的閃光讓自己隊（含自己）致盲的總 tick 數 */
+  readonly flashTeamTicks: readonly [number, number];
 }
 
 export interface KillRecord {
@@ -198,7 +243,7 @@ export interface KillRecord {
   readonly round: number;
   readonly killer: number;
   readonly victim: number;
-  readonly weapon: WeaponId | 'bomb';
+  readonly weapon: WeaponId | GrenadeId | 'bomb';
 }
 
 export interface ShooterResult {
@@ -235,6 +280,33 @@ interface PendingHit {
 }
 
 const weaponState = (id: WeaponId): WeaponState => ({ id, mag: WEAPONS[id].magazine, reserve: WEAPONS[id].reserve });
+const isGrenade = (v: unknown): v is GrenadeId => typeof v === 'string' && (GRENADE_IDS as readonly string[]).includes(v);
+
+/** 煙霧在 tick 時的實際半徑：生效後 smokeBloomTicks 內從 0 線性長到 radius */
+export function smokeRadius(s: Smoke, tick: number): number {
+  const t = clamp(tick - s.startTick, 0, GRENADE_RULES.smokeBloomTicks);
+  return idiv(GRENADES.smoke.radius * t, GRENADE_RULES.smokeBloomTicks);
+}
+
+/** 閃光致盲時間（tick）：依朝向夾角取基礎值，再乘 1 − d／(2R)（外緣剩 flashEdgePct%） */
+export function flashTicks(facingC: number, px: number, py: number, fx: number, fy: number): number {
+  const R = GRENADES.flash.radius;
+  const d = distance(px, py, fx, fy);
+  if (d > R) return 0;
+  const off = d === 0 ? 0 : Math.abs(cdegDiff(iatan2C(fy - py, fx - px), facingC));
+  const base = off <= GRENADE_RULES.flashFrontDeg * 100 ? GRENADE_RULES.flashFrontTicks : off <= GRENADE_RULES.flashSideDeg * 100 ? GRENADE_RULES.flashSideTicks : GRENADE_RULES.flashBackTicks;
+  return idiv(base * (100 * R - (100 - GRENADE_RULES.flashEdgePct) * d), 100 * R);
+}
+
+/** HE 在距離 d 的傷害（護甲、友傷前）：中心 damage，線性衰減到半徑外緣 0 */
+export function heDamageAt(distUnits: number): number {
+  const g = GRENADES.he;
+  if (distUnits >= g.radius) return 0;
+  return idiv(g.damage * (g.radius - distUnits), g.radius);
+}
+
+/** 燃燒每次結算的傷害 */
+export const FIRE_TICK_DAMAGE = idiv(GRENADES.molotov.damage * GRENADE_RULES.fireTickInterval, TPS);
 
 /** 距離衰減後的傷害：每 10 格衰減 falloffPer10%，最低 20%；超過有效射程只剩 20% */
 export function damageAt(w: WeaponDef, distUnits: number): number {
@@ -313,6 +385,7 @@ function newPlayer(id: number): Player {
     kit: false,
     money: 0,
     grenades: [],
+    throwCd: 0,
     primary: null,
     secondary: weaponState('pistol'),
     active: 'secondary',
@@ -389,6 +462,20 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       armorPrice: ARMOR.price,
       kitPrice: DEFUSE_KIT.price,
       grenadeSlots: GRENADE_RULES.totalSlots,
+      grenadeRules: {
+        maxThrowRange: GRENADE_RULES.maxThrowRange,
+        flySpeed: GRENADE_RULES.flySpeed,
+        throwCooldownTicks: GRENADE_RULES.throwCooldownTicks,
+        smokeBloomTicks: GRENADE_RULES.smokeBloomTicks,
+        flashFrontTicks: GRENADE_RULES.flashFrontTicks,
+        flashSideTicks: GRENADE_RULES.flashSideTicks,
+        flashBackTicks: GRENADE_RULES.flashBackTicks,
+        flashFrontDeg: GRENADE_RULES.flashFrontDeg,
+        flashSideDeg: GRENADE_RULES.flashSideDeg,
+        flashEdgePct: GRENADE_RULES.flashEdgePct,
+        heArmorPct: GRENADE_RULES.heArmorPct,
+        fireTickInterval: GRENADE_RULES.fireTickInterval,
+      },
       economy: {
         startMoney: opts.startMoney ?? ECONOMY.startMoney,
         maxMoney: ECONOMY.maxMoney,
@@ -433,7 +520,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
     }),
     grenades: GRENADE_IDS.map((id) => {
       const g = GRENADES[id];
-      return { id, name: g.name, teams: g.teams, price: g.price, maxCarry: g.maxCarry, radius: g.radius, durationTicks: g.durationTicks, damage: g.damage };
+      return { id, name: g.name, teams: g.teams, price: g.price, maxCarry: g.maxCarry, fuseTicks: g.fuseTicks, radius: g.radius, durationTicks: g.durationTicks, damage: g.damage };
     }),
   };
 }
@@ -450,6 +537,9 @@ export class ShooterMatch {
   readonly players: Player[];
   readonly bomb: BombEntity = { state: 'carried', carrier: -1, x: 0, y: 0, site: null, explodeTick: 0, planter: -1, defuser: -1 };
   items: Item[] = [];
+  projectiles: Projectile[] = [];
+  smokes: Smoke[] = [];
+  fires: Fire[] = [];
   readonly rounds: RoundRecord[] = [];
   readonly kills: KillRecord[] = [];
   tick = 0;
@@ -467,6 +557,10 @@ export class ShooterMatch {
   /** 本回合開始時各組平均金錢、購買時間結束時是否全買（寫進 RoundRecord） */
   private roundMoneyAvg: [number, number] = [0, 0];
   private fullBuy: [boolean, boolean] | null = null;
+  /** 本回合各組的投擲數、閃光讓敵人／自己隊致盲的 tick 數（寫進 RoundRecord） */
+  private roundThrows: [number, number] = [0, 0];
+  private roundFlashEnemy: [number, number] = [0, 0];
+  private roundFlashTeam: [number, number] = [0, 0];
   over = false;
   winner: 0 | 1 | null = null;
   private readonly prng: Prng;
@@ -549,13 +643,20 @@ export class ShooterMatch {
       p.plantTicks = 0;
       p.defuseTicks = 0;
       p.blindTicks = 0;
+      p.throwCd = 0;
     }
     const ts = this.players.filter((p) => p.team === 'T');
     const carrier = ts[this.prng.nextInt(ts.length)];
     carrier.hasBomb = true;
     Object.assign(this.bomb, { state: 'carried', carrier: carrier.id, x: carrier.x, y: carrier.y, site: null, explodeTick: 0, planter: -1, defuser: -1 });
-    // 掉落物在回合交接時清除
+    // 掉落物、還沒生效的道具、煙霧、火在回合交接時清除
     this.items = [];
+    this.projectiles = [];
+    this.smokes = [];
+    this.fires = [];
+    this.roundThrows = [0, 0];
+    this.roundFlashEnemy = [0, 0];
+    this.roundFlashTeam = [0, 0];
     this.sounds = [];
     this.chat = [];
     this.roundMoneyAvg = [this.groupMoneyAvg(0), this.groupMoneyAvg(1)];
@@ -580,7 +681,7 @@ export class ShooterMatch {
     const lossPay = ladder[this.lossLevel[lg] - 1];
     const plantedLoss = winner === 'CT' && this.bomb.planter >= 0 ? ECONOMY.plantedLossBonus : 0;
     for (const p of this.players) this.addMoney(p, p.team === winner ? winPay : lossPay + plantedLoss);
-    this.rounds.push({ number: this.roundNumber, winner, winnerGroup: g, reason, endTick: this.tick, tGroup: this.groupOf('T'), money: [this.roundMoneyAvg[0], this.roundMoneyAvg[1]], fullBuy: [this.fullBuy[0], this.fullBuy[1]] });
+    this.rounds.push({ number: this.roundNumber, winner, winnerGroup: g, reason, endTick: this.tick, tGroup: this.groupOf('T'), money: [this.roundMoneyAvg[0], this.roundMoneyAvg[1]], fullBuy: [this.fullBuy[0], this.fullBuy[1]], throws: [this.roundThrows[0], this.roundThrows[1]], flashEnemyTicks: [this.roundFlashEnemy[0], this.roundFlashEnemy[1]], flashTeamTicks: [this.roundFlashTeam[0], this.roundFlashTeam[1]] });
     this.ended = { winner, reason };
     this.phase = 'over';
     this.phaseEnd = this.tick + ROUND.roundEndTicks;
@@ -794,9 +895,31 @@ export class ShooterMatch {
         if (!Array.isArray(cmd.items) || !this.canBuy(p)) return;
         for (const it of cmd.items.slice(0, MAX_BUY_ITEMS)) if (typeof it === 'string') this.buyOne(p, it);
         return;
+      case 'throw':
+        if (!isGrenade(cmd.grenade) || !isNum(cmd.deg) || !isNum(cmd.power)) return;
+        this.throwGrenade(p, cmd.grenade, roundHalfEven(cmd.deg), clamp(roundHalfEven(cmd.power), 0, 100));
+        return;
       default:
-      // throw（步驟 3）與未知指令：忽略
+      // 未知指令：忽略
     }
+  }
+
+  /** 投擲：手上要有該道具、不在凍結時間與投擲冷卻內；投出後從背包移除，停火、冷卻內不能開火 */
+  private throwGrenade(p: Player, kind: GrenadeId, deg: number, power: number): void {
+    if (this.phase === 'freeze' || p.throwCd > 0) return;
+    const idx = p.grenades.indexOf(kind);
+    if (idx < 0) return;
+    p.grenades.splice(idx, 1);
+    this.cancelAction(p);
+    p.fireHeld = false;
+    p.firePending = false;
+    p.scoped = false;
+    p.throwCd = GRENADE_RULES.throwCooldownTicks;
+    p.cooldown = Math.max(p.cooldown, GRENADE_RULES.throwCooldownTicks);
+    const c = normCdeg(deg * 100);
+    const left = idiv(power * GRENADE_RULES.maxThrowRange * UNIT, 100);
+    this.projectiles.push({ kind, owner: p.id, x: p.x, y: p.y, dx: icosC(c), dy: isinC(c), left, bounces: 0, moving: true, fuseTick: this.tick + GRENADES[kind].fuseTicks });
+    this.roundThrows[p.group] += 1;
   }
 
   /** 買一項；不合法（錢不夠、陣營不符、已有、超過攜帶上限、未知）就跳過 */
@@ -912,7 +1035,7 @@ export class ShooterMatch {
     Object.assign(this.bomb, { state: 'carried', carrier: p.id, x: p.x, y: p.y });
   }
 
-  private die(p: Player, killer: number, weapon: WeaponId | 'bomb'): void {
+  private die(p: Player, killer: number, weapon: WeaponId | GrenadeId | 'bomb'): void {
     p.alive = false;
     p.hp = 0;
     p.deaths += 1;
@@ -922,12 +1045,12 @@ export class ShooterMatch {
     p.firePending = false;
     p.vx = 0;
     p.vy = 0;
-    // 擊殺獎金當下發；隊殺 −300；T 被自己的炸彈炸死算自殺 −300；炸死的 CT 不算誰的擊殺
+    // 擊殺獎金當下發（道具為 grenadeKillReward）；隊殺 −300；道具炸死自己、T 被自己的炸彈炸死算自殺 −300；炸死的 CT 不算誰的擊殺
     if (killer >= 0 && weapon !== 'bomb') {
       const k = this.players[killer];
       if (k.team !== p.team) {
         k.kills += 1;
-        this.addMoney(k, WEAPONS[weapon].killReward);
+        this.addMoney(k, isGrenade(weapon) ? ECONOMY.grenadeKillReward : WEAPONS[weapon].killReward);
       } else this.addMoney(k, ECONOMY.teamKillPenalty);
     } else if (weapon === 'bomb' && p.team === 'T') this.addMoney(p, ECONOMY.teamKillPenalty);
     this.kills.push({ tick: this.tick, round: this.roundNumber, killer, victim: p.id, weapon });
@@ -956,8 +1079,15 @@ export class ShooterMatch {
     if (this.chat.length > 0 && this.chat[0].tick < keep) this.chat = this.chat.filter((s) => s.tick >= keep);
     for (const p of this.players) if (p.alive) this.turn(p);
     for (const p of this.players) if (p.alive) this.move(p);
+    for (const p of this.players) {
+      if (p.blindTicks > 0) p.blindTicks -= 1;
+      if (p.throwCd > 0) p.throwCd -= 1;
+    }
+    if (this.projectiles.length > 0) this.flyAll();
+    if (this.smokes.length > 0) this.smokeTick();
     if (this.phase !== 'freeze') this.fireAll();
     for (const p of this.players) if (p.alive) this.weaponTick(p);
+    if (this.fires.length > 0) this.fireTick();
     this.actions();
     if (this.fullBuy === null && this.tick - this.roundStartTick >= ROUND.buyTicks - 1) this.fullBuy = this.fullBuyFlags();
     this.autoPickup();
@@ -1174,6 +1304,164 @@ export class ShooterMatch {
     }
   }
 
+  // ───────── 道具 ─────────
+
+  /** 投射物：到引信時間就在當下位置生效；否則直線飛行一步，燃燒落地（含第二次碰牆）即生效 */
+  private flyAll(): void {
+    const keep: Projectile[] = [];
+    for (const g of this.projectiles) {
+      const incendiary = g.kind === 'molotov' || g.kind === 'incendiary';
+      if (this.tick >= g.fuseTick) {
+        this.detonate(g);
+        continue;
+      }
+      if (g.moving) this.fly(g);
+      if (incendiary && !g.moving) this.detonate(g);
+      else keep.push(g);
+    }
+    this.projectiles = keep;
+  }
+
+  /**
+   * 飛一步（最多 flySpeed）：x、y 分軸移動，碰牆的軸把方向分量反號（軸對齊牆面的法線鏡射，整數）；
+   * 剩餘距離扣實際移動量。已反彈 maxBounces 次後再碰牆、或走完距離就停（落地）。反彈與落地發 grenadeLand
+   */
+  private fly(g: Projectile): void {
+    const step = Math.min(GRENADE_RULES.flySpeed, g.left);
+    const r = GRENADE_RULES.projectileRadius;
+    const wx = tdiv(g.dx * step, 10000);
+    const wy = tdiv(g.dy * step, 10000);
+    const mx = slideAxis(this.map, g.x, g.y, wx, 0, r);
+    g.x += mx;
+    const my = slideAxis(this.map, g.x, g.y, wy, 1, r);
+    g.y += my;
+    const hitX = mx !== wx;
+    const hitY = my !== wy;
+    const range = SOUND.actionRange * UNIT;
+    if (hitX || hitY) {
+      g.left = Math.max(0, g.left - distance(0, 0, mx, my));
+      if (g.bounces >= GRENADE_RULES.maxBounces) {
+        g.moving = false;
+        g.left = 0;
+      } else {
+        g.bounces += 1;
+        if (hitX) g.dx = -g.dx;
+        if (hitY) g.dy = -g.dy;
+      }
+      this.emit('grenadeLand', g.x, g.y, g.owner, null, range);
+      return;
+    }
+    g.left -= step;
+    if (g.left <= 0) {
+      g.left = 0;
+      g.moving = false;
+      this.emit('grenadeLand', g.x, g.y, g.owner, null, range);
+    }
+  }
+
+  private detonate(g: Projectile): void {
+    switch (g.kind) {
+      case 'smoke':
+        this.smokes.push({ x: g.x, y: g.y, owner: g.owner, startTick: this.tick, endTick: this.tick + GRENADES.smoke.durationTicks });
+        this.emit('grenadeLand', g.x, g.y, g.owner, null, SOUND.actionRange * UNIT);
+        return;
+      case 'flash':
+        this.flash(g);
+        return;
+      case 'he':
+        this.heBlast(g);
+        return;
+      default:
+        this.ignite(g);
+    }
+  }
+
+  /** 閃光：所有活著的人（含隊友與自己），15 格內且有視線（牆與煙霧都擋）才致盲；取較大值不累加 */
+  private flash(g: Projectile): void {
+    this.emit('explosion', g.x, g.y, g.owner, null, SOUND.explosionRange * UNIT);
+    const smokes = GRENADE_RULES.flashBlockedBySmoke ? this.smokeBlockers() : [];
+    const owner = this.players[g.owner];
+    for (const p of this.players) {
+      if (!p.alive) continue;
+      const t = flashTicks(p.facing, p.x, p.y, g.x, g.y);
+      if (t <= p.blindTicks || !lineOfSight(this.map, p.x, p.y, g.x, g.y, smokes)) continue;
+      if (p.team === owner.team) this.roundFlashTeam[owner.group] += t - p.blindTicks;
+      else this.roundFlashEnemy[owner.group] += t - p.blindTicks;
+      p.blindTicks = t;
+    }
+  }
+
+  /** 道具傷害的敵我倍率：自己 selfDamagePct、隊友 FRIENDLY_FIRE_PCT、敵人全額 */
+  private grenadeDamagePct(owner: Player, p: Player): number {
+    if (p.id === owner.id) return GRENADE_RULES.selfDamagePct;
+    return p.team === owner.team ? FRIENDLY_FIRE_PCT : 100;
+  }
+
+  /** 手雷：半徑內線性衰減、有視線才算（牆擋）；護甲吸收 heArmorPct% 並扣甲；傷害同時結算，擊殺歸投擲者 */
+  private heBlast(g: Projectile): void {
+    this.emit('explosion', g.x, g.y, g.owner, null, SOUND.explosionRange * UNIT);
+    const smokes = GRENADE_RULES.heBlockedBySmoke ? this.smokeBlockers() : [];
+    const owner = this.players[g.owner];
+    for (const p of this.players) {
+      if (!p.alive) continue;
+      const raw = heDamageAt(distance(p.x, p.y, g.x, g.y));
+      if (raw <= 0 || !lineOfSight(this.map, g.x, g.y, p.x, p.y, smokes)) continue;
+      const { hpLoss, armorLoss } = armorSplit(applyPercent(raw, this.grenadeDamagePct(owner, p)), p.armor, 100 - GRENADE_RULES.heArmorPct);
+      p.armor -= armorLoss;
+      p.hp -= hpLoss;
+    }
+    for (const p of this.players) if (p.alive && p.hp <= 0) this.die(p, g.owner, 'he');
+  }
+
+  /** 燃燒點火：與任何煙霧重疊就不點燃；到引信上限才在空中點火時發 grenadeLand（落地時已發過） */
+  private ignite(g: Projectile): void {
+    if (g.moving) this.emit('grenadeLand', g.x, g.y, g.owner, null, SOUND.actionRange * UNIT);
+    const R = GRENADES[g.kind].radius;
+    for (const s of this.smokes) if (distance(s.x, s.y, g.x, g.y) < smokeRadius(s, this.tick) + R) return;
+    this.fires.push({ x: g.x, y: g.y, owner: g.owner, kind: g.kind, startTick: this.tick, endTick: this.tick + GRENADES[g.kind].durationTicks });
+  }
+
+  /** 煙霧到時消失；生效中（含擴散中）與火圈重疊（圓心距 < 兩半徑和）就撲滅該火 */
+  private smokeTick(): void {
+    this.smokes = this.smokes.filter((sm) => this.tick < sm.endTick);
+    if (this.fires.length === 0) return;
+    this.fires = this.fires.filter((f) => !this.smokes.some((sm) => distance(sm.x, sm.y, f.x, f.y) < smokeRadius(sm, this.tick) + GRENADES[f.kind].radius));
+  }
+
+  /** 火焰結算：點火後每 fireTickInterval 對圈內活著的人扣 FIRE_TICK_DAMAGE（不吃護甲；隊友 30%）；到時熄滅 */
+  private fireTick(): void {
+    const interval = GRENADE_RULES.fireTickInterval;
+    const killedBy = new Int32Array(PLAYER_COUNT).fill(-1);
+    const killKind: GrenadeId[] = new Array<GrenadeId>(PLAYER_COUNT).fill('molotov');
+    for (const f of this.fires) {
+      const el = this.tick - f.startTick;
+      if (el <= 0 || el % interval !== 0) continue;
+      const owner = this.players[f.owner];
+      const R = GRENADES[f.kind].radius;
+      for (const p of this.players) {
+        if (!p.alive || p.hp <= 0 || distance(p.x, p.y, f.x, f.y) >= R) continue;
+        p.hp -= applyPercent(FIRE_TICK_DAMAGE, this.grenadeDamagePct(owner, p));
+        if (p.hp <= 0) {
+          killedBy[p.id] = f.owner;
+          killKind[p.id] = f.kind;
+        }
+      }
+    }
+    for (const p of this.players) if (p.alive && p.hp <= 0) this.die(p, killedBy[p.id], killKind[p.id]);
+    this.fires = this.fires.filter((f) => this.tick < f.endTick);
+  }
+
+  /** 目前擋視線的煙霧（當下實際半徑） */
+  private smokeBlockers(): SightBlocker[] {
+    const out: SightBlocker[] = [];
+    for (const sm of this.smokes) {
+      if (this.tick < sm.startTick || this.tick >= sm.endTick) continue;
+      const radius = smokeRadius(sm, this.tick);
+      if (radius > 0) out.push({ x: sm.x, y: sm.y, radius });
+    }
+    return out;
+  }
+
   // ───────── 觀察 ─────────
 
   /** 視野矩陣：vis[i × 10 + j] = 1 表示 i 此刻看得見敵人 j（視錐內、有視線、i 沒被致盲） */
@@ -1181,19 +1469,21 @@ export class ShooterMatch {
     if (this.visTick === this.tick) return this.vis;
     this.visTick = this.tick;
     this.vis.fill(0);
+    const smokes = this.smokeBlockers();
     for (const a of this.players) {
       if (!a.alive || a.blindTicks > 0) continue;
       const fov = a.scoped ? VISION.scopedFovDeg : VISION.fovDeg;
       for (const b of this.players) {
         if (!b.alive || b.team === a.team) continue;
-        if (this.sees(a, fov, b.x, b.y)) this.vis[a.id * PLAYER_COUNT + b.id] = 1;
+        if (this.sees(a, fov, b.x, b.y, smokes)) this.vis[a.id * PLAYER_COUNT + b.id] = 1;
       }
     }
     return this.vis;
   }
 
-  private sees(a: Player, fov: number, x: number, y: number): boolean {
-    return inCone(a.facing, fov, a.x, a.y, x, y) && lineOfSight(this.map, a.x, a.y, x, y);
+  /** 視錐內且有視線（牆與煙霧都擋） */
+  private sees(a: Player, fov: number, x: number, y: number, smokes: readonly SightBlocker[]): boolean {
+    return inCone(a.facing, fov, a.x, a.y, x, y) && lineOfSight(this.map, a.x, a.y, x, y, smokes);
   }
 
   /** 選手 pid 是否看得見敵人 eid（測試用） */
@@ -1249,10 +1539,30 @@ export class ShooterMatch {
       defusing: m.defuseTicks > 0,
       blind: m.blindTicks > 0,
     }));
+    const smokes = this.smokeBlockers();
+    const canLook = me.alive && !blind;
     const items: DroppedItem[] = [];
     for (const it of this.items) {
       const known = it.kind === 'bomb' && me.team === 'T';
-      if (known || (me.alive && !blind && this.itemVisible(me, it.x, it.y))) items.push({ kind: it.kind, weapon: it.weapon?.id ?? null, x: it.x, y: it.y });
+      if (known || (canLook && this.itemVisible(me, it.x, it.y, smokes))) items.push({ kind: it.kind, weapon: it.weapon?.id ?? null, x: it.x, y: it.y });
+    }
+    const effects: AreaEffect[] = [];
+    const projectiles: ProjectileInfo[] = [];
+    if (canLook) {
+      const fov = me.scoped ? VISION.scopedFovDeg : VISION.fovDeg;
+      // 煙霧：貼近（半徑＋2 格內）或視錐內對煙霧中心有牆的視線（煙霧本身是大物體，不再被其他煙擋）
+      for (const sm of this.smokes) {
+        const radius = smokeRadius(sm, this.tick);
+        if (this.tick >= sm.endTick || radius <= 0) continue;
+        if (distance(me.x, me.y, sm.x, sm.y) <= radius + NEAR_ITEM || this.sees(me, fov, sm.x, sm.y, [])) effects.push({ kind: 'smoke', x: sm.x, y: sm.y, radius, ticksLeft: sm.endTick - this.tick });
+      }
+      for (const f of this.fires) {
+        const radius = GRENADES[f.kind].radius;
+        if (distance(me.x, me.y, f.x, f.y) <= radius + NEAR_ITEM || this.sees(me, fov, f.x, f.y, smokes)) effects.push({ kind: 'fire', x: f.x, y: f.y, radius, ticksLeft: f.endTick - this.tick });
+      }
+      for (const g of this.projectiles) {
+        if (distance(me.x, me.y, g.x, g.y) <= GRENADE_RULES.nearProjectile || this.sees(me, fov, g.x, g.y, smokes)) projectiles.push({ kind: g.kind, x: g.x, y: g.y });
+      }
     }
     const w = activeState(me);
     return {
@@ -1296,9 +1606,10 @@ export class ShooterMatch {
       enemies,
       radar,
       sounds,
-      bomb: this.bombInfo(me, enemies),
-      effects: [],
+      bomb: this.bombInfo(me, enemies, smokes),
+      effects,
       items,
+      projectiles,
       chat,
       enemiesAlive: foes.filter((e) => e.alive).length,
     };
@@ -1311,9 +1622,9 @@ export class ShooterMatch {
     return inRect(this.map.spawnZones[p.team], cellOf(p.x), cellOf(p.y));
   }
 
-  private itemVisible(me: Player, x: number, y: number): boolean {
+  private itemVisible(me: Player, x: number, y: number, smokes: readonly SightBlocker[]): boolean {
     if (distance(me.x, me.y, x, y) <= NEAR_ITEM) return true;
-    return this.sees(me, me.scoped ? VISION.scopedFovDeg : VISION.fovDeg, x, y);
+    return this.sees(me, me.scoped ? VISION.scopedFovDeg : VISION.fovDeg, x, y, smokes);
   }
 
   private deg(c: number): number {
@@ -1321,7 +1632,7 @@ export class ShooterMatch {
   }
 
   /** 炸彈資訊依觀察者的隊伍與視野而定（CT 在下包前看不見就不知道炸彈在哪） */
-  private bombInfo(me: Player, enemies: readonly EnemyInfo[]): BombInfo {
+  private bombInfo(me: Player, enemies: readonly EnemyInfo[], smokes: readonly SightBlocker[]): BombInfo {
     const b = this.bomb;
     const none = (state: BombState): BombInfo => ({ state, x: null, y: null, site: null, ticksLeft: null });
     if (b.state === 'defused' || b.state === 'exploded') return { state: b.state, x: b.x, y: b.y, site: b.site, ticksLeft: null };
@@ -1339,7 +1650,7 @@ export class ShooterMatch {
       if (seen === undefined) return none('unknown');
       return { state: seen.planting ? 'planting' : 'carried', x: seen.x, y: seen.y, site: null, ticksLeft: null };
     }
-    if (me.alive && me.blindTicks === 0 && this.itemVisible(me, b.x, b.y)) return { state: 'dropped', x: b.x, y: b.y, site: null, ticksLeft: null };
+    if (me.alive && me.blindTicks === 0 && this.itemVisible(me, b.x, b.y, smokes)) return { state: 'dropped', x: b.x, y: b.y, site: null, ticksLeft: null };
     return none('unknown');
   }
 
@@ -1369,7 +1680,7 @@ export class ShooterMatch {
       ws(p.secondary);
       h.int(SLOT_CODE[p.active]).int(p.cooldown).int(p.reloadLeft).int(p.recoil).bool(p.fireHeld).bool(p.firePending);
       h.bool(p.walking).bool(p.crouching).bool(p.scoped).str(p.moveKind).int(p.path.length).int(p.pathIdx).int(p.goalX).int(p.goalY).int(p.moveDeg).int(p.stuck);
-      h.int(p.aimX ?? -1).int(p.aimY ?? -1).int(p.vx).int(p.vy).bool(p.hasBomb).int(p.plantTicks).int(p.defuseTicks).int(p.blindTicks).int(p.kills).int(p.deaths);
+      h.int(p.aimX ?? -1).int(p.aimY ?? -1).int(p.vx).int(p.vy).bool(p.hasBomb).int(p.plantTicks).int(p.defuseTicks).int(p.blindTicks).int(p.throwCd).int(p.kills).int(p.deaths);
     }
     const b = this.bomb;
     h.int(BOMB_CODE[b.state]).int(b.carrier).int(b.x).int(b.y).str(b.site ?? '').int(b.explodeTick).int(b.planter).int(b.defuser);
@@ -1378,6 +1689,12 @@ export class ShooterMatch {
       h.str(it.kind).int(it.x).int(it.y);
       ws(it.weapon);
     }
+    h.int(this.projectiles.length);
+    for (const g of this.projectiles) h.int(GRENADE_IDS.indexOf(g.kind)).int(g.owner).int(g.x).int(g.y).int(g.dx).int(g.dy).int(g.left).int(g.bounces).bool(g.moving).int(g.fuseTick);
+    h.int(this.smokes.length);
+    for (const sm of this.smokes) h.int(sm.x).int(sm.y).int(sm.owner).int(sm.startTick).int(sm.endTick);
+    h.int(this.fires.length);
+    for (const f of this.fires) h.int(f.x).int(f.y).int(f.owner).int(GRENADE_IDS.indexOf(f.kind)).int(f.startTick).int(f.endTick);
     h.int(this.sounds.length).int(this.chat.length);
     for (const v of this.prng.getState()) h.int(v);
     return h.digest();

@@ -6,7 +6,7 @@
 //   角度　整數度；0 = +x（東）、90 = +y（畫面下＝南）。
 //   速度　座標單位／tick（已由 CS 的 units／秒換算：1 格 ≈ 52.5 units）。
 
-export const SHOOTER_ENGINE_VERSION = '0.2.0';
+export const SHOOTER_ENGINE_VERSION = '0.3.0';
 
 export const TPS = 30;
 export const UNIT = 1000;
@@ -53,6 +53,8 @@ export const SOUND = {
   midRange: 30,
   /** 換彈、下包、拆包、丟雷落地可聽見的距離（格） */
   actionRange: 15,
+  /** 手雷、閃光爆炸可聽見的距離（格，待審） */
+  explosionRange: 60,
 } as const;
 
 // ───────── 回合與賽制 ─────────
@@ -205,20 +207,39 @@ export const GRENADES: Readonly<Record<GrenadeId, GrenadeDef>> = {
 export const GRENADE_RULES = {
   /** 道具總格數 */
   totalSlots: 4,
-  /** 投擲最遠距離（格）；力道 0～100 線性 */
+  /** 投擲最遠距離（格）；力道 0～100 線性（待審） */
   maxThrowRange: 25,
-  /** 飛行速度（座標單位／tick） */
+  /** 飛行速度（座標單位／tick；900 units／秒 ≈ 17 格／秒，待審） */
   flySpeed: speedFromUnits(900),
-  /** 煙霧擴散時間 */
+  /** 飛行中的道具的碰撞半徑（座標單位；碰牆反彈用，不碰人） */
+  projectileRadius: 100,
+  /** 投擲冷卻（tick，待審）：投擲後這段時間內不能再投、也不能開火 */
+  throwCooldownTicks: ticks(0.5),
+  /** 碰牆反彈次數上限：反彈一次後再碰牆就停 */
+  maxBounces: 1,
+  /** 煙霧擴散時間：半徑從 0 線性長到 radius（待審） */
   smokeBloomTicks: ticks(1),
-  /** 閃光：正對／側向／背對的最長致盲時間（tick），再依距離線性遞減 */
+  /** 閃光：正對／側向／背對的最長致盲時間（tick，待審），再乘距離係數 */
   flashFrontTicks: ticks(2.0),
   flashSideTicks: ticks(1.0),
   flashBackTicks: ticks(0.3),
-  /** HE 對護甲的傷害折半 */
+  /** 閃光朝向分界（度）：爆點方向與朝向夾角 ≤ 60° 為正對、≤ 120° 為側向、其餘背對（待審） */
+  flashFrontDeg: 60,
+  flashSideDeg: 120,
+  /** 閃光距離係數：1 − d／(2R)，即爆點貼臉 100%、半徑外緣剩這個百分比（待審） */
+  flashEdgePct: 50,
+  /** 閃光的視線檢查：牆與煙霧都擋 */
+  flashBlockedBySmoke: true,
+  /** HE 傷害線性衰減：中心 damage、半徑外緣 0；有視線才算（牆擋、煙霧不擋，待審） */
+  heBlockedBySmoke: false,
+  /** HE 對護甲：護甲吸收這個比例的傷害（以剩餘甲值為上限）並扣同量甲值（待審） */
   heArmorPct: 50,
-  /** 燃燒每幾 tick 結算一次 */
+  /** 燃燒每幾 tick 結算一次；每次傷害 = damage × interval ÷ TPS（40／秒 → 8），不吃護甲（待審） */
   fireTickInterval: ticks(0.2),
+  /** 道具傷害（HE、燃燒）打到自己的比例（%）：自己不是隊友，照全額（待審）；隊友照 FRIENDLY_FIRE_PCT */
+  selfDamagePct: 100,
+  /** 看得見的飛行中道具：視錐內有視線，或在自己這個距離內（座標單位） */
+  nearProjectile: 2 * UNIT,
 } as const;
 
 // ───────── 選手程式的時間限制（沿用 RTS／軍團戰） ─────────

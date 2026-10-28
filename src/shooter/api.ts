@@ -79,8 +79,11 @@ export interface GrenadeInfo {
   readonly teams: readonly Team[];
   readonly price: number;
   readonly maxCarry: number;
+  /** 投擲後幾 tick 生效（燃燒為落地生效的上限） */
+  readonly fuseTicks: number;
   readonly radius: number;
   readonly durationTicks: number;
+  /** HE：中心傷害；燃燒：每秒傷害；其他 0 */
   readonly damage: number;
 }
 
@@ -112,6 +115,25 @@ export interface RulesInfo {
   readonly kitPrice: number;
   /** 道具總格數 */
   readonly grenadeSlots: number;
+  /** 投擲規則（步驟 3） */
+  readonly grenadeRules: {
+    /** 力道 100 的投擲距離（格）；力道 0～100 線性 */
+    readonly maxThrowRange: number;
+    /** 飛行速度（座標單位／tick） */
+    readonly flySpeed: number;
+    readonly throwCooldownTicks: number;
+    readonly smokeBloomTicks: number;
+    readonly flashFrontTicks: number;
+    readonly flashSideTicks: number;
+    readonly flashBackTicks: number;
+    readonly flashFrontDeg: number;
+    readonly flashSideDeg: number;
+    /** 閃光距離係數在半徑外緣剩幾 %（貼臉 100%，線性） */
+    readonly flashEdgePct: number;
+    /** HE 時護甲吸收的比例（%） */
+    readonly heArmorPct: number;
+    readonly fireTickInterval: number;
+  };
   readonly economy: {
     readonly startMoney: number;
     readonly maxMoney: number;
@@ -216,7 +238,7 @@ export interface SelfInfo {
   readonly walking: boolean;
   readonly crouching: boolean;
   readonly hasBomb: boolean;
-  /** 致盲剩餘 tick（> 0 時 enemies 與 radar 為空） */
+  /** 致盲剩餘 tick（> 0 時 enemies、radar、effects、items、projectiles 為空） */
   readonly blindTicks: number;
   /** 下包／拆包進度（tick）；未進行為 0 */
   readonly plantTicks: number;
@@ -286,12 +308,20 @@ export interface BombInfo {
   readonly ticksLeft: number | null;
 }
 
+/** 煙霧與火。煙霧的 radius 是當下實際半徑（擴散中會變大） */
 export interface AreaEffect {
   readonly kind: 'smoke' | 'fire';
   readonly x: number;
   readonly y: number;
   readonly radius: number;
   readonly ticksLeft: number;
+}
+
+/** 看得見的還沒生效的道具（飛行中或已落地等引信）：視錐內有視線，或在 2 格內 */
+export interface ProjectileInfo {
+  readonly kind: GrenadeId;
+  readonly x: number;
+  readonly y: number;
 }
 
 export interface DroppedItem {
@@ -316,10 +346,12 @@ export interface ShooterObservation {
   /** 自上次決策以來的聲音事件 */
   readonly sounds: readonly SoundEvent[];
   readonly bomb: BombInfo;
-  /** 看得見的煙霧與火（視錐內或貼近自己） */
+  /** 看得見的煙霧與火（視錐內有視線，或貼近自己） */
   readonly effects: readonly AreaEffect[];
   /** 看得見的掉落物 */
   readonly items: readonly DroppedItem[];
+  /** 看得見的還沒生效的道具 */
+  readonly projectiles: readonly ProjectileInfo[];
   /** 自上次決策以來的隊內喊話 */
   readonly chat: readonly TeamMessage[];
   /** 還活著的敵人數（計分板公開資訊） */
@@ -358,7 +390,10 @@ export type ShooterCommand =
    * 槍：同槽的舊槍丟在腳邊；護甲：補滿到 100，已滿不扣錢；拆彈器：CT 限定；道具：同種上限與總格數
    */
   | { readonly type: 'buy'; readonly items: readonly BuyItem[] }
-  /** 丟雷：方向與力道（0～100，對應投擲距離） */
+  /**
+   * 丟雷：方向（整數度，不受朝向限制）與力道（0～100，線性對應 0～maxThrowRange 格）。
+   * 要帶著該道具、不在凍結時間、不在投擲冷卻內；投出後停火並取消下包／拆包，冷卻內不能開火
+   */
   | { readonly type: 'throw'; readonly grenade: GrenadeId; readonly deg: number; readonly power: number }
   /** 隊內喊話（只有隊友的下一次觀察看得到） */
   | { readonly type: 'say'; readonly text: string };
