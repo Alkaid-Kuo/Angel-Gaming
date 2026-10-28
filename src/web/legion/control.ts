@@ -3,7 +3,7 @@
 import type { FormationKind, UnitKind } from '../../legion/config.ts';
 import { TILE, UNITS } from '../../legion/config.ts';
 import type { LegionFrame, RegFrame } from './protocol.ts';
-import type { LegionRenderer } from './render.ts';
+import type { BattleView } from './view.ts';
 
 export interface Pt {
   x: number;
@@ -44,11 +44,12 @@ export class PlayerControl {
   order: { from: Pt; to: Pt } | null = null;
   /** 按住 Q 瞄準中（放開才施放） */
   aiming = false;
-  private readonly r: LegionRenderer;
+  /** 目前的繪製器（2D／3D 切換時換掉） */
+  r: BattleView;
   private readonly sendCmds: (cmds: unknown[]) => void;
   private readonly toast: (text: string) => void;
 
-  constructor(r: LegionRenderer, side: number, sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void) {
+  constructor(r: BattleView, side: number, sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void) {
     this.r = r;
     this.side = side;
     this.sendCmds = sendCmds;

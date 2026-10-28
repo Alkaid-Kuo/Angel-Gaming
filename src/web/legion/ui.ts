@@ -4,6 +4,8 @@ import { BOMBARD, DASH, FORMATION_NAMES, MODE_NAMES, RAM, RULES, SIEGE, T, TERRA
 import { unitSvg } from './icons.ts';
 import type { Caption, FromLegionWorker, LegionFrame, LegionMeta, ToLegionWorker } from './protocol.ts';
 import { LegionRenderer } from './render.ts';
+import type { Legion3DView } from './three/view3d.ts';
+import type { BattleView } from './view.ts';
 import { HOTKEYS, PlayerControl, type Pt } from './control.ts';
 
 const STATUS_NAME: Record<RegimentStatus, string> = {
@@ -51,6 +53,15 @@ const PLAYER_SPEEDS = [0.5, 1, 2, 4];
 /** 被拒絕的指令名稱（玩家提示） */
 const CMD_NAME: Record<string, string> = { move: '移動', attack: '攻擊', attackMove: '邊走邊打', hold: '堅守', face: '轉向', formation: '變陣', follow: '跟隨', brace: '槍林', unbrace: '收槍林', shield: '盾兵姿態', volley: '齊射', charge: '衝鋒', assault: '突擊', infiltrate: '切入', steer: '微調方向', summon: '後備入場', swap: '換兵', withdraw: '撤回', gate: '開關城門', ladder: '架雲梯', topple: '推倒雲梯', man: '推衝車', unman: '卸下衝車', bombard: '砲擊' };
 
+/** 上次用的是 3D 還是 2D（預設 3D） */
+function prefers3D(): boolean {
+  try {
+    return localStorage.getItem('legion.view') !== '2d';
+  } catch {
+    return true;
+  }
+}
+
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
@@ -70,7 +81,11 @@ export class LegionScreen {
     return this.meta.playerSide;
   }
   private readonly onExit: () => void;
-  private readonly r: LegionRenderer;
+  /** 目前的繪製器：2D 或 3D（3D 第一次用到才載入） */
+  private r: BattleView;
+  private readonly r2d: LegionRenderer;
+  private r3d: Legion3DView | null = null;
+  private disposed = false;
   private readonly el: Record<string, HTMLElement> = {};
   private raf = 0;
   private frameAt = 0;
@@ -110,7 +125,8 @@ export class LegionScreen {
     this.speeds = meta.playerSide >= 0 ? PLAYER_SPEEDS : SPEEDS;
     root.innerHTML = this.layout();
     for (const n of root.querySelectorAll<HTMLElement>('[data-el]')) this.el[n.dataset.el!] = n;
-    this.r = new LegionRenderer(this.el.canvas as HTMLCanvasElement, meta);
+    this.r2d = new LegionRenderer(this.el.canvas as HTMLCanvasElement, meta);
+    this.r = this.r2d;
     if (meta.playerSide >= 0) {
       this.control = new PlayerControl(this.r, meta.playerSide, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t));
       this.viewer = meta.playerSide;
@@ -123,6 +139,36 @@ export class LegionScreen {
     });
     this.bind();
     this.raf = requestAnimationFrame(this.tick);
+    if (prefers3D()) void this.set3D(true);
+  }
+
+  /** 切換 2D／3D：鏡頭位置帶過去，兩邊都一直收狀態流 */
+  private async set3D(on: boolean): Promise<void> {
+    if (on && this.r3d === null) {
+      this.el.view3d.textContent = '載入中…';
+      const { Legion3DView } = await import('./three/view3d.ts');
+      if (this.disposed) return;
+      this.r3d = new Legion3DView(this.el.canvas as HTMLCanvasElement, this.meta);
+      if (this.r2d.frame !== null) this.r3d.push(this.r2d.frame, performance.now());
+      if (this.r === this.r2d) this.r3d.fit();
+    }
+    const next: BattleView = on ? this.r3d! : this.r2d;
+    if (next !== this.r) {
+      next.cam.x = this.r.cam.x;
+      next.cam.y = this.r.cam.y;
+      next.cam.scale = this.r.cam.scale;
+    }
+    this.r3d?.setVisible(on);
+    this.r = next;
+    if (this.control) this.control.r = next;
+    next.clamp();
+    this.el.view3d.textContent = on ? '2D' : '3D';
+    this.el.view3d.title = on ? '切回 2D 俯視（M）' : '切到 3D 沙盤（M）；右鍵拖曳或 [ ] 轉鏡頭';
+    try {
+      localStorage.setItem('legion.view', on ? '3d' : '2d');
+    } catch {
+      // 無痕模式等：不記也沒關係
+    }
   }
 
   private send(msg: ToLegionWorker): void {
@@ -130,6 +176,8 @@ export class LegionScreen {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.r3d?.dispose();
     cancelAnimationFrame(this.raf);
     clearInterval(this.lineupTimer);
     for (const d of this.disposers) d();
@@ -176,6 +224,7 @@ export class LegionScreen {
       <button data-act="director" data-el="director" class="${player ? '' : 'active'}" title="自動導播：鏡頭跟著主要戰場${player ? '' : '（F）'}">導播</button>
       <button data-act="intent" data-el="intent" class="active" title="放大時在軍團旗標下顯示 AI 意圖（I）；滑鼠指著或選中的軍團一律顯示">意圖</button>
       <button data-act="fit" title="看全圖（Home）">全圖</button>
+      <button data-act="view3d" data-el="view3d" title="切到 3D 沙盤（M）；右鍵拖曳或 [ ] 轉鏡頭">3D</button>
       <span class="sep"></span>
       <button data-act="help" title="規則說明（H）">說明</button>
       <button data-act="replay" title="下載這場比賽的回放檔">回放</button>
@@ -330,6 +379,7 @@ export class LegionScreen {
       else if (ke.key === 'f' || ke.key === 'F') this.setDirector(!this.director);
       else if (ke.key === 'i' || ke.key === 'I') this.action('intent');
       else if (ke.key === 'h' || ke.key === 'H') this.action('help');
+      else if (ke.key === 'm' || ke.key === 'M') this.action('view3d');
       else if (ke.key === 'Home') this.action('fit');
       else if (ke.key === 'Escape') {
         if (!this.el.help.classList.contains('hidden')) this.el.help.classList.add('hidden');
@@ -422,6 +472,9 @@ export class LegionScreen {
       case 'help':
         this.toggleHelp();
         return;
+      case 'view3d':
+        void this.set3D(this.r === this.r2d);
+        return;
       case 'replay':
         this.send({ type: 'replay' });
         return;
@@ -430,7 +483,8 @@ export class LegionScreen {
         this.captions = [];
         this.el.feed.innerHTML = '';
         this.el.result.classList.add('hidden');
-        this.r.reset();
+        this.r2d.reset();
+        this.r3d?.reset();
         this.send({ type: 'restart' });
         this.started = true;
         this.paused = false;
@@ -553,7 +607,7 @@ export class LegionScreen {
       <h2>軍團戰怎麼看</h2>
       <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>（佔點模式 ${RULES.capture.budget} 點，場上最多 ${RULES.capture.fieldCap} 點）選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。計分條下方是 AI 的戰略意圖、旗標下方的小字是各團的意圖（放大時顯示），<kbd>I</kbd> 開關。</p>
       <h3>勝利條件</h3>
-      <ul><li><b>攻城戰</b>（石關城）：攻守各 ${SIEGE.budget} 點、沒有後備。攻方要依序佔下 <b>A 正門</b>（${SIEGE.captureA / TPS} 秒）與 <b>B 本陣</b>（${SIEGE.captureB / TPS} 秒）；圈內只算地面的士兵，守方在圈內就不會增加進度。佔下 A：正門永久開啟、時限延長 ${SIEGE.extendTicks / TPS / 60} 分鐘；佔下 B 攻方勝，時間到（${SIEGE.timeLimitTicks / TPS / 60} 分鐘）守方勝。攻方有雲梯（白色描邊的是牆頂的士兵、半透明的是爬梯中或穿過門洞的）、衝車（${Math.round(RULES.gate.mainHp / RAM.hit)} 下破正門）與 ${BOMBARD.shells} 發砲擊（紅圈是落點與倒數）。</li>
+      <ul><li><b>攻城戰</b>（石關城）：攻守各 ${SIEGE.budget} 點、沒有後備。攻方要依序佔下 <b>A 正門廣場</b>（${SIEGE.captureA / TPS} 秒）與 <b>B 本陣</b>（${SIEGE.captureB / TPS} 秒）；圈內只算地面的士兵，守方在圈內就不會增加進度。佔下 A：正門永久開啟、時限延長 ${SIEGE.extendTicks / TPS / 60} 分鐘；佔下 B 攻方勝，時間到（${SIEGE.timeLimitTicks / TPS / 60} 分鐘）守方勝。攻方有雲梯（白色描邊的是牆頂的士兵、半透明的是爬梯中或穿過門洞的）、衝車（${Math.round(RULES.gate.mainHp / RAM.hit)} 下破正門）與 ${BOMBARD.shells} 發砲擊（紅圈是落點與倒數）。</li>
       <li><b>殲滅戰</b>（測試模式）：打光對手全軍。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比戰果（擊殺敵兵的點數價值）。</li>
       <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比戰果。</li>
       <li><b>後備兵力</b>（佔點）：總共 ${RULES.capture.budget} 點，場上同時最多 ${RULES.capture.fieldCap} 點（算全額，不管剩幾人），其餘是後備。場上沒滿時，後備可以從<b>出生點</b>入場（準備 ${RULES.capture.enterTicks / TPS} 秒）；滿了就要把一團帶到出生點或<b>自己的補給站</b>（兩座橋旁，歸佔著那座橋的一方）換下來。撤回的團血量補滿、人數不變；團站在出生點或自己的補給站、${RULES.capture.healQuietTicks / TPS} 秒沒受傷就會回血（每秒 ${RULES.capture.healPct}%）。</li></ul>
@@ -580,7 +634,7 @@ export class LegionScreen {
       <table class="lg-table"><tr><th>兵種</th><th>點數</th><th>人數</th><th>血量</th><th>攻擊</th><th>射程</th><th>速度（格／秒）</th><th>減免（近／遠）</th><th>招牌技能</th><th>剋制</th></tr>${rows}</table>
       <table class="lg-table">${TERRAIN_NAMES.map((n, i) => (TERRAIN_TIP[i] ? `<tr><td>${n}</td><td>${TERRAIN_TIP[i]}</td></tr>` : '')).join('')}</table>
       <h3>操作</h3>
-      <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>I</kbd> AI 意圖・<kbd>Home</kbd> 全圖・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）</p>
+      <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>I</kbd> AI 意圖・<kbd>Home</kbd> 全圖・<kbd>M</kbd> 切換 2D／3D・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）・3D 時右鍵拖曳或 <kbd>[</kbd> <kbd>]</kbd> 轉鏡頭（拉近才轉得動，全圖固定北朝上）</p>
     </div>`;
     h.classList.remove('hidden');
   }
@@ -596,7 +650,8 @@ export class LegionScreen {
           this.frameGap = this.frameGap * 0.7 + Math.min(400, Math.max(16, gap)) * 0.3;
         }
         this.frameAt = now;
-        this.r.push(msg.frame, now);
+        this.r2d.push(msg.frame, now);
+        this.r3d?.push(msg.frame, now);
         this.onFrame(msg.frame);
         return;
       }

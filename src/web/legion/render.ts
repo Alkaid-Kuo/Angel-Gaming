@@ -59,15 +59,15 @@ interface Corpse {
   t: number;
 }
 
-const TEAM = ['#3b82f6', '#ef4444'];
-const TEAM_LIGHT = ['#bfdbfe', '#fecaca'];
-const TEAM_DARK = ['#1e3a8a', '#7f1d1d'];
+export const TEAM = ['#3b82f6', '#ef4444'];
+export const TEAM_LIGHT = ['#bfdbfe', '#fecaca'];
+export const TEAM_DARK = ['#1e3a8a', '#7f1d1d'];
 const ROUTED = ['#64748b', '#78716c'];
-const DASH_COLOR: Record<DashKind, string> = { charge: '#fb923c', assault: '#facc15', infiltrate: '#a3e635' };
-const DASH_NAME: Record<DashKind, string> = { charge: '衝鋒', assault: '突擊', infiltrate: '切入' };
+export const DASH_COLOR: Record<DashKind, string> = { charge: '#fb923c', assault: '#facc15', infiltrate: '#a3e635' };
+export const DASH_NAME: Record<DashKind, string> = { charge: '衝鋒', assault: '突擊', infiltrate: '切入' };
 const TRAIL_FADE = 2500;
 /** 旗標右側的狀態標籤：文字、底色 */
-const TAG: Partial<Record<RegimentStatus, readonly [string, string]>> = {
+export const TAG: Partial<Record<RegimentStatus, readonly [string, string]>> = {
   routed: ['潰散', '#334155'],
   charging: ['衝鋒', '#ea580c'],
   assaulting: ['突擊', '#ca8a04'],
