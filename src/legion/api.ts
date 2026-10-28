@@ -1,6 +1,9 @@
 // 軍團戰選手 API 的公開型別（規格書 v0.2）：開局資料、布陣、觀察資料、指令、事件。
 import type { KnobDef, KnobValues } from '../api/types.ts';
 import type { DashKind, FormationKind, LegionMode, ShieldStance, SkillKind, UnitKind } from './config.ts';
+import type { MapFeatures } from './map.ts';
+
+export type { MapFeatures };
 
 export type { DashKind, FormationKind, KnobDef, KnobValues, LegionMode, ShieldStance, SkillKind, UnitKind };
 
@@ -68,6 +71,12 @@ export interface LegionInitData {
     /** 依 playerId 的出生點；補給站（歸 flag 那面旗的佔領者） */
     readonly spawns: readonly { readonly x: number; readonly y: number }[];
     readonly supplies: readonly { readonly id: number; readonly x: number; readonly y: number; readonly flag: number }[];
+    /** 公開的地形要點：牆段、城門、樓梯、隘口、高地、樹林（所有地圖都有；沒有城的地圖 walls／gates／stairs 是空的） */
+    readonly features: MapFeatures;
+    /** 攻城地圖：守方座位（-1 = 沒有城）、衝車起點、砲擊來向（度，-1 = 沒有） */
+    readonly defender: number;
+    readonly ram: { readonly x: number; readonly y: number; readonly facing: number } | null;
+    readonly bombardFrom: number;
   };
   /**
    * 佔點規則：圈的半徑（單位）、從零佔滿要幾個 tick、目標分數；

@@ -36,7 +36,7 @@ import {
 } from './config.ts';
 import { formationShape, grid, type FormationShape } from './formation.ts';
 import { angleDiff, iatan2, icos, isin, normDeg, offset, stepToward, turnToward } from './geom.ts';
-import { MAPS, defaultMapId, defaultTimeLimit, heightAt, sightBlocked, tileXY, type LegionMap } from './map.ts';
+import { MAPS, defaultMapId, defaultTimeLimit, heightAt, mapFeatures, sightBlocked, tileXY, type LegionMap } from './map.ts';
 import { clearLine, findPath, snapPoint, type PathEnv } from './path.ts';
 
 export type { Flank };
@@ -3322,6 +3322,10 @@ export function legionInitData(m: LegionMap, mode: LegionMode, p: number, knobs:
       flags: m.flags.map((f, i) => ({ id: i, name: f.name, x: f.x, y: f.y, points: f.points })),
       spawns: m.spawns.map((q) => ({ x: q.x, y: q.y })),
       supplies: m.supplies.map((q, i) => ({ id: i, x: q.x, y: q.y, flag: q.flag })),
+      features: mapFeatures(m),
+      defender: m.defender,
+      ram: m.ram === undefined ? null : { x: m.ram.x, y: m.ram.y, facing: m.ram.facing },
+      bombardFrom: m.bombardFrom ?? -1,
     },
     capture: {
       radius: RULES.capture.radius,
