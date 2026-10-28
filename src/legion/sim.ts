@@ -4,7 +4,7 @@
 import { Hasher } from '../shared/hash.ts';
 import { idiv, isqrt, roundHalfEven, tdiv } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
-import type { EnemyRegiment, Flank, FlagState, GateInfo, GateStatus, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RegimentStatus, Structures } from './api.ts';
+import type { EnemyRegiment, Flank, FlagState, GateInfo, GateStatus, LadderInfo, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RegimentStatus, Structures } from './api.ts';
 import {
   RULES,
   T,
@@ -13,6 +13,8 @@ import {
   UNIT_KINDS,
   UNITS,
   VERSUS,
+  LADDER_KINDS,
+  LADDER_LAYER,
   WALL_LAYER,
   WALL_LEVELS,
   dashDefOf,
@@ -80,6 +82,10 @@ export interface Soldier {
   dmgWinStart: number;
   /** 槍林迎擊：下一次可以迎擊的 tick */
   counterAt: number;
+  /** 爬雲梯中：雲梯 id（-1 = 沒有）、已爬的 tick、往上（true）或往下 */
+  climb: number;
+  climbT: number;
+  climbUp: boolean;
 }
 
 export interface DashState {
@@ -117,6 +123,13 @@ export interface Regiment {
   /** 中心最近經過的樓梯格中心（-1 = 沒有）：還在另一層的士兵往這裡走來換層 */
   stairX: number;
   stairY: number;
+  /** 中心最近經過的雲梯（-1 = 沒有）：還在另一層的士兵到梯腳（或梯口）排隊爬 */
+  xferLadder: number;
+  /** 正在架的雲梯、正在推倒的雲梯（-1 = 沒有）與推倒的開始 tick、讀條進度 */
+  building: number;
+  toppling: number;
+  toppleSince: number;
+  toppleT: number;
   facing: number;
   /** tick 開始時的位置與朝向：軍團決策讀取其他軍團時一律用這組，處理順序不影響結果 */
   px: number;
@@ -239,6 +252,24 @@ export interface GateRuntime {
   readonly hpMax: number;
   state: GateStatus;
   timer: number;
+}
+
+/** 雲梯 */
+export interface LadderRuntime {
+  readonly id: number;
+  readonly owner: number;
+  /** 梯口（城牆格）與梯腳（地面格）的格索引與中心座標 */
+  readonly top: number;
+  readonly foot: number;
+  readonly tx: number;
+  readonly ty: number;
+  readonly fx: number;
+  readonly fy: number;
+  progress: number;
+  built: boolean;
+  builder: number;
+  /** 下一個人可以上梯的 tick */
+  nextEntry: number;
 }
 
 export interface FlagRuntime {
@@ -377,6 +408,11 @@ export class LegionMatch {
   readonly gates: GateRuntime[] = [];
   /** 每一格：1 = 城門開著（門樓地面層可走） */
   readonly gateMask: Uint8Array;
+  /** 雲梯（依建立順序；被推倒或取消的就移除） */
+  ladders: LadderRuntime[] = [];
+  private ladderSeq = 0;
+  /** 尋路的額外連結（已架好的雲梯）：狀態索引 → 可到的狀態索引 */
+  private readonly ladderLinks = new Map<number, number[]>();
   /** 傳給尋路的通行狀態；沒有城的地圖為 null（尋路與 0.3 完全相同） */
   private pathEnv: PathEnv | null = null;
 
@@ -394,7 +430,7 @@ export class LegionMatch {
       const hpMax = g.kind === 'main' ? RULES.gate.mainHp : RULES.gate.sideHp;
       this.gates.push({ id: i, kind: g.kind, x0: g.x0, y0: g.y0, x1: g.x1, y1: g.y1, cx: idiv((g.x0 + g.x1) * TILE, 2), cy: idiv((g.y0 + g.y1) * TILE, 2), owner: this.map.defender, hp: hpMax, hpMax, state: 'closed', timer: 0 });
     });
-    if (this.gates.length > 0) this.pathEnv = { open: this.gateMask, links: null, linkCost: 0 };
+    if (this.gates.length > 0 || this.map.defender >= 0) this.pathEnv = { open: this.gateMask, links: this.ladderLinks, linkCost: RULES.ladder.pathCost };
     const n = setup.deployments.length;
     for (let p = 0; p < n; p++) this.inbox.push([]);
     for (let p = 0; p < n; p++) {
@@ -445,7 +481,7 @@ export class LegionMatch {
         this.regiments.push(reg);
         for (let k = 0; k < def.men; k++) {
           const id = this.soldiers.length;
-          this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x: sp.x, y: sp.y, layer: 0, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: false, ord: k, sx: sp.x, sy: sp.y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0 });
+          this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x: sp.x, y: sp.y, layer: 0, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: false, ord: k, sx: sp.x, sy: sp.y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0, climb: -1, climbT: 0, climbUp: true });
           reg.parked.push(id);
         }
         return undefined;
@@ -477,7 +513,7 @@ export class LegionMatch {
       this.regiments.push(reg);
       for (let k = 0; k < def.men; k++) {
         const id = this.soldiers.length;
-        this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x, y, layer, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: true, ord: k, sx: x, sy: y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0 });
+        this.soldiers.push({ id, reg: reg.id, owner: p, k: id - base, x, y, layer, hp: def.hp, cd: 0, target: -1, nextRetarget: 0, alive: true, ord: k, sx: x, sy: y, blocked: false, spd: 0, downUntil: -1, dashing: false, mom: 0, struck: [], firstHit: false, dmgWin: 0, dmgWinStart: 0, counterAt: 0, climb: -1, climbT: 0, climbUp: true });
         reg.slots.push(id);
       }
       this.layout(reg, true);
@@ -507,6 +543,11 @@ export class LegionMatch {
       layer,
       stairX: -1,
       stairY: -1,
+      xferLadder: -1,
+      building: -1,
+      toppling: -1,
+      toppleSince: 0,
+      toppleT: 0,
       facing,
       px: x,
       py: y,
@@ -613,6 +654,8 @@ export class LegionMatch {
     if (r.wall === 2) return 'walled';
     if (this.tick < r.switchUntil) return 'reforming';
     if (r.volley !== null) return 'volleying';
+    if (r.building >= 0) return 'laddering';
+    if (r.toppling >= 0) return 'toppling';
     if (this.tick - r.lastMelee <= 10) return 'engaged';
     if (r.order === 'attack' || ((r.order === 'attackMove' || r.order === 'hold' || r.order === 'idle') && (r.target >= 0 || r.fireTarget >= 0))) return 'attacking';
     if (r.moved) return 'moving';
@@ -660,7 +703,229 @@ export class LegionMatch {
   }
 
   structures(): Structures {
-    return { gates: this.gates.map((g) => this.gateInfo(g)) };
+    return { gates: this.gates.map((g) => this.gateInfo(g)), ladders: this.ladders.map((l) => this.ladderInfo(l)) };
+  }
+
+  // ───────── 雲梯 ─────────
+
+  ladderInfo(l: LadderRuntime): LadderInfo {
+    let climbers = 0;
+    for (const s of this.soldiers) if (s.alive && s.climb === l.id) climbers += 1;
+    let topple = -1;
+    for (const r of this.regiments) if (r.toppling === l.id && !this.gone(r)) topple = Math.max(topple, r.toppleT);
+    return { id: l.id, owner: l.owner, x: l.tx, y: l.ty, footX: l.fx, footY: l.fy, progress: l.progress, buildTicks: RULES.ladder.buildTicks, built: l.built, climbers, topple };
+  }
+
+  ladderById(id: number): LadderRuntime | null {
+    for (const l of this.ladders) if (l.id === id) return l;
+    return null;
+  }
+
+  /** 攻方：不是守方座位的一方（沒有城的地圖沒有攻守） */
+  private isAttacker(p: number): boolean {
+    return this.map.defender >= 0 && p !== this.map.defender;
+  }
+
+  private ladderCommand(p: number, r: Regiment, c: Record<string, unknown>): void {
+    const type = 'ladder';
+    if (!LADDER_KINDS.includes(r.kind)) return this.rejectCmd(p, type, '只有劍士、盾兵、長槍、輕步兵能架雲梯');
+    if (!this.isAttacker(p)) return this.rejectCmd(p, type, '只有攻方能架雲梯');
+    if (r.layer !== 0) return this.rejectCmd(p, type, '要在地面才能架雲梯');
+    if (r.building >= 0) return this.rejectCmd(p, type, '這一團正在架另一座雲梯');
+    const x = typeof c.x === 'number' && Number.isFinite(c.x) ? roundHalfEven(c.x) : null;
+    const y = typeof c.y === 'number' && Number.isFinite(c.y) ? roundHalfEven(c.y) : null;
+    if (x === null || y === null) return this.rejectCmd(p, type, '座標不合法');
+    const w = this.map.width;
+    const [tx, ty] = tileXY(x, y, w, this.map.height);
+    if (tx < 0 || ty < 0 || tx >= w || ty >= this.map.height || this.map.terrain[ty * w + tx] !== T.Wall) return this.rejectCmd(p, type, '只能架在城牆格');
+    const top = ty * w + tx;
+    for (const l of this.ladders) if (l.top === top) return this.rejectCmd(p, type, '這格城牆已經有雲梯');
+    // 梯腳：城牆格上下左右、地面可以站的格裡離軍團中心最近的一格
+    let foot = -1;
+    let best = Infinity;
+    for (const [dx, dy] of [[0, -1], [-1, 0], [1, 0], [0, 1]] as const) {
+      const fx = tx + dx;
+      const fy = ty + dy;
+      if (fx < 0 || fy < 0 || fx >= w || fy >= this.map.height) continue;
+      const fi = fy * w + fx;
+      const t = this.map.terrain[fi];
+      if (t === T.Stair || t === T.Gatehouse || !walkable(t)) continue;
+      const cx = fx * TILE + TILE / 2;
+      const cy = fy * TILE + TILE / 2;
+      const d = (cx - r.x) * (cx - r.x) + (cy - r.y) * (cy - r.y);
+      if (d < best) {
+        best = d;
+        foot = fi;
+      }
+    }
+    if (foot < 0) return this.rejectCmd(p, type, '城牆下沒有可以站的地面');
+    if (best > RULES.ladder.reach * RULES.ladder.reach) return this.rejectCmd(p, type, '離城牆太遠');
+    const fx = foot % w;
+    const fy = (foot - fx) / w;
+    const l: LadderRuntime = { id: this.ladderSeq++, owner: p, top, foot, tx: tx * TILE + TILE / 2, ty: ty * TILE + TILE / 2, fx: fx * TILE + TILE / 2, fy: fy * TILE + TILE / 2, progress: 0, built: false, builder: r.id, nextEntry: 0 };
+    this.ladders.push(l);
+    r.building = l.id;
+    r.order = 'hold';
+    r.target = -1;
+    r.path = [];
+    this.emit({ type: 'ladder', tick: this.tick, ladder: l.id, owner: p, state: 'building', fell: 0 });
+  }
+
+  private toppleCommand(p: number, r: Regiment, c: Record<string, unknown>): void {
+    const type = 'topple';
+    if (this.map.defender < 0 || p !== this.map.defender) return this.rejectCmd(p, type, '只有守方能推倒雲梯');
+    const l = typeof c.ladder === 'number' ? this.ladderById(c.ladder) : null;
+    if (l === null) return this.rejectCmd(p, type, '沒有這座雲梯');
+    if (!l.built) return this.rejectCmd(p, type, '雲梯還沒架好');
+    const why = this.toppleBlocked(r, l);
+    if (why !== null) return this.rejectCmd(p, type, why);
+    r.toppling = l.id;
+    r.toppleSince = this.tick;
+    r.toppleT = 0;
+    r.order = 'hold';
+    r.target = -1;
+    r.path = [];
+  }
+
+  /** 推不了雲梯的原因（null = 可以推） */
+  private toppleBlocked(r: Regiment, l: LadderRuntime): string | null {
+    if (r.layer !== WALL_LAYER) return '要在牆頂才能推倒雲梯';
+    const m2 = RULES.ladder.mouth * RULES.ladder.mouth;
+    let at = false;
+    for (const sid of r.slots) {
+      const s = this.soldiers[sid];
+      if (s.layer === WALL_LAYER && (s.x - l.tx) * (s.x - l.tx) + (s.y - l.ty) * (s.y - l.ty) <= m2) at = true;
+    }
+    if (!at) return '要站在梯口才能推倒雲梯';
+    const c2 = RULES.ladder.clear * RULES.ladder.clear;
+    for (const s of this.soldiers) {
+      if (!s.alive || s.owner === r.owner || s.layer !== WALL_LAYER) continue;
+      if ((s.x - l.tx) * (s.x - l.tx) + (s.y - l.ty) * (s.y - l.ty) <= c2) return '梯口有敵兵';
+    }
+    return null;
+  }
+
+  /** 雲梯計時：架設、推倒 */
+  private stepLadders(): void {
+    for (const l of [...this.ladders]) {
+      if (l.built) continue;
+      const b = this.regiments[l.builder];
+      if (b === undefined || this.gone(b) || b.building !== l.id) {
+        this.removeLadder(l, 'cancelled', null);
+        continue;
+      }
+      l.progress += 1;
+      if (l.progress >= RULES.ladder.buildTicks) {
+        l.built = true;
+        l.builder = -1;
+        b.building = -1;
+        this.rebuildLinks();
+        this.emit({ type: 'ladder', tick: this.tick, ladder: l.id, owner: l.owner, state: 'built', fell: 0 });
+      }
+    }
+    for (const r of this.regiments) {
+      if (r.toppling < 0) continue;
+      const l = this.ladderById(r.toppling);
+      // 讀條中被攻擊、離開梯口、梯口來了敵兵：中斷
+      if (l === null || this.gone(r) || r.lastHit >= r.toppleSince || this.toppleBlocked(r, l) !== null) {
+        r.toppling = -1;
+        continue;
+      }
+      r.toppleT += 1;
+      if (r.toppleT >= RULES.ladder.toppleTicks) {
+        r.toppling = -1;
+        this.removeLadder(l, 'toppled', r);
+      }
+    }
+  }
+
+  /** 移除雲梯：梯上的人摔到梯腳（推倒才有摔傷） */
+  private removeLadder(l: LadderRuntime, state: 'cancelled' | 'toppled', by: Regiment | null): void {
+    this.ladders = this.ladders.filter((q) => q !== l);
+    let fell = 0;
+    for (const s of this.soldiers) {
+      if (!s.alive || s.climb !== l.id) continue;
+      fell += 1;
+      const height = s.climbUp ? s.climbT : RULES.ladder.climbTicks - s.climbT;
+      const t = this.regiments[s.reg];
+      const full = idiv(t.def.hp * RULES.veteran.levels[t.level - 1].hp, 100);
+      s.climb = -1;
+      s.layer = 0;
+      s.x = l.fx;
+      s.y = l.fy;
+      s.target = -1;
+      if (by !== null) this.damage(s, idiv(idiv(full * RULES.ladder.fallPct, 100) * height, RULES.ladder.climbTicks), by);
+    }
+    for (const r of this.regiments) {
+      if (r.xferLadder === l.id) {
+        r.xferLadder = -1;
+        // 軍團中心已經翻到另一層、大部分士兵卻還沒過去：中心退回大多數人所在的那一層（梯腳或梯口），重新規劃
+        let here = 0;
+        for (const sid of r.slots) if (this.soldiers[sid].layer === r.layer) here += 1;
+        if (here * 2 < r.slots.length) {
+          r.layer = r.layer === 0 ? WALL_LAYER : 0;
+          r.x = r.layer === 0 ? l.fx : l.tx;
+          r.y = r.layer === 0 ? l.fy : l.ty;
+          r.path = [];
+        }
+      }
+      if (r.building === l.id) r.building = -1;
+      if (r.toppling === l.id) r.toppling = -1;
+    }
+    if (l.built) this.rebuildLinks();
+    this.emit({ type: 'ladder', tick: this.tick, ladder: l.id, owner: l.owner, state, fell });
+  }
+
+  /** 尋路的雲梯連結：梯腳（地面層）↔ 梯口（牆頂層） */
+  private rebuildLinks(): void {
+    const n = this.map.width * this.map.height;
+    this.ladderLinks.clear();
+    const add = (a: number, b: number): void => {
+      const list = this.ladderLinks.get(a);
+      if (list === undefined) this.ladderLinks.set(a, [b]);
+      else list.push(b);
+    };
+    for (const l of this.ladders) {
+      if (!l.built) continue;
+      add(l.foot, l.top + n);
+      add(l.top + n, l.foot);
+    }
+    this.invalidatePaths();
+  }
+
+  /** 軍團中心從 fi 格跨到 ti 格：是不是經過某座已架好的雲梯（地面梯腳 ↔ 牆頂梯口） */
+  private ladderBetween(fi: number, ti: number, layer: number): LadderRuntime | null {
+    for (const l of this.ladders) {
+      if (!l.built) continue;
+      if (layer === 0 && l.foot === fi && l.top === ti) return l;
+      if (layer === WALL_LAYER && l.top === fi && l.foot === ti) return l;
+    }
+    return null;
+  }
+
+  /** 爬梯中的士兵：沿梯子前進，爬完就換層 */
+  private climbStep(s: Soldier): void {
+    const l = this.ladderById(s.climb);
+    const C = RULES.ladder.climbTicks;
+    if (l === null) {
+      s.climb = -1;
+      this.nx[s.id] = s.x;
+      this.ny[s.id] = s.y;
+      this.nl[s.id] = 0;
+      return;
+    }
+    s.climbT += 1;
+    const [ax, ay, bx, by] = s.climbUp ? [l.fx, l.fy, l.tx, l.ty] : [l.tx, l.ty, l.fx, l.fy];
+    if (s.climbT >= C) {
+      s.climb = -1;
+      this.nx[s.id] = bx;
+      this.ny[s.id] = by;
+      this.nl[s.id] = s.climbUp ? WALL_LAYER : 0;
+      return;
+    }
+    this.nx[s.id] = ax + idiv((bx - ax) * s.climbT, C);
+    this.ny[s.id] = ay + idiv((by - ay) * s.climbT, C);
+    this.nl[s.id] = LADDER_LAYER;
   }
 
   private setGate(g: GateRuntime, state: GateStatus, timer: number): void {
@@ -1071,7 +1336,16 @@ export class LegionMatch {
       return tr;
     };
     // 槍林、盾牆中：先收起，收完再執行（槍林、盾兵姿態、陣形、意圖例外）
-    const needsFree = type === 'move' || type === 'attackMove' || type === 'attack' || type === 'face' || type === 'follow' || type === 'charge' || type === 'assault' || type === 'infiltrate';
+    const needsFree = type === 'move' || type === 'attackMove' || type === 'attack' || type === 'face' || type === 'follow' || type === 'charge' || type === 'assault' || type === 'infiltrate' || type === 'ladder' || type === 'topple';
+    // 架梯、推梯中收到別的指令（停住、轉向、換陣形除外）：放下手上的工作。架梯中再下架梯：拒絕（一團同時只能架一座）
+    if (type !== 'hold' && type !== 'face' && type !== 'formation' && !(type === 'ladder' && r.building >= 0)) {
+      if (r.building >= 0) {
+        const l = this.ladderById(r.building);
+        r.building = -1;
+        if (l !== null && !l.built) this.removeLadder(l, 'cancelled', null);
+      }
+      r.toppling = -1;
+    }
     if (needsFree && !fromPending && (r.brace !== 0 || r.wall !== 0)) {
       if (r.brace === 1 || r.brace === 2) {
         r.brace = 3;
@@ -1256,6 +1530,10 @@ export class LegionMatch {
       }
       case 'steer':
         return this.rejectCmd(p, type, '不在衝刺中');
+      case 'ladder':
+        return this.ladderCommand(p, r, c);
+      case 'topple':
+        return this.toppleCommand(p, r, c);
       default:
         return this.rejectCmd(p, type, '沒有這個指令');
     }
@@ -1343,6 +1621,7 @@ export class LegionMatch {
     }
     if (this.mode === 'capture') this.stepReserves();
     if (this.gates.length > 0) this.stepGates();
+    if (this.ladders.length > 0 || this.regiments.some((r) => r.toppling >= 0)) this.stepLadders();
     for (const r of this.regiments) if (!this.gone(r)) this.think(r);
     for (const r of this.regiments) if (!this.gone(r)) this.layout(r, false);
     this.computeNear();
@@ -1580,6 +1859,17 @@ export class LegionMatch {
           if (t === T.Stair) {
             r.stairX = tx * TILE + TILE / 2;
             r.stairY = ty * TILE + TILE / 2;
+            r.xferLadder = -1;
+          }
+        } else if (this.ladders.length > 0 && !r.def.cavalry) {
+          // 沿雲梯跨層（地面梯腳 ↔ 牆頂梯口）
+          const w = this.map.width;
+          const l = this.ladderBetween(fy * w + fx, ty * w + tx, r.layer);
+          if (l !== null) {
+            r.layer = r.layer === 0 ? WALL_LAYER : 0;
+            r.xferLadder = l.id;
+            r.stairX = -1;
+            r.stairY = -1;
           }
         }
       }
@@ -1826,6 +2116,7 @@ export class LegionMatch {
    * 士兵移動：只讀取 tick 開始時的位置，結果寫入緩衝區，全部算完才一起套用（處理順序不影響結果）。
    */
   private moveSoldier(s: Soldier): void {
+    if (s.climb >= 0) return this.climbStep(s);
     const r = this.regiments[s.reg];
     if (s.downUntil > this.tick) {
       this.nx[s.id] = s.x;
@@ -1841,10 +2132,27 @@ export class LegionMatch {
     let chase = this.chaseRadius(r);
     // 和軍團不在同一層（軍團已經上牆、自己還在地面，或反過來）：先走到軍團經過的樓梯換層，不追人；
     // 已經站在樓梯上就照常走向隊形位置（踏出樓梯的那一步才換層）
-    const offLayer = s.layer !== r.layer && r.stairX >= 0;
+    // 經雲梯換層：走到梯腳（在地面）或梯口（在牆頂）排隊，輪到就上梯
+    const xfer = r.xferLadder >= 0 && s.layer !== r.layer ? this.ladderById(r.xferLadder) : null;
+    const offLayer = s.layer !== r.layer && (r.stairX >= 0 || xfer !== null);
     if (offLayer) {
       chase = 0;
-      if (this.terrainAt(s.x, s.y) !== T.Stair) {
+      if (xfer !== null) {
+        gx = s.layer === 0 ? xfer.fx : xfer.tx;
+        gy = s.layer === 0 ? xfer.fy : xfer.ty;
+        const md = RULES.ladder.mountDist;
+        if (xfer.built && this.tick >= xfer.nextEntry && (s.x - gx) * (s.x - gx) + (s.y - gy) * (s.y - gy) <= md * md) {
+          xfer.nextEntry = this.tick + RULES.ladder.entryTicks;
+          s.climb = xfer.id;
+          s.climbT = 0;
+          s.climbUp = s.layer === 0;
+          s.target = -1;
+          this.nx[s.id] = gx;
+          this.ny[s.id] = gy;
+          this.nl[s.id] = LADDER_LAYER;
+          return;
+        }
+      } else if (this.terrainAt(s.x, s.y) !== T.Stair) {
         gx = r.stairX;
         gy = r.stairY;
       }
@@ -2127,7 +2435,7 @@ export class LegionMatch {
     for (const s of this.soldiers) {
       if (!s.alive) continue;
       const r = this.regiments[s.reg];
-      if (s.downUntil > this.tick) continue;
+      if (s.downUntil > this.tick || s.climb >= 0) continue;
       if (r.dash !== null && s.dashing && !r.dash.aligning) this.collide(s, r);
       // 槍林迎擊：衝進觸及範圍的敵人（正面、衝刺中）不管冷卻都會被刺
       if (r.brace === 2 && r.nearEnemy && this.counterStrike(s, r)) {
@@ -2644,6 +2952,7 @@ export class LegionMatch {
         return this.regiments[ev.reg]?.owner === p;
       case 'flag':
       case 'gate':
+      case 'ladder':
         return true;
     }
   }
@@ -2657,6 +2966,7 @@ export class LegionMatch {
       h.int(s.id).int(s.x).int(s.y).int(s.hp).int(s.cd).int(s.target).int(s.downUntil).bool(s.dashing).int(s.mom).bool(s.firstHit).int(s.counterAt);
       // 層只在非 0 時納入：沒有城牆的地圖雜湊值與 0.3 完全相同
       if (s.layer !== 0) h.int(s.layer);
+      if (s.climb >= 0) h.int(s.climb).int(s.climbT).bool(s.climbUp);
     }
     for (const r of this.regiments) {
       h.int(r.x).int(r.y).int(r.facing).str(r.formation).int(r.width).int(r.depth).int(r.switchUntil).int(r.corridor).int(r.slots.length).int(r.target).int(r.fireTarget);
@@ -2669,6 +2979,8 @@ export class LegionMatch {
     for (const p of this.projectiles) h.int(p.t1).int(p.target).int(p.dmg).int(p.x1).int(p.y1);
     for (const f of this.flags) h.int(f.owner).int(f.capturer).int(f.progress).int(f.contested ? 1 : 0);
     for (const g of this.gates) h.int(g.hp).str(g.state).int(g.timer);
+    for (const l of this.ladders) h.int(l.id).int(l.top).int(l.foot).int(l.progress).bool(l.built).int(l.nextEntry);
+    for (const r of this.regiments) if (r.building >= 0 || r.toppling >= 0 || r.xferLadder >= 0) h.int(r.building).int(r.toppling).int(r.toppleT).int(r.xferLadder);
     for (const p of this.players) h.int(p.score);
     return h.digest();
   }

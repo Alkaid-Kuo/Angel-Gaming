@@ -21,6 +21,8 @@ const STATUS_NAME: Record<RegimentStatus, string> = {
   walled: '盾牆',
   reforming: '換陣形',
   volleying: '齊射',
+  laddering: '架雲梯',
+  toppling: '推倒雲梯',
   reserve: '後備',
   entering: '入場準備',
   routed: '潰散',

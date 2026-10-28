@@ -122,6 +122,9 @@ export type RegimentStatus =
   | 'walled'
   | 'reforming'
   | 'volleying'
+  /** 攻城：架雲梯中、推倒雲梯中 */
+  | 'laddering'
+  | 'toppling'
   /** 佔點模式：在後備、準備入場中 */
   | 'reserve'
   | 'entering'
@@ -214,9 +217,29 @@ export interface GateInfo {
   readonly timer: number;
 }
 
+export interface LadderInfo {
+  readonly id: number;
+  /** 架梯的一方 */
+  readonly owner: number;
+  /** 梯口（城牆格中心）與梯腳（城牆外的地面格中心），單位座標 */
+  readonly x: number;
+  readonly y: number;
+  readonly footX: number;
+  readonly footY: number;
+  /** 架設進度（tick，滿了 = buildTicks）與是否已架好 */
+  readonly progress: number;
+  readonly buildTicks: number;
+  readonly built: boolean;
+  /** 梯上正在爬的人數 */
+  readonly climbers: number;
+  /** 正在被推倒：讀條進度（tick；-1 = 沒有） */
+  readonly topple: number;
+}
+
 /** 城池上的物件（雙方都看得到） */
 export interface Structures {
   readonly gates: readonly GateInfo[];
+  readonly ladders: readonly LadderInfo[];
 }
 
 export interface FlagState {
@@ -254,6 +277,8 @@ export type LegionEvent =
   | { readonly type: 'withdraw'; readonly tick: number; readonly reg: number; readonly at: number }
   /** 城門狀態改變（開門中、開、關門中、關、被破壞） */
   | { readonly type: 'gate'; readonly tick: number; readonly gate: number; readonly state: GateStatus }
+  /** 雲梯：開始架、架好、架設取消、被推倒（fell = 摔下來的人數） */
+  | { readonly type: 'ladder'; readonly tick: number; readonly ladder: number; readonly owner: number; readonly state: 'building' | 'built' | 'cancelled' | 'toppled'; readonly fell: number }
   | { readonly type: 'rejected'; readonly tick: number; readonly player: number; readonly command: string; readonly reason: string };
 
 export interface LegionObservation {
@@ -303,6 +328,10 @@ export type LegionCommand =
   | (Base & { readonly type: 'volley'; readonly x: number; readonly y: number })
   | (Base & DashAim & { readonly type: 'charge' | 'assault' | 'infiltrate' })
   | (Base & { readonly type: 'steer'; readonly facing: number })
+  /** 攻城：攻方步兵（劍、盾、槍、輕步）對相鄰城牆格架雲梯（x, y 是城牆格裡的點），架設期間停在原地 */
+  | (Base & { readonly type: 'ladder'; readonly x: number; readonly y: number })
+  /** 攻城：守方在牆頂的兵團推倒雲梯（要站在梯口、梯口附近沒有攻方士兵；讀條期間被攻擊就中斷） */
+  | (Base & { readonly type: 'topple'; readonly ladder: number })
   /** 佔點模式：後備從出生點入場（場上點數 + 它 ≤ 上限）；入場要準備 enterTicks */
   | (Base & { readonly type: 'summon' })
   /** 佔點模式：場上的這一團在出生點或自己的補給站，換成後備的 with（撤回的血量補滿、人數不變；with 在原地準備入場） */

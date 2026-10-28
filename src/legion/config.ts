@@ -293,7 +293,31 @@ export const RULES = {
     openTicks: 3 * TPS,
     closeTicks: 3 * TPS,
   },
+  /**
+   * 雲梯（引擎 0.4）：攻方劍士、盾兵、長槍、輕步兵對相鄰城牆格架設；架好後雙方都能用。
+   * 一把梯每 entryTicks 上一人、爬到頂 climbTicks（待審）；推倒讀條 toppleTicks（待審），梯上的人摔落，
+   * 傷害 ＝ 單兵血量上限 × fallPct% × 爬升高度比例（待審）。
+   */
+  ladder: {
+    buildTicks: 8 * TPS,
+    entryTicks: 5,
+    climbTicks: 3 * TPS,
+    toppleTicks: 3 * TPS,
+    fallPct: 30,
+    /** 下令時軍團中心離梯腳多遠以內（單位） */
+    reach: 4000,
+    /** 推倒：守方士兵離梯口這個距離內才算站在梯口；梯口這個距離內有攻方士兵就推不了 */
+    mouth: 1500,
+    clear: 1000,
+    /** 士兵離梯腳（梯口）這個距離內才能上梯 */
+    mountDist: 600,
+    /** 尋路：走雲梯的成本（平地一格 = 100） */
+    pathCost: 600,
+  },
 } as const;
+
+/** 能架雲梯的兵種 */
+export const LADDER_KINDS: readonly UnitKind[] = ['sword', 'shield', 'spear', 'light'];
 
 export type LegionMode = 'annihilation' | 'capture';
 export const MODE_NAMES: Readonly<Record<LegionMode, string>> = { annihilation: '殲滅戰', capture: '佔點' };
@@ -320,6 +344,8 @@ export const TERRAIN_NAMES = ['平地', '道路', '樹林', '高地', '淺灘', 
 /** 層：0 地面、1 牆頂（之後塔樓可擴）。牆頂高度 ＝ 地面高度 ＋ WALL_LEVELS 階 */
 export const GROUND_LAYER = 0;
 export const WALL_LAYER = 1;
+/** 爬雲梯中的士兵所在的層：不和任何人近戰、推擠（只有箭與砲擊打得到），高度算地面 */
+export const LADDER_LAYER = 2;
 export const WALL_LEVELS = 3;
 
 /**
