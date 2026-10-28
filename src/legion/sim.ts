@@ -4,7 +4,7 @@
 import { Hasher } from '../shared/hash.ts';
 import { idiv, isqrt, roundHalfEven, tdiv } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
-import type { EnemyRegiment, Flank, FlagState, GateInfo, GateStatus, LadderInfo, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RegimentStatus, Structures } from './api.ts';
+import type { EnemyRegiment, Flank, FlagState, GateInfo, GateStatus, LadderInfo, LegionCommand, LegionEvent, LegionInitData, LegionObservation, OwnRegiment, RamInfo, RegimentStatus, Structures } from './api.ts';
 import {
   RULES,
   T,
@@ -15,6 +15,7 @@ import {
   VERSUS,
   LADDER_KINDS,
   LADDER_LAYER,
+  RAM,
   WALL_LAYER,
   WALL_LEVELS,
   dashDefOf,
@@ -272,6 +273,19 @@ export interface LadderRuntime {
   nextEntry: number;
 }
 
+/** 衝車 */
+export interface RamRuntime {
+  readonly id: number;
+  readonly owner: number;
+  x: number;
+  y: number;
+  facing: number;
+  crew: number;
+  /** 貼著哪座城門（-1 = 沒有）與開始貼著的 tick */
+  gate: number;
+  contactSince: number;
+}
+
 export interface FlagRuntime {
   readonly id: number;
   readonly name: string;
@@ -415,6 +429,8 @@ export class LegionMatch {
   private readonly ladderLinks = new Map<number, number[]>();
   /** 傳給尋路的通行狀態；沒有城的地圖為 null（尋路與 0.3 完全相同） */
   private pathEnv: PathEnv | null = null;
+  /** 衝車（攻城地圖才有） */
+  ram: RamRuntime | null = null;
 
   constructor(setup: LegionSetup) {
     const mapFactory = MAPS[setup.mapId ?? defaultMapId(setup.mode)];
@@ -431,6 +447,9 @@ export class LegionMatch {
       this.gates.push({ id: i, kind: g.kind, x0: g.x0, y0: g.y0, x1: g.x1, y1: g.y1, cx: idiv((g.x0 + g.x1) * TILE, 2), cy: idiv((g.y0 + g.y1) * TILE, 2), owner: this.map.defender, hp: hpMax, hpMax, state: 'closed', timer: 0 });
     });
     if (this.gates.length > 0 || this.map.defender >= 0) this.pathEnv = { open: this.gateMask, links: this.ladderLinks, linkCost: RULES.ladder.pathCost };
+    if (this.map.ram !== undefined && this.map.defender >= 0 && setup.deployments.length === 2) {
+      this.ram = { id: 0, owner: 1 - this.map.defender, x: this.map.ram.x, y: this.map.ram.y, facing: normDeg(this.map.ram.facing), crew: -1, gate: -1, contactSince: -1 };
+    }
     const n = setup.deployments.length;
     for (let p = 0; p < n; p++) this.inbox.push([]);
     for (let p = 0; p < n; p++) {
@@ -665,7 +684,7 @@ export class LegionMatch {
   /** 招牌技能是衝刺，而且現在可以用 */
   canDash(r: Regiment): boolean {
     const d = dashDefOf(r.kind);
-    if (d === null || r.routed || r.dash !== null || r.brace !== 0 || r.wall !== 0 || this.tick < r.skillReadyAt || r.formation === 'circle') return false;
+    if (d === null || r.routed || r.dash !== null || r.brace !== 0 || r.wall !== 0 || this.tick < r.skillReadyAt || r.formation === 'circle' || this.manning(r)) return false;
     return !(d.kind === 'charge' && stopsCavalry(this.terrainAt(r.x, r.y)));
   }
 
@@ -703,7 +722,82 @@ export class LegionMatch {
   }
 
   structures(): Structures {
-    return { gates: this.gates.map((g) => this.gateInfo(g)), ladders: this.ladders.map((l) => this.ladderInfo(l)) };
+    return { gates: this.gates.map((g) => this.gateInfo(g)), ladders: this.ladders.map((l) => this.ladderInfo(l)), ram: this.ramInfo() };
+  }
+
+  // ───────── 衝車 ─────────
+
+  ramInfo(): RamInfo | null {
+    const q = this.ram;
+    if (q === null) return null;
+    const nextHit = q.gate >= 0 && q.crew >= 0 ? RAM.hitTicks - ((this.tick - q.contactSince) % RAM.hitTicks) : 0;
+    return { id: q.id, owner: q.owner, x: q.x, y: q.y, facing: q.facing, crew: q.crew >= 0 ? q.crew : null, gate: q.gate >= 0 ? q.gate : null, nextHit };
+  }
+
+  /** r 正在推衝車 */
+  private manning(r: Regiment): boolean {
+    return this.ram !== null && this.ram.crew === r.id;
+  }
+
+  private manCommand(p: number, r: Regiment, c: Record<string, unknown>): void {
+    const q = this.ram;
+    if (q === null || c.target !== q.id) return this.rejectCmd(p, 'man', '沒有這台衝車');
+    if (q.owner !== p) return this.rejectCmd(p, 'man', '只有攻方能推衝車');
+    if (r.def.cavalry) return this.rejectCmd(p, 'man', '騎兵不能推衝車');
+    if (r.layer !== 0) return this.rejectCmd(p, 'man', '要在地面才能推衝車');
+    if (q.crew === r.id) return undefined;
+    if (q.crew >= 0 && this.alive(q.crew) !== null) return this.rejectCmd(p, 'man', '衝車已經有人推');
+    if ((q.x - r.x) * (q.x - r.x) + (q.y - r.y) * (q.y - r.y) > RAM.attach * RAM.attach) return this.rejectCmd(p, 'man', '離衝車太遠');
+    if (r.formation === 'circle') return this.rejectCmd(p, 'man', '圓陣不能推衝車');
+    q.crew = r.id;
+    q.contactSince = -1;
+  }
+
+  /** 衝車跟著附上的兵團走（在兵團正前方），貼著關閉的城門就定時撞門 */
+  private stepRam(): void {
+    const q = this.ram!;
+    if (q.crew >= 0 && this.alive(q.crew) === null) q.crew = -1;
+    const r = q.crew >= 0 ? this.regiments[q.crew] : null;
+    if (r !== null) {
+      q.facing = r.facing;
+      const [ox, oy] = offset(r.facing, r.halfD + RAM.front);
+      const [nx, ny] = stepToward(q.x, q.y, r.x + ox, r.y + oy, RAM.speed * 2);
+      [q.x, q.y] = this.slide(q.x, q.y, nx, ny, 0, false);
+    }
+    // 貼著哪座擋路的城門（關著或開門中）
+    let gate = -1;
+    for (const g of this.gates) {
+      if (g.state === 'broken' || this.gateMask[g.y0 * this.map.width + g.x0] === 1) continue;
+      const dx = Math.max(g.x0 * TILE - q.x, 0, q.x - g.x1 * TILE);
+      const dy = Math.max(g.y0 * TILE - q.y, 0, q.y - g.y1 * TILE);
+      if (dx * dx + dy * dy <= RAM.contact * RAM.contact) {
+        gate = g.id;
+        break;
+      }
+    }
+    if (gate < 0 || r === null) {
+      q.gate = -1;
+      q.contactSince = -1;
+      return;
+    }
+    if (q.gate !== gate || q.contactSince < 0) {
+      q.gate = gate;
+      q.contactSince = this.tick;
+      return;
+    }
+    const since = this.tick - q.contactSince;
+    if (since > 0 && since % RAM.hitTicks === 0) {
+      const g = this.gates[gate];
+      this.damageGate(g, RAM.hit);
+      this.emit({ type: 'ramHit', tick: this.tick, gate: g.id, hp: g.hp });
+    }
+  }
+
+  /** 箭從 (x0, y0) 射向推衝車的兵團：從衝車正面 ±blockHalf 度射來的被擋下 */
+  private ramBlocks(e: Soldier, x0: number, y0: number): boolean {
+    const q = this.ram;
+    if (q === null || q.crew !== e.reg || (x0 === q.x && y0 === q.y)) return false;
+    return Math.abs(angleDiff(iatan2(y0 - q.y, x0 - q.x), q.facing)) <= RAM.blockHalf;
   }
 
   // ───────── 雲梯 ─────────
@@ -1360,6 +1454,9 @@ export class LegionMatch {
     }
     const moving = type === 'move' || type === 'attackMove' || type === 'attack' || type === 'follow';
     if (moving && r.formation === 'circle') return this.rejectCmd(p, type, '圓陣不能移動，先換陣形');
+    if (this.manning(r) && (type === 'brace' || (type === 'shield' && c.mode === 'wall') || type === 'ladder' || (type === 'formation' && c.formation === 'circle'))) {
+      return this.rejectCmd(p, type, '推衝車中不能這樣做，先卸下（unman）');
+    }
     switch (type) {
       case 'move':
       case 'attackMove': {
@@ -1530,6 +1627,11 @@ export class LegionMatch {
       }
       case 'steer':
         return this.rejectCmd(p, type, '不在衝刺中');
+      case 'man':
+        return this.manCommand(p, r, c);
+      case 'unman':
+        if (this.manning(r)) this.ram!.crew = -1;
+        return undefined;
       case 'ladder':
         return this.ladderCommand(p, r, c);
       case 'topple':
@@ -1623,6 +1725,7 @@ export class LegionMatch {
     if (this.gates.length > 0) this.stepGates();
     if (this.ladders.length > 0 || this.regiments.some((r) => r.toppling >= 0)) this.stepLadders();
     for (const r of this.regiments) if (!this.gone(r)) this.think(r);
+    if (this.ram !== null) this.stepRam();
     for (const r of this.regiments) if (!this.gone(r)) this.layout(r, false);
     this.computeNear();
     this.grid.build(this.soldiers);
@@ -1670,8 +1773,9 @@ export class LegionMatch {
     return r === undefined || this.gone(r) ? null : r;
   }
 
-  /** 平常的移動速度（盾兵依姿態） */
+  /** 平常的移動速度（盾兵依姿態；推衝車的兵團跟衝車同速） */
   private baseSpeed(r: Regiment): number {
+    if (this.ram !== null && this.ram.crew === r.id) return Math.min(RAM.speed, r.stance === 'raise' ? RULES.shield.raise.speed : r.def.speed);
     if (r.stance === 'raise') return RULES.shield.raise.speed;
     if (r.stance === 'carry') return RULES.shield.carry.speed;
     return r.def.speed;
@@ -2688,6 +2792,8 @@ export class LegionMatch {
         }
       }
       if (e === null || !e.alive) continue;
+      // 衝車正面擋箭
+      if (this.ram !== null && this.ramBlocks(e, p.x0, p.y0)) continue;
       const by = this.regiments[p.reg];
       const t = this.regiments[e.reg];
       // 齊射：開火時以落點的地形估層；實際中箭的人在另一層（開著的門洞、樓梯、門樓頂）就依他的層重算高度差
@@ -2953,6 +3059,7 @@ export class LegionMatch {
       case 'flag':
       case 'gate':
       case 'ladder':
+      case 'ramHit':
         return true;
     }
   }
@@ -2980,6 +3087,7 @@ export class LegionMatch {
     for (const f of this.flags) h.int(f.owner).int(f.capturer).int(f.progress).int(f.contested ? 1 : 0);
     for (const g of this.gates) h.int(g.hp).str(g.state).int(g.timer);
     for (const l of this.ladders) h.int(l.id).int(l.top).int(l.foot).int(l.progress).bool(l.built).int(l.nextEntry);
+    if (this.ram !== null) h.int(this.ram.x).int(this.ram.y).int(this.ram.facing).int(this.ram.crew).int(this.ram.gate).int(this.ram.contactSince);
     for (const r of this.regiments) if (r.building >= 0 || r.toppling >= 0 || r.xferLadder >= 0) h.int(r.building).int(r.toppling).int(r.toppleT).int(r.xferLadder);
     for (const p of this.players) h.int(p.score);
     return h.digest();

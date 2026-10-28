@@ -66,6 +66,8 @@ export interface LegionMap {
   readonly gates: readonly MapGate[];
   /** 守方座位（城內布陣區的 playerId）：城門歸它開關；-1 = 沒有城。攻守互換靠交換座位，不改地圖 */
   readonly defender: number;
+  /** 衝車的起點與朝向（單位座標；在攻方布陣區）；沒有就沒有衝車 */
+  readonly ram?: { readonly x: number; readonly y: number; readonly facing: number };
   /** 地面層：不可通行格 → 最近的可通行格（可通行格對應自己） */
   readonly snap: Int32Array;
   /** 牆頂層（城牆、門樓、樓梯）：非牆頂格 → 最近的牆頂格；沒有牆的地圖全是 -1 */

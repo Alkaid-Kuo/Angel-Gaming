@@ -236,10 +236,26 @@ export interface LadderInfo {
   readonly topple: number;
 }
 
+export interface RamInfo {
+  readonly id: number;
+  readonly owner: number;
+  readonly x: number;
+  readonly y: number;
+  /** 衝車正面朝向（度）；正面 ±90° 射來的箭對附上的兵團無效 */
+  readonly facing: number;
+  /** 附上的兵團（null = 沒有人推，衝車不動） */
+  readonly crew: number | null;
+  /** 正在撞的城門（null = 沒貼著關閉的城門）與下一撞還要幾個 tick */
+  readonly gate: number | null;
+  readonly nextHit: number;
+}
+
 /** 城池上的物件（雙方都看得到） */
 export interface Structures {
   readonly gates: readonly GateInfo[];
   readonly ladders: readonly LadderInfo[];
+  /** 衝車（攻城地圖才有，只有一台） */
+  readonly ram: RamInfo | null;
 }
 
 export interface FlagState {
@@ -277,6 +293,8 @@ export type LegionEvent =
   | { readonly type: 'withdraw'; readonly tick: number; readonly reg: number; readonly at: number }
   /** 城門狀態改變（開門中、開、關門中、關、被破壞） */
   | { readonly type: 'gate'; readonly tick: number; readonly gate: number; readonly state: GateStatus }
+  /** 衝車撞了城門一下（hp = 撞完剩下的血量） */
+  | { readonly type: 'ramHit'; readonly tick: number; readonly gate: number; readonly hp: number }
   /** 雲梯：開始架、架好、架設取消、被推倒（fell = 摔下來的人數） */
   | { readonly type: 'ladder'; readonly tick: number; readonly ladder: number; readonly owner: number; readonly state: 'building' | 'built' | 'cancelled' | 'toppled'; readonly fell: number }
   | { readonly type: 'rejected'; readonly tick: number; readonly player: number; readonly command: string; readonly reason: string };
@@ -332,6 +350,10 @@ export type LegionCommand =
   | (Base & { readonly type: 'ladder'; readonly x: number; readonly y: number })
   /** 攻城：守方在牆頂的兵團推倒雲梯（要站在梯口、梯口附近沒有攻方士兵；讀條期間被攻擊就中斷） */
   | (Base & { readonly type: 'topple'; readonly ladder: number })
+  /** 攻城：攻方步兵團附上衝車（target = 衝車 id，目前只有 0）；附上後跟衝車同速 */
+  | (Base & { readonly type: 'man'; readonly target: number })
+  /** 攻城：從衝車卸下 */
+  | (Base & { readonly type: 'unman' })
   /** 佔點模式：後備從出生點入場（場上點數 + 它 ≤ 上限）；入場要準備 enterTicks */
   | (Base & { readonly type: 'summon' })
   /** 佔點模式：場上的這一團在出生點或自己的補給站，換成後備的 with（撤回的血量補滿、人數不變；with 在原地準備入場） */

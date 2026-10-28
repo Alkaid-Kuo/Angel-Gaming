@@ -316,6 +316,21 @@ export const RULES = {
   },
 } as const;
 
+/**
+ * 衝車（引擎 0.4）：攻方免費一台、不計點、不可摧毀。任一步兵團附上（man）才會動，附上的兵團速度降到 speed（待審）；
+ * 衝車在兵團正前方 front；貼著關閉的城門（contact 以內）每 hitTicks 撞一下、每下扣 hit（正門 6 下、側門 3 下破門，已定先測）。
+ * 正面 blockHalf×2 度內射來的箭對附上的兵團無效。
+ */
+export const RAM = {
+  speed: spd(0.7),
+  hit: 667,
+  hitTicks: 3 * TPS,
+  contact: 1500,
+  attach: 5000,
+  front: 1500,
+  blockHalf: 90,
+} as const;
+
 /** 能架雲梯的兵種 */
 export const LADDER_KINDS: readonly UnitKind[] = ['sword', 'shield', 'spear', 'light'];
 
