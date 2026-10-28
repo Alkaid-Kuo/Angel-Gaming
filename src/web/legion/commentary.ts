@@ -1,6 +1,6 @@
 // 軍團戰自動解說：依引擎事件與局勢產生中文字幕（在 Worker 內執行，只讀取比賽狀態）。
 import type { LegionEvent } from '../../legion/api.ts';
-import { MODE_NAMES, RULES, TERRAIN_NAMES, TPS, UNITS, type DashKind } from '../../legion/config.ts';
+import { MODE_NAMES, RULES, T, TERRAIN_NAMES, TPS, UNITS, type DashKind } from '../../legion/config.ts';
 import { terrainAt } from '../../legion/map.ts';
 import type { LegionMatch, Regiment } from '../../legion/sim.ts';
 import type { Caption, PlayerMeta, RegStatic } from './protocol.ts';
@@ -62,7 +62,12 @@ export class LegionCommentator {
     }
     if (best !== '') return best;
     const t = terrainAt(m.map, x, y);
-    const side = x < (m.map.width * 1000) / 2 ? '河西' : '河東';
+    // 有河的地圖說河西／河東；其他地圖：攻城圖說城外／城內，草原說西邊／東邊
+    const west = x < (m.map.width * 1000) / 2;
+    const hasRiver = m.map.terrain.includes(T.River);
+    const z = m.map.deploy[m.map.defender];
+    const inCastle = z !== undefined && x >= z.x0 * 1000 && x < z.x1 * 1000 && y >= z.y0 * 1000 && y < z.y1 * 1000;
+    const side = hasRiver ? (west ? '河西' : '河東') : m.map.defender >= 0 ? (inCastle ? '城內' : '城外') : west ? '西邊' : '東邊';
     return `${side}的${TERRAIN_NAMES[t]}`;
   }
 
@@ -85,6 +90,7 @@ export class LegionCommentator {
     this.say(0, `比賽開始！${MODE_NAMES[m.mode]}・${m.map.name}。${a.side}「${a.bot}」對${b.side}「${b.bot}」`, true);
     for (const p of [a, b]) if (this.viewer < 0 || p.id === this.viewer) this.say(0, `${p.side}陣容：${army(p)}（${p.cost} 點）`);
     if (m.mode === 'capture') this.say(0, `佔點模式：${m.flags.map((f) => `${f.name}（每秒 ${f.points} 分）`).join('、')}三面旗，佔領後每秒得分，先到 ${RULES.capture.scoreTarget} 分獲勝；也可以直接殲滅對手`);
+    else if (m.mode === 'siege') this.say(0, `攻城戰：${this.players[1 - m.map.defender].side}攻、${this.players[m.map.defender].side}守。攻方要先佔下 A「${m.flags[0].name}」，再佔下 B「${m.flags[1].name}」；時間到守方勝`);
     else this.say(0, '殲滅戰：打光對手全軍，或時間到時比剩餘兵力');
   }
 
@@ -181,10 +187,25 @@ export class LegionCommentator {
       }
       case 'flag': {
         const f = m.flags[ev.flag];
+        if (m.mode === 'siege') {
+          this.say(t, ev.flag === 0 ? `${this.players[ev.owner].side}佔下了 A「${f.name}」！正門永久開啟，時限延長` : `${this.players[ev.owner].side}佔下了本陣！`, true);
+          return;
+        }
         const held = m.flags.filter((x) => x.owner === ev.owner).length;
         this.say(t, `${this.players[ev.owner].side}佔領了${f.name}！每秒 +${f.points} 分（目前握有 ${held} 面旗）`, f.points > 1 || held >= 2);
         return;
       }
+      case 'gate':
+        if (ev.state === 'broken') this.say(t, `${m.gates[ev.gate].kind === 'main' ? '正門' : '側門'}被攻破了！`, true);
+        else if (ev.state === 'open') this.say(t, `守方打開了${m.gates[ev.gate].kind === 'main' ? '正門' : '側門'}`);
+        return;
+      case 'ladder':
+        if (ev.state === 'built') this.say(t, `攻方架好了一座雲梯`);
+        else if (ev.state === 'toppled') this.say(t, `守方推倒了雲梯${ev.fell > 0 ? `，${ev.fell} 人摔下城牆` : ''}`, ev.fell >= 5);
+        return;
+      case 'bombard':
+        if (ev.state === 'landed' && ev.hit > 0) this.say(t, `砲擊落地，${ev.hit} 人被波及`);
+        return;
       default:
         return;
     }
@@ -256,7 +277,7 @@ export class LegionCommentator {
 
   end(m: LegionMatch): void {
     const r = m.result();
-    const why = r.reason === 'score' ? `先拿到 ${RULES.capture.scoreTarget} 分（${r.score[0]}：${r.score[1]}）` : r.reason === 'annihilation' ? '打垮了對手全軍' : m.mode === 'capture' ? '時間到，比較分數' : '時間到，比較剩餘兵力';
+    const why = r.reason === 'score' ? `先拿到 ${RULES.capture.scoreTarget} 分（${r.score[0]}：${r.score[1]}）` : r.reason === 'capture' ? '佔下了本陣' : r.reason === 'annihilation' ? '打垮了對手全軍' : m.mode === 'siege' ? '時間到，守方守住了城池' : m.mode === 'capture' ? '時間到，比較分數' : '時間到，比較剩餘兵力';
     if (r.winner === null) this.say(m.tick, `比賽結束，平手！（${why}）`, true);
     else this.say(m.tick, `${this.players[r.winner].side}「${this.players[r.winner].bot}」獲勝！${why}`, true);
   }

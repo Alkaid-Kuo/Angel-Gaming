@@ -1,6 +1,7 @@
 // 軍團戰觀戰：主執行緒與引擎 Worker 之間的訊息格式。
-import type { LegionEvent, RegimentStatus } from '../../legion/api.ts';
+import type { LegionEvent, RegimentStatus, Structures } from '../../legion/api.ts';
 import type { DashKind, FormationKind, LegionMode, ShieldStance, UnitKind } from '../../legion/config.ts';
+import type { MapGate } from '../../legion/map.ts';
 import type { LegionResult } from '../../legion/sim.ts';
 
 export type BotKey = 'push' | 'ambush' | 'ranged' | 'commander' | 'marshal' | 'general2' | 'marshal2';
@@ -15,6 +16,8 @@ export interface LegionSetup {
   /** 'player' = 玩家指揮（只能是藍方） */
   readonly bots: readonly [BotKey | 'player', BotKey];
   readonly mode: LegionMode;
+  /** 地圖（沒給就用模式的預設地圖） */
+  readonly mapId?: string;
   readonly seed: number;
   readonly army?: PlayerArmy;
 }
@@ -53,6 +56,9 @@ export interface LegionMeta {
   /** 佔點模式：依 playerId 的出生點、補給站（歸 flag 那面旗的佔領者） */
   readonly spawns: readonly { readonly x: number; readonly y: number }[];
   readonly supplies: readonly { readonly x: number; readonly y: number; readonly flag: number }[];
+  /** 攻城地圖：城門（格座標範圍）與守方座位（-1 = 沒有城） */
+  readonly gates: readonly MapGate[];
+  readonly defender: number;
   readonly mode: LegionMode;
   readonly timeLimitTicks: number;
   readonly seed: number;
@@ -125,8 +131,10 @@ export interface LegionFrame {
   readonly regs: readonly RegFrame[];
   /** [x0, y0, x1, y1, t0, t1] × n：飛行中的箭 */
   readonly arrows: Int32Array;
-  /** 旗點：佔領者、正在佔領的一方與進度（tick）、佔領者的圈內有敵人 */
-  readonly flags: readonly { readonly owner: number; readonly capturer: number; readonly progress: number; readonly contested: boolean }[];
+  /** 旗點：佔領者、正在佔領的一方與進度（tick）、佔領者的圈內有敵人；need ＝ 佔滿要幾 tick、open ＝ 現在能不能佔（攻城戰 B 要等 A） */
+  readonly flags: readonly { readonly owner: number; readonly capturer: number; readonly progress: number; readonly contested: boolean; readonly need: number; readonly open: boolean }[];
+  /** 城門、雲梯、衝車、砲擊 */
+  readonly structures: Structures;
   /** 佔點分數 */
   readonly score: readonly number[];
   /** 依 playerId：AI 的戰略意圖（plan 指令；沒有就是空字串） */
@@ -164,3 +172,5 @@ export type FromLegionWorker =
 export const ATTACKED_BIT = 1 << 12;
 export const DOWN_BIT = 1 << 13;
 export const REG_MASK = (1 << 12) - 1;
+/** 士兵旗標的第 14～15 位：層（0 地面、1 牆頂、2 爬梯中） */
+export const LAYER_SHIFT = 14;

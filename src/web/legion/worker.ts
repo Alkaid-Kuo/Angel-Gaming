@@ -9,7 +9,7 @@ import pushSource from '../../../bots/legion-push.js?raw';
 import rangedSource from '../../../bots/legion-ranged.js?raw';
 import type { LegionEvent } from '../../legion/api.ts';
 import { TPS, UNITS } from '../../legion/config.ts';
-import { MAPS } from '../../legion/map.ts';
+import { MAPS, defaultMapId } from '../../legion/map.ts';
 import { LegionBatchController, LegionDriver, LegionReplayCursor, type LegionController, type LegionReplay } from '../../legion/runner.ts';
 import type { LegionMatch } from '../../legion/sim.ts';
 import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
@@ -17,7 +17,7 @@ import { resolveKnobs } from '../../sandbox/controller.ts';
 import { LegionCommentator } from './commentary.ts';
 import { PlayerController } from './player.ts';
 import type { BotKey, Caption, FromLegionWorker, LegionFrame, LegionMeta, LegionSetup, PlayerMeta, RegFrame, RegStatic, ToLegionWorker } from './protocol.ts';
-import { ATTACKED_BIT, DOWN_BIT } from './protocol.ts';
+import { ATTACKED_BIT, DOWN_BIT, LAYER_SHIFT } from './protocol.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (msg: FromLegionWorker, transfer: Transferable[] = []): void => ctx.postMessage(msg, transfer);
@@ -84,14 +84,15 @@ function begin(s: LegionSetup, replay: LegionReplay | null = null): void {
     m = cursor.match;
     players = replay.header.players.map((p, i) => ({ id: i, side: SIDES[i], color: COLORS[i], bot: p.bot, style: '（重播）', cost: m.players[i].cost, knobs: p.knobs }));
   } else {
-    const map = MAPS['river-valley']();
+    const mapId = s.mapId ?? defaultMapId(s.mode);
+    const map = MAPS[mapId]();
     const ctrls: LegionController[] = s.bots.map((b, i) => {
       if (b !== 'player') return new LegionBatchController(compiled[b], `legion-${b}.js`, map, s.seed, i);
       player = new PlayerController(s.army ?? { field: ['spear', 'spear', 'spear', 'sword', 'sword', 'archer', 'archer', 'shield', 'shield', 'heavyCav', 'light'], reserve: [] });
       return player;
     });
     const knobs = ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label));
-    const d = new LegionDriver({ seed: s.seed, mode: s.mode, controllers: ctrls, knobs, record: true });
+    const d = new LegionDriver({ seed: s.seed, mode: s.mode, mapId, controllers: ctrls, knobs, record: true });
     driver = d;
     m = d.match;
     if (playerSide >= 0) playerReplay = d.replay;
@@ -110,6 +111,8 @@ function begin(s: LegionSetup, replay: LegionReplay | null = null): void {
     deploy: m.map.deploy,
     spawns: m.mode === 'capture' ? m.map.spawns : [],
     supplies: m.mode === 'capture' ? m.map.supplies : [],
+    gates: m.map.gates,
+    defender: m.map.defender,
     mode: m.mode,
     timeLimitTicks: m.timeLimitTicks,
     seed: s.seed,
@@ -145,7 +148,7 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
     soldiers[k++] = s.id;
     soldiers[k++] = s.x;
     soldiers[k++] = s.y;
-    soldiers[k++] = s.reg | (s.cd === r.def.cooldown && r.def.range === 0 ? ATTACKED_BIT : 0) | (s.downUntil > m.tick ? DOWN_BIT : 0);
+    soldiers[k++] = s.reg | (s.cd === r.def.cooldown && r.def.range === 0 ? ATTACKED_BIT : 0) | (s.downUntil > m.tick ? DOWN_BIT : 0) | (s.layer << LAYER_SHIFT);
   }
   const regs: RegFrame[] = [];
   for (const r of m.regiments) {
@@ -195,7 +198,8 @@ function frameOf(m: LegionMatch, captions: Caption[]): { frame: LegionFrame; tra
     soldiers,
     regs,
     arrows,
-    flags: m.flags.map((f) => ({ owner: f.owner, capturer: f.capturer, progress: f.progress, contested: f.contested })),
+    flags: m.flags.map((f) => ({ owner: f.owner, capturer: f.capturer, progress: f.progress, contested: f.contested, need: f.need, open: m.flagOpen(f) })),
+    structures: m.structures(),
     score: m.players.map((p) => m.scoreOf(p.id)),
     plans: m.players.map((p) => (playerSide < 0 || p.id === playerSide ? p.plan : '')),
     strength: m.players.map((p) => m.strength(p.id)),

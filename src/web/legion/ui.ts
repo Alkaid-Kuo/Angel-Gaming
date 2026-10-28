@@ -1,6 +1,6 @@
 // 軍團戰觀戰畫面：電競轉播風的計分條、雙方兵力名冊、解說字幕、開戰前陣容、結算、自動導播與操作。
 import type { RegimentStatus } from '../../legion/api.ts';
-import { DASH, FORMATION_NAMES, MODE_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type SkillKind, type UnitKind } from '../../legion/config.ts';
+import { BOMBARD, DASH, FORMATION_NAMES, MODE_NAMES, RAM, RULES, SIEGE, T, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type SkillKind, type UnitKind } from '../../legion/config.ts';
 import { unitSvg } from './icons.ts';
 import type { Caption, FromLegionWorker, LegionFrame, LegionMeta, ToLegionWorker } from './protocol.ts';
 import { LegionRenderer } from './render.ts';
@@ -47,7 +47,7 @@ const SPEEDS = [1, 2, 4, 8];
 /** 玩家指揮時的速度（多一檔慢動作） */
 const PLAYER_SPEEDS = [0.5, 1, 2, 4];
 /** 被拒絕的指令名稱（玩家提示） */
-const CMD_NAME: Record<string, string> = { move: '移動', attack: '攻擊', attackMove: '邊走邊打', hold: '堅守', face: '轉向', formation: '變陣', follow: '跟隨', brace: '槍林', unbrace: '收槍林', shield: '盾兵姿態', volley: '齊射', charge: '衝鋒', assault: '突擊', infiltrate: '切入', steer: '微調方向', summon: '後備入場', swap: '換兵', withdraw: '撤回' };
+const CMD_NAME: Record<string, string> = { move: '移動', attack: '攻擊', attackMove: '邊走邊打', hold: '堅守', face: '轉向', formation: '變陣', follow: '跟隨', brace: '槍林', unbrace: '收槍林', shield: '盾兵姿態', volley: '齊射', charge: '衝鋒', assault: '突擊', infiltrate: '切入', steer: '微調方向', summon: '後備入場', swap: '換兵', withdraw: '撤回', gate: '開關城門', ladder: '架雲梯', topple: '推倒雲梯', man: '推衝車', unman: '卸下衝車', bombard: '砲擊' };
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -551,7 +551,8 @@ export class LegionScreen {
       <h2>軍團戰怎麼看</h2>
       <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>（佔點模式 ${RULES.capture.budget} 點，場上最多 ${RULES.capture.fieldCap} 點）選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。計分條下方是 AI 的戰略意圖、旗標下方的小字是各團的意圖（放大時顯示），<kbd>I</kbd> 開關。</p>
       <h3>勝利條件</h3>
-      <ul><li><b>殲滅戰</b>：打光對手全軍。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比戰果（擊殺敵兵的點數價值）。</li>
+      <ul><li><b>攻城戰</b>（石關城）：攻守各 ${SIEGE.budget} 點、沒有後備。攻方要依序佔下 <b>A 正門</b>（${SIEGE.captureA / TPS} 秒）與 <b>B 本陣</b>（${SIEGE.captureB / TPS} 秒）；圈內只算地面的士兵，守方在圈內就不會增加進度。佔下 A：正門永久開啟、時限延長 ${SIEGE.extendTicks / TPS / 60} 分鐘；佔下 B 攻方勝，時間到（${SIEGE.timeLimitTicks / TPS / 60} 分鐘）守方勝。攻方有雲梯（白色描邊的是牆頂的士兵、半透明的是爬梯中或穿過門洞的）、衝車（${Math.round(RULES.gate.mainHp / RAM.hit)} 下破正門）與 ${BOMBARD.shells} 發砲擊（紅圈是落點與倒數）。</li>
+      <li><b>殲滅戰</b>（測試模式）：打光對手全軍。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比戰果（擊殺敵兵的點數價值）。</li>
       <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比戰果。</li>
       <li><b>後備兵力</b>（佔點）：總共 ${RULES.capture.budget} 點，場上同時最多 ${RULES.capture.fieldCap} 點（算全額，不管剩幾人），其餘是後備。場上沒滿時，後備可以從<b>出生點</b>入場（準備 ${RULES.capture.enterTicks / TPS} 秒）；滿了就要把一團帶到出生點或<b>自己的補給站</b>（兩座橋旁，歸佔著那座橋的一方）換下來。撤回的團血量補滿、人數不變；團站在出生點或自己的補給站、${RULES.capture.healQuietTicks / TPS} 秒沒受傷就會回血（每秒 ${RULES.capture.healPct}%）。</li></ul>
       <h3>傷害</h3>
@@ -626,6 +627,14 @@ export class LegionScreen {
       const pct = Math.floor(f.strength[i] / Math.max(1, costs[i]));
       this.el[`bar${i}`].style.width = `${Math.max(0, Math.min(100, pct))}%`;
       this.el[`pct${i}`].textContent = `${pct}%`;
+    }
+    if (this.meta.mode === 'siege') {
+      // 攻城：A、B 兩面旗的狀態
+      const att = 1 - this.meta.defender;
+      this.el.score.innerHTML = f.flags
+        .map((fl, i) => `<b style="color:${fl.owner === att ? this.meta.players[att].color : '#e2e8f0'}">${i === 0 ? 'A' : 'B'} ${fl.owner === att ? '✓' : fl.capturer >= 0 ? `${Math.floor((fl.progress * 100) / fl.need)}%` : fl.open ? '—' : '🔒'}</b>`)
+        .join('<span>　</span>');
+      this.el.score.classList.remove('hidden');
     }
     if (this.meta.mode === 'capture') {
       this.el.pips.innerHTML = f.flags
@@ -778,7 +787,7 @@ export class LegionScreen {
       return `<div class="rs-side${res.winner === i ? ' win' : ''}" style="border-color:${p.color}"><div class="lu-head"><span class="sw" style="background:${p.color}"></span><b>${esc(p.side)}</b><span class="bot">${esc(p.bot)}</span>${res.winner === i ? '<span class="crown">勝</span>' : ''}</div>
         <div class="dt-grid"><span>剩餘兵力</span><b>${Math.floor(res.strength[i] / Math.max(1, p.cost))}%</b><span>存活士兵</span><b>${men} / ${men0}</b><span>擊殺</span><b>${f.kills[i]}</b><span>潰散或覆滅</span><b>${routed} / ${regs.length} 團</b>${this.meta.mode === 'capture' ? `<span>分數</span><b>${res.score[i]}</b><span>旗點</span><b>${res.flagsHeld[i]}</b>` : ''}</div></div>`;
     };
-    const why = res.reason === 'score' ? `先拿到 ${RULES.capture.scoreTarget} 分` : res.reason === 'annihilation' ? '打垮對手全軍' : this.meta.mode === 'capture' ? '時間到，比較分數' : '時間到，比較剩餘兵力';
+    const why = res.reason === 'score' ? `先拿到 ${RULES.capture.scoreTarget} 分` : res.reason === 'capture' ? '攻方佔下本陣' : res.reason === 'annihilation' ? '打垮對手全軍' : this.meta.mode === 'siege' ? '時間到，守方守住了城池' : this.meta.mode === 'capture' ? '時間到，比較分數' : '時間到，比較剩餘兵力';
     const title = res.winner === null ? '平手' : `${this.meta.players[res.winner].side}「${esc(this.meta.players[res.winner].bot)}」獲勝`;
     this.el.result.innerHTML = `<div class="lu"><h2>${title}</h2><p class="muted">${why}・比賽時間 ${clock(res.durationTicks)}</p><div class="lu-cols">${stat(0)}<div class="lu-vs">VS</div>${stat(1)}</div>
       <div class="lu-foot"><button class="primary" data-act="restart">重看一次</button><button data-act="replay">下載回放</button><button data-act="exit">換組合</button><button data-act="closeResult">看戰場</button></div></div>`;
@@ -883,7 +892,13 @@ export class LegionScreen {
       if (tx >= 0 && ty >= 0 && tx < this.meta.width && ty < this.meta.height) {
         const t = this.meta.terrain[ty * this.meta.width + tx];
         const flag = this.meta.flags.findIndex((fl) => Math.hypot(fl.x - w.x, fl.y - w.y) <= RULES.capture.radius);
-        if (this.meta.mode === 'capture' && flag >= 0) {
+        if (this.meta.mode === 'siege' && flag >= 0) {
+          const st = this.r.frame?.flags[flag];
+          const fl = this.meta.flags[flag];
+          const att = 1 - this.meta.defender;
+          const own = st === undefined ? '' : st.owner === att ? '攻方已佔下' : st.open ? (st.capturer >= 0 ? `攻方佔領中：${Math.floor((st.progress * 100) / st.need)}%` : '守方持有') : '要先佔下 A';
+          html = `<b>${flag === 0 ? 'A' : 'B'} ${esc(fl.name)}</b>　佔滿要 ${(st?.need ?? 0) / TPS} 秒<br>${own}<br><span class="muted">只有攻方能佔；圈內只算地面的士兵，守方在圈內進度不動</span>`;
+        } else if (this.meta.mode === 'capture' && flag >= 0) {
           const st = this.r.frame?.flags[flag];
           const fl = this.meta.flags[flag];
           const own = st === undefined || st.owner < 0 ? '沒人佔領' : `${this.meta.players[st.owner].side}佔領${st.contested ? '（爭奪中，暫停得分）' : ''}`;
