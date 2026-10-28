@@ -381,12 +381,32 @@ function shooterLoadoutArg(args: Args): Partial<Record<Team, WeaponId>> | undefi
   return { T: parts[0] as WeaponId, CT: (parts[1] ?? parts[0]) as WeaponId };
 }
 
-function playShooter(files: readonly BotFile[], seed: number, mapId: string, loadout: Partial<Record<Team, WeaponId>> | undefined, record: boolean): ShooterRunOutput {
+/** --round-money 16000,800：玩家 0～4、5～9 每回合開局強制設定的金錢（測試 eco 對全買用）；- 表示照常結算 */
+function shooterRoundMoneyArg(args: Args): readonly [number | null, number | null] | undefined {
+  const s = one(args, 'round-money');
+  if (s === undefined) return undefined;
+  const parts = s.split(',');
+  if (parts.length !== 2) throw new ArgError('--round-money 格式為 玩家0～4金錢,玩家5～9金錢（例如 16000,800；- 表示照常結算）');
+  const parse = (v: string): number | null => {
+    if (v === '-') return null;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 0) throw new ArgError(`--round-money：${v} 不是非負整數`);
+    return n;
+  };
+  return [parse(parts[0]), parse(parts[1])];
+}
+
+interface ShooterPlayOptions {
+  readonly loadout?: Partial<Record<Team, WeaponId>>;
+  readonly roundMoney?: readonly [number | null, number | null];
+}
+
+function playShooter(files: readonly BotFile[], seed: number, mapId: string, opts: ShooterPlayOptions, record: boolean): ShooterRunOutput {
   const map = SHOOTER_MAPS[mapId]();
   const pick = (pid: number): BotFile => files[pid < PLAYER_COUNT / 2 ? 0 : files.length - 1];
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(pick(pid).compiled, pick(pid).label, seed, pid, map));
   const knobs = controllers.map((c) => resolveKnobs(c.declaration, undefined, c.label));
-  return runShooterMatch({ seed, mapId, defaultLoadout: loadout, controllers, knobs, record });
+  return runShooterMatch({ seed, mapId, defaultLoadout: opts.loadout, roundMoney: opts.roundMoney, controllers, knobs, record });
 }
 
 function shooterSummary(run: ShooterRunOutput): Record<string, unknown> {
@@ -407,12 +427,12 @@ function shooterSummary(run: ShooterRunOutput): Record<string, unknown> {
 }
 
 function cmdShooterMatch(args: Args): void {
-  knownArgs(args, ['seed', 'bots', 'map', 'replay', 'loadout', 'out']);
+  knownArgs(args, ['seed', 'bots', 'map', 'replay', 'loadout', 'round-money', 'out']);
   const seed = intArg(args, 'seed', randomInt(0, 2 ** 31), 0)!;
   const files = shooterBotFiles(args);
   const mapId = shooterMapArg(args);
   const replayPath = one(args, 'replay');
-  const run = playShooter(files, seed, mapId, shooterLoadoutArg(args), replayPath !== undefined);
+  const run = playShooter(files, seed, mapId, { loadout: shooterLoadoutArg(args), roundMoney: shooterRoundMoneyArg(args) }, replayPath !== undefined);
   if (replayPath !== undefined && run.replay !== null) {
     mkdirSync(dirname(resolve(replayPath)), { recursive: true });
     writeFileSync(replayPath, JSON.stringify(run.replay));
@@ -421,13 +441,16 @@ function cmdShooterMatch(args: Args): void {
 }
 
 function cmdShooterBatch(args: Args): void {
-  knownArgs(args, ['games', 'seed', 'bots', 'map', 'loadout', 'out']);
+  knownArgs(args, ['games', 'seed', 'bots', 'map', 'loadout', 'round-money', 'out']);
   const games = intArg(args, 'games', 10, 1)!;
   const seed = intArg(args, 'seed', 1, 0)!;
   const files = shooterBotFiles(args);
   const mapId = shooterMapArg(args);
-  const loadout = shooterLoadoutArg(args);
+  const opts: ShooterPlayOptions = { loadout: shooterLoadoutArg(args), roundMoney: shooterRoundMoneyArg(args) };
   const wins = [0, 0];
+  const groupRoundWins = [0, 0];
+  // 經濟統計：依陣營與依組別的回合開局平均金錢總和、全買回合數
+  const econ = { T: { money: 0, fullBuy: 0 }, CT: { money: 0, fullBuy: 0 }, g0: { money: 0, fullBuy: 0 }, g1: { money: 0, fullBuy: 0 } };
   let draws = 0;
   const roundWins: Record<Team, number> = { T: 0, CT: 0 };
   const reasons: Record<string, number> = {};
@@ -437,12 +460,21 @@ function cmdShooterBatch(args: Args): void {
   let maxWall = 0;
   const list: Record<string, unknown>[] = [];
   for (let i = 0; i < games; i++) {
-    const run = playShooter(files, seed + i, mapId, loadout, false);
+    const run = playShooter(files, seed + i, mapId, opts, false);
     const r = run.result;
     if (r.winner === null) draws += 1;
     else wins[r.winner] += 1;
     for (const x of r.rounds) {
       roundWins[x.winner] += 1;
+      groupRoundWins[x.winnerGroup] += 1;
+      for (const g of [0, 1] as const) {
+        const side = x.tGroup === g ? econ.T : econ.CT;
+        const grp = g === 0 ? econ.g0 : econ.g1;
+        for (const e of [side, grp]) {
+          e.money += x.money[g];
+          if (x.fullBuy[g]) e.fullBuy += 1;
+        }
+      }
       const key = `${x.winner}:${x.reason}`;
       reasons[key] = (reasons[key] ?? 0) + 1;
     }
@@ -460,6 +492,13 @@ function cmdShooterBatch(args: Args): void {
       bots: files.map((f) => f.path),
       matchWins: { 'players0-4': wins[0], 'players5-9': wins[1], draws },
       roundWins,
+      groupRoundWins: { 'players0-4': groupRoundWins[0], 'players5-9': groupRoundWins[1] },
+      economy: Object.fromEntries(
+        (Object.entries({ T: econ.T, CT: econ.CT, 'players0-4': econ.g0, 'players5-9': econ.g1 }) as [string, { money: number; fullBuy: number }][]).map(([k, e]) => [
+          k,
+          { avgRoundStartMoney: rounds === 0 ? 0 : Math.round(e.money / rounds), fullBuyRate: rounds === 0 ? 0 : Math.round((e.fullBuy / rounds) * 1000) / 1000 },
+        ]),
+      ),
       roundReasons: reasons,
       avgRounds: Math.round((rounds / games) * 10) / 10,
       avgTicks: Math.round(ticks / games),
@@ -586,8 +625,8 @@ const USAGE = `用法：
   rts-sim mapgen     --mode 1v1|ffa4 [--seed S] [--format ascii|png] [--validate N] [--out F]
   rts-sim bench      --mode 1v1|ffa4 [--games N] [--exec batch|official] [--seed S] [--bot F] [--out F]
   rts-sim viewer     [--port 8000] [--host 127.0.0.1|0.0.0.0] [--dir D]
-  rts-sim shooter match  [--seed N] [--bots a.js [b.js]] [--map dust] [--replay out.json] [--loadout ak,m4] [--out F]
-  rts-sim shooter batch  [--games N] [--seed S] [--bots a.js [b.js]] [--map dust] [--loadout ak,m4] [--out F]
+  rts-sim shooter match  [--seed N] [--bots a.js [b.js]] [--map dust] [--replay out.json] [--loadout ak,m4] [--round-money 16000,800] [--out F]
+  rts-sim shooter batch  [--games N] [--seed S] [--bots a.js [b.js]] [--map dust] [--loadout ak,m4] [--round-money 16000,800] [--out F]
   rts-sim shooter replay file.json
   rts-sim shooter map    [--id dust]`;
 

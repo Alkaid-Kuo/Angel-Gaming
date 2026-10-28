@@ -3,6 +3,7 @@
 // T 的持彈者走最近的炸彈點下包，其他 T 跟去同一點；炸彈掉了由最近的 T 去撿；下包後守在炸彈旁。
 // CT 分兩點守（預設 3 人 A、2 人 B），炸彈下了就去拆。
 // 任何人看到敵人就瞄準開火（有效射程內站定，太遠邊走邊打）；沒看到就看移動方向，聽到敵方聲音就轉向聲音。
+// 購買（各買各的，沒有團隊協調）：錢 ≥ 全買門檻就買步槍＋護甲（CT 加拆彈器）；錢 ≥ 衝鋒槍＋護甲就半買；否則 eco（只在手槍局買護甲）。
 
 /** @typedef {import('../src/shooter/api.ts').ShooterInitData} InitData */
 /** @typedef {import('../src/shooter/api.ts').ShooterHelpers} Helpers */
@@ -34,12 +35,13 @@ export default class ShooterPractice {
   declare() {
     return {
       name: 'shooter-practice',
-      version: '1',
+      version: '2',
       style: '陪練',
       knobs: [
         { key: 'reaction', name: '反應', description: '看到敵人後等幾次決策（每次 0.1 秒）才開火', min: 0, max: 5, default: 1, integer: true },
         { key: 'aimJitter', name: '瞄準抖動', description: '瞄準點的隨機偏移（座標單位，1 格 = 1000）', min: 0, max: 600, default: 150, integer: true },
         { key: 'aSplit', name: '守 A 人數', description: 'CT 守 A 點的人數（依隊內序號，其餘守 B）', min: 0, max: 5, default: 3, integer: true },
+        { key: 'buyThreshold', name: '全買門檻', description: '錢到多少才全買（步槍＋護甲）；0 = 剛好買得起步槍＋護甲', min: 0, max: 16000, default: 0, integer: true },
       ],
     };
   }
@@ -106,6 +108,7 @@ export default class ShooterPractice {
     }
     /** @type {Command[]} */
     const out = [];
+    if (obs.round.canBuy) this.buy(obs, out);
     if (me.loadout.primary !== null && me.weapon !== me.loadout.primary) out.push({ type: 'switch', slot: 'primary' });
     else if (me.loadout.primary === null && me.weapon === 'knife' && me.loadout.secondary !== null) out.push({ type: 'switch', slot: 'secondary' });
 
@@ -144,6 +147,41 @@ export default class ShooterPractice {
     if (goal !== null) out.push({ type: 'move', x: goal.x, y: goal.y });
     this.look(obs, out);
     return out;
+  }
+
+  /** @param {string} id */
+  price(id) {
+    const w = this.data.weapons.find((x) => x.id === id);
+    return w === undefined ? Infinity : w.price;
+  }
+
+  /**
+   * 最簡單的購買規則：全買／半買（衝鋒槍）／eco；已經有的不重買
+   * @param {Observation} obs
+   * @param {Command[]} out
+   */
+  buy(obs, out) {
+    const me = obs.me;
+    const rules = this.data.rules;
+    const rifle = me.team === 'T' ? 'ak' : 'm4';
+    const rifleCost = this.price(rifle) + rules.armorPrice;
+    const full = Math.max(this.k.buyThreshold ?? 0, rifleCost);
+    const needArmor = me.loadout.armor < rules.maxArmor;
+    const primary = me.loadout.primary;
+    /** @type {import('../src/shooter/api.ts').BuyItem[]} */
+    const items = [];
+    if (me.money >= full) {
+      if (primary === null || this.price(primary) < this.price(rifle)) items.push(rifle);
+      if (needArmor) items.push('armor');
+      if (me.team === 'CT' && !me.loadout.kit) items.push('kit');
+    } else if (me.money >= this.price('smg') + rules.armorPrice) {
+      if (primary === null) items.push('smg');
+      if (needArmor) items.push('armor');
+    } else {
+      const pistolRound = obs.round.number === 1 || obs.round.number === rules.roundsPerHalf + 1;
+      if (pistolRound && needArmor) items.push('armor');
+    }
+    if (items.length > 0) out.push({ type: 'buy', items });
   }
 
   /** @param {Observation} obs */
