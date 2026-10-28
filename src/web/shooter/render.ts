@@ -264,7 +264,7 @@ export class ShooterRenderer {
     const full = d.cur.full;
     // 鏡頭：跟隨所看的選手，往滑鼠方向偏一點（玩家模式）
     const scale = d.zoom / UNIT;
-    const lead = this.meta.spectate ? 0 : 0.3;
+    const lead = !this.meta.spectate && view.me.id === this.meta.playerId ? 0.45 : 0;
     const cx = meNow.x + ((d.mouse.x - w / 2) * lead) / scale;
     const cy = meNow.y + ((d.mouse.y - h / 2) * lead) / scale;
     const cam: Camera = { cx, cy, scale, w, h };
@@ -347,12 +347,15 @@ export class ShooterRenderer {
   /** 看得見但在畫面外的敵人：畫面邊緣畫一個指向它的三角形（資料仍是觀察資料裡的 enemies） */
   private drawOffscreen(cam: Camera, x: number, y: number, color: string): void {
     const [sx, sy] = toScreen(cam, x, y);
-    const m = 18;
-    if (sx >= m && sy >= m && sx <= cam.w - m && sy <= cam.h - m) return;
+    // 上緣留給比分列
+    const m = 24;
+    const top = 84;
+    if (sx >= m && sy >= top && sx <= cam.w - m && sy <= cam.h - m) return;
     const cx = cam.w / 2;
     const cy = cam.h / 2;
     const a = Math.atan2(sy - cy, sx - cx);
-    const k = Math.min((cam.w / 2 - m) / Math.max(1e-6, Math.abs(Math.cos(a))), (cam.h / 2 - m) / Math.max(1e-6, Math.abs(Math.sin(a))));
+    const s = Math.sin(a);
+    const k = Math.min((cam.w / 2 - m) / Math.max(1e-6, Math.abs(Math.cos(a))), (s < 0 ? cy - top : cam.h / 2 - m) / Math.max(1e-6, Math.abs(s)));
     const ex = cx + Math.cos(a) * k;
     const ey = cy + Math.sin(a) * k;
     const ctx = this.ctx;

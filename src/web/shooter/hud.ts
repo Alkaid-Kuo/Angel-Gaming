@@ -143,7 +143,8 @@ export class ShooterHud {
     if (this.meta.spectate) {
       hints.push(`觀戰模式・跟隨 ${this.name(f.viewId, f.board)}（← → 切換）・<kbd>X</kbd> 全圖透視 ${extra.xray ? '開' : '關'}・<kbd>[</kbd><kbd>]</kbd> 速度 ${extra.speed}×・<kbd>空白</kbd> 暫停`);
     } else if (!self.me.alive) {
-      hints.push(`你已陣亡・觀看 ${this.name(f.viewId, f.board)}（← → 或滑鼠左右鍵切換隊友）`);
+      if (view.me.alive) hints.push(`你已陣亡・觀看 ${this.name(f.viewId, f.board)}（← → 或滑鼠左右鍵切換隊友）`);
+      else hints.push('全隊陣亡・等待下一回合');
     } else {
       if (r.phase === 'freeze') hints.push(`凍結中：${clock(r.phaseTicksLeft, tps)} 後開打`);
       if (self.round.canBuy) hints.push('可購買：按 <kbd>B</kbd>');
