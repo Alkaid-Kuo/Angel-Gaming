@@ -1,4 +1,4 @@
-// CS 射擊模擬核心（規格書 v0.3；確定性、全整數）。步驟 1：移動碰撞、視錐視線、槍械、炸彈、回合流程、換邊、雜湊。
+// CS 射擊模擬核心（規格書 v0.4；確定性、全整數）。步驟 1：移動碰撞、視錐視線、槍械、炸彈、回合流程、換邊、雜湊。
 // 步驟 2：友軍傷害、經濟（金錢、購買、回合結算）。步驟 3：道具（投擲、煙霧、閃光、手雷、燃燒）。
 //
 // 每 tick：（決策 tick 先由驅動層套用指令）→ 轉身（上限）→ 移動（圓對格碰撞、沿牆滑動）→ 致盲與投擲冷卻倒數
@@ -904,11 +904,17 @@ export class ShooterMatch {
     }
   }
 
-  /** 投擲：手上要有該道具、不在凍結時間與投擲冷卻內；投出後從背包移除，停火、冷卻內不能開火 */
+  /**
+   * 投擲：手上要有該道具、不在凍結時間與投擲冷卻內；投出後從背包移除，停火、冷卻內不能開火。
+   * 方向夾在視錐內（v0.4）：與朝向的夾角超過 fov／2 時夾到邊界，要往背後丟得先轉身
+   */
   private throwGrenade(p: Player, kind: GrenadeId, deg: number, power: number): void {
     if (this.phase === 'freeze' || p.throwCd > 0) return;
     const idx = p.grenades.indexOf(kind);
     if (idx < 0) return;
+    const half = (p.scoped ? VISION.scopedFovDeg : VISION.fovDeg) * 50;
+    const off = cdegDiff(normCdeg(deg * 100), p.facing);
+    const c = Math.abs(off) <= half ? normCdeg(deg * 100) : normCdeg(p.facing + (off < 0 ? -half : half));
     p.grenades.splice(idx, 1);
     this.cancelAction(p);
     p.fireHeld = false;
@@ -916,7 +922,6 @@ export class ShooterMatch {
     p.scoped = false;
     p.throwCd = GRENADE_RULES.throwCooldownTicks;
     p.cooldown = Math.max(p.cooldown, GRENADE_RULES.throwCooldownTicks);
-    const c = normCdeg(deg * 100);
     const left = idiv(power * GRENADE_RULES.maxThrowRange * UNIT, 100);
     this.projectiles.push({ kind, owner: p.id, x: p.x, y: p.y, dx: icosC(c), dy: isinC(c), left, bounces: 0, moving: true, fuseTick: this.tick + GRENADES[kind].fuseTicks });
     this.roundThrows[p.group] += 1;

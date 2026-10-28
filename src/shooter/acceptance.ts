@@ -432,7 +432,8 @@ export const GRENADE_SCENARIOS: readonly Scenario[] = [
       const d = driver({ 0: thrower('he', 270, 20) });
       const m = d.match;
       toLive(d);
-      m.teleport(0, cell(106), cell(90), 90);
+      // 面向 CT（v0.4：投擲方向夾在視錐內）
+      m.teleport(0, cell(106), cell(90), 270);
       m.teleport(5, cell(106), cell(85), 90);
       parkOthers(d, [0, 5]);
       m.players[0].grenades = ['he'];
@@ -452,7 +453,8 @@ export const GRENADE_SCENARIOS: readonly Scenario[] = [
       const d = driver({ 0: thrower('molotov', 270, 20) });
       const m = d.match;
       toLive(d);
-      m.teleport(0, cell(106), cell(90), 90);
+      // 面向 CT（v0.4：投擲方向夾在視錐內）
+      m.teleport(0, cell(106), cell(90), 270);
       m.teleport(5, cell(106), cell(85), 90);
       parkOthers(d, [0, 5]);
       m.players[0].grenades = ['molotov'];

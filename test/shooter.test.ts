@@ -8,6 +8,7 @@ import { ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, GRENADE_RULES,
 import { applyPercent } from '../src/shared/intmath.ts';
 import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
+import { ShooterHumanController } from '../src/shooter/human.ts';
 import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterController } from '../src/shooter/runner.ts';
 import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
 import { lineOfSight, quantizeDir, rayWallDistance, soundRange } from '../src/shooter/vision.ts';
@@ -741,7 +742,8 @@ function litFire(m: ShooterMatch, x: number, y: number, owner: number): void {
 function throwAndLand(power: number, deg = 270, kind: GrenadeId = 'smoke'): { m: ShooterMatch; g: Projectile; ticks: number } {
   const m = live();
   const [x, y] = at(106, 90);
-  m.teleport(0, x, y, 270);
+  // 面向投擲方向（v0.4：投擲方向夾在視錐內）
+  m.teleport(0, x, y, deg);
   parkOthers(m, [0]);
   m.players[0].grenades = [kind];
   m.applyCommands(0, [{ type: 'throw', grenade: kind, deg, power }]);
@@ -1249,4 +1251,91 @@ describe('道具（驗收情境）', () => {
       expect(r.pass, r.detail).toBe(true);
     });
   }
+});
+
+describe('投擲方向夾視錐（v0.4）', () => {
+  /** 玩家 0 在 A 長面向 facing，往 deg 丟煙霧；回傳投射物的方向向量換算的角度（整數度） */
+  function throwDir(facing: number, deg: number, scoped = false): number {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, facing);
+    parkOthers(m, [0]);
+    m.players[0].grenades = ['smoke'];
+    if (scoped) m.players[0].scoped = true;
+    m.applyCommands(0, [{ type: 'throw', grenade: 'smoke', deg, power: 50 }]);
+    const g = m.projectiles[0];
+    return (iatan2(g.dy, g.dx) + 360) % 360;
+  }
+
+  it('視錐內照原方向丟', () => {
+    expect(throwDir(270, 270)).toBe(270);
+    expect(throwDir(270, 300)).toBe(300);
+    expect(throwDir(270, 220)).toBe(220);
+    // 剛好在邊界（±50°）
+    expect(throwDir(270, 320)).toBe(320);
+    expect(throwDir(270, 220)).toBe(220);
+  });
+
+  it('背後與視錐外夾到邊界（不拒絕）', () => {
+    // 面北（270）往南（90）丟：正背後，夾到 ±50° 之一
+    expect([220, 320]).toContain(throwDir(270, 90));
+    // 往東（0）丟：偏右 90°，夾到 320
+    expect(throwDir(270, 0)).toBe(320);
+    // 往西（180）丟：偏左 90°，夾到 220
+    expect(throwDir(270, 180)).toBe(220);
+    // 跨 0° 的情況：面東（0）往 300 丟（偏 −60°）→ 310
+    expect(throwDir(0, 300)).toBe(310);
+  });
+
+  it('開鏡時用開鏡視錐（30°）', () => {
+    expect(throwDir(270, 0, true)).toBe(285);
+  });
+});
+
+describe('人類控制器（v0.4）', () => {
+  it('realtime 指令每個 tick 套用、按實際 tick 錄進回放，重播雜湊相同', () => {
+    const seed = 21;
+    const human = new ShooterHumanController();
+    const controllers = practiceControllers(seed);
+    controllers[2] = human;
+    const d = new ShooterDriver({ seed, controllers, record: true, roundsPerHalf: 2, winRounds: 3 });
+    const applied: number[] = [];
+    let n = 0;
+    while (!d.match.over && n < 40000) {
+      const m = d.match;
+      const me = m.players[2];
+      // 模擬人類：每 tick 都下指令（瞄準點畫圓、每 7 tick 換移動方向、每 11 tick 開火／停火、偶爾購買與換槍）
+      const t = m.tick;
+      const cmds: unknown[] = [{ type: 'aim', x: me.x + ((t * 37) % 4000) - 2000, y: me.y + ((t * 53) % 4000) - 2000 }];
+      if (t % 7 === 0) cmds.push({ type: 'moveDir', deg: (t * 13) % 360 });
+      if (t % 11 === 0) cmds.push({ type: 'fire', on: t % 22 === 0 });
+      if (t % 97 === 0) cmds.push({ type: 'buy', items: ['armor', 'smg', 'flash'] });
+      if (t % 41 === 0) cmds.push({ type: 'switch', slot: t % 82 === 0 ? 'secondary' : 'primary' });
+      if (t % 13 === 0) cmds.push({ type: 'walk', on: t % 26 === 0 });
+      human.enqueue(cmds as never);
+      const aimBefore = me.aimX;
+      d.step();
+      if (me.alive && aimBefore !== me.aimX) applied.push(t);
+      n += 1;
+    }
+    // 非決策 tick 也有套用
+    expect(applied.some((t) => t % 3 !== 0)).toBe(true);
+    const rp = d.replay!;
+    const humanTicks = rp.decisions.filter((x) => x.playerId === 2).map((x) => x.tick);
+    expect(humanTicks.some((t) => t % 3 === 1)).toBe(true);
+    expect(humanTicks.some((t) => t % 3 === 2)).toBe(true);
+    // 重播
+    const final = d.match.hash();
+    const re = runShooterReplay(rp);
+    expect(re.desyncTick).toBeNull();
+    expect(re.finalHash).toBe(final);
+  });
+
+  it('decide 回傳空陣列；takeRealtime 取完即清空', () => {
+    const h = new ShooterHumanController();
+    h.enqueue([{ type: 'reload' }]);
+    expect(h.decide({} as ShooterObservation).value).toEqual([]);
+    expect(h.takeRealtime()).toEqual([{ type: 'reload' }]);
+    expect(h.takeRealtime()).toEqual([]);
+  });
 });

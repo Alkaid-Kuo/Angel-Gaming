@@ -1,4 +1,4 @@
-// CS 射擊比賽驅動：載入選手 → init → 每 DECISION_INTERVAL tick 呼叫 decide；可錄製回放。
+// CS 射擊比賽驅動：載入選手 → init → 每 DECISION_INTERVAL tick 呼叫 decide；人類玩家的指令每個 tick 套用；可錄製回放。
 // 回放保存比賽選項與每次決策的指令，重播不需要選手程式。
 // 時間限制：decide 超過硬上限（50 ms）當該次無指令；同一回合連續超時 idleAfterTimeouts 次，該回合剩下的時間閒置。
 import type { KnobValues } from '../api/types.ts';
@@ -46,6 +46,8 @@ export interface ShooterController {
   readonly declaration: ShooterDeclaration;
   init(data: ShooterInitData): CallOutcome<null>;
   decide(obs: ShooterObservation): CallOutcome<unknown>;
+  /** 人類玩家：每個 tick 取出介面送來的指令（不必等決策 tick）；Bot 不實作 */
+  takeRealtime?(): unknown[];
 }
 
 const errorText = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
@@ -266,6 +268,15 @@ export class ShooterDriver {
           m.applyCommands(pid, cmds);
         }
       }
+    }
+    // 人類玩家的指令每個 tick 套用，按實際 tick 錄進回放（決策 tick 排在 Bot 之後，與錄製順序一致）
+    for (let pid = 0; pid < this.controllers.length; pid++) {
+      const take = this.controllers[pid].takeRealtime;
+      if (take === undefined || this.dead[pid]) continue;
+      const cmds = take.call(this.controllers[pid]);
+      if (cmds.length === 0) continue;
+      this.replay?.decisions.push({ tick: m.tick, playerId: pid, commands: cmds });
+      m.applyCommands(pid, cmds);
     }
     m.step();
     if (this.replay !== null && m.tick % HASH_INTERVAL === 0) this.replay.hashes.push({ tick: m.tick, hash: m.hash() });

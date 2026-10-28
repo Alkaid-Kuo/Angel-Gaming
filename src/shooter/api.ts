@@ -391,7 +391,8 @@ export type ShooterCommand =
    */
   | { readonly type: 'buy'; readonly items: readonly BuyItem[] }
   /**
-   * 丟雷：方向（整數度，不受朝向限制）與力道（0～100，線性對應 0～maxThrowRange 格）。
+   * 丟雷：方向（整數度）與力道（0～100，線性對應 0～maxThrowRange 格）。
+   * 方向夾在視錐內：與朝向的夾角超過 fov／2 時夾到視錐邊界（往背後丟要先轉身）。
    * 要帶著該道具、不在凍結時間、不在投擲冷卻內；投出後停火並取消下包／拆包，冷卻內不能開火
    */
   | { readonly type: 'throw'; readonly grenade: GrenadeId; readonly deg: number; readonly power: number }

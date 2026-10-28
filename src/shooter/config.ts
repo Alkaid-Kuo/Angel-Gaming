@@ -6,7 +6,7 @@
 //   角度　整數度；0 = +x（東）、90 = +y（畫面下＝南）。
 //   速度　座標單位／tick（已由 CS 的 units／秒換算：1 格 ≈ 52.5 units）。
 
-export const SHOOTER_ENGINE_VERSION = '0.3.0';
+export const SHOOTER_ENGINE_VERSION = '0.4.0';
 
 export const TPS = 30;
 export const UNIT = 1000;
