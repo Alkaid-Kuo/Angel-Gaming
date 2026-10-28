@@ -452,16 +452,21 @@ function floodMask(w: number, h: number, sx: number, sy: number, pass: (i: numbe
 }
 
 /**
- * 攻城地圖「石關城」：200 × 140 格，仿中國古城（參考西安、平遙一類的城制）。攻方（藍方，座位 0）從西邊出發；城池在東側、背靠大河。
- * 城牆：四格厚（牆頂能站五、六列縱深的方陣），四角 8 × 8 的角樓，牆面凸出的馬面；正門外有甕城（三格厚的牆圍成的小城，
- * 入口開在西面北段，攻方得在甕城裡轉彎、頂著三面城牆的箭撞正門）；甕城前三格寬的護城河，只有入口前有橋。
- * 路線：西牆正門（3 格）、北牆側門（2 格，兩側有門樓馬面）、南牆一段坍塌的瓦礫缺口（5 格）；北牆、南牆、西牆兩段可以架雲梯。
- * 城內全部鋪石：沿城牆一圈四格寬的順城街與馬道（三格寬的坡道上牆）、五格寬的東西大街與南北大街交會於鼓樓廣場、
- * 街道劃出的坊（四合院式的房舍圍著院落）、市集、寺廟、營房與校場、糧倉、官署；東側是兩格厚城牆圍成的衙署子城（本陣，高一階）。
- * 旗：A ＝ 正門、B ＝ 衙署。
+ * 攻城地圖「石關城」：224 × 140 格，中國城池的「三重城」：郭城（外城）→ 內城 → 衙署子城，城內逐級升高（台地），越往裡越是仰攻。
+ * 攻方（藍方，座位 0）在西端紮營；城池在東側、背靠大河。
+ * 城外：攻方營地往東分出三條路，中間用兩道長嶺（坡地與樹林）隔開——
+ *   中路：大道 → 西橋 → 甕城 → 正門（衝車路線，路旁有土丘可以擋箭）；
+ *   北路：沿北嶺北側穿過樹林 → 北橋 → 北牆側門（遠，但有樹林遮蔽）；
+ *   南路：碎石坡與廢村 → 南淺灘 → 南牆的瓦礫缺口（近，但地形慢，騎兵過不了缺口）。
+ * 第一道防線（郭城，高 2）：四格厚的城牆、角樓、馬面、甕城（入口開在西面北段）；護城河繞西北南三面，和城牆之間留護城堤（架雲梯）。
+ *   郭城西半是巷戰區：正門內與內城門洞前各一座廣場，大街（6 格）、巷（4 格）、弄（3 格）直角錯開、穿過密集的民房，另有市集與寺廟；
+ *   內城北、南兩側是窄長的夾道（營房、糧倉），北側門與南牆缺口各通往其中一側。
+ * 第二道防線（內城，高 3）：三格厚的內城牆，西、北、南三個門洞（沒有門扇），西門洞兩側有馬面；城內是整齊的坊與官署。
+ * 第三道防線（子城，院落高 4）：內城最深處兩格厚城牆圍成的衙署，西面一個門洞。
+ * 旗：A ＝ 正門（旗圈涵蓋甕城東半與正門內側）、B ＝ 衙署院落。
  */
 export function stonePass(): LegionMap {
-  const w = 200;
+  const w = 224;
   const h = 140;
   const terrain = new Uint8Array(w * h);
   const heights = new Uint8Array(w * h).fill(1);
@@ -474,36 +479,55 @@ export function stonePass(): LegionMap {
   const CY = 69;
   // ── 東邊的大河（城池背水） ──
   for (let y = 0; y < h; y++) {
-    const bank = y >= 22 && y <= 117 ? 189 : 189 + idiv(2 * isin(idiv(y * 360, 40)) + 10000, 10000) - 1;
+    const bank = y >= 20 && y <= 119 ? 213 : 213 + idiv(2 * isin(idiv(y * 360, 40)) + 10000, 10000) - 1;
     for (let x = bank; x < w; x++) terrain[idx(x, y)] = T.River;
   }
-  // ── 城外：大道、村落、樹林、小丘、緩坡 ──
-  paint(terrain, w, h, T.Road, polyline([[0, 63], [30, 61], [60, 64], [88, 62]], 5));
-  // 繞到北橋的小路
-  paint(terrain, w, h, T.Road, polyline([[40, 60], [70, 40], [110, 16], [150, 16], [150, 20]], 2));
-  paint(terrain, w, h, T.Forest, ellipse(76, 30, 9, 7, 51));
-  paint(terrain, w, h, T.Forest, ellipse(89, 22, 5, 4, 52));
-  paint(terrain, w, h, T.Hill, ellipse(60, 112, 7, 5, 53), (c) => c === T.Plain);
-  for (const [bx, by, bw, bh] of [[44, 55, 3, 2], [49, 54, 2, 3], [43, 68, 3, 2], [49, 69, 2, 2], [55, 56, 2, 2], [54, 68, 3, 2]] as const) box(bx, by, bx + bw - 1, by + bh - 1, T.Building);
-  const rises = [oval(100, 12, 16, 5), oval(150, 126, 18, 5), oval(60, 112, 11, 8)];
-  // ── 城牆（四格厚） ──
+  // ── 城外：兩道長嶺把攻方的路分成三條 ──
+  const plainOnly = (c: number): boolean => c === T.Plain;
+  // 北嶺、南嶺（坡地，嶺上有樹）
+  const ridges = [polyline([[24, 52], [40, 46], [62, 42], [84, 40]], 36), polyline([[24, 76], [40, 84], [62, 88], [84, 92]], 36)];
+  for (const r of ridges) paint(terrain, w, h, T.Hill, r, plainOnly);
+  paint(terrain, w, h, T.Forest, ellipse(42, 46, 7, 3, 61));
+  paint(terrain, w, h, T.Forest, ellipse(70, 41, 6, 3, 62));
+  paint(terrain, w, h, T.Forest, ellipse(52, 86, 5, 2, 63));
+  // 中路：大道直通西橋；路旁的土丘（擋箭、架弓）與小樹叢
+  paint(terrain, w, h, T.Road, polyline([[0, 63], [28, 63], [52, 61], [72, 63], [88, 62]], 9));
+  paint(terrain, w, h, T.Hill, ellipse(50, 56, 4, 2, 66), plainOnly);
+  paint(terrain, w, h, T.Hill, ellipse(64, 69, 4, 2, 67), plainOnly);
+  paint(terrain, w, h, T.Hill, ellipse(80, 56, 3, 2, 68), plainOnly);
+  paint(terrain, w, h, T.Forest, ellipse(36, 70, 3, 2, 69), plainOnly);
+  // 北路：繞過北嶺、穿過樹林到北橋
+  paint(terrain, w, h, T.Road, polyline([[16, 58], [26, 46], [44, 34], [66, 22], [96, 16], [140, 15], [166, 15], [166, 22]], 4));
+  paint(terrain, w, h, T.Forest, ellipse(56, 27, 8, 5, 70), (c) => c === T.Plain || c === T.Road);
+  paint(terrain, w, h, T.Forest, ellipse(86, 15, 9, 4, 71), (c) => c === T.Plain || c === T.Road);
+  paint(terrain, w, h, T.Forest, ellipse(122, 10, 10, 4, 72), (c) => c === T.Plain || c === T.Road);
+  // 南路：碎石坡與廢村到南淺灘
+  paint(terrain, w, h, T.Road, polyline([[16, 68], [26, 80], [44, 94], [66, 106], [96, 116], [118, 121], [132, 121], [132, 117]], 4));
+  paint(terrain, w, h, T.Rubble, ellipse(58, 101, 5, 3, 64), plainOnly);
+  paint(terrain, w, h, T.Rubble, ellipse(84, 113, 6, 3, 65), plainOnly);
+  for (const [bx, by, bw, bh] of [[66, 98, 3, 2], [71, 100, 2, 3], [62, 110, 3, 2], [74, 108, 2, 2], [104, 124, 3, 2]] as const) box(bx, by, bx + bw - 1, by + bh - 1, T.Building);
+  // 攻方營地：西端南北兩群營帳（中間留給布陣），衝車出發處北側是攻城器械工坊
+  for (const [bx, by] of [[2, 34], [6, 34], [2, 38], [6, 38], [2, 42], [6, 42], [2, 88], [6, 88], [2, 92], [6, 92], [2, 96], [6, 96]] as const) box(bx, by, bx + 2, by + 1, T.Building);
+  box(9, 56, 14, 58, T.Building);
+  const rises = [oval(112, 10, 18, 4), oval(160, 128, 20, 5)];
+  // ── 郭城城牆（四格厚） ──
   const WX0 = 110;
-  const WX1 = 188;
-  const WY0 = 30;
-  const WY1 = 109;
+  const WX1 = 210;
+  const WY0 = 32;
+  const WY1 = 107;
   box(WX0, WY0, WX0 + 3, WY1, T.Wall);
   box(WX1 - 3, WY0, WX1, WY1, T.Wall);
   box(WX0, WY0, WX1, WY0 + 3, T.Wall);
   box(WX0, WY1 - 3, WX1, WY1, T.Wall);
   // 角樓（8 × 8，往外凸兩格）
   for (const [cx, cy] of [[WX0 - 2, WY0 - 2], [WX1 - 5, WY0 - 2], [WX0 - 2, WY1 - 5], [WX1 - 5, WY1 - 5]] as const) box(cx, cy, cx + 7, cy + 7, T.Wall);
-  // 馬面（往外凸三格）：北牆、南牆各兩座，北側門兩側各一座；西牆甕城以外兩座
-  for (const x of [124, 168]) {
+  // 馬面（往外凸三格）：北牆、南牆各兩座（南牆西邊那座緊貼缺口），北側門兩側各一座；西牆甕城以外兩座
+  for (const x of [124, 186]) {
     box(x, WY0 - 3, x + 5, WY0 - 1, T.Wall);
     box(x, WY1 + 1, x + 5, WY1 + 3, T.Wall);
   }
-  box(145, WY0 - 3, 148, WY0 - 1, T.Wall);
-  box(153, WY0 - 3, 156, WY0 - 1, T.Wall);
+  box(161, WY0 - 3, 164, WY0 - 1, T.Wall);
+  box(169, WY0 - 3, 172, WY0 - 1, T.Wall);
   for (const y of [42, 92]) box(WX0 - 3, y, WX0 - 1, y + 5, T.Wall);
   // ── 甕城（正門外，三格厚的牆；入口在西面北段） ──
   box(96, 58, 98, 80, T.Wall);
@@ -513,26 +537,24 @@ export function stonePass(): LegionMap {
   box(archBarbican.x0, archBarbican.y0, archBarbican.x1 - 1, archBarbican.y1 - 1, T.Paved);
   // ── 城門與缺口 ──
   box(WX0, CY - 1, WX0 + 3, CY + 1, T.Gatehouse);
-  box(150, WY0, 151, WY0 + 3, T.Gatehouse);
-  const breach = { x0: 146, y0: WY1 - 3, x1: 151, y1: WY1 + 1 };
+  box(166, WY0, 167, WY0 + 3, T.Gatehouse);
+  const breach = { x0: 130, y0: WY1 - 3, x1: 135, y1: WY1 + 1 };
   box(breach.x0, breach.y0, breach.x1 - 1, breach.y1 - 1, T.Rubble);
-  // ── 護城河：三格寬，繞西、北、南三面（東面接大河），和城牆之間留護城堤；甕城外的一段往外繞 ──
+  // ── 護城河：三格寬，繞西、北、南三面（東面接大河）；甕城外的一段往外繞 ──
   // 過河處：西橋（甕城入口前）、北橋（側門前）、南牆缺口前一段淤塞成淺灘
   const MX = 99;
-  const MY0 = 21;
-  const MY1 = 116;
-  const moat = (x0: number, y0: number, x1: number, y1: number): void => {
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (inMap(x, y)) terrain[idx(x, y)] = T.River;
-  };
-  moat(MX, MY0, 188, MY0 + 2);
-  moat(MX, MY1, 188, MY1 + 2);
+  const MY0 = 23;
+  const MY1 = 114;
+  const moat = (x0: number, y0: number, x1: number, y1: number): void => box(x0, y0, x1, y1, T.River);
+  moat(MX, MY0, 212, MY0 + 2);
+  moat(MX, MY1, 212, MY1 + 2);
   moat(MX, MY0, MX + 2, 52);
   moat(MX, 86, MX + 2, MY1 + 2);
   moat(89, 52, MX + 2, 54);
   moat(89, 84, MX + 2, 86);
   moat(89, 52, 91, 86);
   box(89, archBarbican.y0, 91, archBarbican.y1 - 1, T.Bridge);
-  box(150, MY0, 151, MY0 + 2, T.Bridge);
+  box(166, MY0, 167, MY0 + 2, T.Bridge);
   box(breach.x0, MY1, breach.x1 - 1, MY1 + 2, T.Shallow);
   // ── 城內與甕城內的範圍（淹過去鋪石） ──
   const solid = (i: number): boolean => {
@@ -543,11 +565,26 @@ export function stonePass(): LegionMap {
   const archAt = (x: number, y: number, a: { x0: number; y0: number; x1: number; y1: number }): boolean => x >= a.x0 && x < a.x1 && y >= a.y0 && y < a.y1;
   const barbican = floodMask(w, h, 104, CY, (i) => !solid(i) && !archAt(i % w, (i - (i % w)) / w, archBarbican));
   for (let i = 0; i < w * h; i++) if (inside[i] === 1 || barbican[i] === 1) terrain[i] = T.Paved;
-  // ── 衙署子城（兩格厚城牆、四角小樓、西面五格寬的門洞） ──
-  const CX0 = 162;
-  const CX1 = 180;
-  const CY0 = 54;
-  const CY1 = 84;
+  // ── 第二道防線：內城牆（三格厚、內角樓 5 × 5、西門洞兩側馬面；東面接郭城東牆） ──
+  const IW = 152;
+  const IN = 46;
+  const IS = 93;
+  box(IW, IN, IW + 2, IS, T.Wall);
+  box(IW, IN, WX1 - 4, IN + 2, T.Wall);
+  box(IW, IS - 2, WX1 - 4, IS, T.Wall);
+  box(IW - 1, IN - 1, IW + 3, IN + 3, T.Wall);
+  box(IW - 1, IS - 3, IW + 3, IS + 1, T.Wall);
+  box(IW - 2, 60, IW - 1, 63, T.Wall);
+  box(IW - 2, 75, IW - 1, 78, T.Wall);
+  const archInW = { x0: IW, y0: CY - 2, x1: IW + 3, y1: CY + 3 };
+  const archInN = { x0: 178, y0: IN, x1: 183, y1: IN + 3 };
+  const archInS = { x0: 184, y0: IS - 2, x1: 189, y1: IS + 1 };
+  for (const a of [archInW, archInN, archInS]) box(a.x0, a.y0, a.x1 - 1, a.y1 - 1, T.Paved);
+  // ── 第三道防線：衙署子城（兩格厚城牆、四角小樓、西面五格寬的門洞） ──
+  const CX0 = 182;
+  const CX1 = 204;
+  const CY0 = 56;
+  const CY1 = 83;
   box(CX0, CY0, CX0 + 1, CY1, T.Wall);
   box(CX1 - 1, CY0, CX1, CY1, T.Wall);
   box(CX0, CY0, CX1, CY0 + 1, T.Wall);
@@ -556,10 +593,61 @@ export function stonePass(): LegionMap {
   const archCitadel = { x0: CX0, y0: CY - 2, x1: CX0 + 2, y1: CY + 3 };
   box(archCitadel.x0, archCitadel.y0, archCitadel.x1 - 1, archCitadel.y1 - 1, T.Paved);
   // 正堂（北）、東廂、南堂；中間是院落（B 旗）
-  box(168, 58, 176, 61, T.Building);
-  box(175, 64, 177, 74, T.Building);
-  box(167, 78, 175, 80, T.Building);
-  // ── 城內的建築：坊（四合院式）、市集、寺廟、營房與校場、糧倉、官署 ──
+  box(188, 59, 198, 62, T.Building);
+  box(199, 65, 201, 74, T.Building);
+  box(188, 77, 198, 79, T.Building);
+  // ── 郭城西半：巷戰區（先全部蓋滿民房，再挖出街巷與廣場） ──
+  const OX0 = WX0 + 4;
+  const OX1 = IW - 1;
+  const OY0 = WY0 + 4;
+  const OY1 = WY1 - 4;
+  for (let y = OY0; y <= OY1; y++) for (let x = OX0; x <= OX1; x++) if (tAt(x, y) === T.Paved) terrain[idx(x, y)] = T.Building;
+  const carve = (p: Painter): void => {
+    for (let y = OY0; y <= OY1; y++) for (let x = OX0; x <= OX1; x++) if (tAt(x, y) === T.Building && p(x, y)) terrain[idx(x, y)] = T.Paved;
+  };
+  // 順城街（沿城牆、內城牆三格）
+  carve((x, y) => x <= OX0 + 2 || y <= OY0 + 2 || y >= OY1 - 2 || x >= OX1 - 2);
+  // 街巷都是直角轉折（老城的街不是直通到底，走幾步就錯開一段），格子上不會出現鋸齒邊
+  const lane = (x0: number, y0: number, x1: number, y1: number): void => carve((x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1);
+  // 正門內廣場、內城西門洞前廣場
+  lane(117, 63, 126, 75);
+  lane(141, 62, 148, 76);
+  // 大街（六格）：出廣場往東，錯開兩次才到內城西門洞
+  lane(126, 63, 135, 68);
+  lane(132, 63, 137, 71);
+  lane(135, 66, 141, 71);
+  // 巷（四格）：北巷、東北巷各轉一次到北邊順城街；南巷轉一次通到南牆缺口；東南巷轉一次到寺廟
+  lane(118, 50, 121, 63);
+  lane(118, 50, 128, 53);
+  lane(125, 39, 128, 53);
+  lane(134, 52, 137, 63);
+  lane(134, 52, 143, 55);
+  lane(140, 39, 143, 55);
+  lane(120, 75, 123, 84);
+  lane(120, 81, 131, 84);
+  lane(128, 81, 131, 100);
+  lane(136, 71, 139, 88);
+  lane(136, 85, 145, 88);
+  lane(142, 85, 145, 100);
+  // 弄（三格）：串起巷子的短街
+  lane(122, 57, 134, 59);
+  lane(124, 76, 136, 78);
+  lane(117, 91, 128, 93);
+  lane(143, 46, 149, 48);
+  lane(145, 80, 149, 82);
+  // 市集（北巷與東北巷之間）：一排排攤位
+  lane(129, 40, 139, 48);
+  for (const y of [42, 45]) for (let x = 130; x <= 138; x += 3) box(x, y, x + 1, y, T.Building);
+  // 寺廟（南巷與東南巷之間）：大殿、兩側配殿，院裡種樹
+  lane(132, 91, 141, 100);
+  box(134, 92, 139, 94, T.Building);
+  box(132, 96, 133, 99, T.Building);
+  box(140, 96, 141, 99, T.Building);
+  paint(terrain, w, h, T.Forest, oval(136, 98, 1, 1), (c) => c === T.Paved);
+  // ── 內城北、南兩側的夾道：營房與糧倉（中間一排，兩側是街；留出側門、門洞的通路） ──
+  for (const [x0, x1] of [[156, 163], [170, 176], [185, 192], [196, 204]] as const) box(x0, 39, x1, 42, T.Building);
+  for (const [x0, x1] of [[157, 163], [167, 173], [177, 182], [191, 197], [200, 205]] as const) box(x0, 97, x1, 100, T.Building);
+  // ── 內城：整齊的坊與官署 ──
   /** 坊：沿街一圈兩格深的房舍（每隔幾間留一條巷子、南面正中開坊門），中間是院落，大的坊院子裡再一座正房 */
   const ward = (x0: number, y0: number, x1: number, y1: number): void => {
     const midX = idiv(x0 + x1, 2);
@@ -579,66 +667,60 @@ export function stonePass(): LegionMap {
     }
     if (x1 - x0 >= 10 && y1 - y0 >= 10) box(midX - 1, y0 + 4, midX + 2, y0 + 6, T.Building);
   };
-  ward(118, 38, 130, 50);
-  ward(134, 38, 146, 50);
-  ward(118, 54, 130, 66);
-  ward(134, 54, 143, 66);
-  ward(134, 72, 143, 84);
-  ward(118, 88, 130, 101);
-  ward(154, 55, 159, 65);
-  ward(154, 73, 159, 83);
-  // 市集（西大街南側、正門內）：北、西兩面沿街店鋪，中間一排排攤位
-  for (let x = 118; x <= 130; x++) if ((x - 118) % 5 !== 4) box(x, 72, x, 73, T.Building);
-  for (let y = 74; y <= 84; y++) if ((y - 72) % 5 !== 4) box(118, y, 119, y, T.Building);
-  for (let y = 76; y <= 83; y += 3) for (let x = 122; x <= 129; x += 3) box(x, y, x + 1, y, T.Building);
-  // 寺廟（西南）：山門、大殿、兩側配殿，院裡種樹
-  box(137, 99, 143, 100, T.Building);
-  box(136, 89, 144, 92, T.Building);
-  box(134, 93, 135, 98, T.Building);
-  box(145, 93, 146, 98, T.Building);
-  paint(terrain, w, h, T.Forest, oval(140, 96, 2, 1), (c) => c === T.Paved);
-  // 營房（東北）：三排長屋；西半部是校場（空地）
-  for (const y of [38, 42, 46]) box(167, y, 179, y + 1, T.Building);
-  box(155, 38, 158, 40, T.Building);
-  // 糧倉（東南）：兩排倉廒
-  for (const y of [89, 95]) for (const x of [156, 163, 170]) box(x, y, x + 4, y + 2, T.Building);
-  // ── 馬道（城牆內側三格寬的坡道，上牆用） ──
+  ward(158, 52, 173, 64);
+  ward(158, 74, 173, 87);
+  // 子城北側的官署
+  box(184, 50, 192, 53, T.Building);
+  box(196, 50, 203, 53, T.Building);
+  // ── 走不到的空格（被房舍圍住的小角落）改成房舍 ──
+  const reach = floodMask(w, h, 121, CY, (i) => {
+    const t = terrain[i];
+    return t === T.Paved || t === T.Forest || t === T.Rubble || t === T.Gatehouse;
+  });
+  for (let i = 0; i < w * h; i++) if (inside[i] === 1 && reach[i] === 0 && (terrain[i] === T.Paved || terrain[i] === T.Forest)) terrain[i] = T.Building;
+  // ── 馬道（城牆內側的坡道，上牆用） ──
   const ramp = (x0: number, y0: number, x1: number, y1: number): void => {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (tAt(x, y) === T.Paved) terrain[idx(x, y)] = T.Stair;
   };
-  const IX0 = WX0 + 4;
-  const IX1 = WX1 - 4;
-  const IY0 = WY0 + 4;
-  const IY1 = WY1 - 4;
-  for (const y of [46, CY - 7, CY + 5, 90]) ramp(IX0, y, IX0, y + 2);
-  for (const y of [46, 90]) ramp(IX1, y, IX1, y + 2);
-  for (const x of [124, 144, 155, 170]) ramp(x, IY0, x + 2, IY0);
-  for (const x of [124, 141, 154, 170]) ramp(x, IY1, x + 2, IY1);
+  // 郭城：西牆、北牆、南牆、東牆內側
+  for (const y of [42, 56, 82, 94]) ramp(OX0, y, OX0, y + 2);
+  for (const x of [120, 140, 158, 186, 198]) ramp(x, OY0, x + 2, OY0);
+  for (const x of [118, 140, 160, 178, 198]) ramp(x, OY1, x + 2, OY1);
+  for (const y of [40, 52, 86, 98]) ramp(WX1 - 4, y, WX1 - 4, y + 2);
+  // 內城牆：只有內側有馬道（攻方要上內城牆得架雲梯）
+  for (const y of [56, 80]) ramp(IW + 3, y, IW + 3, y + 2);
+  for (const x of [162, 194]) {
+    ramp(x, IN + 3, x + 2, IN + 3);
+    ramp(x, IS - 3, x + 2, IS - 3);
+  }
   // 子城：北牆、南牆內側各一段
-  ramp(165, CY0 + 2, 166, CY0 + 2);
-  ramp(165, CY1 - 2, 166, CY1 - 2);
-  // ── 高度：城內、甕城、城牆 2；子城院落 3；護城河與大河 0、橋 1；城外 1、緩坡 2、西南小丘 3～4 ──
-  const hillTop = ellipse(60, 112, 3, 2, 56);
+  ramp(185, CY0 + 2, 186, CY0 + 2);
+  ramp(185, CY1 - 2, 186, CY1 - 2);
+  // ── 高度：郭城 2、內城 3、子城 4（城牆跟著所在的台地）；護城河與大河 0、橋 1；城外 1、緩坡 2、長嶺與土丘 3 ──
+  const innerWall = (x: number, y: number): boolean => x >= IW - 2 && x <= WX1 - 4 && y >= IN - 1 && y <= IS + 1;
+  const innerArea = (x: number, y: number): boolean => x >= IW + 3 && x <= WX1 - 4 && y >= IN + 3 && y <= IS - 3;
+  const citadel = (x: number, y: number): boolean => x >= CX0 - 1 && x <= CX1 && y >= CY0 - 1 && y <= CY1 + 1;
   for (let i = 0; i < w * h; i++) {
     const t = terrain[i];
     const x = i % w;
     const y = (i - x) / w;
-    const castle = x >= 93 && x <= 191 && y >= 25 && y <= 114 && t !== T.River && t !== T.Bridge && (inside[i] === 1 || barbican[i] === 1 || t === T.Wall || t === T.Gatehouse || t === T.Rubble || t === T.Paved || t === T.Stair || t === T.Building || t === T.Forest);
-    if (t === T.River) heights[i] = 0;
+    const castle = x >= 93 && x <= 212 && y >= 26 && y <= 113 && (inside[i] === 1 || barbican[i] === 1 || t === T.Wall || t === T.Gatehouse || t === T.Rubble);
+    if (t === T.River || t === T.Shallow) heights[i] = 0;
     else if (t === T.Bridge) heights[i] = 1;
-    else if (t === T.Shallow) heights[i] = 0;
-    else if (castle) heights[i] = t !== T.Wall && x > CX0 + 1 && x < CX1 - 1 && y > CY0 + 1 && y < CY1 - 1 ? 3 : 2;
-    else if (t === T.Hill) heights[i] = hillTop(x, y) ? 4 : 3;
+    else if (castle) {
+      const wallOrArch = t === T.Wall || [archInW, archInN, archInS].some((a) => archAt(x, y, a));
+      if (citadel(x, y) && (t === T.Wall || x >= CX0)) heights[i] = 4;
+      else if (innerArea(x, y) || (wallOrArch && innerWall(x, y))) heights[i] = 3;
+      else heights[i] = 2;
+    } else if (t === T.Hill || (t !== T.Building && ridges.some((p) => p(x, y)))) heights[i] = 3;
     else if (t !== T.Building && rises.some((p) => p(x, y))) heights[i] = 2;
   }
-  // 子城門洞也算院落那一階
-  for (let y = archCitadel.y0; y < archCitadel.y1; y++) for (let x = archCitadel.x0; x < archCitadel.x1; x++) heights[idx(x, y)] = 3;
   // ── 守方布陣區：城內、甕城、城牆（含角樓、馬面）、門樓、缺口 ──
   const defMask = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
     const x = i % w;
     const y = (i - x) / w;
-    if (x < 93 || x > 191 || y < 25 || y > 114) continue;
+    if (x < 93 || x > 212 || y < 26 || y > 113) continue;
     const t = terrain[i];
     if (inside[i] === 1 || barbican[i] === 1 || archAt(x, y, archBarbican) || t === T.Wall || t === T.Gatehouse || t === T.Rubble) defMask[i] = 1;
   }
@@ -646,55 +728,60 @@ export function stonePass(): LegionMap {
   return finishMap({
     id: 'stone-pass',
     name: '石關城',
-    description: '背靠大河的方城：四格厚的城牆、四角角樓與馬面，正門外有甕城與護城河，北牆有側門、南牆有一段坍塌的瓦礫缺口。城內全部鋪石，大街十字交會於鼓樓廣場，街坊、市集、寺廟、營房校場與糧倉分區排開，東側是圍著城牆的衙署子城（本陣）。',
+    description:
+      '背靠大河的三重城：郭城（四格厚城牆、角樓、馬面、甕城、護城河）、內城（三格厚城牆、三個門洞、高一階）、衙署子城（本陣、再高一階）。攻方營地往東分出三條路：中路大道經西橋進甕城撞正門、北路穿過樹林到北橋與側門、南路經碎石坡與淺灘到南牆的瓦礫缺口。郭城西半是彎曲街巷的巷戰區，內城是整齊的坊與官署。',
     width: w,
     height: h,
     terrain,
     heights,
     deploy: [
       { x0: 0, y0: 0, x1: depth, y1: h },
-      { x0: 93, y0: 25, x1: 192, y1: 115 },
+      { x0: 93, y0: 26, x1: 213, y1: 114 },
     ],
     deployMask: [null, defMask],
     rearX: [0, w * TILE],
     spawns: [
       { x: 10000, y: 63000 },
-      { x: 171500, y: 74500 },
+      { x: 193500, y: 74500 },
     ],
     supplies: [],
     flags: [
       { name: '正門', x: 112000, y: 69500 },
-      { name: '衙署', x: 171500, y: 69500 },
+      { name: '衙署', x: 193500, y: 69500 },
     ].map((f) => ({ ...f, points: 0 })),
     landmarks: [
       { name: '正門', x: 112000, y: 69500 },
       { name: '甕城', x: 103500, y: 69500 },
       { name: '西橋', x: 90500, y: 63000 },
-      { name: '北橋', x: 151000, y: 22500 },
-      { name: '南淺灘', x: 148500, y: 117500 },
-      { name: '鼓樓廣場', x: 150500, y: 69500 },
-      { name: '西大街', x: 130500, y: 69500 },
-      { name: '市集', x: 124500, y: 78500 },
-      { name: '寺廟', x: 140500, y: 95500 },
-      { name: '校場', x: 160500, y: 44500 },
-      { name: '營房', x: 173500, y: 42500 },
-      { name: '糧倉', x: 166500, y: 95500 },
-      { name: '北側門', x: 151000, y: 32000 },
-      { name: '南牆缺口', x: 148500, y: 107500 },
-      { name: '衙署', x: 171500, y: 69500 },
-      { name: '西北角樓', x: 111500, y: 31500 },
-      { name: '西南角樓', x: 111500, y: 107500 },
-      { name: '西北樹林', x: 78500, y: 30500 },
-      { name: '路邊村落', x: 49500, y: 62500 },
-      { name: '西南小丘', x: 60500, y: 112500 },
-      { name: '攻方陣地', x: 10000, y: 63000 },
+      { name: '北橋', x: 167000, y: 24500 },
+      { name: '南淺灘', x: 132500, y: 115500 },
+      { name: '正門廣場', x: 121500, y: 69500 },
+      { name: '西大街', x: 134500, y: 66500 },
+      { name: '市集', x: 134500, y: 44500 },
+      { name: '寺廟', x: 136500, y: 96500 },
+      { name: '內城西門', x: 153500, y: 69500 },
+      { name: '內城北門', x: 180500, y: 47500 },
+      { name: '內城南門', x: 186500, y: 92500 },
+      { name: '營房', x: 180500, y: 40500 },
+      { name: '糧倉', x: 180500, y: 98500 },
+      { name: '官署廣場', x: 176500, y: 69500 },
+      { name: '北側門', x: 167000, y: 34000 },
+      { name: '南牆缺口', x: 132500, y: 105500 },
+      { name: '衙署', x: 193500, y: 69500 },
+      { name: '西北角樓', x: 111500, y: 33500 },
+      { name: '西南角樓', x: 111500, y: 105500 },
+      { name: '北嶺', x: 54500, y: 44500 },
+      { name: '南嶺', x: 54500, y: 86500 },
+      { name: '北路樹林', x: 86500, y: 15500 },
+      { name: '南路廢村', x: 68500, y: 101500 },
+      { name: '攻方營地', x: 10000, y: 63000 },
     ],
     gates: [
       { x0: WX0, y0: CY - 1, x1: WX0 + 4, y1: CY + 2, kind: 'main' },
-      { x0: 150, y0: WY0, x1: 152, y1: WY0 + 4, kind: 'side' },
+      { x0: 166, y0: WY0, x1: 168, y1: WY0 + 4, kind: 'side' },
     ],
     breaches: [breach],
-    archways: [archBarbican, archCitadel],
+    archways: [archBarbican, archInW, archInN, archInS, archCitadel],
     defender: 1,
     ram: { x: 16000, y: 62500, facing: 0 },
     bombardFrom: 180,
