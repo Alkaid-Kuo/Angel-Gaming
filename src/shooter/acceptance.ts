@@ -1,10 +1,10 @@
 // CS 射擊驗收情境，用寫死的腳本控制器（不用陪練 Bot）；test/shooter.test.ts 檢查全部通過。
-// SCENARIOS（步驟 1）：四種回合勝利條件與回合流程。ECONOMY_SCENARIOS（步驟 2）：回合結算。
+// SCENARIOS（步驟 1）：四種回合勝利條件與回合流程。ECONOMY_SCENARIOS（步驟 2）：回合結算。GRENADE_SCENARIOS（步驟 3）：道具。
 import type { ShooterCommand, ShooterObservation } from './api.ts';
-import { ECONOMY, ROUND, TEAM_SIZE, UNIT, ticks } from './config.ts';
+import { ECONOMY, GRENADES, GRENADE_RULES, ROUND, TEAM_SIZE, UNIT, ticks, type GrenadeId } from './config.ts';
 import { isSolidCell } from './map.ts';
 import { ScriptController, ShooterDriver } from './runner.ts';
-import { PLAYER_COUNT, type ShooterMatchOptions } from './sim.ts';
+import { FIRE_TICK_DAMAGE, PLAYER_COUNT, type ShooterMatchOptions } from './sim.ts';
 
 export interface ScenarioResult {
   readonly pass: boolean;
@@ -347,6 +347,151 @@ export const ECONOMY_SCENARIOS: readonly Scenario[] = [
       const r4 = d.match.rounds[3];
       const pass = r4 !== undefined && r4.money[0] === S0 && r4.money[1] === S0 && log[3][1] === S0 + ECONOMY.lossBonus[0] && log[3][0] === S0 + ECONOMY.winElimination;
       return { pass, detail: `第 4 回合開局平均 ${r4?.money.join('／')}；結算後玩家 0 ${log[3]?.[0]}、玩家 5 ${log[3]?.[1]}` };
+    },
+  },
+];
+
+// ───────── 步驟 3：道具 ─────────
+
+/** 其他人移到各自出生區邊上、面對牆（看不到、不干擾） */
+function parkOthers(d: ShooterDriver, keep: readonly number[]): void {
+  const m = d.match;
+  m.players.forEach((p, i) => {
+    if (keep.includes(i)) return;
+    if (p.team === 'T') m.teleport(i, (40 + (i % 5) * 2) * UNIT + 500, 115500, 90);
+    else m.teleport(i, (57 + (i % 5) * 2) * UNIT + 500, 2500, 270);
+  });
+}
+
+/** 開打後只要還帶著該道具就丟（投出後閒置） */
+function thrower(grenade: GrenadeId, deg: number, power: number): Script {
+  return (obs) => (obs.round.phase === 'live' && obs.me.loadout.grenades.includes(grenade) ? [{ type: 'throw', grenade, deg, power }] : []);
+}
+
+const cell = (c: number): number => c * UNIT + UNIT / 2;
+
+export const GRENADE_SCENARIOS: readonly Scenario[] = [
+  {
+    id: 'G1',
+    name: '煙霧擋視線不擋子彈',
+    expect: 'T 朝 10 格外互相看得見的 CT 丟煙霧；煙霧散開後雙方 enemies 與隊友 radar 都沒有對方；T 照原位盲射，子彈穿煙打中 CT',
+    run: () => {
+      let fire = false;
+      const [cx, cy] = [cell(106), cell(80)];
+      const smoke = thrower('smoke', 270, 20);
+      const t0: Script = (obs) => (fire ? [{ type: 'aim', x: cx, y: cy }, { type: 'fire', on: true }] : smoke(obs));
+      const d = driver({ 0: t0 });
+      const m = d.match;
+      toLive(d);
+      m.teleport(0, cell(106), cell(90), 270);
+      m.teleport(1, cell(104), cell(90), 270);
+      m.teleport(5, cx, cy, 90);
+      parkOthers(d, [0, 1, 5]);
+      m.players[0].grenades = ['smoke'];
+      const before = m.observe(0).enemies.some((e) => e.id === 5) && m.observe(5).enemies.some((e) => e.id === 0);
+      runUntil(d, () => m.smokes.length > 0, ticks(3));
+      runUntil(d, () => false, GRENADE_RULES.smokeBloomTicks + 3);
+      const o0 = m.observe(0);
+      const o5 = m.observe(5);
+      const blocked = o0.enemies.length === 0 && o0.radar.length === 0 && o5.enemies.length === 0 && m.observe(1).enemies.length === 0;
+      fire = true;
+      runUntil(d, () => m.players[5].hp < 100, ticks(1));
+      const pass = before && blocked && m.players[5].hp < 100 && o0.effects.some((e) => e.kind === 'smoke');
+      return { pass, detail: `丟前互看 ${before}；煙後 T 見 ${o0.enemies.length}、雷達 ${o0.radar.length}、CT 見 ${o5.enemies.length}；CT 血 ${m.players[5].hp}` };
+    },
+  },
+  {
+    id: 'G2',
+    name: '閃光清空觀察',
+    expect: 'CT 朝 10 格外面向自己的 T 丟閃光；生效後 T 的 enemies／radar／effects／items／projectiles 全空、自己與隊友資料照給；致盲結束後恢復',
+    run: () => {
+      const d = driver({ 5: thrower('flash', 90, 40) });
+      const m = d.match;
+      toLive(d);
+      m.teleport(0, cell(106), cell(90), 270);
+      m.teleport(1, cell(104), cell(92), 90);
+      m.teleport(5, cell(106), cell(80), 180);
+      parkOthers(d, [0, 1, 5]);
+      m.players[5].grenades = ['flash'];
+      runUntil(d, () => m.players[0].blindTicks > 0, ticks(3));
+      const o = m.observe(0);
+      const empty = o.enemies.length + o.radar.length + o.effects.length + o.items.length + o.projectiles.length === 0;
+      const kept = o.me.alive && o.me.blindTicks > 0 && o.teammates.length === TEAM_SIZE - 1 && m.observe(1).teammates.some((t) => t.id === 0 && t.blind);
+      const blindFor = m.players[0].blindTicks;
+      runUntil(d, () => m.players[0].blindTicks === 0, ticks(3));
+      m.teleport(5, cell(106), cell(80), 180);
+      const back = m.observe(0).enemies.some((e) => e.id === 5);
+      return { pass: empty && kept && back && blindFor > 0, detail: `致盲 ${blindFor} tick；清空 ${empty}；自己與隊友 ${kept}；恢復後看見 ${back}` };
+    },
+  },
+  {
+    id: 'G3',
+    name: '手雷擊殺獎金',
+    expect: `T 朝 5 格外站著不動、剩 50 血的 CT 丟手雷，落點貼臉 98 傷害炸死；T 擊殺 +1、獎金 +${ECONOMY.grenadeKillReward}`,
+    run: () => {
+      const d = driver({ 0: thrower('he', 270, 20) });
+      const m = d.match;
+      toLive(d);
+      m.teleport(0, cell(106), cell(90), 90);
+      m.teleport(5, cell(106), cell(85), 90);
+      parkOthers(d, [0, 5]);
+      m.players[0].grenades = ['he'];
+      m.players[5].hp = 50;
+      const money = m.players[0].money;
+      runUntil(d, () => !m.players[5].alive, ticks(3));
+      const k = m.kills.at(-1);
+      const pass = !m.players[5].alive && m.players[0].kills === 1 && m.players[0].money === money + ECONOMY.grenadeKillReward && k?.weapon === 'he' && k.killer === 0;
+      return { pass, detail: `CT 存活 ${m.players[5].alive}；擊殺 ${m.players[0].kills}；金錢 ${money} → ${m.players[0].money}；紀錄 ${k?.weapon}` };
+    },
+  },
+  {
+    id: 'G4',
+    name: '燃燒：站在火裡 2 秒掉 80、不吃護甲',
+    expect: 'T 朝 5 格外有甲的 CT 丟燃燒瓶，落地點火；CT 站在火裡 2 秒，血 −80、甲值不變；7 秒後火熄',
+    run: () => {
+      const d = driver({ 0: thrower('molotov', 270, 20) });
+      const m = d.match;
+      toLive(d);
+      m.teleport(0, cell(106), cell(90), 90);
+      m.teleport(5, cell(106), cell(85), 90);
+      parkOthers(d, [0, 5]);
+      m.players[0].grenades = ['molotov'];
+      m.players[5].armor = 100;
+      runUntil(d, () => m.fires.length > 0, ticks(2));
+      const lit = m.fires[0]?.startTick ?? -1;
+      runUntil(d, () => false, ticks(2));
+      const hp = m.players[5].hp;
+      const armor = m.players[5].armor;
+      runUntil(d, () => m.fires.length === 0, GRENADES.molotov.durationTicks);
+      const out = m.tick - 1 - lit;
+      const pass = lit >= 0 && hp === 100 - 10 * FIRE_TICK_DAMAGE && armor === 100 && m.fires.length === 0 && out === GRENADES.molotov.durationTicks;
+      return { pass, detail: `點火於 ${lit}；2 秒後血 ${hp}、甲 ${armor}；火持續 ${out} tick` };
+    },
+  },
+  {
+    id: 'G5',
+    name: '回合交接清除道具效果',
+    expect: '同時有飛行中的閃光、煙霧、火時 CT 全滅；回合展示時間內效果還在，下一回合開始時全部清除、致盲與投擲冷卻歸零',
+    run: () => {
+      const d = driver({});
+      const m = d.match;
+      toLive(d);
+      m.teleport(0, cell(106), cell(90), 270);
+      m.players[0].grenades = ['smoke', 'molotov', 'flash'];
+      m.applyCommands(0, [{ type: 'throw', grenade: 'smoke', deg: 270, power: 20 }]);
+      runUntil(d, () => m.smokes.length > 0, ticks(2));
+      m.players[0].throwCd = 0;
+      m.applyCommands(0, [{ type: 'throw', grenade: 'molotov', deg: 90, power: 20 }]);
+      runUntil(d, () => m.fires.length > 0, ticks(1));
+      m.players[0].throwCd = 0;
+      m.applyCommands(0, [{ type: 'throw', grenade: 'flash', deg: 270, power: 100 }]);
+      m.players[1].blindTicks = 50;
+      for (const p of m.players) if (p.team === 'CT') m.kill(p.id);
+      runUntil(d, () => roundOver(d, 1), 5);
+      const during = m.smokes.length > 0 && m.fires.length > 0 && m.projectiles.length > 0;
+      runUntil(d, () => m.roundNumber === 2, ROUND.roundEndTicks + 5);
+      const cleared = m.smokes.length + m.fires.length + m.projectiles.length === 0 && m.players.every((p) => p.blindTicks === 0 && p.throwCd === 0);
+      return { pass: during && cleared, detail: `展示時間內仍在 ${during}；第 ${m.roundNumber} 回合清除 ${cleared}` };
     },
   },
 ];

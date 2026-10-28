@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { cdegDiff, iatan2, iatan2C, icosC, isinC } from '../src/shared/geom.ts';
 import { iatan2 as legionIatan2 } from '../src/legion/geom.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
-import { ECONOMY_SCENARIOS, SCENARIOS } from '../src/shooter/acceptance.ts';
-import { ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS } from '../src/shooter/config.ts';
+import { ECONOMY_SCENARIOS, GRENADE_SCENARIOS, SCENARIOS } from '../src/shooter/acceptance.ts';
+import { ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, GRENADE_RULES, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS, ticks, type GrenadeId } from '../src/shooter/config.ts';
 import { applyPercent } from '../src/shared/intmath.ts';
 import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
 import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterController } from '../src/shooter/runner.ts';
-import { PLAYER_COUNT, ShooterMatch, TURN_STEP_C, armorSplit, damageAt, type ShooterMatchOptions } from '../src/shooter/sim.ts';
+import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
 import { lineOfSight, quantizeDir, rayWallDistance, soundRange } from '../src/shooter/vision.ts';
 import type { ShooterObservation, SoundEvent } from '../src/shooter/api.ts';
 
@@ -675,6 +675,24 @@ describe('確定性與效能', () => {
     expect(run.result.stats.reduce((a, s) => a + s.kills, 0)).toBeGreaterThan(0);
   });
 
+  it('陪練 Bot v3 會丟道具：全買局 T 丟煙霧、CT 丟閃光（10 個種子短賽制）', () => {
+    let tThrows = 0;
+    let ctThrows = 0;
+    let enemyBlind = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const run = runShooterMatch({ seed, ...short, controllers: practiceControllers(seed), record: false });
+      expect(run.runtime.every((rt) => rt.exceptions === 0 && rt.timeouts === 0)).toBe(true);
+      for (const r of run.result.rounds) {
+        tThrows += r.throws[r.tGroup];
+        ctThrows += r.throws[r.tGroup === 0 ? 1 : 0];
+        enemyBlind += r.flashEnemyTicks[0] + r.flashEnemyTicks[1];
+      }
+    }
+    expect(tThrows).toBeGreaterThan(0);
+    expect(ctThrows).toBeGreaterThan(0);
+    expect(enemyBlind).toBeGreaterThan(0);
+  });
+
   it('eco 對全買：玩家 0～4 每回合開局 16000、玩家 5～9 只有 800，20 個種子短賽制回合勝率 ≥ 75%', () => {
     let won = 0;
     let total = 0;
@@ -698,4 +716,537 @@ describe('確定性與效能', () => {
     expect(m.players.filter((p) => p.team === 'T').length).toBe(TEAM_SIZE);
     for (const p of m.players) expect(isSolidCell(map, cellOf(p.x), cellOf(p.y))).toBe(false);
   });
+});
+
+// ───────── 步驟 3：道具 ─────────
+
+/** 在 (x, y) 放一顆已落地、這一 tick 就生效的道具，跑一 tick */
+function pop(m: ShooterMatch, kind: GrenadeId, owner: number, x: number, y: number): void {
+  m.projectiles.push({ kind, owner, x, y, dx: 0, dy: 0, left: 0, bounces: 0, moving: false, fuseTick: m.tick });
+  m.step();
+}
+
+/** 放一團已經完全散開的煙霧（視野矩陣每 tick 快取一次：原地瞬移玩家 0 讓它重算） */
+function fullSmoke(m: ShooterMatch, x: number, y: number, owner = 5): void {
+  m.smokes.push({ x, y, owner, startTick: m.tick - GRENADE_RULES.smokeBloomTicks, endTick: m.tick + GRENADES.smoke.durationTicks });
+  m.teleport(0, m.players[0].x, m.players[0].y);
+}
+
+/** 放一團剛點著（上一 tick 點火）的火 */
+function litFire(m: ShooterMatch, x: number, y: number, owner: number): void {
+  m.fires.push({ x, y, owner, kind: 'molotov', startTick: m.tick - 1, endTick: m.tick - 1 + GRENADES.molotov.durationTicks });
+}
+
+/** 玩家 0 在 A 長 (106, 90) 朝 deg 丟 kind，跑到停下；回傳那顆道具 */
+function throwAndLand(power: number, deg = 270, kind: GrenadeId = 'smoke'): { m: ShooterMatch; g: Projectile; ticks: number } {
+  const m = live();
+  const [x, y] = at(106, 90);
+  m.teleport(0, x, y, 270);
+  parkOthers(m, [0]);
+  m.players[0].grenades = [kind];
+  m.applyCommands(0, [{ type: 'throw', grenade: kind, deg, power }]);
+  const g = m.projectiles[0];
+  let n = 0;
+  while (g.moving && n < 200) {
+    m.step();
+    n += 1;
+  }
+  return { m, g, ticks: n };
+}
+
+describe('投擲', () => {
+  it('力道線性對應距離：0／50／100 → 0／12.5／25 格（直線、沒碰牆）', () => {
+    const [, y] = at(106, 90);
+    for (const [power, cells] of [
+      [0, 0],
+      [50, 12.5],
+      [100, 25],
+    ] as const) {
+      const { g } = throwAndLand(power);
+      expect(y - g.y).toBe(cells * UNIT);
+      expect(g.x).toBe(at(106, 90)[0]);
+      expect(g.bounces).toBe(0);
+    }
+    // 飛行速度：25 格約 44 tick（< 1.5 秒引信）
+    expect(throwAndLand(100).ticks).toBe(Math.ceil((25 * UNIT) / GRENADE_RULES.flySpeed));
+  });
+
+  it('碰牆反彈一次後繼續飛、第二次碰牆就停', () => {
+    // A 長寬 12 格（x 100～111）：從 (106.5, 90.5) 往東全力丟，撞東牆反彈，往西撞西牆停
+    const { g } = throwAndLand(100, 0, 'flash');
+    expect(g.bounces).toBe(1);
+    expect(g.moving).toBe(false);
+    expect(g.x).toBe(100 * UNIT + GRENADE_RULES.projectileRadius);
+    expect(g.y).toBe(at(106, 90)[1]);
+    // 第一次碰牆後沒有停：飛過的路程 > 往東的 5.4 格
+    const traveled = 112 * UNIT - GRENADE_RULES.projectileRadius - at(106, 90)[0] + (112 * UNIT - 100 * UNIT - 2 * GRENADE_RULES.projectileRadius);
+    expect(traveled).toBeLessThan(25 * UNIT);
+    expect(g.left).toBe(0);
+  });
+
+  it('斜著撞牆：只反轉撞到的那一軸（法線鏡射）', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    parkOthers(m, [0]);
+    m.players[0].grenades = ['smoke'];
+    m.applyCommands(0, [{ type: 'throw', grenade: 'smoke', deg: 315, power: 100 }]);
+    const g = m.projectiles[0];
+    const dy0 = g.dy;
+    const dx0 = g.dx;
+    while (g.bounces === 0 && g.moving) m.step();
+    expect(g.dx).toBe(-dx0);
+    expect(g.dy).toBe(dy0);
+  });
+
+  it('投出後從背包移除；沒有該道具時忽略；冷卻 0.5 秒內不能再投也不能開火；凍結時間不能投', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    parkOthers(m, [0]);
+    m.players[0].grenades = ['flash', 'flash', 'smoke'];
+    m.applyCommands(0, [{ type: 'throw', grenade: 'he', deg: 270, power: 50 }]);
+    expect(m.projectiles.length).toBe(0);
+    m.applyCommands(0, [{ type: 'throw', grenade: 'flash', deg: 270, power: 50 }]);
+    expect(m.players[0].grenades).toEqual(['flash', 'smoke']);
+    expect(m.projectiles.length).toBe(1);
+    // 冷卻內：再投、開火都無效
+    m.applyCommands(0, [{ type: 'throw', grenade: 'smoke', deg: 270, power: 50 }, { type: 'fire', on: true }]);
+    const mag = m.players[0].secondary!.mag;
+    for (let i = 0; i < GRENADE_RULES.throwCooldownTicks - 1; i++) m.step();
+    expect(m.players[0].grenades).toEqual(['flash', 'smoke']);
+    expect(m.players[0].secondary!.mag).toBe(mag);
+    m.step();
+    expect(m.players[0].throwCd).toBe(0);
+    m.applyCommands(0, [{ type: 'throw', grenade: 'smoke', deg: 270, power: 50 }]);
+    expect(m.players[0].grenades).toEqual(['flash']);
+    expect(m.observe(0).me.loadout.grenades).toEqual(['flash']);
+    // 凍結時間
+    const f = new ShooterMatch({ seed: 3 });
+    f.players[0].grenades = ['smoke'];
+    f.applyCommands(0, [{ type: 'throw', grenade: 'smoke', deg: 270, power: 50 }]);
+    expect(f.projectiles.length).toBe(0);
+    expect(f.players[0].grenades).toEqual(['smoke']);
+  });
+
+  it('飛行中的道具：視錐內或 2 格內看得見，背後看不見', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    parkOthers(m, [0]);
+    m.projectiles.push({ kind: 'he', owner: 5, x, y: y - 8 * UNIT, dx: 0, dy: 0, left: 0, bounces: 0, moving: false, fuseTick: m.tick + 100 });
+    expect(m.observe(0).projectiles).toEqual([{ kind: 'he', x, y: y - 8 * UNIT }]);
+    m.teleport(0, x, y, 90);
+    expect(m.observe(0).projectiles).toEqual([]);
+    m.teleport(0, x, y - 7 * UNIT, 90);
+    expect(m.observe(0).projectiles.length).toBe(1);
+  });
+});
+
+describe('煙霧', () => {
+  it('擴散中半徑線性成長、1 秒長滿 3 格；觀察資料給當下半徑', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    parkOthers(m, [0]);
+    pop(m, 'smoke', 5, x, y - 6 * UNIT);
+    const s = m.smokes[0];
+    expect(smokeRadius(s, s.startTick)).toBe(0);
+    expect(smokeRadius(s, s.startTick + 15)).toBe(1500);
+    expect(smokeRadius(s, s.startTick + 30)).toBe(3000);
+    expect(smokeRadius(s, s.startTick + 300)).toBe(3000);
+    for (let i = 0; i < 9; i++) m.step();
+    const e = m.observe(0).effects;
+    expect(e).toEqual([{ kind: 'smoke', x, y: y - 6 * UNIT, radius: smokeRadius(s, m.tick), ticksLeft: s.endTick - m.tick }]);
+    expect(e[0].radius).toBe(1000);
+  });
+
+  it('煙後的敵人不在 enemies、也不在隊友的 radar；子彈穿煙照打', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    m.teleport(1, x - 2 * UNIT, y, 270);
+    m.teleport(5, x, y - 10 * UNIT, 90);
+    m.teleport(6, x - 2 * UNIT, y + 3 * UNIT, 0); // 背後看不見 0，也沒有視線問題
+    parkOthers(m, [0, 1, 5, 6]);
+    expect(m.observe(0).enemies.map((e) => e.id)).toContain(5);
+    fullSmoke(m, x, y - 5 * UNIT);
+    expect(m.observe(0).enemies.map((e) => e.id)).not.toContain(5);
+    expect(m.observe(0).radar.map((r) => r.id)).not.toContain(5);
+    expect(m.observe(1).enemies.map((e) => e.id)).not.toContain(5);
+    expect(m.observe(5).enemies.length).toBe(0);
+    expect(m.canSee(5, 0)).toBe(false);
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 10 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.players[5].hp).toBe(100 - damageAt(WEAPONS.pistol, 10 * UNIT));
+  });
+
+  it('擋掉落物與炸彈的可見性（2 格內照看得到）', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    parkOthers(m, [0]);
+    m.items.push({ kind: 'weapon', weapon: { id: 'ak', mag: 30, reserve: 90 }, x, y: y - 10 * UNIT });
+    expect(m.observe(0).items.length).toBe(1);
+    fullSmoke(m, x, y - 5 * UNIT);
+    expect(m.observe(0).items.length).toBe(0);
+  });
+
+  it('18 秒後消失', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    parkOthers(m, [0]);
+    pop(m, 'smoke', 0, x, y - 6 * UNIT);
+    for (let i = 0; i < GRENADES.smoke.durationTicks - 1; i++) m.step();
+    expect(m.smokes.length).toBe(1);
+    m.step();
+    expect(m.smokes.length).toBe(0);
+    expect(m.observe(0).effects).toEqual([]);
+  });
+
+  it('撲滅重疊的火（擴散中也算）；火落在煙裡不會點燃', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    parkOthers(m, [5]);
+    m.teleport(5, x, y, 90);
+    litFire(m, x, y, 0);
+    for (let i = 0; i < GRENADE_RULES.fireTickInterval; i++) m.step();
+    const hp = m.players[5].hp;
+    expect(hp).toBe(100 - FIRE_TICK_DAMAGE);
+    // 圓心距 3 格：煙剛生效（半徑 0）不重疊，下一 tick 半徑 > 0 就撲滅
+    pop(m, 'smoke', 0, x, y + 3 * UNIT);
+    expect(m.fires.length).toBe(1);
+    m.step();
+    expect(m.fires.length).toBe(0);
+    for (let i = 0; i < ticks(2); i++) m.step();
+    expect(m.players[5].hp).toBe(hp);
+    // 燃燒瓶落在已有煙霧裡
+    pop(m, 'molotov', 0, x, y + 2 * UNIT);
+    expect(m.fires.length).toBe(0);
+  });
+});
+
+describe('閃光', () => {
+  /** 玩家 0 在 (106, 80) 面向 facing，敵人 5 在 (106, 80 − d) 引爆閃光；回傳致盲 tick */
+  function flashAt(facing: number, dCells: number, setup?: (m: ShooterMatch) => void): number {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, facing);
+    parkOthers(m, [0]);
+    setup?.(m);
+    pop(m, 'flash', 5, x, y - Math.round(dCells * UNIT));
+    return m.players[0].blindTicks;
+  }
+
+  it('正對 2.0 秒、側向 1.0 秒、背對 0.3 秒（10 格：乘 2/3）', () => {
+    expect(flashAt(270, 10)).toBe(40);
+    expect(flashAt(180, 10)).toBe(20);
+    expect(flashAt(0, 10)).toBe(20);
+    expect(flashAt(90, 10)).toBe(6);
+    // 分界：夾角 60° 仍算正對、61° 算側向
+    expect(flashAt(330, 10)).toBe(40);
+    expect(flashAt(331, 10)).toBe(20);
+    expect(flashAt(30, 10)).toBe(20);
+    expect(flashAt(31, 10)).toBe(6);
+  });
+
+  it('距離係數 1 − d／(2R)：貼臉 100%、7.5 格 75%、15 格 50%、15 格外不致盲', () => {
+    expect(flashAt(270, 0)).toBe(GRENADE_RULES.flashFrontTicks);
+    expect(flashAt(270, 7.5)).toBe(45);
+    expect(flashAt(270, 15)).toBe(30);
+    expect(flashAt(90, 15)).toBe(4);
+    expect(flashAt(270, 15.1)).toBe(0);
+    expect(flashTicks(27000, 0, 0, 0, -15000)).toBe(30);
+  });
+
+  it('牆後與煙後不致盲', () => {
+    // 柱子 (66, 61～63)：爆點 (64.5, 63.5)、人在 (68.5, 63.5) 面西，距離 4 格但隔柱子
+    const m = live();
+    const [px, py] = at(68, 63);
+    const [fx, fy] = at(64, 63);
+    expect(lineOfSight(map, px, py, fx, fy)).toBe(false);
+    m.teleport(0, px, py, 180);
+    parkOthers(m, [0]);
+    pop(m, 'flash', 5, fx, fy);
+    expect(m.players[0].blindTicks).toBe(0);
+    expect(flashAt(270, 10, (mm) => fullSmoke(mm, at(106, 80)[0], at(106, 75)[1]))).toBe(0);
+  });
+
+  it('隊友與自己也會被閃；取較大值不累加', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(1, x + 2 * UNIT, y, 270);
+    parkOthers(m, [0, 1]);
+    pop(m, 'flash', 0, x, y - 5 * UNIT);
+    expect(m.players[0].blindTicks).toBe(flashTicks(27000, x, y, x, y - 5 * UNIT));
+    expect(m.players[0].blindTicks).toBe(50);
+    expect(m.players[1].blindTicks).toBeGreaterThan(0);
+    // 第二顆較弱（側向）：不累加、維持較大值（已倒數 1 tick）
+    m.teleport(0, x, y, 180);
+    pop(m, 'flash', 0, x, y - 5 * UNIT);
+    expect(m.players[0].blindTicks).toBe(49);
+    // 第三顆較強（貼臉）：取新值
+    pop(m, 'flash', 0, x, y);
+    expect(m.players[0].blindTicks).toBe(GRENADE_RULES.flashFrontTicks);
+    // 統計：自己隊的致盲 tick 有記下
+    expect(m.rounds.length).toBe(0);
+  });
+
+  it('致盲期間 enemies／radar／effects／items／projectiles 為空，me 與 teammates 照給；結束後恢復', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(1, x + 3 * UNIT, y + 5 * UNIT, 270);
+    m.teleport(5, x, y - 10 * UNIT, 90);
+    m.teleport(6, x + 3 * UNIT, y - 12 * UNIT, 0);
+    parkOthers(m, [0, 1, 5, 6]);
+    m.items.push({ kind: 'weapon', weapon: { id: 'ak', mag: 30, reserve: 90 }, x, y: y - 4 * UNIT });
+    litFire(m, x - 3 * UNIT, y - 6 * UNIT, 5);
+    m.projectiles.push({ kind: 'he', owner: 5, x: x + UNIT, y: y - 8 * UNIT, dx: 0, dy: 0, left: 0, bounces: 0, moving: false, fuseTick: m.tick + 200 });
+    const before = m.observe(0);
+    expect(before.enemies.length).toBeGreaterThan(0);
+    expect(before.effects.length).toBe(1);
+    expect(before.items.length).toBe(1);
+    expect(before.projectiles.length).toBe(1);
+    m.players[0].blindTicks = 10;
+    m.players[1].blindTicks = 0;
+    m.teleport(0, x, y, 270);
+    const o = m.observe(0);
+    expect(o.enemies).toEqual([]);
+    expect(o.radar).toEqual([]);
+    expect(o.effects).toEqual([]);
+    expect(o.items).toEqual([]);
+    expect(o.projectiles).toEqual([]);
+    expect(o.me.blindTicks).toBe(10);
+    expect(o.me.x).toBe(x);
+    expect(o.teammates.length).toBe(TEAM_SIZE - 1);
+    expect(m.observe(1).teammates.find((t) => t.id === 0)!.blind).toBe(true);
+    for (let i = 0; i < 10; i++) m.step();
+    expect(m.players[0].blindTicks).toBe(0);
+    expect(m.observe(0).enemies.length).toBeGreaterThan(0);
+  });
+
+  it('回合紀錄：投擲數與閃光致盲 tick', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(5, x, y - 10 * UNIT, 90);
+    parkOthers(m, [0, 5]);
+    m.players[0].grenades = ['flash'];
+    m.applyCommands(0, [{ type: 'throw', grenade: 'flash', deg: 270, power: 40 }]);
+    while (m.projectiles.length > 0) m.step();
+    expect(m.players[5].blindTicks).toBeGreaterThan(0);
+    const enemy = m.players[5].blindTicks;
+    const own = m.players[0].blindTicks;
+    expect(own).toBeGreaterThan(0);
+    for (const p of m.players) if (p.team === 'CT') m.kill(p.id);
+    while (m.rounds.length === 0) m.step();
+    expect(m.rounds[0].throws).toEqual([1, 0]);
+    expect(m.rounds[0].flashEnemyTicks).toEqual([enemy, 0]);
+    expect(m.rounds[0].flashTeamTicks).toEqual([own, 0]);
+  });
+});
+
+describe('手雷', () => {
+  function heOn(victim: number, dCells: number, opts: { armor?: number; owner?: number; hp?: number } = {}): ShooterMatch {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(victim, x, y, 270);
+    const owner = opts.owner ?? 5;
+    if (owner !== victim) m.teleport(owner, x, y + 10 * UNIT, 270);
+    parkOthers(m, [victim, owner]);
+    m.players[victim].armor = opts.armor ?? 0;
+    if (opts.hp !== undefined) m.players[victim].hp = opts.hp;
+    pop(m, 'he', owner, x, y - Math.round(dCells * UNIT));
+    return m;
+  }
+
+  it('中心 98、線性衰減到 3.5 格歸零', () => {
+    expect(heDamageAt(0)).toBe(98);
+    expect(heDamageAt(1750)).toBe(49);
+    expect(heDamageAt(3500)).toBe(0);
+    expect(heOn(0, 0).players[0].hp).toBe(2);
+    expect(heOn(0, 1.75).players[0].hp).toBe(51);
+    expect(heOn(0, 3.5).players[0].hp).toBe(100);
+  });
+
+  it('護甲吸收 50% 並扣甲；甲不夠時只擋剩下的', () => {
+    const a = heOn(0, 0, { armor: 100 }).players[0];
+    expect(a.hp).toBe(100 - 49);
+    expect(a.armor).toBe(100 - 49);
+    const b = heOn(0, 0, { armor: 10 }).players[0];
+    expect(b.hp).toBe(100 - 88);
+    expect(b.armor).toBe(0);
+  });
+
+  it('牆後不受傷（煙霧不擋）', () => {
+    const m = live();
+    const [px, py] = at(67, 63);
+    const [fx, fy] = at(65, 63);
+    m.teleport(0, px, py, 180);
+    parkOthers(m, [0]);
+    pop(m, 'he', 5, fx, fy);
+    expect(m.players[0].hp).toBe(100);
+    const s = heOn(0, 2, { owner: 5 });
+    expect(s.players[0].hp).toBe(100 - heDamageAt(2000));
+    const t = live();
+    const [x, y] = at(106, 80);
+    t.teleport(0, x, y, 270);
+    parkOthers(t, [0]);
+    fullSmoke(t, x, y - UNIT);
+    pop(t, 'he', 5, x, y - 2 * UNIT);
+    expect(t.players[0].hp).toBe(100 - heDamageAt(2000));
+  });
+
+  it('隊友 30%；自己全額', () => {
+    expect(heOn(1, 0, { owner: 0 }).players[1].hp).toBe(100 - applyPercent(98, FRIENDLY_FIRE_PCT));
+    expect(heOn(0, 0, { owner: 0 }).players[0].hp).toBe(2);
+  });
+
+  it(`擊殺獎金 ${ECONOMY.grenadeKillReward}、隊殺 −300、自殺 −300 不算擊殺`, () => {
+    const kill = heOn(5, 0, { owner: 0, hp: 50 });
+    expect(kill.players[5].alive).toBe(false);
+    expect(kill.players[0].kills).toBe(1);
+    expect(kill.players[0].money).toBe(ECONOMY.startMoney + ECONOMY.grenadeKillReward);
+    expect(kill.kills.at(-1)).toMatchObject({ killer: 0, victim: 5, weapon: 'he' });
+    const tk = heOn(1, 0, { owner: 0, hp: 10 });
+    expect(tk.players[1].alive).toBe(false);
+    expect(tk.players[0].kills).toBe(0);
+    expect(tk.players[0].money).toBe(ECONOMY.startMoney + ECONOMY.teamKillPenalty);
+    const self = heOn(0, 0, { owner: 0, hp: 50 });
+    expect(self.players[0].alive).toBe(false);
+    expect(self.players[0].kills).toBe(0);
+    expect(self.players[0].money).toBe(ECONOMY.startMoney + ECONOMY.teamKillPenalty);
+  });
+});
+
+describe('燃燒', () => {
+  it('每 0.2 秒 8 點、不吃護甲；站在火裡 2 秒掉 80；隊友 30%', () => {
+    expect(FIRE_TICK_DAMAGE).toBe(8);
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(5, x, y, 90);
+    m.teleport(1, x + 2 * UNIT, y, 90);
+    parkOthers(m, [1, 5]);
+    m.players[5].armor = 100;
+    litFire(m, x, y, 0);
+    for (let i = 0; i < GRENADE_RULES.fireTickInterval - 1; i++) m.step();
+    expect(m.players[5].hp).toBe(100);
+    m.step();
+    expect(m.players[5].hp).toBe(92);
+    for (let i = 0; i < ticks(2) - GRENADE_RULES.fireTickInterval; i++) m.step();
+    expect(m.players[5].hp).toBe(20);
+    expect(m.players[5].armor).toBe(100);
+    expect(m.players[1].hp).toBe(100 - 10 * applyPercent(FIRE_TICK_DAMAGE, FRIENDLY_FIRE_PCT));
+  });
+
+  it('燒死敵人：擊殺歸投擲者、獎金 300', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(5, x, y, 90);
+    parkOthers(m, [5]);
+    m.players[5].hp = 8;
+    litFire(m, x, y, 0);
+    for (let i = 0; i < GRENADE_RULES.fireTickInterval; i++) m.step();
+    expect(m.players[5].alive).toBe(false);
+    expect(m.kills.at(-1)).toMatchObject({ killer: 0, victim: 5, weapon: 'molotov' });
+    expect(m.players[0].money).toBe(ECONOMY.startMoney + ECONOMY.grenadeKillReward);
+  });
+
+  it('7 秒後消失；火圈外不受傷', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(5, x, y + 3 * UNIT, 90);
+    parkOthers(m, [5]);
+    litFire(m, x, y, 0);
+    for (let i = 0; i < GRENADES.molotov.durationTicks - 1; i++) m.step();
+    expect(m.fires.length).toBe(1);
+    m.step();
+    expect(m.fires.length).toBe(0);
+    expect(m.players[5].hp).toBe(100);
+  });
+
+  it('燃燒瓶落地才點火（飛行中不點）', () => {
+    const { m, g, ticks: n } = throwAndLand(40, 270, 'molotov');
+    expect(g.moving).toBe(false);
+    expect(n).toBeLessThan(GRENADES.molotov.fuseTicks);
+    expect(m.projectiles.length).toBe(0);
+    expect(m.fires.length).toBe(1);
+    expect(m.fires[0].y).toBe(g.y);
+    expect(at(106, 90)[1] - m.fires[0].y).toBe(10 * UNIT);
+  });
+
+  it('飛超過引信上限（1 秒）就在空中點火', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    parkOthers(m, [0]);
+    m.players[0].grenades = ['molotov'];
+    m.applyCommands(0, [{ type: 'throw', grenade: 'molotov', deg: 270, power: 100 }]);
+    for (let i = 0; i <= GRENADES.molotov.fuseTicks; i++) m.step();
+    expect(m.fires.length).toBe(1);
+    expect(y - m.fires[0].y).toBe(GRENADES.molotov.fuseTicks * GRENADE_RULES.flySpeed);
+  });
+});
+
+describe('道具聲音', () => {
+  it('grenadeLand 15 格內聽得到、explosion 60 格；方向量化、隊友標 friendly、投擲者自己不收', () => {
+    const m = live();
+    const [x, y] = at(106, 90);
+    m.teleport(0, x, y, 270);
+    m.teleport(1, x - 3 * UNIT, y, 270);
+    m.teleport(5, x, y - 20 * UNIT, 90); // 落點北方 10 格
+    m.teleport(6, x, y - 40 * UNIT, 90); // 落點北方 30 格
+    parkOthers(m, [0, 1, 5, 6]);
+    m.players[0].grenades = ['flash'];
+    m.applyCommands(0, [{ type: 'throw', grenade: 'flash', deg: 270, power: 40 }]);
+    const heard: Record<number, SoundEvent[]> = { 0: [], 1: [], 5: [], 6: [], 7: [] };
+    for (let i = 0; i < 60; i++) {
+      m.step();
+      if (m.isDecisionTick()) for (const pid of [0, 1, 5, 6, 7]) heard[pid].push(...m.observe(pid).sounds.filter((s) => s.kind === 'grenadeLand' || s.kind === 'explosion'));
+    }
+    const kinds = (pid: number): string[] => heard[pid].map((s) => s.kind);
+    expect(kinds(5)).toEqual(['grenadeLand', 'explosion']);
+    expect(heard[5].every((s) => s.dirDeg === 90 && s.range === 'near' && !s.friendly && s.weapon === null)).toBe(true);
+    expect(kinds(6)).toEqual(['explosion']);
+    expect(heard[6][0]).toMatchObject({ dirDeg: 90, range: 'far' });
+    expect(kinds(1)).toEqual(['grenadeLand', 'explosion']);
+    expect(heard[1].every((s) => s.friendly && s.dirDeg % SOUND.directionStepDeg === 0)).toBe(true);
+    expect(heard[0]).toEqual([]);
+    // 玩家 7 停在 CT 出生區，離爆點 60 格以上
+    expect(heard[7]).toEqual([]);
+    // 反彈也發 grenadeLand
+    const b = throwAndLand(100, 0, 'flash');
+    expect(b.g.bounces).toBe(1);
+  });
+});
+
+describe('道具與確定性', () => {
+  it('道具狀態計入雜湊', () => {
+    const a = live();
+    const b = live();
+    expect(a.hash()).toBe(b.hash());
+    a.projectiles.push({ kind: 'smoke', owner: 0, x: 1, y: 1, dx: 0, dy: 0, left: 0, bounces: 0, moving: false, fuseTick: a.tick + 10 });
+    expect(a.hash()).not.toBe(b.hash());
+    const c = live();
+    fullSmoke(c, 1000, 1000);
+    expect(c.hash()).not.toBe(b.hash());
+    const d = live();
+    litFire(d, 1000, 1000, 0);
+    expect(d.hash()).not.toBe(b.hash());
+    const e = live();
+    e.players[0].throwCd = 3;
+    expect(e.hash()).not.toBe(b.hash());
+  });
+});
+
+describe('道具（驗收情境）', () => {
+  for (const s of GRENADE_SCENARIOS) {
+    it(`${s.id} ${s.name}：${s.expect}`, () => {
+      const r = s.run();
+      expect(r.pass, r.detail).toBe(true);
+    });
+  }
 });
