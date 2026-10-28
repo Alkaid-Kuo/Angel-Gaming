@@ -14,16 +14,30 @@ function tileCost(map: LegionMap, i: number): number {
   return terrainCost(map.terrain[i]) + (map.edge[i] === 1 ? EDGE_COST : 0);
 }
 
+/**
+ * 比賽中會變的通行狀態（沒有城的地圖傳 null，行為與單層版相同）：
+ * open[格] = 1 表示這格門樓的城門開著（地面層可走）；links 是雲梯之類的額外連結（狀態索引 → 可到的狀態索引），每條成本 linkCost。
+ */
+export interface PathEnv {
+  readonly open: Uint8Array | null;
+  readonly links: ReadonlyMap<number, readonly number[]> | null;
+  readonly linkCost: number;
+}
+
 /** 地面層的快速路徑：平地類地形（0～6 扣掉河流）在層 0 之間移動不用查 stepLayer */
 function groundFast(layer: number, t: number): boolean {
   return layer === 0 && t !== T.River && t < T.Building;
 }
 
-/** 從地形 fromT（層 layer）踏進 toT 後的層；-1 不能走 */
-function stepTo(layer: number, fromT: number, toT: number, cavalry: boolean): number {
+/** 從地形 fromT（層 layer）踏進 toT 後的層；-1 不能走。open = 目的格的城門開著 */
+function stepTo(layer: number, fromT: number, toT: number, cavalry: boolean, open: boolean): number {
   if (groundFast(layer, toT)) return 0;
   if (toT === T.River || toT === T.Building) return -1;
-  return stepLayer(layer, fromT, toT, cavalry);
+  return stepLayer(layer, fromT, toT, cavalry, open);
+}
+
+function isOpen(env: PathEnv | null, i: number): boolean {
+  return env !== null && env.open !== null && env.open[i] === 1;
 }
 
 /** A* 的工作陣列（每張地圖共用一份；以世代戳記避免每次清空）；大小為兩層 */
@@ -106,13 +120,14 @@ function clampTile(map: LegionMap, x: number, y: number): number {
   return ty * map.width + tx;
 }
 
-/** 所在格（不可通行時取該層最近的可通行格；牆頂層在沒有牆的地圖退回地面） */
-function tileOf(map: LegionMap, x: number, y: number, layer = 0): number {
+/** 所在格（不可通行時取該層最近的可通行格；牆頂層在沒有牆的地圖退回地面；開著的城門在地面層算自己） */
+function tileOf(map: LegionMap, x: number, y: number, layer = 0, env: PathEnv | null = null): number {
   const i = clampTile(map, x, y);
   if (layer !== 0) {
     const top = map.snapTop[i];
     if (top >= 0) return top;
   }
+  if (isOpen(env, i)) return i;
   return map.snap[i];
 }
 
@@ -128,7 +143,7 @@ let lineEndLayer = 0;
  * 線段上取樣檢查可通行；回傳沿途最高的尋路成本（不可通行回傳 -1）。
  * 從 layer 層出發，沿途逐格套用 stepLayer（經過樓梯會換層）；終點的層留在 lineEndLayer。
  */
-export function lineCost(map: LegionMap, ax: number, ay: number, bx: number, by: number, layer = 0, cavalry = false): number {
+export function lineCost(map: LegionMap, ax: number, ay: number, bx: number, by: number, layer = 0, cavalry = false, env: PathEnv | null = null): number {
   const dx = bx - ax;
   const dy = by - ay;
   const len = Math.max(Math.abs(dx), Math.abs(dy));
@@ -145,10 +160,10 @@ export function lineCost(map: LegionMap, ax: number, ay: number, bx: number, by:
     if (i !== prev) {
       const t = map.terrain[i];
       if (prev === -1) {
-        if (!walkableAt(t, lv)) return -1;
+        if (!walkableAt(t, lv, isOpen(env, i))) return -1;
       } else if (!groundFast(lv, t)) {
         if (t === T.River || t === T.Building) return -1;
-        lv = stepLayer(lv, map.terrain[prev], t, cavalry);
+        lv = stepLayer(lv, map.terrain[prev], t, cavalry, isOpen(env, i));
         if (lv < 0) return -1;
       }
       prev = i;
@@ -160,24 +175,27 @@ export function lineCost(map: LegionMap, ax: number, ay: number, bx: number, by:
   return worst;
 }
 
-export function clearLine(map: LegionMap, ax: number, ay: number, bx: number, by: number, layer = 0, cavalry = false): boolean {
-  return lineCost(map, ax, ay, bx, by, layer, cavalry) >= 0;
+export function clearLine(map: LegionMap, ax: number, ay: number, bx: number, by: number, layer = 0, cavalry = false, env: PathEnv | null = null): boolean {
+  return lineCost(map, ax, ay, bx, by, layer, cavalry, env) >= 0;
 }
 
 /**
  * 最近的可通行點（該層不可通行時移到該層最近可通行格的中心）。
  * flip = true 時在旋轉 180° 的座標系計算再轉回來：地圖是旋轉對稱的，這樣雙方得到互為鏡像的結果（同分時的取捨不偏向任何一方）。
  */
-export function snapPoint(map: LegionMap, x: number, y: number, flip = false, layer = 0): [number, number] {
+export function snapPoint(map: LegionMap, x: number, y: number, flip = false, layer = 0, env: PathEnv | null = null): [number, number] {
   if (flip) {
     const W = map.width * TILE;
     const H = map.height * TILE;
-    const [fx, fy] = snapPoint(map, W - x, H - y, false, layer);
+    const [fx, fy] = snapPoint(map, W - x, H - y, false, layer, env);
     return [W - fx, H - fy];
   }
   const [tx, ty] = tileXY(x, y, map.width, map.height);
-  if (tx >= 0 && ty >= 0 && tx < map.width && ty < map.height && walkableAt(map.terrain[ty * map.width + tx], layer)) return [x, y];
-  return center(map, tileOf(map, x, y, layer));
+  if (tx >= 0 && ty >= 0 && tx < map.width && ty < map.height) {
+    const i = ty * map.width + tx;
+    if (walkableAt(map.terrain[i], layer, isOpen(env, i))) return [x, y];
+  }
+  return center(map, tileOf(map, x, y, layer, env));
 }
 
 /** 尋路終點：任何一層可走的格都算合法（牆頂也可以當目的地）；都不行就吸到地面最近的可通行格 */
@@ -191,16 +209,17 @@ function snapGoal(map: LegionMap, x: number, y: number): [number, number] {
  * 從 (sx, sy)（在 layer 層）到 (gx, gy) 的路徑（單位座標的轉折點，不含起點、含終點）。
  * 終點不可通行時改到最近的可通行格；終點在牆頂時路徑會經過樓梯。找不到路徑回傳 null。
  */
-export function findPath(map: LegionMap, sx: number, sy: number, gx: number, gy: number, flip = false, layer = 0, cavalry = false): [number, number][] | null {
+export function findPath(map: LegionMap, sx: number, sy: number, gx: number, gy: number, flip = false, layer = 0, cavalry = false, env: PathEnv | null = null): [number, number][] | null {
   if (flip) {
+    // 翻轉只用在旋轉對稱、沒有城的地圖（env 為 null）
     const W = map.width * TILE;
     const H = map.height * TILE;
-    const p = findPath(map, W - sx, H - sy, W - gx, H - gy, false, layer, cavalry);
+    const p = findPath(map, W - sx, H - sy, W - gx, H - gy, false, layer, cavalry, env);
     return p === null ? null : p.map(([x, y]) => [W - x, H - y]);
   }
   const [ex, ey] = snapGoal(map, gx, gy);
-  const cost0 = lineCost(map, sx, sy, ex, ey, layer, cavalry);
-  if (cost0 >= 0 && cost0 <= tileCost(map, tileOf(map, sx, sy, layer))) return [[ex, ey]];
+  const cost0 = lineCost(map, sx, sy, ex, ey, layer, cavalry, env);
+  if (cost0 >= 0 && cost0 <= tileCost(map, tileOf(map, sx, sy, layer, env))) return [[ex, ey]];
   const w = map.width;
   const n = w * map.height;
   let s = scratch.get(map);
@@ -212,7 +231,9 @@ export function findPath(map: LegionMap, sx: number, sy: number, gx: number, gy:
   s.size = 0;
   const gen = s.gen;
   const terrain = map.terrain;
-  const startTile = tileOf(map, sx, sy, layer);
+  const startTile = tileOf(map, sx, sy, layer, env);
+  const open = env !== null ? env.open : null;
+  const links = env !== null ? env.links : null;
   const start = startTile + layer * n;
   const goal = clampTile(map, ex, ey);
   const gxT = goal % w;
@@ -251,13 +272,31 @@ export function findPath(map: LegionMap, sx: number, sy: number, gx: number, gy:
         const ny = cy + dy;
         if (nx < 0 || ny < 0 || nx >= w || ny >= map.height) continue;
         const ni = ny * w + nx;
-        const nl = stepTo(cl, ct, terrain[ni], cavalry);
+        const nl = stepTo(cl, ct, terrain[ni], cavalry, open !== null && open[ni] === 1);
         if (nl < 0) continue;
         const ns = ni + nl * n;
         if (s.closed[ns] === gen) continue;
         const diag = dx !== 0 && dy !== 0;
-        if (diag && (stepTo(cl, ct, terrain[cy * w + nx], cavalry) < 0 || stepTo(cl, ct, terrain[ny * w + cx], cavalry) < 0)) continue;
+        if (diag) {
+          const ai = cy * w + nx;
+          const bi = ny * w + cx;
+          if (stepTo(cl, ct, terrain[ai], cavalry, open !== null && open[ai] === 1) < 0 || stepTo(cl, ct, terrain[bi], cavalry, open !== null && open[bi] === 1) < 0) continue;
+        }
         const g = s.g[cur] + idiv(tileCost(map, ni) * (diag ? SQRT2 : 100), 100);
+        if (s.stamp[ns] === gen && s.g[ns] <= g) continue;
+        s.stamp[ns] = gen;
+        s.g[ns] = g;
+        s.parent[ns] = cur;
+        s.push(ns, g + h(ni));
+      }
+    }
+    // 額外連結（雲梯）：騎兵不能用
+    const ext = links !== null && !cavalry ? links.get(cur) : undefined;
+    if (ext !== undefined) {
+      for (const ns of ext) {
+        if (s.closed[ns] === gen) continue;
+        const ni = ns < n ? ns : ns - n;
+        const g = s.g[cur] + env!.linkCost;
         if (s.stamp[ns] === gen && s.g[ns] <= g) continue;
         s.stamp[ns] = gen;
         s.g[ns] = g;
@@ -290,7 +329,7 @@ export function findPath(map: LegionMap, sx: number, sy: number, gx: number, gy:
     for (let j = i + 1; j < pts.length; j++) {
       const c = tileCost(map, tiles[j]);
       if (c > segMax) segMax = c;
-      const lc = lineCost(map, px, py, pts[j][0], pts[j][1], pl, cavalry);
+      const lc = lineCost(map, px, py, pts[j][0], pts[j][1], pl, cavalry, env);
       if (lc < 0 || lc > segMax || lineEndLayer !== layers[j]) break;
       best = j;
     }

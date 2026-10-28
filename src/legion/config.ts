@@ -283,6 +283,16 @@ export const RULES = {
     healPct: 2,
     healQuietTicks: 5 * TPS,
   },
+  /**
+   * 城門（引擎 0.4）：有血量的物件，掛在門樓格上，只有衝車能扣血。血量沿用「×10」慣例（儲存值）。
+   * 開門、關門各要 openTicks／closeTicks（待審）；門洞地面還有士兵時關不上。
+   */
+  gate: {
+    mainHp: 4000,
+    sideHp: 2000,
+    openTicks: 3 * TPS,
+    closeTicks: 3 * TPS,
+  },
 } as const;
 
 export type LegionMode = 'annihilation' | 'capture';
@@ -360,7 +370,8 @@ export function stepLayer(layer: number, fromT: number, toT: number, cavalry: bo
       if (layer === WALL_LAYER) return WALL_LAYER;
       return gateOpen ? GROUND_LAYER : -1;
     default:
-      return layer === GROUND_LAYER || fromT === T.Stair || (fromT === T.Gatehouse && gateOpen) ? GROUND_LAYER : -1;
+      // 牆頂（含門樓頂）不能直接走到地面；只有地面層或經過樓梯才行
+      return layer === GROUND_LAYER || fromT === T.Stair ? GROUND_LAYER : -1;
   }
 }
 

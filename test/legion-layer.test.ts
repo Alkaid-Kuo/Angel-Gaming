@@ -45,6 +45,8 @@ function wallMap(): LegionMap {
     ],
     supplies: [],
     landmarks: [],
+    gates: [{ x0: WALL_X, y0: GATE_Y, x1: WALL_X + 1, y1: GATE_Y + 1, kind: 'main' }],
+    defender: 1,
   });
 }
 

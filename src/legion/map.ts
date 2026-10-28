@@ -27,6 +27,16 @@ export interface SupplyPoint {
   readonly flag: number;
 }
 
+/** 城門（格座標的矩形，含 x0／y0、不含 x1／y1；範圍內每一格都必須是門樓） */
+export interface MapGate {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+  /** main 正門、side 側門（血量較薄） */
+  readonly kind: 'main' | 'side';
+}
+
 export interface CaptureFlag extends FlagPoint {
   /** 佔領後每秒得幾分 */
   readonly points: number;
@@ -52,6 +62,10 @@ export interface LegionMap {
   readonly supplies: readonly SupplyPoint[];
   /** 地標（解說用的地名），單位座標 */
   readonly landmarks: readonly FlagPoint[];
+  /** 城門（沒有城的地圖是空陣列） */
+  readonly gates: readonly MapGate[];
+  /** 守方座位（城內布陣區的 playerId）：城門歸它開關；-1 = 沒有城。攻守互換靠交換座位，不改地圖 */
+  readonly defender: number;
   /** 地面層：不可通行格 → 最近的可通行格（可通行格對應自己） */
   readonly snap: Int32Array;
   /** 牆頂層（城牆、門樓、樓梯）：非牆頂格 → 最近的牆頂格；沒有牆的地圖全是 -1 */
@@ -71,6 +85,9 @@ export type LegionMapSpec = Omit<LegionMap, 'snap' | 'snapTop' | 'edge' | 'symme
 /** 補上尋路與吸附用的衍生陣列與對稱旗標 */
 export function finishMap(spec: LegionMapSpec): LegionMap {
   const { terrain, heights, width: w, height: h } = spec;
+  for (const g of spec.gates) {
+    for (let y = g.y0; y < g.y1; y++) for (let x = g.x0; x < g.x1; x++) if (terrain[y * w + x] !== T.Gatehouse) throw new Error(`${spec.id}：城門 (${x}, ${y}) 不在門樓格上`);
+  }
   return { ...spec, snap: buildSnap(terrain, w, h), snapTop: buildSnapTop(terrain, w, h), edge: buildEdge(terrain, w, h), symmetric: isSymmetric(terrain, heights) };
 }
 
@@ -256,6 +273,8 @@ export function riverValley(): LegionMap {
       { x: w * TILE - 10000, y: (h * TILE) / 2 },
     ],
     supplies: [],
+    gates: [],
+    defender: -1,
     flags: [
       { name: '西南高地', x: 64500, y: 59500, points: 1 },
       { name: '中央淺灘', x: 80000, y: 50000, points: 2 },
@@ -362,6 +381,8 @@ export function grandValley(): LegionMap {
       { x: north.x + 9000, y: north.y, flag: 0 },
       { x: W - north.x - 9000, y: H - north.y, flag: 2 },
     ],
+    gates: [],
+    defender: -1,
     flags: [
       { name: '北橋', x: north.x, y: north.y, points: 1 },
       { name: '中央淺灘', x: W / 2, y: H / 2, points: 2 },

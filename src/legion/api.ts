@@ -192,6 +192,33 @@ export interface EnemyRegiment {
   readonly radius: number;
 }
 
+/** 城門狀態：closed 關、opening 開門中（還不能過）、open 開、closing 關門中（還能過）、broken 被破壞或永久開啟 */
+export type GateStatus = 'closed' | 'opening' | 'open' | 'closing' | 'broken';
+
+export interface GateInfo {
+  readonly id: number;
+  readonly kind: 'main' | 'side';
+  /** 門洞中心（單位座標）與範圍（格座標，含 x0／y0、不含 x1／y1） */
+  readonly x: number;
+  readonly y: number;
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+  /** 歸誰開關（守方） */
+  readonly owner: number;
+  readonly hp: number;
+  readonly hpMax: number;
+  readonly state: GateStatus;
+  /** 開門中、關門中還要幾個 tick（其他狀態為 0） */
+  readonly timer: number;
+}
+
+/** 城池上的物件（雙方都看得到） */
+export interface Structures {
+  readonly gates: readonly GateInfo[];
+}
+
 export interface FlagState {
   readonly id: number;
   readonly name: string;
@@ -225,6 +252,8 @@ export type LegionEvent =
   /** 佔點模式：後備入場、撤回後備（at = 出生點 -1 或補給站 id） */
   | { readonly type: 'enter'; readonly tick: number; readonly reg: number; readonly at: number }
   | { readonly type: 'withdraw'; readonly tick: number; readonly reg: number; readonly at: number }
+  /** 城門狀態改變（開門中、開、關門中、關、被破壞） */
+  | { readonly type: 'gate'; readonly tick: number; readonly gate: number; readonly state: GateStatus }
   | { readonly type: 'rejected'; readonly tick: number; readonly player: number; readonly command: string; readonly reason: string };
 
 export interface LegionObservation {
@@ -240,6 +269,8 @@ export interface LegionObservation {
   /** 自己場上的點數（含準備入場中的，算全額）與上限 */
   readonly fieldCost: number;
   readonly fieldCap: number;
+  /** 城門、雲梯、衝車、砲擊（雙方都看得到；沒有城的地圖都是空的） */
+  readonly structures: Structures;
   /** 自上次決策後與自己有關的事件 */
   readonly events: readonly LegionEvent[];
 }
@@ -281,6 +312,17 @@ export type LegionCommand =
   /** 整體戰略意圖（不對某一團；最多 30 字，觀戰畫面顯示在計分條；不佔指令額度） */
   | { readonly type: 'plan'; readonly text: string };
 
+/**
+ * 對整個陣營的指令（不對某一團，沒有 id；各佔一條指令額度）。和 LegionCommand 分開定義，
+ * 讓「扣掉 plan 就一定有 id」的既有選手型別不受影響。
+ */
+export type LegionSideCommand =
+  /** 守方開門、關門 */
+  { readonly type: 'gate'; readonly gate: number; readonly action: 'open' | 'close' };
+
+/** decide() 可以回傳的所有指令 */
+export type LegionOrder = LegionCommand | LegionSideCommand;
+
 export interface LegionHelpers {
   /** 確定性亂數 [0, 1) */
   random(): number;
@@ -299,5 +341,5 @@ export interface LegionBot {
   declare(): LegionDeclaration;
   init?(data: LegionInitData, helpers: LegionHelpers): void;
   deploy(data: LegionInitData, helpers: LegionHelpers): Deployment[];
-  decide(obs: LegionObservation): LegionCommand[];
+  decide(obs: LegionObservation): LegionOrder[];
 }
