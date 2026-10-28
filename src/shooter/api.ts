@@ -110,6 +110,8 @@ export interface RulesInfo {
   readonly maxArmor: number;
   readonly armorPrice: number;
   readonly kitPrice: number;
+  /** 道具總格數 */
+  readonly grenadeSlots: number;
   readonly economy: {
     readonly startMoney: number;
     readonly maxMoney: number;
@@ -121,6 +123,9 @@ export interface RulesInfo {
     readonly plantedLossBonus: number;
     readonly planterBonus: number;
     readonly defuserBonus: number;
+    readonly grenadeKillReward: number;
+    /** 隊殺、自殺（負數） */
+    readonly teamKillPenalty: number;
   };
 }
 
@@ -228,6 +233,8 @@ export interface TeammateInfo {
   readonly y: number;
   readonly facing: number;
   readonly hp: number;
+  /** 隊友金錢是公開資訊（敵人金錢不給） */
+  readonly money: number;
   readonly weapon: WeaponId;
   readonly hasBomb: boolean;
   readonly planting: boolean;
@@ -346,6 +353,10 @@ export type ShooterCommand =
   | { readonly type: 'pickup' }
   /** 丟掉手上武器（刀不可丟）；bomb = true 改為丟炸彈（傳給隊友用） */
   | { readonly type: 'drop'; readonly bomb?: boolean }
+  /**
+   * 購買（canBuy 為真時有效）：依序處理，不合法的項目跳過（錢不夠、陣營不符、已有、超過攜帶上限），其餘照買。
+   * 槍：同槽的舊槍丟在腳邊；護甲：補滿到 100，已滿不扣錢；拆彈器：CT 限定；道具：同種上限與總格數
+   */
   | { readonly type: 'buy'; readonly items: readonly BuyItem[] }
   /** 丟雷：方向與力道（0～100，對應投擲距離） */
   | { readonly type: 'throw'; readonly grenade: GrenadeId; readonly deg: number; readonly power: number }

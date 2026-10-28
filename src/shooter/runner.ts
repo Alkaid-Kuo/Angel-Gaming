@@ -22,6 +22,8 @@ export interface ShooterReplay {
     readonly mapId: string;
     readonly defaultLoadout?: Partial<Record<Team, WeaponId>>;
     readonly defaultArmor?: number;
+    readonly startMoney?: number;
+    readonly roundMoney?: readonly [number | null, number | null];
     readonly roundsPerHalf?: number;
     readonly winRounds?: number;
     readonly players: readonly { readonly playerId: number; readonly bot: string; readonly version: string; readonly knobs: KnobValues }[];
@@ -208,6 +210,8 @@ export class ShooterDriver {
             mapId,
             ...(opts.defaultLoadout !== undefined ? { defaultLoadout: opts.defaultLoadout } : {}),
             ...(opts.defaultArmor !== undefined ? { defaultArmor: opts.defaultArmor } : {}),
+            ...(opts.startMoney !== undefined ? { startMoney: opts.startMoney } : {}),
+            ...(opts.roundMoney !== undefined ? { roundMoney: opts.roundMoney } : {}),
             ...(opts.roundsPerHalf !== undefined ? { roundsPerHalf: opts.roundsPerHalf } : {}),
             ...(opts.winRounds !== undefined ? { winRounds: opts.winRounds } : {}),
             players: opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: knobs[i] })),
@@ -297,7 +301,7 @@ export class ShooterReplayCursor {
     if (replay.kind !== 'shooter') throw new Error(`不是射擊回放：${String(replay.kind)}`);
     this.replay = replay;
     const h = replay.header;
-    this.match = new ShooterMatch({ seed: h.seed, mapId: h.mapId, defaultLoadout: h.defaultLoadout, defaultArmor: h.defaultArmor, roundsPerHalf: h.roundsPerHalf, winRounds: h.winRounds });
+    this.match = new ShooterMatch({ seed: h.seed, mapId: h.mapId, defaultLoadout: h.defaultLoadout, defaultArmor: h.defaultArmor, startMoney: h.startMoney, roundMoney: h.roundMoney, roundsPerHalf: h.roundsPerHalf, winRounds: h.winRounds });
   }
 
   step(): void {

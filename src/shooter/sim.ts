@@ -34,6 +34,7 @@ import {
   FRIENDLY_FIRE_PCT,
   GRENADES,
   GRENADE_IDS,
+  GRENADE_RULES,
   MOVE,
   ROUND,
   SOUND,
@@ -43,6 +44,7 @@ import {
   VISION,
   WEAPONS,
   WEAPON_IDS,
+  type GrenadeId,
   type Team,
   type WeaponDef,
   type WeaponId,
@@ -69,6 +71,10 @@ const FOOTSTEP_INTERVAL = 9;
 /** 自己腳邊多近的掉落物不在視錐內也看得見 */
 const NEAR_ITEM = 2 * UNIT;
 const MAX_COMMANDS = 32;
+/** 一次 buy 指令最多處理幾項 */
+const MAX_BUY_ITEMS = 16;
+/** 全買判定：步槍級主武器（價格 ≥ AK）＋護甲的人數達到幾人 */
+const FULL_BUY_PLAYERS = TEAM_SIZE - 1;
 const MAX_SAY = 120;
 /** 卡住偵測：連續多少 tick 幾乎沒前進就重新尋路 */
 const STUCK_TICKS = 15;
@@ -100,6 +106,10 @@ export interface Player {
   hp: number;
   armor: number;
   kit: boolean;
+  /** 金錢（0～maxMoney） */
+  money: number;
+  /** 攜帶的道具（依購買順序；投擲在步驟 3） */
+  grenades: GrenadeId[];
   primary: WeaponState | null;
   secondary: WeaponState | null;
   active: WeaponSlot;
@@ -145,7 +155,7 @@ export interface BombEntity {
 }
 
 export interface Item {
-  readonly kind: 'weapon' | 'bomb';
+  readonly kind: 'weapon' | 'bomb' | 'kit';
   readonly weapon: WeaponState | null;
   readonly x: number;
   readonly y: number;
@@ -175,6 +185,12 @@ export interface RoundRecord {
   readonly winnerGroup: 0 | 1;
   readonly reason: RoundEndReason;
   readonly endTick: number;
+  /** 本回合 T 是哪一組 */
+  readonly tGroup: 0 | 1;
+  /** 各組回合開始時（結算與重置之後）的平均金錢 */
+  readonly money: readonly [number, number];
+  /** 各組在購買時間結束時是否全買（≥ 4 人有步槍級主武器＋護甲） */
+  readonly fullBuy: readonly [boolean, boolean];
 }
 
 export interface KillRecord {
@@ -201,6 +217,10 @@ export interface ShooterMatchOptions {
   readonly defaultLoadout?: Partial<Record<Team, WeaponId>>;
   /** 測試用：開局甲值 */
   readonly defaultArmor?: number;
+  /** 起始／每半場首回合的金錢（預設 ECONOMY.startMoney） */
+  readonly startMoney?: number;
+  /** 測試用：依組別（0 = 玩家 0～4、1 = 玩家 5～9）每回合開局強制設定的金錢；null = 照常結算 */
+  readonly roundMoney?: readonly [number | null, number | null];
   /** 測試用短賽制 */
   readonly roundsPerHalf?: number;
   readonly winRounds?: number;
@@ -291,6 +311,8 @@ function newPlayer(id: number): Player {
     hp: ROUND.startHp,
     armor: 0,
     kit: false,
+    money: 0,
+    grenades: [],
     primary: null,
     secondary: weaponState('pistol'),
     active: 'secondary',
@@ -331,7 +353,7 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 export const DEFAULT_ATTRIBUTES: Attributes = Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, 50])) as unknown as Attributes;
 
 /** 開局資料（JSON 安全） */
-export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds'> = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
+export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney'> = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
   const group = playerId < TEAM_SIZE ? 0 : 1;
   const ids = Array.from({ length: PLAYER_COUNT }, (_, i) => i);
   return {
@@ -366,8 +388,9 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       maxArmor: ROUND.maxArmor,
       armorPrice: ARMOR.price,
       kitPrice: DEFUSE_KIT.price,
+      grenadeSlots: GRENADE_RULES.totalSlots,
       economy: {
-        startMoney: ECONOMY.startMoney,
+        startMoney: opts.startMoney ?? ECONOMY.startMoney,
         maxMoney: ECONOMY.maxMoney,
         winElimination: ECONOMY.winElimination,
         winTimeout: ECONOMY.winTimeout,
@@ -377,6 +400,8 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
         plantedLossBonus: ECONOMY.plantedLossBonus,
         planterBonus: ECONOMY.planterBonus,
         defuserBonus: ECONOMY.defuserBonus,
+        grenadeKillReward: ECONOMY.grenadeKillReward,
+        teamKillPenalty: ECONOMY.teamKillPenalty,
       },
     },
     map: mapInfo(map),
@@ -420,6 +445,8 @@ export class ShooterMatch {
   readonly winRounds: number;
   readonly defaultLoadout: Partial<Record<Team, WeaponId>>;
   readonly defaultArmor: number;
+  readonly startMoney: number;
+  readonly roundMoney: readonly [number | null, number | null];
   readonly players: Player[];
   readonly bomb: BombEntity = { state: 'carried', carrier: -1, x: 0, y: 0, site: null, explodeTick: 0, planter: -1, defuser: -1 };
   items: Item[] = [];
@@ -435,6 +462,11 @@ export class ShooterMatch {
   ended: { winner: Team; reason: RoundEndReason } | null = null;
   /** 依組別的勝回合數 */
   readonly score: [number, number] = [0, 0];
+  /** 依組別的連敗補償階梯（0 = 沒有連敗；輸一場 +1、贏一場 −1；半場歸零） */
+  readonly lossLevel: [number, number] = [0, 0];
+  /** 本回合開始時各組平均金錢、購買時間結束時是否全買（寫進 RoundRecord） */
+  private roundMoneyAvg: [number, number] = [0, 0];
+  private fullBuy: [boolean, boolean] | null = null;
   over = false;
   winner: 0 | 1 | null = null;
   private readonly prng: Prng;
@@ -453,6 +485,8 @@ export class ShooterMatch {
     this.winRounds = opts.winRounds ?? ROUND.winRounds;
     this.defaultLoadout = opts.defaultLoadout ?? {};
     this.defaultArmor = opts.defaultArmor ?? 0;
+    this.startMoney = opts.startMoney ?? ECONOMY.startMoney;
+    this.roundMoney = opts.roundMoney ?? [null, null];
     this.prng = Prng.fromInts(opts.seed, 0x5407);
     this.players = Array.from({ length: PLAYER_COUNT }, (_, i) => newPlayer(i));
     this.startRound();
@@ -476,14 +510,20 @@ export class ShooterMatch {
   private startRound(): void {
     this.roundNumber += 1;
     const firstOfHalf = this.roundNumber === 1 || this.roundNumber === this.roundsPerHalf + 1;
+    if (firstOfHalf) this.lossLevel.fill(0);
     for (const p of this.players) {
       p.team = (p.group === 0) === (this.half === 1) ? 'T' : 'CT';
+      if (firstOfHalf) p.money = clamp(this.startMoney, 0, ECONOMY.maxMoney);
+      const fixed = this.roundMoney[p.group];
+      if (fixed !== null) p.money = clamp(fixed, 0, ECONOMY.maxMoney);
+      // 存活者保留武器、彈藥、甲值、道具、拆彈器；死亡者（與半場首回合）重發手槍＋刀
       if (firstOfHalf || !p.alive) {
         const prim = this.defaultLoadout[p.team];
         p.primary = prim !== undefined && WEAPONS[prim].slot === 'primary' ? weaponState(prim) : null;
         p.secondary = weaponState('pistol');
         p.armor = this.defaultArmor;
         p.kit = false;
+        p.grenades = [];
       }
       const sp = this.map.spawns[p.team][p.slot];
       p.alive = true;
@@ -514,19 +554,33 @@ export class ShooterMatch {
     const carrier = ts[this.prng.nextInt(ts.length)];
     carrier.hasBomb = true;
     Object.assign(this.bomb, { state: 'carried', carrier: carrier.id, x: carrier.x, y: carrier.y, site: null, explodeTick: 0, planter: -1, defuser: -1 });
+    // 掉落物在回合交接時清除
     this.items = [];
     this.sounds = [];
     this.chat = [];
+    this.roundMoneyAvg = [this.groupMoneyAvg(0), this.groupMoneyAvg(1)];
+    this.fullBuy = null;
     this.phase = 'freeze';
     this.roundStartTick = this.tick;
     this.phaseEnd = this.tick + ROUND.freezeTicks;
     this.ended = null;
   }
 
+  /** 回合結算（唯一結算點）：勝利獎金、連敗補償、下包敗補償；記錄回合 */
   private endRound(winner: Team, reason: RoundEndReason): void {
     const g = this.groupOf(winner);
+    const lg = g === 0 ? 1 : 0;
     this.score[g] += 1;
-    this.rounds.push({ number: this.roundNumber, winner, winnerGroup: g, reason, endTick: this.tick });
+    if (this.fullBuy === null) this.fullBuy = this.fullBuyFlags();
+    const winPay = reason === 'bomb' ? ECONOMY.winBomb : reason === 'defuse' ? ECONOMY.winDefuse : reason === 'timeout' ? ECONOMY.winTimeout : ECONOMY.winElimination;
+    // 連敗階梯：敗方升一階、勝方退一階（不是歸零）
+    const ladder = ECONOMY.lossBonus;
+    this.lossLevel[lg] = Math.min(ladder.length, this.lossLevel[lg] + 1);
+    this.lossLevel[g] = Math.max(0, this.lossLevel[g] - 1);
+    const lossPay = ladder[this.lossLevel[lg] - 1];
+    const plantedLoss = winner === 'CT' && this.bomb.planter >= 0 ? ECONOMY.plantedLossBonus : 0;
+    for (const p of this.players) this.addMoney(p, p.team === winner ? winPay : lossPay + plantedLoss);
+    this.rounds.push({ number: this.roundNumber, winner, winnerGroup: g, reason, endTick: this.tick, tGroup: this.groupOf('T'), money: [this.roundMoneyAvg[0], this.roundMoneyAvg[1]], fullBuy: [this.fullBuy[0], this.fullBuy[1]] });
     this.ended = { winner, reason };
     this.phase = 'over';
     this.phaseEnd = this.tick + ROUND.roundEndTicks;
@@ -541,6 +595,24 @@ export class ShooterMatch {
       this.over = true;
       this.winner = this.score[0] === this.score[1] ? null : this.score[0] > this.score[1] ? 0 : 1;
     }
+  }
+
+  private addMoney(p: Player, amount: number): void {
+    p.money = clamp(p.money + amount, 0, ECONOMY.maxMoney);
+  }
+
+  private groupMoneyAvg(g: 0 | 1): number {
+    let sum = 0;
+    for (const p of this.players) if (p.group === g) sum += p.money;
+    return idiv(sum, TEAM_SIZE);
+  }
+
+  private fullBuyFlags(): [boolean, boolean] {
+    const n = [0, 0];
+    for (const p of this.players) {
+      if (p.alive && p.armor > 0 && p.primary !== null && WEAPONS[p.primary.id].price >= WEAPONS.ak.price) n[p.group] += 1;
+    }
+    return [n[0] >= FULL_BUY_PLAYERS, n[1] >= FULL_BUY_PLAYERS];
   }
 
   private aliveCount(team: Team): number {
@@ -718,9 +790,50 @@ export class ShooterMatch {
         }
         this.dropActive(p);
         return;
+      case 'buy':
+        if (!Array.isArray(cmd.items) || !this.canBuy(p)) return;
+        for (const it of cmd.items.slice(0, MAX_BUY_ITEMS)) if (typeof it === 'string') this.buyOne(p, it);
+        return;
       default:
-      // buy（步驟 2）、throw（步驟 3）與未知指令：忽略
+      // throw（步驟 3）與未知指令：忽略
     }
+  }
+
+  /** 買一項；不合法（錢不夠、陣營不符、已有、超過攜帶上限、未知）就跳過 */
+  private buyOne(p: Player, item: string): void {
+    if (item === 'armor') {
+      if (p.armor >= ARMOR.points || p.money < ARMOR.price) return;
+      p.money -= ARMOR.price;
+      p.armor = ARMOR.points;
+      return;
+    }
+    if (item === 'kit') {
+      if (p.team !== DEFUSE_KIT.team || p.kit || p.money < DEFUSE_KIT.price) return;
+      p.money -= DEFUSE_KIT.price;
+      p.kit = true;
+      return;
+    }
+    if ((GRENADE_IDS as readonly string[]).includes(item)) {
+      const g = GRENADES[item as GrenadeId];
+      if (!g.teams.includes(p.team) || p.money < g.price || p.grenades.length >= GRENADE_RULES.totalSlots) return;
+      if (p.grenades.filter((x) => x === g.id).length >= g.maxCarry) return;
+      p.money -= g.price;
+      p.grenades.push(g.id);
+      return;
+    }
+    if (!(WEAPON_IDS as readonly string[]).includes(item)) return;
+    const w = WEAPONS[item as WeaponId];
+    // teams 為空（手槍、刀）＝不可購買
+    if (!w.teams.includes(p.team) || p.money < w.price || w.slot === 'knife') return;
+    p.money -= w.price;
+    // 同槽的舊槍丟在腳邊（可被撿）；免費配發的手槍不退錢
+    const old = w.slot === 'primary' ? p.primary : p.secondary;
+    if (old !== null) this.items.push({ kind: 'weapon', weapon: { ...old }, x: p.x, y: p.y });
+    if (w.slot === 'primary') p.primary = weaponState(w.id);
+    else p.secondary = weaponState(w.id);
+    p.active = w.slot;
+    p.reloadLeft = 0;
+    p.scoped = false;
   }
 
   private siteAt(x: number, y: number): 'A' | 'B' | null {
@@ -764,6 +877,7 @@ export class ShooterMatch {
     let bestD = PICKUP_RANGE + 1;
     this.items.forEach((it, i) => {
       if (it.kind === 'bomb' && p.team !== 'T') return;
+      if (it.kind === 'kit' && (p.team !== DEFUSE_KIT.team || p.kit)) return;
       const d = distance(p.x, p.y, it.x, it.y);
       if (d < bestD) {
         bestD = d;
@@ -775,6 +889,10 @@ export class ShooterMatch {
     this.items.splice(best, 1);
     if (it.kind === 'bomb') {
       this.takeBomb(p);
+      return;
+    }
+    if (it.kind === 'kit') {
+      p.kit = true;
       return;
     }
     const ws = it.weapon!;
@@ -804,11 +922,22 @@ export class ShooterMatch {
     p.firePending = false;
     p.vx = 0;
     p.vy = 0;
-    if (killer >= 0 && this.players[killer].team !== p.team) this.players[killer].kills += 1;
+    // 擊殺獎金當下發；隊殺 −300；T 被自己的炸彈炸死算自殺 −300；炸死的 CT 不算誰的擊殺
+    if (killer >= 0 && weapon !== 'bomb') {
+      const k = this.players[killer];
+      if (k.team !== p.team) {
+        k.kills += 1;
+        this.addMoney(k, WEAPONS[weapon].killReward);
+      } else this.addMoney(k, ECONOMY.teamKillPenalty);
+    } else if (weapon === 'bomb' && p.team === 'T') this.addMoney(p, ECONOMY.teamKillPenalty);
     this.kills.push({ tick: this.tick, round: this.roundNumber, killer, victim: p.id, weapon });
     if (p.primary !== null) {
       this.items.push({ kind: 'weapon', weapon: { ...p.primary }, x: p.x, y: p.y });
       p.primary = null;
+    }
+    if (p.kit) {
+      this.items.push({ kind: 'kit', weapon: null, x: p.x, y: p.y });
+      p.kit = false;
     }
     if (p.hasBomb) this.dropBomb(p);
   }
@@ -830,6 +959,7 @@ export class ShooterMatch {
     if (this.phase !== 'freeze') this.fireAll();
     for (const p of this.players) if (p.alive) this.weaponTick(p);
     this.actions();
+    if (this.fullBuy === null && this.tick - this.roundStartTick >= ROUND.buyTicks - 1) this.fullBuy = this.fullBuyFlags();
     this.autoPickup();
     if (this.tick % FOOTSTEP_INTERVAL === 0) {
       for (const p of this.players) {
@@ -1014,6 +1144,7 @@ export class ShooterMatch {
           p.plantTicks = 0;
           p.hasBomb = false;
           Object.assign(this.bomb, { state: 'planted', carrier: -1, x: p.x, y: p.y, site: this.siteAt(p.x, p.y), explodeTick: this.tick + ROUND.bombTicks, planter: p.id });
+          this.addMoney(p, ECONOMY.planterBonus);
           this.phase = 'planted';
           this.phaseEnd = this.bomb.explodeTick;
         }
@@ -1027,6 +1158,7 @@ export class ShooterMatch {
           p.defuseTicks = 0;
           this.bomb.state = 'defused';
           this.bomb.defuser = p.id;
+          this.addMoney(p, ECONOMY.defuserBonus);
         }
       }
     }
@@ -1110,6 +1242,7 @@ export class ShooterMatch {
       y: m.y,
       facing: this.deg(m.facing),
       hp: m.hp,
+      money: m.money,
       weapon: activeWeaponId(m),
       hasBomb: m.hasBomb,
       planting: m.plantTicks > 0,
@@ -1142,8 +1275,8 @@ export class ShooterMatch {
         y: me.y,
         facing: this.deg(me.facing),
         hp: me.hp,
-        money: 0,
-        loadout: { primary: me.primary?.id ?? null, secondary: me.secondary?.id ?? null, grenades: [], armor: me.armor, kit: me.kit },
+        money: me.money,
+        loadout: { primary: me.primary?.id ?? null, secondary: me.secondary?.id ?? null, grenades: me.grenades.slice(), armor: me.armor, kit: me.kit },
         weapon: activeWeaponId(me),
         ammoMag: w?.mag ?? 0,
         ammoReserve: w?.reserve ?? 0,
@@ -1224,13 +1357,14 @@ export class ShooterMatch {
 
   hash(): string {
     const h = new Hasher();
-    h.int(this.tick).int(this.roundNumber).int(PHASE_CODE[this.phase]).int(this.phaseEnd).int(this.score[0]).int(this.score[1]).bool(this.over);
+    h.int(this.tick).int(this.roundNumber).int(PHASE_CODE[this.phase]).int(this.phaseEnd).int(this.score[0]).int(this.score[1]).bool(this.over).int(this.lossLevel[0]).int(this.lossLevel[1]);
     const ws = (w: WeaponState | null): void => {
       if (w === null) h.int(-1);
       else h.int(WEAPON_IDS.indexOf(w.id)).int(w.mag).int(w.reserve);
     };
     for (const p of this.players) {
-      h.int(p.team === 'T' ? 0 : 1).bool(p.alive).int(p.x).int(p.y).int(p.facing).int(p.hp).int(p.armor).bool(p.kit);
+      h.int(p.team === 'T' ? 0 : 1).bool(p.alive).int(p.x).int(p.y).int(p.facing).int(p.hp).int(p.armor).bool(p.kit).int(p.money).int(p.grenades.length);
+      for (const g of p.grenades) h.int(GRENADE_IDS.indexOf(g));
       ws(p.primary);
       ws(p.secondary);
       h.int(SLOT_CODE[p.active]).int(p.cooldown).int(p.reloadLeft).int(p.recoil).bool(p.fireHeld).bool(p.firePending);
