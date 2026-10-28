@@ -1,7 +1,7 @@
-// 軍團戰的規則數值（規格書 v0.4）。所有數值都是整數：座標單位 1 格 = 1000、時間單位 tick（每秒 10 tick）、
+// 軍團戰的規則數值（規格書 v0.4；引擎 0.4 起加上攻城戰，見選手規格書 v0.5）。所有數值都是整數：座標單位 1 格 = 1000、時間單位 tick（每秒 10 tick）、
 // 血量與攻擊 ×10、倍率與減免為百分比。對照規格書：docs/軍團戰 規格書 v0.4（草案）.md。
 
-export const LEGION_ENGINE_VERSION = '0.3.2';
+export const LEGION_ENGINE_VERSION = '0.4.0';
 export const TPS = 10;
 export const TILE = 1000;
 
@@ -283,10 +283,96 @@ export const RULES = {
     healPct: 2,
     healQuietTicks: 5 * TPS,
   },
+  /**
+   * 城門（引擎 0.4）：有血量的物件，掛在門樓格上，只有衝車能扣血。血量沿用「×10」慣例（儲存值）。
+   * 開門、關門各要 openTicks／closeTicks（待審）；門洞地面還有士兵時關不上。
+   */
+  gate: {
+    mainHp: 4000,
+    sideHp: 2000,
+    openTicks: 3 * TPS,
+    closeTicks: 3 * TPS,
+  },
+  /**
+   * 雲梯（引擎 0.4）：攻方劍士、盾兵、長槍、輕步兵對相鄰城牆格架設；架好後雙方都能用。
+   * 一把梯每 entryTicks 上一人、爬到頂 climbTicks（待審）；推倒讀條 toppleTicks（待審），梯上的人摔落，
+   * 傷害 ＝ 單兵血量上限 × fallPct% × 爬升高度比例（待審）。
+   */
+  ladder: {
+    buildTicks: 8 * TPS,
+    entryTicks: 5,
+    climbTicks: 3 * TPS,
+    toppleTicks: 3 * TPS,
+    fallPct: 30,
+    /** 下令時軍團中心離梯腳多遠以內（單位） */
+    reach: 4000,
+    /** 推倒：守方士兵離梯口這個距離內才算站在梯口；梯口這個距離內有攻方士兵就推不了 */
+    mouth: 1500,
+    clear: 1000,
+    /** 士兵離梯腳（梯口）這個距離內才能上梯 */
+    mountDist: 600,
+    /** 尋路：走雲梯的成本（平地一格 = 100） */
+    pathCost: 600,
+  },
 } as const;
 
-export type LegionMode = 'annihilation' | 'capture';
-export const MODE_NAMES: Readonly<Record<LegionMode, string>> = { annihilation: '殲滅戰', capture: '佔點' };
+/**
+ * 衝車（引擎 0.4）：攻方免費一台、不計點、不可摧毀。任一步兵團附上（man）才會動，附上的兵團速度降到 speed（待審）；
+ * 衝車在兵團正前方 front；貼著關閉的城門（contact 以內）每 hitTicks 撞一下、每下扣 hit（正門 6 下、側門 3 下破門，已定先測）。
+ * 正面 blockHalf×2 度內射來的箭對附上的兵團無效。
+ */
+export const RAM = {
+  speed: spd(0.7),
+  hit: 667,
+  hitTicks: 3 * TPS,
+  contact: 1500,
+  attach: 5000,
+  front: 1500,
+  blockHalf: 90,
+} as const;
+
+/**
+ * 砲擊支援（引擎 0.4，數字待審）：攻方每場 shells 發、冷卻 cooldown；下令後 delay 落地，半徑 radius 內敵我不分每人扣 damage；
+ * 不打城門、不打牆。陰影：從落點往砲擊來向走 shadow 距離內碰到城牆或門樓（落點那一格不算）就打不到。
+ * damage 規格沒有給，暫定 500（長槍兵血量的一半），待試打。
+ */
+export const BOMBARD = {
+  shells: 3,
+  cooldown: 60 * TPS,
+  delay: 5 * TPS,
+  radius: 3000,
+  damage: 500,
+  shadow: 4000,
+} as const;
+
+/** 能架雲梯的兵種 */
+export const LADDER_KINDS: readonly UnitKind[] = ['sword', 'shield', 'spear', 'light'];
+
+/** 模式：攻城戰 siege、佔點 capture；殲滅戰 annihilation 只保留給引擎內部測試（不進聯賽、參賽包、觀戰選單） */
+export type LegionMode = 'annihilation' | 'capture' | 'siege';
+export const MODE_NAMES: Readonly<Record<LegionMode, string>> = { annihilation: '殲滅戰', capture: '佔點', siege: '攻城戰' };
+/** 聯賽、參賽包、觀戰網頁用的模式（三場制：攻城、攻城、佔點） */
+export const LEAGUE_MODES: readonly LegionMode[] = ['siege', 'capture'];
+
+/**
+ * 攻城戰（引擎 0.4，規格 1.2）：兩面旗依序佔——A（地圖 flags[0]，城門）15 秒、B（flags[1]，本陣）30 秒；A 未佔下前 B 不能佔，
+ * 守方不能把 A 佔回去。A 佔下：正門永久開啟、時限延長 extendTicks（試打後定）。B 佔下攻方勝；時間到守方勝；全滅仍算勝利。
+ * 攻守各 600 點、場上 600、沒有後備；後備開關（attackerReserve／defenderReserve）先關（試打後才開）。
+ * 旗圈只算地面層的士兵（牆頂、爬梯中的不算佔旗也不算阻擋）。
+ */
+export const SIEGE = {
+  budget: 600,
+  fieldCap: 600,
+  timeLimitTicks: 8 * 60 * TPS,
+  extendTicks: 3 * 60 * TPS,
+  radius: 5000,
+  captureA: 15 * TPS,
+  captureB: 30 * TPS,
+  attackerReserve: false,
+  defenderReserve: false,
+  /** 後備開關打開時的總點數（場上仍是 fieldCap） */
+  reserveBudget: 900,
+} as const;
 
 /** 地形（「高地」只是高度 3 階以上的平地標籤，效果全部依高度計算） */
 export const T = {
@@ -299,17 +385,88 @@ export const T = {
   Bridge: 6,
   Building: 7,
   Wall: 8,
+  /** 樓梯：城內側與牆相鄰的格，進入即切換層（0↔1），速度 ×50%；騎兵不可進 */
+  Stair: 9,
+  /** 門樓：牆頂（層 1）永遠可走；地面（層 0）由城門狀態決定 */
+  Gatehouse: 10,
+  /** 石板地：城內鋪石的街道、廣場與院落，移動 ×1 */
+  Paved: 11,
+  /** 瓦礫：坍塌城牆的碎石堆，移動 ×0.6，擋得住騎兵衝鋒 */
+  Rubble: 12,
 } as const;
 
-export const TERRAIN_NAMES = ['平地', '道路', '樹林', '高地', '淺灘', '河流', '橋', '建築', '城牆'] as const;
+export const TERRAIN_NAMES = ['平地', '道路', '樹林', '高地', '淺灘', '河流', '橋', '建築', '城牆', '樓梯', '門樓', '石板地', '瓦礫'] as const;
 
+/** 地面層的一般地形（地面層之間走動不涉及換層）：1 = 是。尋路與士兵移動的快速路徑用 */
+export const GROUND_FAST: Uint8Array = (() => {
+  const a = new Uint8Array(256);
+  for (const t of [T.Plain, T.Road, T.Forest, T.Hill, T.Shallow, T.Bridge, T.Paved, T.Rubble]) a[t] = 1;
+  return a;
+})();
+
+/** 層：0 地面、1 牆頂（之後塔樓可擴）。牆頂高度 ＝ 地面高度 ＋ WALL_LEVELS 階 */
+export const GROUND_LAYER = 0;
+export const WALL_LAYER = 1;
+/** 爬雲梯中的士兵所在的層：不和任何人近戰、推擠（只有箭與砲擊打得到），高度算地面 */
+export const LADDER_LAYER = 2;
+export const WALL_LEVELS = 3;
+
+/**
+ * 城門狀態佔位（引擎 0.4 步驟 2 才做城門物件）：門關著時門樓格在地面層不可走。
+ * 這一步所有門樓都用這個預設值。
+ */
+export const GATE_OPEN_DEFAULT = false;
+
+/** 地面層（層 0、城門關閉）可走：沿用 0.3 的語意，給布陣檢查、吸附與觀戰網頁用 */
 export function walkable(t: number): boolean {
-  return t !== T.River && t !== T.Building && t !== T.Wall;
+  return t !== T.River && t !== T.Building && t !== T.Wall && t !== T.Gatehouse;
 }
 
-/** 擋得住騎兵衝鋒的地形 */
+/** 牆頂層（層 1）可走：城牆、門樓、樓梯 */
+export function walkableTop(t: number): boolean {
+  return t === T.Wall || t === T.Gatehouse || t === T.Stair;
+}
+
+/** 某一層可走（門樓在地面層依城門狀態） */
+export function walkableAt(t: number, layer: number, gateOpen = GATE_OPEN_DEFAULT): boolean {
+  if (layer === WALL_LAYER) return walkableTop(t);
+  return walkable(t) || (gateOpen && t === T.Gatehouse);
+}
+
+/** 任何一層可走（尋路終點是否合法） */
+export function walkableAny(t: number): boolean {
+  return walkable(t) || walkableTop(t);
+}
+
+/**
+ * 從地形 fromT（所在層 layer）踏進相鄰格 toT 後的層；不能走回傳 -1。
+ * 規則：踏進樓梯立即切換層；從樓梯往牆或往地面都可走，層由目的格決定；
+ * 城牆只有層 1；門樓層 1 永遠可走、層 0 看城門；騎兵不得進樓梯。
+ */
+export function stepLayer(layer: number, fromT: number, toT: number, cavalry: boolean, gateOpen = GATE_OPEN_DEFAULT): number {
+  switch (toT) {
+    case T.River:
+    case T.Building:
+      return -1;
+    case T.Wall:
+      return layer === WALL_LAYER || fromT === T.Stair ? WALL_LAYER : -1;
+    case T.Stair:
+      if (cavalry) return -1;
+      if (fromT === T.Stair) return layer;
+      return layer === WALL_LAYER ? GROUND_LAYER : WALL_LAYER;
+    case T.Gatehouse:
+      if (fromT === T.Stair) return layer === WALL_LAYER || !gateOpen ? WALL_LAYER : GROUND_LAYER;
+      if (layer === WALL_LAYER) return WALL_LAYER;
+      return gateOpen ? GROUND_LAYER : -1;
+    default:
+      // 牆頂（含門樓頂）不能直接走到地面；只有地面層或經過樓梯才行
+      return layer === GROUND_LAYER || fromT === T.Stair ? GROUND_LAYER : -1;
+  }
+}
+
+/** 擋得住騎兵衝鋒的地形（樓梯、城牆、門樓都算） */
 export function stopsCavalry(t: number): boolean {
-  return t === T.Forest || t === T.Shallow || !walkable(t);
+  return t === T.Forest || t === T.Shallow || t === T.Stair || t === T.Rubble || !walkable(t);
 }
 
 /** 地形移動倍率（百分比） */
@@ -321,7 +478,10 @@ export function terrainSpeed(t: number, kind: UnitKind): number {
     case T.Forest:
       return kind === 'light' ? 100 : 60;
     case T.Shallow:
+    case T.Stair:
       return 50;
+    case T.Rubble:
+      return 60;
     default:
       return 100;
   }
@@ -336,7 +496,10 @@ export function terrainCost(t: number): number {
     case T.Forest:
       return 170;
     case T.Shallow:
+    case T.Stair:
       return 200;
+    case T.Rubble:
+      return 170;
     default:
       return 100;
   }

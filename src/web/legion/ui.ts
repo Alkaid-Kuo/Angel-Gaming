@@ -1,9 +1,11 @@
 // 軍團戰觀戰畫面：電競轉播風的計分條、雙方兵力名冊、解說字幕、開戰前陣容、結算、自動導播與操作。
 import type { RegimentStatus } from '../../legion/api.ts';
-import { DASH, FORMATION_NAMES, MODE_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type SkillKind, type UnitKind } from '../../legion/config.ts';
+import { BOMBARD, DASH, FORMATION_NAMES, MODE_NAMES, RAM, RULES, SIEGE, T, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type SkillKind, type UnitKind } from '../../legion/config.ts';
 import { unitSvg } from './icons.ts';
 import type { Caption, FromLegionWorker, LegionFrame, LegionMeta, ToLegionWorker } from './protocol.ts';
 import { LegionRenderer } from './render.ts';
+import type { Legion3DView } from './three/view3d.ts';
+import type { BattleView } from './view.ts';
 import { HOTKEYS, PlayerControl, type Pt } from './control.ts';
 
 const STATUS_NAME: Record<RegimentStatus, string> = {
@@ -21,6 +23,8 @@ const STATUS_NAME: Record<RegimentStatus, string> = {
   walled: '盾牆',
   reforming: '換陣形',
   volleying: '齊射',
+  laddering: '架雲梯',
+  toppling: '推倒雲梯',
   reserve: '後備',
   entering: '入場準備',
   routed: '潰散',
@@ -35,7 +39,11 @@ const TERRAIN_TIP = [
   '不可通行',
   '移動 ×1.25・只有 3 格寬',
   '不可通行・擋住視線',
-  '不可通行・擋住視線',
+  '只有牆頂（層 1）可走・擋住視線・牆頂高度 ＝ 地面 ＋ 3 階',
+  '地面與牆頂之間的樓梯：進入即換層・移動 ×0.5・騎兵不可',
+  '門樓：牆頂永遠可走；地面在城門開啟時可走・擋住視線',
+  '城內鋪石的街道、廣場與院落・移動同平地',
+  '坍塌城牆的碎石：移動 ×0.6・擋得住騎兵衝鋒',
 ];
 const SKILL_NAME: Record<SkillKind, string> = { brace: '槍林', assault: '突擊', shield: '持盾／舉盾／盾牆', volley: '齊射', infiltrate: '切入', charge: '衝鋒' };
 const HEIGHT_TIP = `每高 1 階：視野 +${RULES.height.sightPerLevel / TILE} 格、弓兵射程 +${RULES.height.rangePerLevel / TILE} 格、打較低的敵人傷害 +${RULES.height.rangedPerLevel}%（高低差最多算 ${RULES.height.clamp} 階）・上坡移動 ×${RULES.height.uphillSpeed / 100}、下坡 ×${RULES.height.downhillSpeed / 100}`;
@@ -43,7 +51,16 @@ const SPEEDS = [1, 2, 4, 8];
 /** 玩家指揮時的速度（多一檔慢動作） */
 const PLAYER_SPEEDS = [0.5, 1, 2, 4];
 /** 被拒絕的指令名稱（玩家提示） */
-const CMD_NAME: Record<string, string> = { move: '移動', attack: '攻擊', attackMove: '邊走邊打', hold: '堅守', face: '轉向', formation: '變陣', follow: '跟隨', brace: '槍林', unbrace: '收槍林', shield: '盾兵姿態', volley: '齊射', charge: '衝鋒', assault: '突擊', infiltrate: '切入', steer: '微調方向', summon: '後備入場', swap: '換兵', withdraw: '撤回' };
+const CMD_NAME: Record<string, string> = { move: '移動', attack: '攻擊', attackMove: '邊走邊打', hold: '堅守', face: '轉向', formation: '變陣', follow: '跟隨', brace: '槍林', unbrace: '收槍林', shield: '盾兵姿態', volley: '齊射', charge: '衝鋒', assault: '突擊', infiltrate: '切入', steer: '微調方向', summon: '後備入場', swap: '換兵', withdraw: '撤回', gate: '開關城門', ladder: '架雲梯', topple: '推倒雲梯', man: '推衝車', unman: '卸下衝車', bombard: '砲擊' };
+
+/** 上次用的是 3D 還是 2D（預設 3D） */
+function prefers3D(): boolean {
+  try {
+    return localStorage.getItem('legion.view') !== '2d';
+  } catch {
+    return true;
+  }
+}
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -64,7 +81,11 @@ export class LegionScreen {
     return this.meta.playerSide;
   }
   private readonly onExit: () => void;
-  private readonly r: LegionRenderer;
+  /** 目前的繪製器：2D 或 3D（3D 第一次用到才載入） */
+  private r: BattleView;
+  private readonly r2d: LegionRenderer;
+  private r3d: Legion3DView | null = null;
+  private disposed = false;
   private readonly el: Record<string, HTMLElement> = {};
   private raf = 0;
   private frameAt = 0;
@@ -104,7 +125,8 @@ export class LegionScreen {
     this.speeds = meta.playerSide >= 0 ? PLAYER_SPEEDS : SPEEDS;
     root.innerHTML = this.layout();
     for (const n of root.querySelectorAll<HTMLElement>('[data-el]')) this.el[n.dataset.el!] = n;
-    this.r = new LegionRenderer(this.el.canvas as HTMLCanvasElement, meta);
+    this.r2d = new LegionRenderer(this.el.canvas as HTMLCanvasElement, meta);
+    this.r = this.r2d;
     if (meta.playerSide >= 0) {
       this.control = new PlayerControl(this.r, meta.playerSide, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t));
       this.viewer = meta.playerSide;
@@ -117,6 +139,36 @@ export class LegionScreen {
     });
     this.bind();
     this.raf = requestAnimationFrame(this.tick);
+    if (prefers3D()) void this.set3D(true);
+  }
+
+  /** 切換 2D／3D：鏡頭位置帶過去，兩邊都一直收狀態流 */
+  private async set3D(on: boolean): Promise<void> {
+    if (on && this.r3d === null) {
+      this.el.view3d.textContent = '載入中…';
+      const { Legion3DView } = await import('./three/view3d.ts');
+      if (this.disposed) return;
+      this.r3d = new Legion3DView(this.el.canvas as HTMLCanvasElement, this.meta);
+      if (this.r2d.frame !== null) this.r3d.push(this.r2d.frame, performance.now());
+      if (this.r === this.r2d) this.r3d.fit();
+    }
+    const next: BattleView = on ? this.r3d! : this.r2d;
+    if (next !== this.r) {
+      next.cam.x = this.r.cam.x;
+      next.cam.y = this.r.cam.y;
+      next.cam.scale = this.r.cam.scale;
+    }
+    this.r3d?.setVisible(on);
+    this.r = next;
+    if (this.control) this.control.r = next;
+    next.clamp();
+    this.el.view3d.textContent = on ? '2D' : '3D';
+    this.el.view3d.title = on ? '切回 2D 俯視（M）' : '切到 3D 沙盤（M）；右鍵拖曳或 [ ] 轉鏡頭';
+    try {
+      localStorage.setItem('legion.view', on ? '3d' : '2d');
+    } catch {
+      // 無痕模式等：不記也沒關係
+    }
   }
 
   private send(msg: ToLegionWorker): void {
@@ -124,6 +176,8 @@ export class LegionScreen {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.r3d?.dispose();
     cancelAnimationFrame(this.raf);
     clearInterval(this.lineupTimer);
     for (const d of this.disposers) d();
@@ -170,6 +224,7 @@ export class LegionScreen {
       <button data-act="director" data-el="director" class="${player ? '' : 'active'}" title="自動導播：鏡頭跟著主要戰場${player ? '' : '（F）'}">導播</button>
       <button data-act="intent" data-el="intent" class="active" title="放大時在軍團旗標下顯示 AI 意圖（I）；滑鼠指著或選中的軍團一律顯示">意圖</button>
       <button data-act="fit" title="看全圖（Home）">全圖</button>
+      <button data-act="view3d" data-el="view3d" title="切到 3D 沙盤（M）；右鍵拖曳或 [ ] 轉鏡頭">3D</button>
       <span class="sep"></span>
       <button data-act="help" title="規則說明（H）">說明</button>
       <button data-act="replay" title="下載這場比賽的回放檔">回放</button>
@@ -324,6 +379,7 @@ export class LegionScreen {
       else if (ke.key === 'f' || ke.key === 'F') this.setDirector(!this.director);
       else if (ke.key === 'i' || ke.key === 'I') this.action('intent');
       else if (ke.key === 'h' || ke.key === 'H') this.action('help');
+      else if (ke.key === 'm' || ke.key === 'M') this.action('view3d');
       else if (ke.key === 'Home') this.action('fit');
       else if (ke.key === 'Escape') {
         if (!this.el.help.classList.contains('hidden')) this.el.help.classList.add('hidden');
@@ -416,6 +472,9 @@ export class LegionScreen {
       case 'help':
         this.toggleHelp();
         return;
+      case 'view3d':
+        void this.set3D(this.r === this.r2d);
+        return;
       case 'replay':
         this.send({ type: 'replay' });
         return;
@@ -424,7 +483,8 @@ export class LegionScreen {
         this.captions = [];
         this.el.feed.innerHTML = '';
         this.el.result.classList.add('hidden');
-        this.r.reset();
+        this.r2d.reset();
+        this.r3d?.reset();
         this.send({ type: 'restart' });
         this.started = true;
         this.paused = false;
@@ -485,7 +545,7 @@ export class LegionScreen {
         <div class="lu-units">${[...counts]
           .map(([k, c]) => `<div class="lu-unit"><span class="ic" style="background:${p.color}">${unitSvg(k, 20, '#fff')}</span><span>${UNITS[k].name}</span><b>× ${c}</b><span class="muted small">${UNITS[k].cost} 點／${UNITS[k].men} 人</span></div>`)
           .join('')}</div>
-        <div class="lu-total"><b>${p.cost}</b> / ${this.meta.mode === 'capture' ? RULES.capture.budget : RULES.budget} 點・${regs.length} 團・${men} 人</div>
+        <div class="lu-total"><b>${p.cost}</b> / ${(this.meta.mode === 'capture' ? RULES.capture.budget : this.meta.mode === 'siege' ? SIEGE.budget : RULES.budget)} 點・${regs.length} 團・${men} 人</div>
         ${rej.length ? `<div class="warn small">有 ${rej.length} 團布陣失敗：${esc(rej.map((x) => x.reason).join('、'))}</div>` : ''}
       </div>`;
     };
@@ -493,7 +553,7 @@ export class LegionScreen {
     const hidden = (i: number): string => `<div class="lu-side t${i}"><div class="lu-head" style="border-color:${this.meta.players[i].color}"><b>${esc(this.meta.players[i].side)}</b><span class="bot">${esc(this.meta.players[i].bot)}</span></div><p class="muted">對手的陣容開戰後才看得到。</p></div>`;
     this.el.lineup.innerHTML = `<div class="lu">
       <h2>開戰前陣容</h2>
-      <p class="muted">${ps >= 0 ? '你指揮藍方。左鍵選取、右鍵移動或攻擊，快捷鍵見右下；暫停中也可以下指令。' : `雙方各有 ${this.meta.mode === 'capture' ? RULES.capture.budget : RULES.budget} 點，在<b>看不到對手</b>的情況下選兵、布陣。觀眾是上帝視角：埋伏在樹林裡的軍團會以黃色虛線框標示。`}</p>
+      <p class="muted">${ps >= 0 ? '你指揮藍方。左鍵選取、右鍵移動或攻擊，快捷鍵見右下；暫停中也可以下指令。' : `雙方各有 ${(this.meta.mode === 'capture' ? RULES.capture.budget : this.meta.mode === 'siege' ? SIEGE.budget : RULES.budget)} 點，在<b>看不到對手</b>的情況下選兵、布陣。觀眾是上帝視角：埋伏在樹林裡的軍團會以黃色虛線框標示。`}</p>
       <div class="lu-cols">${side(0)}<div class="lu-vs">VS</div>${ps === 0 ? hidden(1) : side(1)}</div>
       <div class="lu-foot"><button class="primary" data-act="start">開戰 <span data-el="countdown"></span></button><button data-act="help">規則說明</button></div>
     </div>`;
@@ -547,7 +607,8 @@ export class LegionScreen {
       <h2>軍團戰怎麼看</h2>
       <p>兩個 AI 選手各用 <b>${RULES.budget} 點</b>（佔點模式 ${RULES.capture.budget} 點，場上最多 ${RULES.capture.fieldCap} 點）選兵、在看不到對方的情況下布陣，開戰後指揮軍團（不是單兵）。<b>沒有資源、沒有建築</b>，開場就行軍接敵。計分條下方是 AI 的戰略意圖、旗標下方的小字是各團的意圖（放大時顯示），<kbd>I</kbd> 開關。</p>
       <h3>勝利條件</h3>
-      <ul><li><b>殲滅戰</b>：打光對手全軍。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比戰果（擊殺敵兵的點數價值）。</li>
+      <ul><li><b>攻城戰</b>（石關城）：攻守各 ${SIEGE.budget} 點、沒有後備。攻方要依序佔下 <b>A 正門廣場</b>（${SIEGE.captureA / TPS} 秒）與 <b>B 本陣</b>（${SIEGE.captureB / TPS} 秒）；圈內只算地面的士兵，守方在圈內就不會增加進度。佔下 A：正門永久開啟、時限延長 ${SIEGE.extendTicks / TPS / 60} 分鐘；佔下 B 攻方勝，時間到（${SIEGE.timeLimitTicks / TPS / 60} 分鐘）守方勝。攻方有雲梯（白色描邊的是牆頂的士兵、半透明的是爬梯中或穿過門洞的）、衝車（${Math.round(RULES.gate.mainHp / RAM.hit)} 下破正門）與 ${BOMBARD.shells} 發砲擊（紅圈是落點與倒數）。</li>
+      <li><b>殲滅戰</b>（測試模式）：打光對手全軍。時間到（${RULES.timeLimitTicks / TPS / 60} 分鐘）比戰果（擊殺敵兵的點數價值）。</li>
       <li><b>佔點</b>（大河谷）：三個渡口各有一面旗。圈內有我方、沒有敵方，佔領進度就增加，${RULES.capture.captureTicks / TPS} 秒佔滿才算佔領；沒佔滿就離開，進度會倒退到零；圈內有敵人時進度不動。佔領後每秒得分（中央淺灘 2 分、兩座橋 1 分），圈內有敵人時暫停得分；先到 ${RULES.capture.scoreTarget} 分獲勝，也可以直接殲滅對手。時間到（${RULES.capture.timeLimitTicks / TPS / 60} 分鐘）先比分數、再比戰果。</li>
       <li><b>後備兵力</b>（佔點）：總共 ${RULES.capture.budget} 點，場上同時最多 ${RULES.capture.fieldCap} 點（算全額，不管剩幾人），其餘是後備。場上沒滿時，後備可以從<b>出生點</b>入場（準備 ${RULES.capture.enterTicks / TPS} 秒）；滿了就要把一團帶到出生點或<b>自己的補給站</b>（兩座橋旁，歸佔著那座橋的一方）換下來。撤回的團血量補滿、人數不變；團站在出生點或自己的補給站、${RULES.capture.healQuietTicks / TPS} 秒沒受傷就會回血（每秒 ${RULES.capture.healPct}%）。</li></ul>
       <h3>傷害</h3>
@@ -573,7 +634,7 @@ export class LegionScreen {
       <table class="lg-table"><tr><th>兵種</th><th>點數</th><th>人數</th><th>血量</th><th>攻擊</th><th>射程</th><th>速度（格／秒）</th><th>減免（近／遠）</th><th>招牌技能</th><th>剋制</th></tr>${rows}</table>
       <table class="lg-table">${TERRAIN_NAMES.map((n, i) => (TERRAIN_TIP[i] ? `<tr><td>${n}</td><td>${TERRAIN_TIP[i]}</td></tr>` : '')).join('')}</table>
       <h3>操作</h3>
-      <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>I</kbd> AI 意圖・<kbd>Home</kbd> 全圖・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）</p>
+      <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>I</kbd> AI 意圖・<kbd>Home</kbd> 全圖・<kbd>M</kbd> 切換 2D／3D・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）・3D 時右鍵拖曳或 <kbd>[</kbd> <kbd>]</kbd> 轉鏡頭（拉近才轉得動，全圖固定北朝上）</p>
     </div>`;
     h.classList.remove('hidden');
   }
@@ -589,7 +650,8 @@ export class LegionScreen {
           this.frameGap = this.frameGap * 0.7 + Math.min(400, Math.max(16, gap)) * 0.3;
         }
         this.frameAt = now;
-        this.r.push(msg.frame, now);
+        this.r2d.push(msg.frame, now);
+        this.r3d?.push(msg.frame, now);
         this.onFrame(msg.frame);
         return;
       }
@@ -622,6 +684,14 @@ export class LegionScreen {
       const pct = Math.floor(f.strength[i] / Math.max(1, costs[i]));
       this.el[`bar${i}`].style.width = `${Math.max(0, Math.min(100, pct))}%`;
       this.el[`pct${i}`].textContent = `${pct}%`;
+    }
+    if (this.meta.mode === 'siege') {
+      // 攻城：A、B 兩面旗的狀態
+      const att = 1 - this.meta.defender;
+      this.el.score.innerHTML = f.flags
+        .map((fl, i) => `<b style="color:${fl.owner === att ? this.meta.players[att].color : '#e2e8f0'}">${i === 0 ? 'A' : 'B'} ${fl.owner === att ? '✓' : fl.capturer >= 0 ? `${Math.floor((fl.progress * 100) / fl.need)}%` : fl.open ? '—' : '🔒'}</b>`)
+        .join('<span>　</span>');
+      this.el.score.classList.remove('hidden');
     }
     if (this.meta.mode === 'capture') {
       this.el.pips.innerHTML = f.flags
@@ -774,7 +844,7 @@ export class LegionScreen {
       return `<div class="rs-side${res.winner === i ? ' win' : ''}" style="border-color:${p.color}"><div class="lu-head"><span class="sw" style="background:${p.color}"></span><b>${esc(p.side)}</b><span class="bot">${esc(p.bot)}</span>${res.winner === i ? '<span class="crown">勝</span>' : ''}</div>
         <div class="dt-grid"><span>剩餘兵力</span><b>${Math.floor(res.strength[i] / Math.max(1, p.cost))}%</b><span>存活士兵</span><b>${men} / ${men0}</b><span>擊殺</span><b>${f.kills[i]}</b><span>潰散或覆滅</span><b>${routed} / ${regs.length} 團</b>${this.meta.mode === 'capture' ? `<span>分數</span><b>${res.score[i]}</b><span>旗點</span><b>${res.flagsHeld[i]}</b>` : ''}</div></div>`;
     };
-    const why = res.reason === 'score' ? `先拿到 ${RULES.capture.scoreTarget} 分` : res.reason === 'annihilation' ? '打垮對手全軍' : this.meta.mode === 'capture' ? '時間到，比較分數' : '時間到，比較剩餘兵力';
+    const why = res.reason === 'score' ? `先拿到 ${RULES.capture.scoreTarget} 分` : res.reason === 'capture' ? '攻方佔下本陣' : res.reason === 'annihilation' ? '打垮對手全軍' : this.meta.mode === 'siege' ? '時間到，守方守住了城池' : this.meta.mode === 'capture' ? '時間到，比較分數' : '時間到，比較剩餘兵力';
     const title = res.winner === null ? '平手' : `${this.meta.players[res.winner].side}「${esc(this.meta.players[res.winner].bot)}」獲勝`;
     this.el.result.innerHTML = `<div class="lu"><h2>${title}</h2><p class="muted">${why}・比賽時間 ${clock(res.durationTicks)}</p><div class="lu-cols">${stat(0)}<div class="lu-vs">VS</div>${stat(1)}</div>
       <div class="lu-foot"><button class="primary" data-act="restart">重看一次</button><button data-act="replay">下載回放</button><button data-act="exit">換組合</button><button data-act="closeResult">看戰場</button></div></div>`;
@@ -871,7 +941,7 @@ export class LegionScreen {
       const r = this.r.reg(id);
       const p = this.meta.players[s.owner];
       if (r !== undefined)
-        html = `<b style="color:${p.color}">${esc(p.side)} ${esc(s.name)}</b>　${r.men}/${s.men0} 人・${FORMATION_NAMES[r.formation]}・高度 ${this.heightAt(r.x, r.y)} 階<br>${STATUS_NAME[r.status]}${r.concealed ? '・<span class="hint">埋伏中（敵方看不到）</span>' : ''}${r.level > 1 ? `・${r.level} 級老兵` : ''}${r.intent && (this.viewer < 0 || this.viewer === s.owner) ? `<br><span class="muted">意圖：${esc(r.intent)}</span>` : ''}`;
+        html = `<b style="color:${p.color}">${esc(p.side)} ${esc(s.name)}</b>　${r.men}/${s.men0} 人・${FORMATION_NAMES[r.formation]}・高度 ${this.heightAt(r.x, r.y)} 階・位置 (${(r.x / TILE).toFixed(1)}, ${(r.y / TILE).toFixed(1)})<br>${STATUS_NAME[r.status]}${r.concealed ? '・<span class="hint">埋伏中（敵方看不到）</span>' : ''}${r.level > 1 ? `・${r.level} 級老兵` : ''}${r.intent && (this.viewer < 0 || this.viewer === s.owner) ? `<br><span class="muted">意圖：${esc(r.intent)}</span>` : ''}`;
     } else {
       const w = this.r.toWorld(this.mouse.x, this.mouse.y);
       const tx = Math.floor(w.x / TILE);
@@ -879,7 +949,13 @@ export class LegionScreen {
       if (tx >= 0 && ty >= 0 && tx < this.meta.width && ty < this.meta.height) {
         const t = this.meta.terrain[ty * this.meta.width + tx];
         const flag = this.meta.flags.findIndex((fl) => Math.hypot(fl.x - w.x, fl.y - w.y) <= RULES.capture.radius);
-        if (this.meta.mode === 'capture' && flag >= 0) {
+        if (this.meta.mode === 'siege' && flag >= 0) {
+          const st = this.r.frame?.flags[flag];
+          const fl = this.meta.flags[flag];
+          const att = 1 - this.meta.defender;
+          const own = st === undefined ? '' : st.owner === att ? '攻方已佔下' : st.open ? (st.capturer >= 0 ? `攻方佔領中：${Math.floor((st.progress * 100) / st.need)}%` : '守方持有') : '要先佔下 A';
+          html = `<b>${flag === 0 ? 'A' : 'B'} ${esc(fl.name)}</b>　佔滿要 ${(st?.need ?? 0) / TPS} 秒<br>${own}<br><span class="muted">只有攻方能佔；圈內只算地面的士兵，守方在圈內進度不動</span>`;
+        } else if (this.meta.mode === 'capture' && flag >= 0) {
           const st = this.r.frame?.flags[flag];
           const fl = this.meta.flags[flag];
           const own = st === undefined || st.owner < 0 ? '沒人佔領' : `${this.meta.players[st.owner].side}佔領${st.contested ? '（爭奪中，暫停得分）' : ''}`;
@@ -888,7 +964,7 @@ export class LegionScreen {
         } else {
           const hgt = this.meta.heights[ty * this.meta.width + tx];
           const tip = [TERRAIN_TIP[t], t === T.River || t === T.Building || t === T.Wall ? '' : HEIGHT_TIP].filter((x) => x !== '').join('<br>');
-          html = `<b>${TERRAIN_NAMES[t]}</b>　高度 ${hgt} 階<br><span class="muted">${tip}</span>`;
+          html = `<b>${TERRAIN_NAMES[t]}</b>　高度 ${hgt} 階　格 (${tx}, ${ty})<br><span class="muted">${tip}</span>`;
         }
       }
     }

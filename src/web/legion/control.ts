@@ -3,7 +3,7 @@
 import type { FormationKind, UnitKind } from '../../legion/config.ts';
 import { TILE, UNITS } from '../../legion/config.ts';
 import type { LegionFrame, RegFrame } from './protocol.ts';
-import type { LegionRenderer } from './render.ts';
+import type { BattleView } from './view.ts';
 
 export interface Pt {
   x: number;
@@ -21,6 +21,9 @@ export const HOTKEYS: readonly [string, string][] = [
   ['T', '轉向滑鼠'],
   ['F', '跟隨滑鼠下的友軍（保持目前相對位置）'],
   ['Z X C V', '橫陣、方陣、楔形陣、圓陣'],
+  ['L', '攻城：在滑鼠指的城牆格架雲梯（劍士、盾兵、長槍、輕步兵）'],
+  ['R', '攻城：附上／卸下衝車'],
+  ['B', '攻城：砲擊滑鼠位置（每場 3 發，不必選取）'],
   ['Ctrl+A', '全選；Esc 取消選取'],
   ['WASD', '平移鏡頭（也可以中鍵拖曳）'],
 ];
@@ -41,11 +44,12 @@ export class PlayerControl {
   order: { from: Pt; to: Pt } | null = null;
   /** 按住 Q 瞄準中（放開才施放） */
   aiming = false;
-  private readonly r: LegionRenderer;
+  /** 目前的繪製器（2D／3D 切換時換掉） */
+  r: BattleView;
   private readonly sendCmds: (cmds: unknown[]) => void;
   private readonly toast: (text: string) => void;
 
-  constructor(r: LegionRenderer, side: number, sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void) {
+  constructor(r: BattleView, side: number, sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void) {
     this.r = r;
     this.side = side;
     this.sendCmds = sendCmds;
@@ -158,6 +162,12 @@ export class PlayerControl {
       else this.selection.clear();
       return true;
     }
+    if (key === 'b') {
+      if (mouse === null) return true;
+      this.sendCmds([{ type: 'bombard', x: Math.round(mouse.x), y: Math.round(mouse.y) }]);
+      this.r.ping(mouse.x, mouse.y, '#f87171');
+      return true;
+    }
     const sel = this.selected();
     if (sel.length === 0) return false;
     const m = mouse;
@@ -181,6 +191,15 @@ export class PlayerControl {
       case 'h':
         for (const r of sel) cmds.push({ type: 'hold', id: r.id, intent: '玩家：堅守' });
         break;
+      case 'l':
+        if (m) for (const r of sel) cmds.push({ type: 'ladder', id: r.id, x: Math.round(m.x), y: Math.round(m.y), intent: '玩家：架雲梯' });
+        break;
+      case 'r': {
+        const crew = this.frame?.structures.ram?.crew ?? null;
+        const r = sel[0];
+        cmds.push(crew === r.id ? { type: 'unman', id: r.id, intent: '玩家：卸下衝車' } : { type: 'man', id: r.id, target: 0, intent: '玩家：推衝車' });
+        break;
+      }
       case 't':
         if (m) for (const r of sel) cmds.push({ type: 'face', id: r.id, facing: deg(r, m), intent: '玩家：轉向' });
         break;

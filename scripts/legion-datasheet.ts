@@ -1,7 +1,7 @@
 // 軍團戰數值總表：直接讀引擎的數值（config.ts），產生 docs/軍團戰 數值總表.md。改了數值就重跑一次，文件永遠和程式一致。
 // 用法：node scripts/legion-datasheet.ts
 import { writeFileSync } from 'node:fs';
-import { DASH, FORMATION_NAMES, LEGION_ENGINE_VERSION, RULES, SPEED_SCALE, TPS, TERRAIN_NAMES, TILE, UNIT_KINDS, UNITS, VERSUS, type DashDef, type FormationKind, type UnitKind } from '../src/legion/config.ts';
+import { BOMBARD, DASH, FORMATION_NAMES, LADDER_KINDS, LEGION_ENGINE_VERSION, RAM, RULES, SIEGE, SPEED_SCALE, T, TPS, TERRAIN_NAMES, TILE, UNIT_KINDS, UNITS, VERSUS, WALL_LEVELS, terrainSpeed, type DashDef, type FormationKind, type UnitKind } from '../src/legion/config.ts';
 import { formationShape } from '../src/legion/formation.ts';
 
 const OUT = 'docs/軍團戰 數值總表.md';
@@ -127,7 +127,12 @@ p(`| ${TERRAIN_NAMES[1]}、${TERRAIN_NAMES[6]} | 可 | ×1.25 | — |`);
 p(`| ${TERRAIN_NAMES[2]} | 可 | ×0.6（輕步兵 ×1） | 隱蔽；受到的遠程傷害 −${pct(RULES.terrain.forestRangedDR)}；擋下騎兵衝鋒 |`);
 p(`| ${TERRAIN_NAMES[4]} | 可 | ×0.5 | 受到的近戰傷害 ${x100(RULES.terrain.shallowMeleeTaken)}；不能衝鋒 |`);
 p(`| ${TERRAIN_NAMES[5]} | 不可 | — | 擋衝鋒（不擋視線） |`);
-p(`| ${TERRAIN_NAMES[7]}、${TERRAIN_NAMES[8]} | 不可 | — | 擋視線、擋衝鋒 |`);
+p(`| ${TERRAIN_NAMES[7]} | 不可 | — | 擋視線、擋衝鋒 |`);
+p(`| ${TERRAIN_NAMES[8]} | 只有牆頂（層 1） | ×1 | 牆頂高度 ＝ 地面 ＋ ${WALL_LEVELS} 階；擋視線、擋衝鋒 |`);
+p(`| ${TERRAIN_NAMES[9]} | 可（騎兵不可） | ×${terrainSpeed(T.Stair, 'sword') / 100} | 進入即在地面與牆頂之間換層 |`);
+p(`| ${TERRAIN_NAMES[10]} | 牆頂可；地面看城門 | ×1 | 擋視線、擋衝鋒 |`);
+p(`| ${TERRAIN_NAMES[11]} | 可 | ×1 | 城內的地面 |`);
+p(`| ${TERRAIN_NAMES[12]} | 可 | ×${terrainSpeed(T.Rubble, 'sword') / 100} | 擋騎兵衝鋒 |`);
 p();
 p(`視線：建築、城牆與較高的地形擋視線；河流（高度 0）與樹林不擋視線（樹林另有隱蔽）。`);
 p();
@@ -140,7 +145,21 @@ p(`- 殲滅戰：${RULES.budget} 點；${RULES.timeLimitTicks / TPS / 60} 分鐘
 const C = RULES.capture;
 p(`- 佔點：共 ${C.budget} 點、場上最多 ${C.fieldCap} 點；${C.timeLimitTicks / TPS / 60} 分鐘；旗圈半徑 ${tiles(C.radius)} 格、${sec(C.captureTicks)}佔滿；先到 ${C.scoreTarget} 分獲勝，時間到先比分數再比戰果。`);
 p(`- 後備：入場準備 ${sec(C.enterTicks)}；出生點半徑 ${tiles(C.spawnRadius)} 格、補給站 ${tiles(C.supplyRadius)} 格；在範圍內 ${sec(C.healQuietTicks)}沒受傷，每秒回單兵血量上限的 ${pct(C.healPct)}。`);
+p(`- 攻城戰：攻守各 ${SIEGE.budget} 點、全部上場；${SIEGE.timeLimitTicks / TPS / 60} 分鐘，攻方佔下 A 再延長 ${SIEGE.extendTicks / TPS / 60} 分鐘；旗圈半徑 ${tiles(SIEGE.radius)} 格，A ${sec(SIEGE.captureA)}、B ${sec(SIEGE.captureB)}佔滿（只有攻方能佔，圈內只算地面的士兵）；佔下 B 攻方勝，時間到守方勝。後備開關預設關閉（打開時總點數 ${SIEGE.reserveBudget}）。`);
 p(`- 指令：每 ${sec(RULES.decisionInterval)}最多 ${RULES.commandsPerDecision} 個；布陣區寬 ${RULES.deployDepthTiles} 格。`);
+p();
+p('## 六、攻城');
+p();
+const G = RULES.gate;
+const Ld = RULES.ladder;
+const names = (ks: readonly UnitKind[]): string => ks.map((k) => UNITS[k].name).join('、');
+p('| 項目 | 數值 |');
+p('| --- | --- |');
+p(`| 城門 | 正門 ${G.mainHp} 血、側門 ${G.sideHp} 血；開門 ${sec(G.openTicks)}、關門 ${sec(G.closeTicks)}；只有衝車扣得了血 |`);
+p(`| 雲梯 | ${names(LADDER_KINDS)}可以架；軍團中心離梯腳 ${tiles(Ld.reach)} 格內下令；架設 ${sec(Ld.buildTicks)}；每 ${sec(Ld.entryTicks)}上一人、爬到頂 ${sec(Ld.climbTicks)} |`);
+p(`| 推倒雲梯 | 守方士兵在梯口 ${tiles(Ld.mouth)} 格內、梯口 ${tiles(Ld.clear)} 格內沒有攻方士兵；讀條 ${sec(Ld.toppleTicks)}；梯上的人摔落，傷害 ＝ 單兵血量上限 × ${pct(Ld.fallPct)} × 爬升高度比例 |`);
+p(`| 衝車 | 一台、不計點、不可摧毀；步兵團在 ${tiles(RAM.attach)} 格內附上，推車時速度 ${specSpeed(RAM.speed)}；衝車在推車那團正前方（半厚 ＋ ${tiles(RAM.front)} 格）；離城門 ${tiles(RAM.contact)} 格內每 ${sec(RAM.hitTicks)}撞一下、每下 ${RAM.hit}；正面 ±${RAM.blockHalf}° 射來的箭對推車的團無效 |`);
+p(`| 砲擊 | 每場 ${BOMBARD.shells} 發、冷卻 ${sec(BOMBARD.cooldown)}；下令後 ${sec(BOMBARD.delay)}落地；半徑 ${tiles(BOMBARD.radius)} 格內敵我不分每人 −${BOMBARD.damage / 10}；不打城門與牆；落點往砲擊來向 ${tiles(BOMBARD.shadow)} 格內有城牆或門樓就打不到 |`);
 p();
 writeFileSync(OUT, L.join('\n'));
 console.log(`寫入 ${OUT}（${L.length} 行）`);

@@ -1,5 +1,6 @@
 // 軍團戰觀戰頁入口：選雙方 AI 與模式、建立引擎 Worker、切換畫面。
-import { RULES, UNITS, type LegionMode, type UnitKind } from '../../legion/config.ts';
+import { RULES, SIEGE, UNITS, type LegionMode, type UnitKind } from '../../legion/config.ts';
+import { LEAGUE_MAPS } from '../../legion/map.ts';
 import { unitSvg } from './icons.ts';
 import type { BotKey, FromLegionWorker, PlayerArmy, ToLegionWorker } from './protocol.ts';
 import { LegionScreen } from './ui.ts';
@@ -41,7 +42,11 @@ const startBtn = document.getElementById('start') as HTMLButtonElement;
 
 const mode = (): LegionMode => (document.querySelector('input[name=mode]:checked') as HTMLInputElement).value as LegionMode;
 const pts = (c: Record<UnitKind, number>): number => KINDS.reduce((t, k) => t + c[k] * UNITS[k].cost, 0);
-const limits = (): { field: number; total: number } => (mode() === 'capture' ? { field: RULES.capture.fieldCap, total: RULES.capture.budget } : { field: RULES.budget, total: RULES.budget });
+const mapSel = document.querySelector('select[name=map]') as HTMLSelectElement;
+/** 目前選的地圖：攻城戰固定石關城；佔點看選單 */
+const mapId = (): string => (mode() === 'siege' ? LEAGUE_MAPS.siege[0] : mapSel.value);
+const limits = (): { field: number; total: number } =>
+  mode() === 'capture' ? { field: RULES.capture.fieldCap, total: RULES.capture.budget } : mode() === 'siege' ? { field: SIEGE.fieldCap, total: SIEGE.budget } : { field: RULES.budget, total: RULES.budget };
 
 /** 超出點數上限的原因（空字串 = 合格） */
 function armyProblem(): string {
@@ -64,7 +69,9 @@ function renderArmy(): void {
   rowsEl.classList.toggle('no-reserve', !cap);
   document.getElementById('army-note')!.textContent = cap
     ? `場上最多 ${lim.field} 點，加上後備共 ${lim.total} 點。後備從出生點入場，或把場上的團帶到出生點／自己的補給站換下來。`
-    : `共 ${lim.field} 點，全部上場（殲滅戰沒有後備）。`;
+    : mode() === 'siege'
+      ? `你是攻方（藍方）：共 ${lim.field} 點，全部上場（攻城戰沒有後備）。L 架雲梯、R 推衝車、B 砲擊。`
+      : `共 ${lim.field} 點，全部上場（殲滅戰沒有後備）。`;
   const cnt = (side: 'field' | 'reserve', k: UnitKind): string =>
     `<span class="cnt ${side === 'reserve' ? 'rs' : ''}"><button type="button" data-side="${side}" data-kind="${k}" data-d="-1">−</button><b>${army[side][k]}</b><button type="button" data-side="${side}" data-kind="${k}" data-d="1">＋</button></span>`;
   rowsEl.innerHTML =
@@ -91,19 +98,24 @@ document.getElementById('army-reset')!.addEventListener('click', () => {
   army.reserve = { ...DEFAULT_RESERVE };
   renderArmy();
 });
-/** 地圖卡片跟著模式換（殲滅戰：河谷；佔點：大河谷） */
-const MAP_TEXT: Record<LegionMode, [string, string]> = {
-  annihilation: [
-    '地圖：河谷',
-    '160 × 100 格。中央一條 S 形河流，南北各一座 3 格寬的窄橋、中央一處淺灘（走得慢、受到的近戰傷害較高）；兩岸都有樹林可以埋伏，淺灘兩側各有一座高地（視野與射程加成）。藍方從西邊、紅方從東邊出發。',
+/** 地圖卡片跟著選的地圖換 */
+const MAP_TEXT: Record<string, [string, string]> = {
+  'stone-pass': [
+    '地圖：石關城',
+    '224 × 140 格。藍方攻、紅方守。背靠大河的三重城：郭城（四格厚城牆、角樓與馬面、甕城、護城河）、內城（三個門洞、高一階）、衙署子城（再高一階）。攻方營地分出三條路：中路大道經西橋進甕城撞正門、北路穿過樹林到北側門、南路經碎石坡與淺灘到南牆缺口。郭城西半是街坊：大街在鼓樓前分成兩路，北有市集、南有寺院與塔；內城是院落民房、牌坊大街與官署。攻方要依序佔下 A 正門廣場與 B 衙署。',
   ],
-  capture: [
+  grassland: [
+    '地圖：大草原',
+    '240 × 150 格。開闊起伏的草原、騎兵有利：三面旗排成西北—東南的斜線，中央十字路口的驛站（2 分），西北丘、東南丘各有一座烽火台（1 分），離中央約 60 格；西北丘靠近藍方、東南丘靠近紅方。一條環路繞過雙方陣地與兩座烽火台丘，斜貫大道把三面旗串成一線；四處是小塊樹林、岩堆與緩坡。藍方出生點在西邊、紅方在東邊。',
+  ],
+  'grand-valley': [
     '地圖：大河谷',
     '240 × 150 格。縱貫中央的 S 形大河，北橋、中央淺灘、南橋三個渡口相隔約 48 格，各插一面旗（淺灘 2 分、橋 1 分）；兩座橋旁各有一個補給站，歸佔著那座橋的一方。兩岸有樹林、高地與村莊，雙方必須分兵。藍方出生點在西邊、紅方在東邊。',
   ],
 };
 function renderMode(): void {
-  const [name, desc] = MAP_TEXT[mode()];
+  mapSel.closest('label')!.classList.toggle('hidden', mode() !== 'capture');
+  const [name, desc] = MAP_TEXT[mapId()];
   document.getElementById('map-name')!.textContent = name;
   document.getElementById('map-desc')!.textContent = desc;
   renderArmy();
@@ -111,6 +123,7 @@ function renderMode(): void {
 
 blueSel.addEventListener('change', renderArmy);
 for (const r of document.querySelectorAll('input[name=mode]')) r.addEventListener('change', renderMode);
+mapSel.addEventListener('change', renderMode);
 renderMode();
 
 function playerArmy(): PlayerArmy {
@@ -151,7 +164,7 @@ function launch(): void {
     } else screen?.handle(msg);
   };
   w.onerror = (e) => alert(`Worker 錯誤：${e.message}`);
-  const start: ToLegionWorker = { type: 'start', setup: { bots: [blue, pick('red')], mode: m, seed, army: blue === 'player' ? playerArmy() : undefined } };
+  const start: ToLegionWorker = { type: 'start', setup: { bots: [blue, pick('red')], mode: m, mapId: mapId(), seed, army: blue === 'player' ? playerArmy() : undefined } };
   w.postMessage(start);
 }
 
