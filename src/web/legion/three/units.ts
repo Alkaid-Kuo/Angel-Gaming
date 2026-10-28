@@ -1,6 +1,7 @@
 // 3D 沙盤的士兵（先求看得懂，造型之後再換）：每種兵一個「人物」InstancedMesh（中性色）與一個「隊伍色」InstancedMesh（底座、盾面、馬衣），
 // 兩者共用同一組矩陣。槍林（長槍放平）、盾牆（盾舉高並排）各有一個姿勢；倒地的人側躺；潰散整團調灰、不畫底座。
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { UnitKind } from '../../../legion/config.ts';
 import { Builder } from './builder.ts';
 import { PAL, col } from './palette.ts';
@@ -20,88 +21,131 @@ const CLOTH: Record<UnitKind, number> = {
 const METAL = 0xa7adb4;
 const POLE = 0x6a5134;
 
-/** 步兵的人：腿、身、頭、盔；正面朝 +x */
-function infantry(b: Builder, kind: UnitKind, y = 0): void {
-  const cloth = col(CLOTH[kind]);
-  b.box(-0.05, y, -0.08, 0.05, y + 0.26, 0.08, col(0x5c4b3b));
-  b.box(-0.07, y + 0.26, -0.11, 0.07, y + 0.48, 0.11, cloth);
-  b.box(-0.05, y + 0.48, -0.05, 0.05, y + 0.58, 0.05, col(PAL.skin));
-  b.box(-0.06, y + 0.56, -0.06, 0.06, y + 0.62, 0.06, col(kind === 'archer' || kind === 'light' ? 0x6b5538 : METAL));
+/** 一個零件：基本形狀擺好位置、塗上顏色（頂點色），之後合併成一個人 */
+function part(g: THREE.BufferGeometry, color: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): THREE.BufferGeometry {
+  const ng = g.index !== null ? g.toNonIndexed() : g;
+  g.dispose();
+  ng.deleteAttribute('uv');
+  ng.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(sx, sy, sz)));
+  const c = col(color);
+  const n = ng.getAttribute('position').count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] = c.r;
+    arr[i * 3 + 1] = c.g;
+    arr[i * 3 + 2] = c.b;
+  }
+  ng.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return ng;
+}
+
+const cyl = (r0: number, r1: number, hgt: number, n = 6): THREE.BufferGeometry => new THREE.CylinderGeometry(r1, r0, hgt, n, 1, false);
+const ball = (r: number): THREE.BufferGeometry => new THREE.SphereGeometry(r, 7, 5);
+
+/** 步兵的人：雙腿、上身、腰帶、雙臂、頭、盔（弓兵、輕步兵是皮帽）；正面朝 +x；y 是腳底高度 */
+function person(parts: THREE.BufferGeometry[], kind: UnitKind, y = 0, riding = false): void {
+  const cloth = CLOTH[kind];
+  if (!riding) for (const s of [-1, 1]) parts.push(part(cyl(0.03, 0.026, 0.26, 5), 0x5c4b3b, 0, y + 0.13, s * 0.045));
+  else for (const s of [-1, 1]) parts.push(part(cyl(0.028, 0.024, 0.2, 5), 0x5c4b3b, 0.02, y + 0.2, s * 0.1, s * 0.5, 0, 0));
+  parts.push(part(cyl(0.1, 0.082, 0.22, 7), cloth, 0, y + 0.37, 0));
+  parts.push(part(cyl(0.102, 0.102, 0.03, 7), 0x4a3a2a, 0, y + 0.28, 0));
+  for (const s of [-1, 1]) parts.push(part(cyl(0.026, 0.022, 0.2, 5), cloth, 0.03, y + 0.37, s * 0.11, 0, 0, 0.35));
+  parts.push(part(ball(0.06), PAL.skin, 0, y + 0.53, 0));
+  if (kind === 'archer' || kind === 'light') parts.push(part(cyl(0.066, 0.02, 0.09, 7), 0x6b5538, 0, y + 0.585, 0));
+  else {
+    parts.push(part(new THREE.SphereGeometry(0.066, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), METAL, 0, y + 0.545, 0));
+    parts.push(part(cyl(0.075, 0.075, 0.012, 8), METAL, 0, y + 0.545, 0));
+  }
+}
+
+/** 馬：身體、胸、脖子、頭、四條腿、尾巴；正面朝 +x */
+function horse(parts: THREE.BufferGeometry[], s: number, color: number): void {
+  parts.push(part(cyl(0.1, 0.11, 0.5, 8), color, 0, 0.42, 0, 0, 0, Math.PI / 2, s, s, s));
+  parts.push(part(ball(0.105), color, 0.24 * s, 0.43, 0, 0, 0, 0, s, s * 1.05, s * 0.95));
+  parts.push(part(cyl(0.07, 0.05, 0.3, 6), color, 0.3 * s, 0.56, 0, 0, 0, -0.6, s, s, s));
+  parts.push(part(new THREE.BoxGeometry(0.2, 0.08, 0.075), color, 0.42 * s, 0.66, 0, 0, 0, -0.5, s, s, s));
+  parts.push(part(new THREE.BoxGeometry(0.06, 0.06, 0.02), 0x3f2b1b, 0.33 * s, 0.73, 0, 0, 0, -0.4, s, s, s));
+  for (const [lx, lz] of [
+    [-0.19, -0.06],
+    [-0.19, 0.06],
+    [0.2, -0.06],
+    [0.2, 0.06],
+  ]) parts.push(part(cyl(0.028, 0.022, 0.36, 5), color, lx * s, 0.18, lz * s));
+  parts.push(part(cyl(0.03, 0.012, 0.26, 5), 0x3f2b1b, -0.3 * s, 0.36, 0, 0, 0, -0.55, s, s, s));
+}
+
+function merged(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const g = mergeGeometries(parts, false)!;
+  for (const p of parts) p.dispose();
+  g.computeBoundingSphere();
+  return g;
 }
 
 /** 人物（不含隊伍色的部分） */
 function figure(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
-  const b = new Builder();
-  const pole = col(POLE);
-  const metal = col(METAL);
+  const parts: THREE.BufferGeometry[] = [];
   if (kind === 'lightCav' || kind === 'heavyCav') {
-    const horse = col(kind === 'heavyCav' ? 0x5a4632 : 0x6b4a2f);
     const s = kind === 'heavyCav' ? 1.1 : 1;
-    b.box(-0.28 * s, 0.3, -0.09 * s, 0.24 * s, 0.5, 0.09 * s, horse);
-    for (const [lx, lz] of [
-      [-0.22, -0.06],
-      [-0.22, 0.06],
-      [0.18, -0.06],
-      [0.18, 0.06],
-    ]) b.box(lx * s - 0.025, 0, lz * s - 0.025, lx * s + 0.025, 0.32, lz * s + 0.025, horse);
-    b.box(0.2 * s, 0.42, -0.05, 0.32 * s, 0.66, 0.05, horse);
-    b.box(0.28 * s, 0.58, -0.045, 0.42 * s, 0.68, 0.045, horse);
-    b.box(-0.34 * s, 0.32, -0.02, -0.28 * s, 0.48, 0.02, col(0x3f2b1b));
-    infantry(b, kind, 0.42);
+    horse(parts, s, kind === 'heavyCav' ? 0x5a4632 : 0x6b4a2f);
+    person(parts, kind, 0.4, true);
     const len = kind === 'heavyCav' ? 1.3 : 0.95;
-    b.box(-0.1, 0.72, 0.12, len - 0.1, 0.75, 0.15, pole);
-    b.box(len - 0.12, 0.71, 0.11, len, 0.76, 0.16, metal);
-    return b.geometry();
+    parts.push(part(cyl(0.012, 0.012, len, 5), POLE, len / 2 - 0.15, 0.74, 0.13, 0, 0, Math.PI / 2 - 0.08));
+    parts.push(part(new THREE.ConeGeometry(0.022, 0.1, 5), METAL, len - 0.12, 0.78, 0.13, 0, 0, -Math.PI / 2 + 0.08));
+    return merged(parts);
   }
-  infantry(b, kind);
+  person(parts, kind);
   switch (kind) {
     case 'spear':
       if (pose === 'brace') {
-        b.box(-0.3, 0.36, 0.12, 1.4, 0.39, 0.15, pole);
-        b.box(1.4, 0.355, 0.115, 1.52, 0.395, 0.155, metal);
+        parts.push(part(cyl(0.012, 0.012, 1.8, 5), POLE, 0.55, 0.4, 0.13, 0, 0, Math.PI / 2));
+        parts.push(part(new THREE.ConeGeometry(0.024, 0.14, 5), METAL, 1.5, 0.4, 0.13, 0, 0, -Math.PI / 2));
       } else {
-        b.box(0.02, 0, 0.12, 0.05, 1.8, 0.15, pole);
-        b.box(0.01, 1.8, 0.115, 0.06, 1.92, 0.155, metal);
+        parts.push(part(cyl(0.012, 0.012, 1.8, 5), POLE, 0.06, 0.9, 0.13));
+        parts.push(part(new THREE.ConeGeometry(0.024, 0.14, 5), METAL, 0.06, 1.86, 0.13));
       }
       break;
     case 'sword':
-      b.box(0.06, 0.3, 0.12, 0.09, 0.62, 0.14, metal);
+      parts.push(part(new THREE.BoxGeometry(0.02, 0.34, 0.04), METAL, 0.12, 0.42, 0.13, 0, 0, -0.5));
       break;
     case 'archer':
-      b.box(0.08, 0.2, -0.16, 0.1, 0.75, -0.14, pole);
-      b.box(-0.12, 0.3, 0.02, -0.07, 0.6, 0.08, col(0x4a3a2a));
+      parts.push(part(new THREE.TorusGeometry(0.28, 0.012, 4, 10, Math.PI * 0.8), POLE, 0.1, 0.45, -0.14, Math.PI / 2, 0, Math.PI * 0.6));
+      parts.push(part(cyl(0.035, 0.035, 0.3, 6), 0x4a3a2a, -0.1, 0.42, 0.04, 0.3, 0, 0));
       break;
     case 'light':
-      b.box(0.0, 0.2, 0.12, 0.02, 0.95, 0.14, pole);
-      b.box(0.04, 0.2, 0.12, 0.06, 0.92, 0.14, pole);
+      for (const dz of [0.12, 0.15]) parts.push(part(cyl(0.01, 0.01, 0.8, 4), POLE, 0.02, 0.55, dz, 0, 0, 0.1));
       break;
     default:
       break;
   }
-  return b.geometry();
+  return merged(parts);
 }
 
 /** 隊伍色的部分（白色，實際顏色由 instanceColor 給）：底座、盾面、馬衣 */
 function teamParts(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
-  const b = new Builder();
-  const white = new THREE.Color(1, 1, 1);
-  const rim = new THREE.Color(0.45, 0.45, 0.45);
+  const parts: THREE.BufferGeometry[] = [];
+  const W = 0xffffff;
+  const RIM = 0x737373;
   if (kind === 'lightCav' || kind === 'heavyCav') {
     const s = kind === 'heavyCav' ? 1.1 : 1;
-    b.box(-0.39 * s, 0, -0.22 * s, 0.39 * s, 0.035, 0.22 * s, rim, white);
-    if (kind === 'heavyCav') b.box(-0.26, 0.22, -0.11, 0.26, 0.47, 0.11, white);
-    else b.box(-0.1, 0.5, -0.1, 0.1, 0.52, 0.1, white);
-    return b.geometry();
+    parts.push(part(new THREE.BoxGeometry(0.78 * s, 0.03, 0.44 * s), RIM, 0, 0.015, 0));
+    parts.push(part(new THREE.BoxGeometry(0.74 * s, 0.012, 0.4 * s), W, 0, 0.036, 0));
+    if (kind === 'heavyCav') parts.push(part(cyl(0.125, 0.125, 0.44, 8), W, 0, 0.37, 0, 0, 0, Math.PI / 2, s, s * 1.1, s));
+    else parts.push(part(new THREE.BoxGeometry(0.2, 0.025, 0.24), W, 0, 0.53, 0));
+    return merged(parts);
   }
   if (kind === 'archer' || kind === 'light') {
-    b.prism(0, 0, 0, 0.035, kind === 'archer' ? 0.2 : 0.17, kind === 'archer' ? 0.2 : 0.17, 10, rim);
-    b.prism(0, 0, 0.035, 0.04, 0.17, 0.17, 10, white);
-  } else b.box(-0.2, 0, -0.2, 0.2, 0.035, 0.2, rim, white);
+    const r = kind === 'archer' ? 0.2 : 0.17;
+    parts.push(part(cyl(r, r, 0.035, 10), RIM, 0, 0.0175, 0));
+    parts.push(part(cyl(r - 0.03, r - 0.03, 0.01, 10), W, 0, 0.04, 0));
+  } else {
+    parts.push(part(new THREE.BoxGeometry(0.4, 0.035, 0.4), RIM, 0, 0.0175, 0));
+    parts.push(part(new THREE.BoxGeometry(0.365, 0.01, 0.365), W, 0, 0.04, 0));
+  }
   if (kind === 'shield') {
-    if (pose === 'wall') b.box(0.12, 0.05, -0.26, 0.17, 0.7, 0.26, white);
-    else b.box(0.12, 0.1, -0.16, 0.16, 0.55, 0.16, white);
-  } else if (kind === 'sword') b.prism(0.12, -0.13, 0.3, 0.32, 0.09, 0.09, 8, white, 0, true);
-  return b.geometry();
+    if (pose === 'wall') parts.push(part(new THREE.BoxGeometry(0.04, 0.66, 0.52), W, 0.15, 0.38, 0));
+    else parts.push(part(new THREE.BoxGeometry(0.035, 0.46, 0.32), W, 0.14, 0.33, 0));
+  } else if (kind === 'sword') parts.push(part(cyl(0.09, 0.09, 0.02, 10), W, 0.11, 0.36, -0.13, 0, 0, Math.PI / 2));
+  return merged(parts);
 }
 
 interface Layer {

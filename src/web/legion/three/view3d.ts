@@ -1,7 +1,12 @@
 // 即時 3D 觀戰：吃和 2D 觀戰同一份 worker 狀態流（LegionFrame），畫成 3D 沙盤；對外介面和 2D 的 LegionRenderer 一樣（BattleView），
 // 觀戰畫面換一個繪製器就能用。世界層（地形、城池、士兵、托盤與地面範圍）用 Three.js；資訊層（軍團旗標、特效文字、倒數）畫在疊在上面的 2D 畫布。
-// 鏡頭沿用 2D 的 cam（中心、每格像素）：拉遠是 66° 的高空俯視、拉近慢慢壓低到 32°；中景以下可以水平轉 ±35°（右鍵拖曳或 [ ]），全圖固定北朝上。
+// 鏡頭沿用 2D 的 cam（中心、每格像素）：拉遠是 66° 的高空俯視、拉近慢慢壓低到 32°；拉近後可以水平轉一整圈（右鍵拖曳或 [ ]），拉遠慢慢轉回北朝上。
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { DASH, FORMATION_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, UNITS, stopsCavalry, walkable, type UnitKind } from '../../../legion/config.ts';
 import { MAPS, type LegionMap } from '../../../legion/map.ts';
 import { drawUnitIcon } from '../icons.ts';
@@ -38,10 +43,32 @@ interface Corpse {
 const DEG = Math.PI / 180;
 const PITCH_FAR = 66 * DEG;
 const PITCH_NEAR = 32 * DEG;
-const MAX_YAW = 35 * DEG;
+/** 水平轉角包回 -π～π */
+const wrapYaw = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 const MAX_SCALE = 140;
 /** 主光從西北上方照下來（v2 第七節） */
 const SUN_DIR = new THREE.Vector3(-0.55, 0.62, -0.45).normalize();
+
+/** 移軸模糊（一個方向）：畫面中央一條帶子清楚，越往上下越模糊（v2 第二節）；amount 0 ＝ 不模糊 */
+const TILT_SHADER = {
+  uniforms: { tDiffuse: { value: null }, dir: { value: new THREE.Vector2(1, 0) }, amount: { value: 0 } },
+  vertexShader: 'varying vec2 vUv;\nvoid main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: [
+    'uniform sampler2D tDiffuse;',
+    'uniform vec2 dir;',
+    'uniform float amount;',
+    'varying vec2 vUv;',
+    'void main() {',
+    '  float k = smoothstep(0.2, 0.5, abs(vUv.y - 0.5)) * amount;',
+    '  if (k <= 0.0) { gl_FragColor = texture2D(tDiffuse, vUv); return; }',
+    '  vec2 d = dir * k;',
+    '  vec4 s = texture2D(tDiffuse, vUv) * 0.2270;',
+    '  s += (texture2D(tDiffuse, vUv + d * 1.3846) + texture2D(tDiffuse, vUv - d * 1.3846)) * 0.3162;',
+    '  s += (texture2D(tDiffuse, vUv + d * 3.2308) + texture2D(tDiffuse, vUv - d * 3.2308)) * 0.0703;',
+    '  gl_FragColor = s;',
+    '}',
+  ].join('\n'),
+};
 
 /** 依地圖名稱找回地圖（meta 只有名稱；城門洞、建物外觀要從地圖資料拿） */
 function mapByName(name: string): LegionMap {
@@ -65,6 +92,14 @@ export class Legion3DView implements BattleView {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(34, 1, 0.5, 2000);
   private readonly sun: THREE.DirectionalLight;
+  private readonly composer: EffectComposer;
+  private readonly ao: GTAOPass;
+  private readonly tiltH: ShaderPass;
+  private readonly tiltV: ShaderPass;
+  /** 戰爭迷霧（一方視角時，看不到的地面變暗）：貼在地形上的一張畫布 */
+  private readonly fogCanvas = document.createElement('canvas');
+  private readonly fogTex: THREE.CanvasTexture;
+  private readonly fog: THREE.Mesh;
   private readonly ground: Ground;
   private readonly city: City;
   private readonly nature: Nature;
@@ -143,6 +178,26 @@ export class Legion3DView implements BattleView {
     this.soldiers = new Soldiers(cap);
     this.fallen = new Soldiers(cap);
     this.scene.add(this.soldiers.group, this.fallen.group, this.arrows.mesh, this.decals.mesh, this.deploy.mesh);
+    // 戰爭迷霧：和地形同一份幾何（UV 一樣），畫布每格 2 像素
+    this.fogCanvas.width = meta.width * 2;
+    this.fogCanvas.height = meta.height * 2;
+    this.fogTex = new THREE.CanvasTexture(this.fogCanvas);
+    this.fog = new THREE.Mesh(this.ground.terrain.geometry, new THREE.MeshBasicMaterial({ map: this.fogTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    this.fog.renderOrder = 3;
+    this.fog.visible = false;
+    this.scene.add(this.fog);
+    // 後製：場景 → 環境遮蔽 → 移軸（左右、上下）→ 色調映射
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.ao = new GTAOPass(this.scene, this.camera, 512, 512);
+    this.ao.blendIntensity = 0.55;
+    this.ao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.5, thickness: 1.2, scale: 1 });
+    this.composer.addPass(this.ao);
+    this.tiltH = new ShaderPass(TILT_SHADER);
+    this.tiltV = new ShaderPass(TILT_SHADER);
+    this.composer.addPass(this.tiltH);
+    this.composer.addPass(this.tiltV);
+    this.composer.addPass(new OutputPass());
     this.bindRotate();
     // 開發時從主控台檢查場景用（正式建置不帶）
     if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__v3d = { view: this, scene: this.scene };
@@ -159,6 +214,9 @@ export class Legion3DView implements BattleView {
     this.arrows.dispose();
     this.decals.dispose();
     this.deploy.dispose();
+    this.fogTex.dispose();
+    (this.fog.material as THREE.Material).dispose();
+    this.composer.dispose();
     this.renderer.dispose();
     this.gl.remove();
   }
@@ -300,7 +358,7 @@ export class Legion3DView implements BattleView {
     const t = this.zoomT();
     const ease = t * t * (3 - 2 * t);
     const pitch = Math.max(20 * DEG, Math.min(80 * DEG, PITCH_FAR + (PITCH_NEAR - PITCH_FAR) * ease + this.tilt));
-    const yaw = Math.max(-MAX_YAW, Math.min(MAX_YAW, this.yaw)) * Math.min(1, t * 2.2);
+    const yaw = wrapYaw(this.yaw) * Math.min(1, t * 2.2);
     const fov = 34 - 4 * ease;
     const gy = this.ground.heightAt(this.cam.x, this.cam.y);
     this.targetY += (gy - this.targetY) * 0.15;
@@ -384,7 +442,7 @@ export class Legion3DView implements BattleView {
         drag = null;
         return;
       }
-      this.yaw = Math.max(-MAX_YAW, Math.min(MAX_YAW, drag.yaw - (e.clientX - drag.x) * 0.006));
+      this.yaw = wrapYaw(drag.yaw - (e.clientX - drag.x) * 0.006);
       this.tilt = Math.max(-14 * DEG, Math.min(14 * DEG, drag.tilt + (e.clientY - drag.y) * 0.004));
     };
     const ctx = (e: Event): void => {
@@ -392,8 +450,8 @@ export class Legion3DView implements BattleView {
     };
     const key = (e: KeyboardEvent): void => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
-      if (e.key === '[') this.yaw = Math.max(-MAX_YAW, this.yaw - 8 * DEG);
-      else if (e.key === ']') this.yaw = Math.min(MAX_YAW, this.yaw + 8 * DEG);
+      if (e.key === '[') this.yaw = wrapYaw(this.yaw - 15 * DEG);
+      else if (e.key === ']') this.yaw = wrapYaw(this.yaw + 15 * DEG);
     };
     this.canvas.addEventListener('mousedown', down);
     window.addEventListener('mousemove', move);
@@ -513,7 +571,10 @@ export class Legion3DView implements BattleView {
     const ch = this.canvas.clientHeight;
     const dpr = window.devicePixelRatio || 1;
     const size = this.renderer.getSize(new THREE.Vector2());
-    if (size.x !== cw || size.y !== ch) this.renderer.setSize(cw, ch, false);
+    if (size.x !== cw || size.y !== ch) {
+      this.renderer.setSize(cw, ch, false);
+      this.composer.setSize(cw, ch);
+    }
     if (this.canvas.width !== Math.round(cw * dpr) || this.canvas.height !== Math.round(ch * dpr)) {
       this.canvas.width = Math.round(cw * dpr);
       this.canvas.height = Math.round(ch * dpr);
@@ -531,7 +592,17 @@ export class Legion3DView implements BattleView {
     }
     this.decals.end();
     this.ground.update(now);
-    this.renderer.render(this.scene, this.camera);
+    // 移軸：全圖不模糊，拉近越多帶子外越糊
+    const blur = Math.max(0, (this.zoomT() - 0.35) / 0.65) * 2.4;
+    const pr = this.renderer.getPixelRatio();
+    (this.tiltH.uniforms.dir.value as THREE.Vector2).set(1 / (cw * pr), 0);
+    (this.tiltV.uniforms.dir.value as THREE.Vector2).set(0, 1 / (ch * pr));
+    this.tiltH.uniforms.amount.value = blur;
+    this.tiltV.uniforms.amount.value = blur;
+    this.tiltH.enabled = blur > 0;
+    this.tiltV.enabled = blur > 0;
+    this.drawFog(alpha, opt);
+    this.composer.render();
     const ctx = this.ctx;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
@@ -647,6 +718,38 @@ export class Legion3DView implements BattleView {
     this.regLayer.clear();
     for (const [reg, c] of layerCount) this.regLayer.set(reg, c[1] > c[0] && c[1] >= c[2] ? 1 : c[2] > c[0] ? 2 : 0);
     this.regTop = top;
+  }
+
+  /** 一方視角：己方軍團視野以外的地面變暗（照 2D 的做法：視野半徑 ＝ 兵種視野 ＋ 高度加成 ＋ 軍團半徑） */
+  private drawFog(alpha: number, opt: DrawOptions): void {
+    this.fog.visible = opt.viewer >= 0 && this.cur !== null;
+    if (!this.fog.visible) return;
+    const g = this.fogCanvas.getContext('2d')!;
+    const k = 2;
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
+    g.fillStyle = 'rgba(6,9,16,0.6)';
+    g.fillRect(0, 0, this.fogCanvas.width, this.fogCanvas.height);
+    g.globalCompositeOperation = 'destination-out';
+    for (const r of this.field) {
+      if (this.ownerOf[r.id] !== opt.viewer) continue;
+      const p = this.regAt(r.id, alpha);
+      if (p === null) continue;
+      const lv = this.meta.heights[Math.floor(p.y / TILE) * this.meta.width + Math.floor(p.x / TILE)] ?? 1;
+      const sight = UNITS[this.kindOf[r.id]].sight + RULES.height.sightPerLevel * Math.max(0, lv - 1);
+      const x = (p.x / TILE) * k;
+      const y = (p.y / TILE) * k;
+      const R = ((sight + r.rad) / TILE) * k;
+      const grad = g.createRadialGradient(x, y, R * 0.82, x, y, R);
+      grad.addColorStop(0, 'rgba(0,0,0,1)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(x, y, R, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+    this.fogTex.needsUpdate = true;
   }
 
   private drawFallen(): void {
