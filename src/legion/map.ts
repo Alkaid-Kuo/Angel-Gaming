@@ -60,6 +60,8 @@ export interface MapDecor {
   readonly width?: number;
   /** 外觀的變化（屋頂顏色、高矮） */
   readonly seed?: number;
+  /** 民房：茅草頂（否則是灰瓦） */
+  readonly thatch?: boolean;
 }
 
 /**
@@ -91,7 +93,7 @@ export type DecorKind =
   | 'road'
   | 'moat';
 
-type DecorMore = Pick<MapDecor, 'face' | 'storeys' | 'pts' | 'width' | 'seed'>;
+type DecorMore = Pick<MapDecor, 'face' | 'storeys' | 'pts' | 'width' | 'seed' | 'thatch'>;
 
 export interface LegionMap {
   readonly id: string;
@@ -937,9 +939,11 @@ export function stonePass(): LegionMap {
 
 /**
  * 佔點地圖「大草原」：240 × 150 格，旋轉 180° 對稱。開闊的起伏草原，騎兵有利。
- * 中央是十字路口的驛站（中央旗，2 分）；北丘、南丘各有一座烽火台遺跡（側旗，1 分），離中央約 55 格。
- * 大道從雙方陣地經過驛站連到對面；驛站往北、往南的路通到兩座山丘；陣地另有小路斜向通往較近的那座山丘。
- * 四處緩坡（2 階）、零星小樹林與一個池塘提供一點掩護，但大部分是騎兵能自由奔馳的開闊地。
+ * 三面旗排成一條西北—東南的斜線：中央是十字路口的驛站（2 分），西北丘、東南丘各有一座烽火台遺跡（1 分），離中央約 60 格；
+ * 西北丘離藍方陣地近、東南丘離紅方陣地近，中央兩邊一樣遠。
+ * 道路連成環：一條環路繞過雙方陣地與兩座烽火台丘；斜貫中央的大道把三面旗串成一線；東西大道從雙方陣地直通驛站。
+ * 四處是小塊的樹林與岩堆（瓦礫）、幾處緩坡與小丘、一個池塘；擋路的地形加起來不到全圖 5%，大部分仍是騎兵能奔馳的開闊地。
+ * 3D 畫面用的道路折線、農田、烽火台記在 decor。
  */
 export function grassland(): LegionMap {
   const w = 240;
@@ -947,57 +951,79 @@ export function grassland(): LegionMap {
   const half = idiv(h, 2);
   const terrain = new Uint8Array(w * h);
   const heights = new Uint8Array(w * h).fill(1);
+  const decor: MapDecor[] = [];
+  const W = w * TILE;
+  const H = h * TILE;
   const box = (x0: number, y0: number, x1: number, y1: number, t: number): void => {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) terrain[y * w + x] = t;
   };
-  // 以下只畫上半部（列 0～74），旋轉 180° 複製成下半部
-  // 山腳與低嶺（高度 2）：北丘、西邊小丘的山腳一圈，以及從西陣地斜向北丘的一道低嶺（西嶺）
-  const rises = [oval(126, 20, 17, 12), oval(40, 64, 10, 8), polyline([[54, 40], [72, 45], [90, 52]], 36)];
-  // 北丘（側旗所在，3～4 階）與西邊小丘
-  paint(terrain, w, h, T.Hill, oval(126, 20, 10, 7));
-  paint(terrain, w, h, T.Hill, oval(40, 64, 5, 4));
-  // 樹林：北丘西側的林子、東北的長林帶、西邊幾片小樹林
-  paint(terrain, w, h, T.Forest, ellipse(104, 22, 5, 4, 66), (c) => c === T.Plain);
-  paint(terrain, w, h, T.Forest, ellipse(158, 30, 7, 3, 67), (c) => c === T.Plain);
-  paint(terrain, w, h, T.Forest, ellipse(84, 52, 4, 3, 68), (c) => c === T.Plain);
-  paint(terrain, w, h, T.Forest, ellipse(34, 26, 4, 3, 69), (c) => c === T.Plain);
-  paint(terrain, w, h, T.Forest, ellipse(196, 66, 4, 3, 70), (c) => c === T.Plain);
+  /** 3D 外觀：上半部的一份，連同旋轉 180° 的那一份（輸入的範圍含兩端） */
+  const decoPair = (kind: DecorKind, x0: number, y0: number, x1: number, y1: number, more: DecorMore = {}): void => {
+    decor.push({ kind, x0, y0, x1: x1 + 1, y1: y1 + 1, ...more });
+    decor.push({ kind, x0: w - 1 - x1, y0: h - 1 - y1, x1: w - x0, y1: h - y0, ...more, face: more.face === undefined ? undefined : (more.face + 2) % 4 });
+  };
+  // 道路（整條畫，本來就對稱）：格子畫成道路，3D 照折線畫
+  const road = (pts: [number, number][], halfWidth2: number): void => {
+    paint(terrain, w, h, T.Road, polyline(pts, halfWidth2));
+    decor.push({ kind: 'road', x0: 0, y0: 0, x1: 0, y1: 0, pts, width: isqrt(halfWidth2) });
+  };
+  // 以下的地形只畫上半部（列 0～74），最後旋轉 180° 複製成下半部
+  // 烽火台丘（西北，側旗所在；山頂 4 階）、小丘與緩坡（2 階）
+  const flagHill = oval(80, 30, 9, 7);
+  const knolls = [oval(30, 22, 5, 4), oval(172, 36, 6, 4), oval(214, 12, 5, 3)];
+  const rises = [oval(80, 30, 15, 11), oval(46, 56, 10, 7), oval(150, 46, 12, 6), oval(196, 22, 10, 6), oval(104, 58, 6, 4)];
+  paint(terrain, w, h, T.Hill, flagHill);
+  for (const k of knolls) paint(terrain, w, h, T.Hill, k);
+  // 小塊樹林（不規則的邊）與岩堆
+  const groves: [number, number, number, number][] = [
+    [36, 40, 3, 2], [58, 18, 4, 2], [66, 48, 3, 2], [96, 40, 3, 3], [104, 10, 4, 2], [132, 32, 3, 2], [140, 56, 3, 2], [176, 10, 4, 2],
+    [192, 40, 3, 2], [206, 62, 3, 2], [92, 64, 2, 2], [44, 66, 3, 2], [226, 30, 3, 2], [16, 20, 3, 2], [124, 46, 2, 2], [160, 24, 2, 2],
+    [60, 4, 3, 2], [186, 56, 2, 2], [74, 8, 2, 1], [150, 30, 2, 2], [168, 52, 2, 2], [112, 48, 2, 1], [38, 10, 2, 1], [200, 32, 2, 1], [126, 20, 2, 1], [84, 52, 2, 2],
+  ];
+  groves.forEach(([cx, cy, rx, ry], k) => paint(terrain, w, h, T.Forest, ellipse(cx, cy, rx, ry, 80 + k), (c) => c === T.Plain || c === T.Hill));
+  const rocks: [number, number, number, number][] = [
+    [52, 28, 2, 1], [114, 34, 1, 1], [146, 14, 2, 1], [70, 62, 1, 1], [200, 50, 2, 1], [24, 56, 1, 1], [166, 64, 1, 1], [128, 8, 1, 1], [90, 18, 1, 1], [218, 66, 2, 1], [100, 30, 1, 1], [180, 44, 1, 1], [62, 40, 1, 1],
+  ];
+  rocks.forEach(([cx, cy, rx, ry], k) => paint(terrain, w, h, T.Rubble, ellipse(cx, cy, rx, ry, 120 + k), (c) => c === T.Plain || c === T.Hill));
   // 池塘（淺灘）
-  paint(terrain, w, h, T.Shallow, ellipse(72, 30, 4, 2, 71), (c) => c === T.Plain);
-  // 道路：大道（西陣地 → 驛站）、北路（驛站 → 北丘）、斜路（西陣地 → 北丘）
-  paint(terrain, w, h, T.Road, polyline([[0, 73], [36, 70], [76, 73], [119, 74]], 5), (c) => c !== T.Hill);
-  paint(terrain, w, h, T.Road, polyline([[121, 74], [123, 56], [124, 40], [125, 28]], 3), (c) => c !== T.Hill);
-  paint(terrain, w, h, T.Road, polyline([[0, 44], [44, 36], [86, 28], [116, 22]], 3), (c) => c !== T.Hill && c !== T.Shallow);
+  paint(terrain, w, h, T.Shallow, ellipse(58, 62, 3, 2, 71), (c) => c === T.Plain);
+  // 道路：斜貫中央的大道（三面旗）、東西大道（陣地 → 驛站）、繞全圖的環路
+  road([[80, 30], [100, 52], [120, 75], [140, 98], [160, 120]], 9);
+  road([[0, 75], [40, 72], [80, 76], [120, 75], [160, 74], [200, 78], [240, 75]], 9);
+  road([[12, 75], [24, 52], [50, 34], [80, 30], [112, 18], [150, 16], [186, 24], [214, 46], [228, 75], [216, 98], [190, 116], [160, 120], [128, 132], [90, 134], [54, 126], [26, 104], [12, 75]], 4);
   // 驛站：十字路口四周的房舍（中央留 7 格空地給旗圈）
-  box(109, 64, 112, 66, T.Building);
-  box(113, 60, 115, 62, T.Building);
-  box(127, 63, 130, 65, T.Building);
-  box(125, 59, 127, 60, T.Building);
-  box(132, 68, 133, 70, T.Building);
-  // 烽火台遺跡（北丘頂東側）
-  box(130, 17, 131, 18, T.Building);
+  for (const [x0, y0, x1, y1] of [[109, 64, 112, 66], [113, 60, 115, 62], [127, 63, 130, 65], [125, 59, 127, 60], [132, 68, 133, 70]] as const) {
+    box(x0, y0, x1, y1, T.Building);
+    decoPair('house', x0, y0, x1, y1, { face: y1 < 64 ? 1 : x0 > 120 ? 2 : 0, storeys: 1, seed: x0 + y0, thatch: true });
+  }
+  // 烽火台遺跡（西北丘頂東側）
+  box(84, 27, 85, 28, T.Building);
+  decoPair('ruin', 84, 27, 85, 28, { seed: 84 });
+  // 驛站外的幾塊田（3D 的地面花紋，格子仍是平地）
+  for (const [x0, y0, x1, y1] of [[90, 52, 104, 60], [136, 54, 152, 64], [100, 4, 120, 12], [196, 4, 220, 12], [4, 2, 20, 16]] as const) decoPair('field', x0, y0, x1, y1, { seed: x0 * 7 + y0 });
   // 高度
-  const hillTops = [oval(126, 20, 4, 3), oval(40, 64, 2, 2)];
+  const tops = [oval(80, 30, 4, 3)];
   for (let y = 0; y < half; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       const t = terrain[i];
-      if (t === T.Hill) heights[i] = hillTops.some((p) => p(x, y)) ? 4 : 3;
-      else if (t === T.Shallow) heights[i] = 0;
-      else if (t !== T.Building && rises.some((p) => p(x, y))) heights[i] = 2;
+      const hill = t === T.Hill || flagHill(x, y) || knolls.some((p) => p(x, y));
+      if (t === T.Shallow) heights[i] = 0;
+      else if (t === T.Building) heights[i] = flagHill(x, y) ? 3 : 1;
+      else if (hill) heights[i] = tops.some((p) => p(x, y)) ? 4 : 3;
+      else if (rises.some((p) => p(x, y))) heights[i] = 2;
     }
   }
   rotateHalf(terrain);
   rotateHalf(heights);
   const depth = RULES.deployDepthTiles;
-  const W = w * TILE;
-  const H = h * TILE;
-  const north = { x: 126500, y: 20500 };
+  const nw = { x: 80500, y: 30500 };
   const rot = (p: { x: number; y: number }, name: string): FlagPoint => ({ name, x: W - p.x, y: H - p.y });
   return finishMap({
     id: 'grassland',
     name: '大草原',
-    description: '開闊起伏的草原，騎兵有利。中央十字路口的驛站插著中央旗；北丘、南丘各有一座烽火台遺跡與側旗，離中央約 55 格。大道與小路把雙方陣地、驛站和兩座山丘連在一起；西嶺、東嶺兩道低嶺斜向山丘，另有零星小樹林與池塘。',
+    description:
+      '開闊起伏的草原，騎兵有利。三面旗排成西北—東南的斜線：中央十字路口的驛站插著中央旗，西北丘、東南丘各有一座烽火台遺跡與側旗，離中央約 60 格（西北丘靠近藍方、東南丘靠近紅方）。一條環路繞過雙方陣地與兩座烽火台丘，斜貫中央的大道把三面旗串成一線；四處是小塊樹林、岩堆與緩坡。',
     width: w,
     height: h,
     terrain,
@@ -1011,35 +1037,36 @@ export function grassland(): LegionMap {
       { x: 10000, y: H / 2 },
       { x: W - 10000, y: H / 2 },
     ],
-    // 補給站：北丘山腳東側、南丘山腳西側，歸佔著那座山丘的一方
+    // 補給站：西北丘山腳西南、東南丘山腳東北，歸佔著那座山丘的一方
     supplies: [
-      { x: north.x + 12000, y: north.y + 6000, flag: 0 },
-      { x: W - north.x - 12000, y: H - north.y - 6000, flag: 2 },
+      { x: nw.x - 12000, y: nw.y + 8000, flag: 0 },
+      { x: W - nw.x + 12000, y: H - nw.y - 8000, flag: 2 },
     ],
     flags: [
-      { name: '北丘烽火台', x: north.x, y: north.y, points: 1 },
+      { name: '西北烽火台', x: nw.x, y: nw.y, points: 1 },
       { name: '十字路口驛站', x: W / 2, y: H / 2, points: 2 },
-      { ...rot(north, '南丘烽火台'), points: 1 },
+      { ...rot(nw, '東南烽火台'), points: 1 },
     ],
     landmarks: [
-      { name: '北丘烽火台', x: north.x, y: north.y },
+      { name: '西北烽火台', x: nw.x, y: nw.y },
       { name: '十字路口驛站', x: W / 2, y: H / 2 },
-      rot(north, '南丘烽火台'),
-      { name: '北丘西側的林子', x: 104500, y: 22500 },
-      rot({ x: 104500, y: 22500 }, '南丘東側的林子'),
-      { name: '東北林帶', x: 158500, y: 30500 },
-      rot({ x: 158500, y: 30500 }, '西南林帶'),
-      { name: '西北池塘', x: 72500, y: 30500 },
-      rot({ x: 72500, y: 30500 }, '東南池塘'),
-      { name: '西邊小丘', x: 40500, y: 64500 },
-      rot({ x: 40500, y: 64500 }, '東邊小丘'),
-      { name: '西嶺', x: 72500, y: 45500 },
-      rot({ x: 72500, y: 45500 }, '東嶺'),
+      rot(nw, '東南烽火台'),
+      { name: '西北池塘', x: 58500, y: 62500 },
+      rot({ x: 58500, y: 62500 }, '東南池塘'),
+      { name: '西邊緩坡', x: 46500, y: 56500 },
+      rot({ x: 46500, y: 56500 }, '東邊緩坡'),
+      { name: '北邊緩坡', x: 150500, y: 46500 },
+      rot({ x: 150500, y: 46500 }, '南邊緩坡'),
+      { name: '東北小丘', x: 172500, y: 36500 },
+      rot({ x: 172500, y: 36500 }, '西南小丘'),
+      { name: '北環路', x: 150500, y: 16500 },
+      rot({ x: 150500, y: 16500 }, '南環路'),
       { name: '藍方陣地', x: 10000, y: H / 2 },
       { name: '紅方陣地', x: W - 10000, y: H / 2 },
     ],
     gates: [],
     defender: -1,
+    decor,
   });
 }
 

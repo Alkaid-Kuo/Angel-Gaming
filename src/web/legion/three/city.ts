@@ -518,7 +518,7 @@ export class City {
     const seed = d.seed ?? d.x0 * 31 + d.y0;
     switch (d.kind) {
       case 'house':
-        return this.house(d, roofs, things, seed, false);
+        return this.house(d, roofs, things, seed, d.thatch === true);
       case 'ruin':
         return this.ruin(d, things, seed);
       case 'hall':
