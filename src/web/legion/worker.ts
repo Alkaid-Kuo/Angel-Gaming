@@ -109,6 +109,7 @@ function begin(s: LegionSetup, replay: LegionReplay | null = null): void {
     heights: m.map.heights,
     flags: m.map.flags,
     deploy: m.map.deploy,
+    deployMask: m.map.deploy.map((_, p) => m.map.deployMask?.[p] ?? null),
     spawns: m.mode === 'capture' ? m.map.spawns : [],
     supplies: m.mode === 'capture' ? m.map.supplies : [],
     gates: m.map.gates,

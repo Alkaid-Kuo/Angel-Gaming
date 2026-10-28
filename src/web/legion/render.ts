@@ -108,10 +108,10 @@ function paintTerrain(meta: LegionMeta): HTMLCanvasElement {
     [T.Shallow]: [104, 150, 170],
     [T.River]: [44, 86, 128],
     [T.Bridge]: [120, 92, 62],
-    [T.Building]: [90, 90, 90],
-    [T.Wall]: [70, 70, 70],
-    [T.Stair]: [150, 140, 120],
-    [T.Gatehouse]: [110, 96, 80],
+    [T.Building]: [150, 82, 58],
+    [T.Wall]: [176, 168, 148],
+    [T.Stair]: [196, 182, 146],
+    [T.Gatehouse]: [150, 132, 104],
   };
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -221,19 +221,49 @@ function paintTerrain(meta: LegionMeta): HTMLCanvasElement {
       }
     }
   }
-  // 城牆：石塊與城垛；門樓：拱門；樓梯：踏階
+  // 房舍：紅瓦屋頂（屋脊亮線、南側陰影）
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (at(x, y) !== T.Building) continue;
+      const px = x * TPX;
+      const py = y * TPX;
+      g.fillStyle = 'rgba(255,210,170,0.25)';
+      g.fillRect(px, py + TPX / 2 - 1, TPX, 2);
+      if (at(x, y + 1) !== T.Building) {
+        g.fillStyle = 'rgba(20,10,5,0.45)';
+        g.fillRect(px, py + TPX - 2, TPX, 2);
+        g.fillStyle = 'rgba(0,0,0,0.25)';
+        g.fillRect(px, py + TPX, TPX, 3);
+      }
+      if (at(x - 1, y) !== T.Building) {
+        g.fillStyle = 'rgba(20,10,5,0.35)';
+        g.fillRect(px, py, 1, TPX);
+      }
+    }
+  }
+  // 城牆：亮石色的牆頂、深色外框與投影、城垛；門樓：拱門；樓梯：踏階
+  const wallish = (t: number): boolean => t === T.Wall || t === T.Gatehouse;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const t = at(x, y);
       const px = x * TPX;
       const py = y * TPX;
-      if (t === T.Wall || t === T.Gatehouse) {
-        g.fillStyle = 'rgba(255,255,255,0.10)';
-        g.fillRect(px + 1, py + 1, TPX - 2, TPX - 2);
-        g.fillStyle = 'rgba(0,0,0,0.35)';
-        g.fillRect(px, py + TPX - 2, TPX, 2);
-        g.fillStyle = 'rgba(210,210,200,0.35)';
-        for (let k = 0; k < 2; k++) g.fillRect(px + 1 + k * 5, py + 1, 3, 3);
+      if (wallish(t)) {
+        g.fillStyle = 'rgba(255,255,245,0.12)';
+        g.fillRect(px + 2, py + 2, TPX - 4, TPX - 4);
+        // 外框：和不是牆的格相鄰的那一邊畫深色線，牆的輪廓才看得清楚
+        g.fillStyle = 'rgba(40,34,26,0.9)';
+        if (!wallish(at(x, y - 1))) g.fillRect(px, py, TPX, 2);
+        if (!wallish(at(x, y + 1))) g.fillRect(px, py + TPX - 2, TPX, 2);
+        if (!wallish(at(x - 1, y))) g.fillRect(px, py, 2, TPX);
+        if (!wallish(at(x + 1, y))) g.fillRect(px + TPX - 2, py, 2, TPX);
+        g.fillStyle = 'rgba(90,82,70,0.8)';
+        for (let k = 0; k < 2; k++) g.fillRect(px + 2 + k * 4, py + 3, 2, 2);
+      }
+      // 牆的投影（往東南落在地面上）
+      if (!wallish(t) && t !== T.River && (wallish(at(x - 1, y)) || wallish(at(x, y - 1)))) {
+        g.fillStyle = 'rgba(0,0,0,0.22)';
+        g.fillRect(px, py, wallish(at(x - 1, y)) ? 3 : TPX, wallish(at(x, y - 1)) ? 3 : TPX);
       }
       if (t === T.Gatehouse) {
         g.fillStyle = 'rgba(20,12,6,0.85)';
@@ -529,7 +559,24 @@ export class LegionRenderer {
     if (f.tick < 30) {
       this.meta.deploy.forEach((z, p) => {
         ctx.fillStyle = p === 0 ? 'rgba(59,130,246,0.12)' : 'rgba(239,68,68,0.12)';
-        ctx.fillRect(this.sx(z.x0 * TILE), this.sy(z.y0 * TILE), (z.x1 - z.x0) * s, (z.y1 - z.y0) * s);
+        const mask = this.meta.deployMask[p];
+        if (mask === null) {
+          ctx.fillRect(this.sx(z.x0 * TILE), this.sy(z.y0 * TILE), (z.x1 - z.x0) * s, (z.y1 - z.y0) * s);
+          return;
+        }
+        // 不是矩形的布陣區：逐列畫連續的格
+        for (let y = z.y0; y < z.y1; y++) {
+          for (let x = z.x0; x < z.x1; ) {
+            if (mask[y * this.meta.width + x] !== 1) {
+              x += 1;
+              continue;
+            }
+            let e = x;
+            while (e < z.x1 && mask[y * this.meta.width + e] === 1) e += 1;
+            ctx.fillRect(this.sx(x * TILE), this.sy(y * TILE), (e - x) * s, s);
+            x = e;
+          }
+        }
       });
     }
     if (this.meta.mode === 'capture') this.drawDepots(f);

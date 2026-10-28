@@ -66,6 +66,8 @@ export interface LegionInitData {
     readonly heights: readonly number[];
     /** 依 playerId 的布陣區（格座標，含 x0/y0、不含 x1/y1） */
     readonly deploy: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
+    /** 依 playerId：布陣區不是整個矩形時，列優先的格遮罩（1 = 可以布陣）；null = 整個矩形都可以（攻城圖守方的城內是遮罩） */
+    readonly deployMask: readonly (readonly number[] | null)[];
     /** 旗點（佔點模式）：points = 佔領後每秒得幾分 */
     readonly flags: readonly { readonly id: number; readonly name: string; readonly x: number; readonly y: number; readonly points: number }[];
     /** 依 playerId 的出生點；補給站（歸 flag 那面旗的佔領者） */

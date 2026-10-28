@@ -89,8 +89,10 @@ export default class TemplateBot {
         // 從中線往兩側交錯排開
         const offset = (i % 2 === 0 ? 1 : -1) * Math.ceil(i / 2) * spacing;
         let y = midY + (west ? offset : -offset);
-        // 不可通行就往南找一格可以站的位置
-        for (let k = 0; k < 10 && !walkable(helpers.terrainAt(x, y)); k++) y += T;
+        // 不可通行（或不在不規則布陣區的遮罩裡）就往南找一格可以站的位置
+        const mask = data.map.deployMask[data.playerId];
+        const ok = (/** @type {number} */ yy) => walkable(helpers.terrainAt(x, yy)) && (mask === null || mask[Math.floor(yy / T) * data.map.width + Math.floor(x / T)] === 1);
+        for (let k = 0; k < 20 && !ok(y); k++) y += T;
         if (spent + this.cost[kind] > data.budget) return;
         spent += this.cost[kind];
         out.push({ type: kind, x, y, facing });

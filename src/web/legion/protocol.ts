@@ -53,6 +53,8 @@ export interface LegionMeta {
   /** 旗點（佔點模式）：points = 佔領後每秒得幾分 */
   readonly flags: readonly { readonly name: string; readonly x: number; readonly y: number; readonly points: number }[];
   readonly deploy: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
+  /** 依 playerId：不是矩形的布陣區（攻城圖的城內）；null = 整個矩形 */
+  readonly deployMask: readonly (Uint8Array | null)[];
   /** 佔點模式：依 playerId 的出生點、補給站（歸 flag 那面旗的佔領者） */
   readonly spawns: readonly { readonly x: number; readonly y: number }[];
   readonly supplies: readonly { readonly x: number; readonly y: number; readonly flag: number }[];

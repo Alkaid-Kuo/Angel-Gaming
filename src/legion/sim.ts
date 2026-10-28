@@ -529,6 +529,9 @@ export class LegionMatch {
       const y = roundHalfEven(o.y);
       const [tx, ty] = tileXY(x, y, this.map.width, this.map.height);
       if (tx < zone.x0 || tx >= zone.x1 || ty < zone.y0 || ty >= zone.y1) return reject(i, '不在布陣區內');
+      // 不是矩形的布陣區（攻城圖的城內）：還要落在遮罩裡
+      const mask = this.map.deployMask?.[p];
+      if (mask !== undefined && mask !== null && mask[ty * this.map.width + tx] !== 1) return reject(i, '不在布陣區內');
       // 層（選填，預設地面）：牆頂只有城牆、門樓、樓梯格可布陣，而且騎兵不能上牆
       const layer = o.layer === undefined ? 0 : o.layer;
       if (layer !== 0 && layer !== WALL_LAYER) return reject(i, '層只能是 0（地面）或 1（牆頂）');
@@ -3319,6 +3322,10 @@ export function legionInitData(m: LegionMap, mode: LegionMode, p: number, knobs:
       terrain: Array.from(m.terrain),
       heights: Array.from(m.heights),
       deploy: m.deploy.map((z) => ({ x0: z.x0, y0: z.y0, x1: z.x1, y1: z.y1 })),
+      deployMask: m.deploy.map((_, p) => {
+        const mask = m.deployMask?.[p];
+        return mask === undefined || mask === null ? null : Array.from(mask);
+      }),
       flags: m.flags.map((f, i) => ({ id: i, name: f.name, x: f.x, y: f.y, points: f.points })),
       spawns: m.spawns.map((q) => ({ x: q.x, y: q.y })),
       supplies: m.supplies.map((q, i) => ({ id: i, x: q.x, y: q.y, flag: q.flag })),

@@ -66,7 +66,10 @@ export class LegionCommentator {
     const west = x < (m.map.width * 1000) / 2;
     const hasRiver = m.map.terrain.includes(T.River);
     const z = m.map.deploy[m.map.defender];
-    const inCastle = z !== undefined && x >= z.x0 * 1000 && x < z.x1 * 1000 && y >= z.y0 * 1000 && y < z.y1 * 1000;
+    const mask = m.map.deployMask?.[m.map.defender] ?? null;
+    const [tx, ty] = [Math.floor(x / 1000), Math.floor(y / 1000)];
+    const inRect = z !== undefined && tx >= z.x0 && tx < z.x1 && ty >= z.y0 && ty < z.y1;
+    const inCastle = inRect && (mask === null || mask[ty * m.map.width + tx] === 1);
     const side = hasRiver ? (west ? '河西' : '河東') : m.map.defender >= 0 ? (inCastle ? '城內' : '城外') : west ? '西邊' : '東邊';
     return `${side}的${TERRAIN_NAMES[t]}`;
   }

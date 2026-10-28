@@ -53,6 +53,8 @@ export interface LegionMap {
   readonly heights: Uint8Array;
   /** 依 playerId */
   readonly deploy: readonly DeployZone[];
+  /** 依 playerId：布陣區內真正能布陣的格（1 = 可以）；null 或沒有 = 整個矩形都可以（攻城圖的城內不是矩形） */
+  readonly deployMask?: readonly (Uint8Array | null)[];
   /** 潰散時撤離的地圖邊緣（單位 x 座標）：依 playerId */
   readonly rearX: readonly number[];
   readonly flags: readonly CaptureFlag[];
@@ -424,97 +426,264 @@ export function grandValley(): LegionMap {
   };
 }
 
+/** 邊緣平滑的橢圓（不加雜湊抖動；山腳、緩坡用，看起來才像一圈圈的等高線） */
+function oval(cx: number, cy: number, rx: number, ry: number): Painter {
+  return (x, y) => (x - cx) * (x - cx) * ry * ry + (y - cy) * (y - cy) * rx * rx <= rx * rx * ry * ry;
+}
+
+/** 4 連通的直線（城牆用）：牆頂一格寬、斜牆是階梯狀，相鄰的兩格一定共用一條邊，牆外的人不會從斜縫鑽進來 */
+function line4(set: (x: number, y: number) => void, x0: number, y0: number, x1: number, y1: number): void {
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const sx = x1 > x0 ? 1 : -1;
+  const sy = y1 > y0 ? 1 : -1;
+  let x = x0;
+  let y = y0;
+  let ix = 0;
+  let iy = 0;
+  set(x, y);
+  while (ix < dx || iy < dy) {
+    if (iy >= dy || (ix < dx && (1 + 2 * ix) * dy < (1 + 2 * iy) * dx)) {
+      x += sx;
+      ix += 1;
+    } else {
+      y += sy;
+      iy += 1;
+    }
+    set(x, y);
+  }
+}
+
+/** 從 (sx, sy) 四方向淹過 pass 為真的格，回傳遮罩 */
+function floodMask(w: number, h: number, sx: number, sy: number, pass: (i: number) => boolean): Uint8Array {
+  const mask = new Uint8Array(w * h);
+  const stack = [sy * w + sx];
+  mask[sy * w + sx] = 1;
+  while (stack.length > 0) {
+    const i = stack.pop()!;
+    const x = i % w;
+    const y = (i - x) / w;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+      if (j < 0 || mask[j] === 1 || !pass(j)) continue;
+      mask[j] = 1;
+      stack.push(j);
+    }
+  }
+  return mask;
+}
+
 /**
- * 攻城地圖「石關城」：180 × 120 格。攻方（藍方，座位 0）從西邊出發；城池在東側，城牆寬一格（x 105～168、y 20～100）。
- * 三條路線：西牆正門（3 格）、北牆側門（2 格）、南牆缺口（3 格斷牆）；城內中央偏東是本陣高台，城外是一段開闊地，
- * 西北有一處樹林可以藏兵。城內側沿牆有 9 座樓梯。旗：A ＝ 正門、B ＝ 本陣。
+ * 攻城地圖「石關城」：190 × 130 格。攻方（藍方，座位 0）從西邊出發；城池在東側、背靠大河。
+ * 外城：六邊形的一格寬城牆，轉角與正門兩側是 3 × 3 的角樓（牆頂平台）；西牆前是三格寬的護城河，只有正門前有橋。
+ * 三條路線：西牆正門（3 格）、北牆側門（2 格）、南牆坍塌的缺口（3 格）；北牆、南牆可以架雲梯。
+ * 城內：從正門往東的大街、市集廣場、南北向的十字街、一區區房舍、兵營與糧倉；中央偏東是內城——
+ * 一圈有東西兩個缺口的八角形內牆，圍著本陣高台。城外：通往正門的大道、路邊村落、西北一片樹林、西南小丘。
+ * 旗：A ＝ 正門、B ＝ 本陣。
  */
 export function stonePass(): LegionMap {
-  const w = 180;
-  const h = 120;
+  const w = 190;
+  const h = 130;
   const terrain = new Uint8Array(w * h);
   const heights = new Uint8Array(w * h).fill(1);
-  const X0 = 105;
-  const X1 = 168;
-  const Y0 = 20;
-  const Y1 = 100;
-  // 城外：通往正門的道路、西北的樹林、西南的小丘
-  paint(terrain, w, h, T.Road, polyline([[0, 60], [40, 58], [80, 61], [X0 - 1, 60]], 5));
-  paint(terrain, w, h, T.Forest, ellipse(78, 32, 8, 6, 31));
-  paint(terrain, w, h, T.Hill, ellipse(62, 95, 6, 4, 32), (c) => c === T.Plain);
-  // 城牆（一格寬）
-  for (let x = X0; x <= X1; x++) {
-    terrain[Y0 * w + x] = T.Wall;
-    terrain[Y1 * w + x] = T.Wall;
+  const idx = (x: number, y: number): number => y * w + x;
+  const inMap = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < w && y < h;
+  const put = (t: number) => (x: number, y: number): void => {
+    if (inMap(x, y)) terrain[idx(x, y)] = t;
+  };
+  const box = (x0: number, y0: number, x1: number, y1: number, t: number): void => {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(t)(x, y);
+  };
+  const CY = 65;
+  // ── 東邊的大河（城池背水，河岸微彎；城牆一段直接臨河） ──
+  for (let y = 0; y < h; y++) {
+    const bank = y >= 28 && y <= 102 ? 183 : 183 + idiv(2 * isin(idiv(y * 360, 40)) + 10000, 10000) - 1;
+    for (let x = bank; x < w; x++) terrain[idx(x, y)] = T.River;
   }
-  for (let y = Y0; y <= Y1; y++) {
-    terrain[y * w + X0] = T.Wall;
-    terrain[y * w + X1] = T.Wall;
+  // ── 城外 ──
+  paint(terrain, w, h, T.Road, polyline([[0, 65], [28, 63], [58, 66], [88, 64], [114, 65]], 5));
+  paint(terrain, w, h, T.Forest, ellipse(84, 34, 9, 7, 51));
+  paint(terrain, w, h, T.Forest, ellipse(97, 27, 5, 4, 52));
+  paint(terrain, w, h, T.Hill, ellipse(66, 101, 7, 5, 53), (c) => c === T.Plain);
+  // 城外的緩坡（高度 2）：北邊一道、東南一道、西南小丘的山腳
+  const rises = [oval(98, 13, 14, 5), oval(150, 117, 16, 5), oval(66, 101, 11, 8)];
+  // 路邊村落
+  for (const [bx, by, bw, bh] of [[50, 57, 3, 2], [55, 56, 2, 3], [49, 71, 3, 2], [55, 71, 2, 2], [61, 59, 2, 2]] as const) box(bx, by, bx + bw - 1, by + bh - 1, T.Building);
+  // ── 外城牆：六邊形（西北、西南兩道斜牆），東牆臨河 ──
+  const V: [number, number][] = [[118, 44], [128, 30], [182, 30], [182, 100], [128, 100], [118, 86]];
+  for (let i = 0; i < V.length; i++) {
+    const [ax, ay] = V[i];
+    const [bx, by] = V[(i + 1) % V.length];
+    line4(put(T.Wall), ax, ay, bx, by);
   }
-  // 正門（西牆 3 格）、側門（北牆 2 格）、缺口（南牆 3 格）
-  for (let y = 59; y <= 61; y++) terrain[y * w + X0] = T.Gatehouse;
-  for (let x = 135; x <= 136; x++) terrain[Y0 * w + x] = T.Gatehouse;
-  for (let x = 125; x <= 127; x++) terrain[Y1 * w + x] = T.Plain;
-  // 城內：沿牆的樓梯（不貼門樓）、兩座建築、本陣高台
-  const stairs: [number, number][] = [[X0 + 1, 35], [X0 + 1, 50], [X0 + 1, 70], [X0 + 1, 85], [118, Y0 + 1], [155, Y0 + 1], [115, Y1 - 1], [150, Y1 - 1], [X1 - 1, 60]];
-  for (const [x, y] of stairs) terrain[y * w + x] = T.Stair;
-  for (const [bx0, by0] of [[124, 40], [124, 78]] as const) for (let y = by0; y < by0 + 3; y++) for (let x = bx0; x < bx0 + 4; x++) terrain[y * w + x] = T.Building;
-  paint(terrain, w, h, T.Hill, ellipse(145, 60, 9, 7, 33), (c) => c === T.Plain);
-  // 高度：平地 1；本陣高台與西南小丘 3、頂 4
-  const tops = [ellipse(145, 60, 4, 3, 34), ellipse(62, 95, 3, 2, 35)];
-  for (let i = 0; i < w * h; i++) {
-    if (terrain[i] !== T.Hill) continue;
+  // 角樓與門塔（3 × 3 的牆頂平台）
+  const towers: [number, number][] = [[118, 44], [128, 30], [148, 30], [172, 30], [182, 50], [182, 80], [172, 100], [154, 100], [128, 100], [118, 86], [118, 60], [118, 70]];
+  for (const [tx, ty] of towers) box(tx - 1, ty - 1, tx + 1, ty + 1, T.Wall);
+  // 正門（西牆 3 格）、北側門（2 格）、南牆缺口（3 格坍塌的斷牆）
+  box(118, CY - 1, 118, CY + 1, T.Gatehouse);
+  box(160, 30, 161, 30, T.Gatehouse);
+  const breach = { x0: 139, y0: 100, x1: 142, y1: 101 };
+  // 城內的範圍：從本陣往外淹，城牆、門樓、缺口都當邊界
+  const solid = (i: number): boolean => {
+    const t = terrain[i];
     const x = i % w;
-    heights[i] = tops.some((p) => p(x, (i - x) / w)) ? 4 : 3;
+    const y = (i - x) / w;
+    return t === T.Wall || t === T.Gatehouse || t === T.River || (y === breach.y0 && x >= breach.x0 && x < breach.x1);
+  };
+  const inside = floodMask(w, h, 154, CY, (i) => !solid(i));
+  box(breach.x0, breach.y0, breach.x1 - 1, breach.y0, T.Plain);
+  // ── 護城河：西牆前三格寬，正門前是橋 ──
+  for (let y = 47; y <= 83; y++) {
+    for (let x = 115; x <= 117; x++) {
+      if (terrain[idx(x, y)] !== T.Plain) continue;
+      terrain[idx(x, y)] = y >= CY - 1 && y <= CY + 1 ? T.Bridge : T.River;
+    }
+  }
+  // ── 城內：內城（八角形內牆、東西兩個缺口、本陣高台） ──
+  const KX = 154;
+  const IV: [number, number][] = [[KX - 4, CY - 9], [KX + 4, CY - 9], [KX + 9, CY - 4], [KX + 9, CY + 4], [KX + 4, CY + 9], [KX - 4, CY + 9], [KX - 9, CY + 4], [KX - 9, CY - 4]];
+  for (let i = 0; i < IV.length; i++) {
+    const [ax, ay] = IV[i];
+    const [bx, by] = IV[(i + 1) % IV.length];
+    line4(put(T.Wall), ax, ay, bx, by);
+  }
+  const innerGaps = [
+    { x0: KX - 9, y0: CY - 1, x1: KX - 8, y1: CY + 2 },
+    { x0: KX + 9, y0: CY - 1, x1: KX + 10, y1: CY + 2 },
+  ];
+  for (const g of innerGaps) box(g.x0, g.y0, g.x1 - 1, g.y1 - 1, T.Plain);
+  paint(terrain, w, h, T.Hill, ellipse(KX, CY, 6, 6, 54), (c) => c === T.Plain);
+  // 本陣四角的樓閣
+  for (const [bx, by] of [[KX - 5, CY - 5], [KX + 4, CY - 5], [KX - 5, CY + 4], [KX + 4, CY + 4]] as const) box(bx, by, bx + 1, by + 1, T.Building);
+  // ── 街道：五格寬的大街（正門 → 內城西缺口）、東街（內城東缺口 → 守方營地）、三格寬的十字街（北 → 南牆缺口）、側門路 ──
+  box(119, CY - 2, KX - 10, CY + 2, T.Road);
+  box(KX + 10, CY - 1, 179, CY + 1, T.Road);
+  box(135, 35, 137, 95, T.Road);
+  paint(terrain, w, h, T.Road, polyline([[136, 94], [140, 99]], 3), (c) => c === T.Plain);
+  box(160, 31, 161, 50, T.Road);
+  paint(terrain, w, h, T.Road, polyline([[160, 50], [150, 54], [137, 55]], 2), (c) => c === T.Plain);
+  // ── 建築：沿大街兩側的店鋪、四個街區的房舍、廟、馬廄、兵營、糧倉；中間留出廣場、校場與園林 ──
+  const BUILDINGS: readonly (readonly [number, number, number, number])[] = [
+    // 大街北側、南側的店鋪（大街兩旁一排，中間留巷子）
+    [130, 59, 4, 3], [139, 59, 3, 3], [130, 69, 4, 3], [139, 69, 3, 3],
+    // 西北街區：廟（大）與兩戶人家
+    [123, 43, 6, 4], [129, 50, 3, 2], [124, 52, 2, 2],
+    // 東北：馬廄、民宅一群、兵營（北牆內長屋）
+    [141, 38, 5, 3], [147, 44, 3, 2], [151, 42, 2, 3], [146, 48, 2, 2], [166, 35, 11, 3],
+    // 西南街區：民宅一群
+    [123, 79, 3, 2], [127, 81, 2, 3], [123, 84, 3, 2], [129, 76, 2, 2],
+    // 東南：民宅、糧倉（南牆內長屋）
+    [142, 81, 3, 3], [146, 79, 2, 2], [148, 84, 3, 2], [166, 92, 11, 3],
+  ];
+  for (const [bx, by, bw, bh] of BUILDINGS) box(bx, by, bx + bw - 1, by + bh - 1, T.Building);
+  // 園林（城內的小樹林）：西南的果園、東南的林苑
+  paint(terrain, w, h, T.Forest, ellipse(126, 91, 3, 2, 57), (c) => c === T.Plain);
+  paint(terrain, w, h, T.Forest, ellipse(172, 80, 4, 3, 58), (c) => c === T.Plain);
+  const near = (x: number, y: number, r: number, t: number): boolean => {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (inMap(x + dx, y + dy) && terrain[idx(x + dx, y + dy)] === t) return true;
+    return false;
+  };
+  // ── 樓梯：沿外牆內側與內牆內側（貼牆、不貼門樓、不壓街道與房舍） ──
+  const stairAt = (px: number, py: number, ward: (x: number, y: number) => boolean): void => {
+    let best = -1;
+    let bestD = Infinity;
+    for (let y = py - 4; y <= py + 4; y++) {
+      for (let x = px - 4; x <= px + 4; x++) {
+        if (!inMap(x, y) || terrain[idx(x, y)] !== T.Plain || !ward(x, y)) continue;
+        const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => (inMap(x + dx, y + dy) ? terrain[idx(x + dx, y + dy)] : -1));
+        if (!nb.includes(T.Wall) || nb.includes(T.Gatehouse) || near(x, y, 1, T.Stair)) continue;
+        const d = (x - px) * (x - px) + (y - py) * (y - py);
+        if (d < bestD) {
+          bestD = d;
+          best = idx(x, y);
+        }
+      }
+    }
+    if (best >= 0) terrain[best] = T.Stair;
+  };
+  const outerWard = (x: number, y: number): boolean => inside[idx(x, y)] === 1 && (Math.abs(x - KX) > 10 || Math.abs(y - CY) > 10);
+  const innerWard = (x: number, y: number): boolean => Math.abs(x - KX) <= 8 && Math.abs(y - CY) <= 8;
+  for (const [sx, sy] of [[120, 58], [120, 72], [120, 50], [120, 80], [124, 37], [124, 93], [140, 31], [168, 31], [148, 99], [168, 99], [181, 44], [181, 86]] as const) stairAt(sx, sy, outerWard);
+  for (const [sx, sy] of [[KX, CY - 8], [KX, CY + 8]] as const) stairAt(sx, sy, innerWard);
+  // ── 高度：城內的台地與城牆 2、內城高台 3～4（頂 4）、護城河與大河 0、橋 1、西南小丘 3 ──
+  const keepTop = ellipse(KX, CY, 3, 3, 55);
+  const hillTop = ellipse(66, 101, 3, 2, 56);
+  for (let i = 0; i < w * h; i++) {
+    const t = terrain[i];
+    const x = i % w;
+    const y = (i - x) / w;
+    if (t === T.River) heights[i] = 0;
+    else if (t === T.Bridge) heights[i] = 1;
+    else if (inside[i] === 1 || t === T.Wall || t === T.Gatehouse || (y === breach.y0 && x >= breach.x0 && x < breach.x1)) heights[i] = t === T.Hill ? (keepTop(x, y) ? 4 : 3) : 2;
+    else if (t === T.Hill) heights[i] = hillTop(x, y) ? 4 : 3;
+    else if (t !== T.Building && rises.some((p) => p(x, y))) heights[i] = 2;
+  }
+  // ── 守方布陣區：城內（含城牆、門樓、樓梯、缺口） ──
+  const defMask = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const x = i % w;
+    const y = (i - x) / w;
+    const t = terrain[i];
+    if (x < 117 || x > 183 || y < 28 || y > 102) continue;
+    if (inside[i] === 1 || t === T.Wall || t === T.Gatehouse || (y === breach.y0 && x >= breach.x0 && x < breach.x1)) defMask[i] = 1;
   }
   const depth = RULES.deployDepthTiles;
-  const T1 = TILE;
   return finishMap({
     id: 'stone-pass',
     name: '石關城',
-    description: '城池在東側，西牆正門朝攻方；北牆另有側門、南牆有一段缺口，攻方共三條路線。城內中央偏東是本陣高台，城外是一段開闊地，西北有一處樹林可以藏兵。',
+    description: '背靠大河的六角城池：西牆正門朝攻方、前有護城河與橋，北牆有側門、南牆有一段坍塌的缺口；城內有大街、市集、房舍與兵營，中央偏東是圍著內牆的本陣高台。城外是開闊的原野、路邊村落與西北的樹林。',
     width: w,
     height: h,
     terrain,
     heights,
     deploy: [
       { x0: 0, y0: 0, x1: depth, y1: h },
-      { x0: X0, y0: Y0, x1: X1 + 1, y1: Y1 + 1 },
+      { x0: 117, y0: 28, x1: 184, y1: 103 },
     ],
-    rearX: [0, w * T1],
+    deployMask: [null, defMask],
+    rearX: [0, w * TILE],
     spawns: [
-      { x: 10000, y: 60000 },
-      { x: 160000, y: 60500 },
+      { x: 10000, y: 65000 },
+      { x: 172500, y: 65500 },
     ],
     supplies: [],
     flags: [
-      { name: '正門', x: X0 * T1 + 500, y: 60500, points: 0 },
-      { name: '本陣', x: 145500, y: 60500, points: 0 },
+      { name: '正門', x: 118500, y: 65500, points: 0 },
+      { name: '本陣', x: KX * TILE + 500, y: 65500, points: 0 },
     ],
     landmarks: [
-      { name: '正門', x: X0 * T1 + 500, y: 60500 },
-      { name: '北側門', x: 136000, y: Y0 * T1 + 500 },
-      { name: '南牆缺口', x: 126500, y: Y1 * T1 + 500 },
-      { name: '本陣高台', x: 145500, y: 60500 },
-      { name: '西北樹林', x: 78500, y: 32500 },
-      { name: '西南小丘', x: 62500, y: 95500 },
-      { name: '攻方陣地', x: 10000, y: 60000 },
+      { name: '正門', x: 118500, y: 65500 },
+      { name: '護城河橋', x: 116000, y: 65500 },
+      { name: '市集廣場', x: 124500, y: 65500 },
+      { name: '十字街', x: 137000, y: 65500 },
+      { name: '北側門', x: 161000, y: 30500 },
+      { name: '南牆缺口', x: 140500, y: 100500 },
+      { name: '內城', x: KX * TILE + 500, y: 65500 },
+      { name: '北兵營', x: 172000, y: 36500 },
+      { name: '南糧倉', x: 172000, y: 94500 },
+      { name: '西北角樓', x: 123000, y: 37000 },
+      { name: '西南角樓', x: 123000, y: 93000 },
+      { name: '西北樹林', x: 86500, y: 32500 },
+      { name: '路邊村落', x: 55500, y: 64500 },
+      { name: '西南小丘', x: 66500, y: 101500 },
+      { name: '攻方陣地', x: 10000, y: 65000 },
     ],
     gates: [
-      { x0: X0, y0: 59, x1: X0 + 1, y1: 62, kind: 'main' },
-      { x0: 135, y0: Y0, x1: 137, y1: Y0 + 1, kind: 'side' },
+      { x0: 118, y0: CY - 1, x1: 119, y1: CY + 2, kind: 'main' },
+      { x0: 160, y0: 30, x1: 162, y1: 31, kind: 'side' },
     ],
-    breaches: [{ x0: 125, y0: Y1, x1: 128, y1: Y1 + 1 }],
+    breaches: [breach, ...innerGaps],
     defender: 1,
-    ram: { x: 16000, y: 60500, facing: 0 },
+    ram: { x: 16000, y: 65500, facing: 0 },
     bombardFrom: 180,
-    siegeEntry: { x: (X0 - 5) * T1 + 500, y: 60500 },
+    siegeEntry: { x: 108500, y: 65500 },
   });
 }
 
 /**
- * 佔點地圖「大草原」：240 × 150 格，旋轉 180° 對稱。開闊、少障礙，騎兵有利；三面旗南北拉開
- * （側旗離中央旗約 57 格，比大河谷的 48 格遠），讓「守兩旗還是搶三旗」是真的選擇。幾片小樹林與緩丘。
+ * 佔點地圖「大草原」：240 × 150 格，旋轉 180° 對稱。開闊的起伏草原，騎兵有利。
+ * 中央是十字路口的驛站（中央旗，2 分）；北丘、南丘各有一座烽火台遺跡（側旗，1 分），離中央約 55 格。
+ * 大道從雙方陣地經過驛站連到對面；驛站往北、往南的路通到兩座山丘；陣地另有小路斜向通往較近的那座山丘。
+ * 四處緩坡（2 階）、零星小樹林與一個池塘提供一點掩護，但大部分是騎兵能自由奔馳的開闊地。
  */
 export function grassland(): LegionMap {
   const w = 240;
@@ -522,19 +691,44 @@ export function grassland(): LegionMap {
   const half = idiv(h, 2);
   const terrain = new Uint8Array(w * h);
   const heights = new Uint8Array(w * h).fill(1);
-  // 上半部繪製（旋轉後成為下半部）
-  paint(terrain, w, h, T.Forest, ellipse(84, 40, 7, 5, 41));
-  paint(terrain, w, h, T.Forest, ellipse(168, 54, 6, 4, 42));
-  paint(terrain, w, h, T.Forest, ellipse(40, 16, 5, 4, 43));
-  paint(terrain, w, h, T.Hill, ellipse(120, 44, 8, 5, 44), (c) => c === T.Plain);
-  paint(terrain, w, h, T.Hill, ellipse(60, 66, 6, 4, 45), (c) => c === T.Plain);
-  paint(terrain, w, h, T.Road, polyline([[0, 30], [60, 24], [126, 18]], 3), (c) => c !== T.Hill);
-  const tops = [ellipse(120, 44, 3, 2, 46), ellipse(60, 66, 2, 2, 47)];
+  const box = (x0: number, y0: number, x1: number, y1: number, t: number): void => {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) terrain[y * w + x] = t;
+  };
+  // 以下只畫上半部（列 0～74），旋轉 180° 複製成下半部
+  // 山腳與低嶺（高度 2）：北丘、西邊小丘的山腳一圈，以及從西陣地斜向北丘的一道低嶺（西嶺）
+  const rises = [oval(126, 20, 17, 12), oval(40, 64, 10, 8), polyline([[54, 40], [72, 45], [90, 52]], 36)];
+  // 北丘（側旗所在，3～4 階）與西邊小丘
+  paint(terrain, w, h, T.Hill, oval(126, 20, 10, 7));
+  paint(terrain, w, h, T.Hill, oval(40, 64, 5, 4));
+  // 樹林：北丘西側的林子、東北的長林帶、西邊幾片小樹林
+  paint(terrain, w, h, T.Forest, ellipse(104, 22, 5, 4, 66), (c) => c === T.Plain);
+  paint(terrain, w, h, T.Forest, ellipse(158, 30, 7, 3, 67), (c) => c === T.Plain);
+  paint(terrain, w, h, T.Forest, ellipse(84, 52, 4, 3, 68), (c) => c === T.Plain);
+  paint(terrain, w, h, T.Forest, ellipse(34, 26, 4, 3, 69), (c) => c === T.Plain);
+  paint(terrain, w, h, T.Forest, ellipse(196, 66, 4, 3, 70), (c) => c === T.Plain);
+  // 池塘（淺灘）
+  paint(terrain, w, h, T.Shallow, ellipse(72, 30, 4, 2, 71), (c) => c === T.Plain);
+  // 道路：大道（西陣地 → 驛站）、北路（驛站 → 北丘）、斜路（西陣地 → 北丘）
+  paint(terrain, w, h, T.Road, polyline([[0, 73], [36, 70], [76, 73], [119, 74]], 5), (c) => c !== T.Hill);
+  paint(terrain, w, h, T.Road, polyline([[121, 74], [123, 56], [124, 40], [125, 28]], 3), (c) => c !== T.Hill);
+  paint(terrain, w, h, T.Road, polyline([[0, 44], [44, 36], [86, 28], [116, 22]], 3), (c) => c !== T.Hill && c !== T.Shallow);
+  // 驛站：十字路口四周的房舍（中央留 7 格空地給旗圈）
+  box(109, 64, 112, 66, T.Building);
+  box(113, 60, 115, 62, T.Building);
+  box(127, 63, 130, 65, T.Building);
+  box(125, 59, 127, 60, T.Building);
+  box(132, 68, 133, 70, T.Building);
+  // 烽火台遺跡（北丘頂東側）
+  box(130, 17, 131, 18, T.Building);
+  // 高度
+  const hillTops = [oval(126, 20, 4, 3), oval(40, 64, 2, 2)];
   for (let y = 0; y < half; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      if (terrain[i] === T.Hill) heights[i] = tops.some((p) => p(x, y)) ? 4 : 3;
-      else if (terrain[i] === T.Plain && (x - 120) * (x - 120) + 9 * (y - 44) * (y - 44) <= 1440) heights[i] = 2;
+      const t = terrain[i];
+      if (t === T.Hill) heights[i] = hillTops.some((p) => p(x, y)) ? 4 : 3;
+      else if (t === T.Shallow) heights[i] = 0;
+      else if (t !== T.Building && rises.some((p) => p(x, y))) heights[i] = 2;
     }
   }
   rotateHalf(terrain);
@@ -542,12 +736,12 @@ export function grassland(): LegionMap {
   const depth = RULES.deployDepthTiles;
   const W = w * TILE;
   const H = h * TILE;
-  const north = { x: 126500, y: 18500 };
+  const north = { x: 126500, y: 20500 };
   const rot = (p: { x: number; y: number }, name: string): FlagPoint => ({ name, x: W - p.x, y: H - p.y });
   return finishMap({
     id: 'grassland',
     name: '大草原',
-    description: '開闊少障礙的草原，騎兵有利。三面旗南北拉開，側旗離中央旗約 57 格；幾片小樹林與緩丘。',
+    description: '開闊起伏的草原，騎兵有利。中央十字路口的驛站插著中央旗；北丘、南丘各有一座烽火台遺跡與側旗，離中央約 55 格。大道與小路把雙方陣地、驛站和兩座山丘連在一起；西嶺、東嶺兩道低嶺斜向山丘，另有零星小樹林與池塘。',
     width: w,
     height: h,
     terrain,
@@ -561,24 +755,30 @@ export function grassland(): LegionMap {
       { x: 10000, y: H / 2 },
       { x: W - 10000, y: H / 2 },
     ],
-    // 補給站：北旗往東 10 格、南旗往西 10 格，歸佔著那面旗的一方
+    // 補給站：北丘山腳東側、南丘山腳西側，歸佔著那座山丘的一方
     supplies: [
-      { x: north.x + 10000, y: north.y, flag: 0 },
-      { x: W - north.x - 10000, y: H - north.y, flag: 2 },
+      { x: north.x + 12000, y: north.y + 6000, flag: 0 },
+      { x: W - north.x - 12000, y: H - north.y - 6000, flag: 2 },
     ],
     flags: [
-      { name: '北丘', x: north.x, y: north.y, points: 1 },
-      { name: '中央草場', x: W / 2, y: H / 2, points: 2 },
-      { ...rot(north, '南丘'), points: 1 },
+      { name: '北丘烽火台', x: north.x, y: north.y, points: 1 },
+      { name: '十字路口驛站', x: W / 2, y: H / 2, points: 2 },
+      { ...rot(north, '南丘烽火台'), points: 1 },
     ],
     landmarks: [
-      { name: '北丘', x: north.x, y: north.y },
-      { name: '中央草場', x: W / 2, y: H / 2 },
-      rot(north, '南丘'),
-      { name: '北緩丘', x: 120500, y: 44500 },
-      rot({ x: 120500, y: 44500 }, '南緩丘'),
-      { name: '西北樹林', x: 84500, y: 40500 },
-      rot({ x: 84500, y: 40500 }, '東南樹林'),
+      { name: '北丘烽火台', x: north.x, y: north.y },
+      { name: '十字路口驛站', x: W / 2, y: H / 2 },
+      rot(north, '南丘烽火台'),
+      { name: '北丘西側的林子', x: 104500, y: 22500 },
+      rot({ x: 104500, y: 22500 }, '南丘東側的林子'),
+      { name: '東北林帶', x: 158500, y: 30500 },
+      rot({ x: 158500, y: 30500 }, '西南林帶'),
+      { name: '西北池塘', x: 72500, y: 30500 },
+      rot({ x: 72500, y: 30500 }, '東南池塘'),
+      { name: '西邊小丘', x: 40500, y: 64500 },
+      rot({ x: 40500, y: 64500 }, '東邊小丘'),
+      { name: '西嶺', x: 72500, y: 45500 },
+      rot({ x: 72500, y: 45500 }, '東嶺'),
       { name: '藍方陣地', x: 10000, y: H / 2 },
       { name: '紅方陣地', x: W - 10000, y: H / 2 },
     ],
@@ -721,8 +921,15 @@ export function mapFeatures(m: LegionMap): MapFeatures {
   const stairs: MapFeatures['stairs'][number][] = [];
   for (let i = 0; i < w * h; i++) if (terrain[i] === T.Stair) stairs.push({ x: c(i % w), y: c((i - (i % w)) / w) });
   const chokes: MapFeatures['chokes'][number][] = [];
+  // 橋與淺灘：要接著河流才算渡口（草原上的池塘不是隘口）
+  const touchesRiver = (comp: readonly number[]): boolean =>
+    comp.some((i) => {
+      const x = i % w;
+      return (x > 0 && terrain[i - 1] === T.River) || (x < w - 1 && terrain[i + 1] === T.River) || (i >= w && terrain[i - w] === T.River) || (i + w < w * h && terrain[i + w] === T.River);
+    });
   for (const [t, kind] of [[T.Bridge, 'bridge'], [T.Shallow, 'ford']] as const) {
     for (const comp of components(w, h, (i) => terrain[i] === t)) {
+      if (!touchesRiver(comp)) continue;
       const b = blob(w, comp);
       chokes.push({ x: b.x, y: b.y, width: Math.min(b.bw, b.bh), kind });
     }

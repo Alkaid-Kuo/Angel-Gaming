@@ -489,7 +489,7 @@ export class LegionScreen {
         <div class="lu-units">${[...counts]
           .map(([k, c]) => `<div class="lu-unit"><span class="ic" style="background:${p.color}">${unitSvg(k, 20, '#fff')}</span><span>${UNITS[k].name}</span><b>× ${c}</b><span class="muted small">${UNITS[k].cost} 點／${UNITS[k].men} 人</span></div>`)
           .join('')}</div>
-        <div class="lu-total"><b>${p.cost}</b> / ${this.meta.mode === 'capture' ? RULES.capture.budget : RULES.budget} 點・${regs.length} 團・${men} 人</div>
+        <div class="lu-total"><b>${p.cost}</b> / ${(this.meta.mode === 'capture' ? RULES.capture.budget : this.meta.mode === 'siege' ? SIEGE.budget : RULES.budget)} 點・${regs.length} 團・${men} 人</div>
         ${rej.length ? `<div class="warn small">有 ${rej.length} 團布陣失敗：${esc(rej.map((x) => x.reason).join('、'))}</div>` : ''}
       </div>`;
     };
@@ -497,7 +497,7 @@ export class LegionScreen {
     const hidden = (i: number): string => `<div class="lu-side t${i}"><div class="lu-head" style="border-color:${this.meta.players[i].color}"><b>${esc(this.meta.players[i].side)}</b><span class="bot">${esc(this.meta.players[i].bot)}</span></div><p class="muted">對手的陣容開戰後才看得到。</p></div>`;
     this.el.lineup.innerHTML = `<div class="lu">
       <h2>開戰前陣容</h2>
-      <p class="muted">${ps >= 0 ? '你指揮藍方。左鍵選取、右鍵移動或攻擊，快捷鍵見右下；暫停中也可以下指令。' : `雙方各有 ${this.meta.mode === 'capture' ? RULES.capture.budget : RULES.budget} 點，在<b>看不到對手</b>的情況下選兵、布陣。觀眾是上帝視角：埋伏在樹林裡的軍團會以黃色虛線框標示。`}</p>
+      <p class="muted">${ps >= 0 ? '你指揮藍方。左鍵選取、右鍵移動或攻擊，快捷鍵見右下；暫停中也可以下指令。' : `雙方各有 ${(this.meta.mode === 'capture' ? RULES.capture.budget : this.meta.mode === 'siege' ? SIEGE.budget : RULES.budget)} 點，在<b>看不到對手</b>的情況下選兵、布陣。觀眾是上帝視角：埋伏在樹林裡的軍團會以黃色虛線框標示。`}</p>
       <div class="lu-cols">${side(0)}<div class="lu-vs">VS</div>${ps === 0 ? hidden(1) : side(1)}</div>
       <div class="lu-foot"><button class="primary" data-act="start">開戰 <span data-el="countdown"></span></button><button data-act="help">規則說明</button></div>
     </div>`;
