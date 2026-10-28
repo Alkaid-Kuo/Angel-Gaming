@@ -1,108 +1,12 @@
-// 3D 沙盤的士兵（先求看得懂，造型之後再換）：每種兵一個「人物」InstancedMesh（中性色）與一個「隊伍色」InstancedMesh（底座、盾面、馬衣），
-// 兩者共用同一組矩陣。槍林（長槍放平）、盾牆（盾舉高並排）各有一個姿勢；倒地的人側躺；潰散整團調灰、不畫底座。
+// 3D 沙盤的士兵：每種兵 × 姿勢一個「人物」InstancedMesh（中性色）與一個「隊伍色」InstancedMesh（底座、盾面、馬衣、肩甲），
+// 兩者共用同一組矩陣；造型在 unitModels.ts。槍林（長槍放平）、盾牆（盾加寬並排）各有一個姿勢；倒地的人側躺；潰散整團調灰、不畫底座。
 import * as THREE from 'three';
 import type { UnitKind } from '../../../legion/config.ts';
 import { Builder } from './builder.ts';
-import { PAL, col } from './palette.ts';
+import { col } from './palette.ts';
+import { figureGeometry, teamGeometry, type Pose } from './unitModels.ts';
 
-export type Pose = 'stand' | 'brace' | 'wall';
-
-const CLOTH: Record<UnitKind, number> = {
-  spear: 0x8a7a5c,
-  sword: 0x8f9398,
-  shield: 0x7d6b52,
-  archer: 0x6f5d40,
-  light: 0x8c7a58,
-  lightCav: 0x7f7058,
-  heavyCav: 0x8f9398,
-};
-
-const METAL = 0xa7adb4;
-const POLE = 0x6a5134;
-
-/** 步兵的人：腿、身、頭、盔；正面朝 +x */
-function infantry(b: Builder, kind: UnitKind, y = 0): void {
-  const cloth = col(CLOTH[kind]);
-  b.box(-0.05, y, -0.08, 0.05, y + 0.26, 0.08, col(0x5c4b3b));
-  b.box(-0.07, y + 0.26, -0.11, 0.07, y + 0.48, 0.11, cloth);
-  b.box(-0.05, y + 0.48, -0.05, 0.05, y + 0.58, 0.05, col(PAL.skin));
-  b.box(-0.06, y + 0.56, -0.06, 0.06, y + 0.62, 0.06, col(kind === 'archer' || kind === 'light' ? 0x6b5538 : METAL));
-}
-
-/** 人物（不含隊伍色的部分） */
-function figure(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
-  const b = new Builder();
-  const pole = col(POLE);
-  const metal = col(METAL);
-  if (kind === 'lightCav' || kind === 'heavyCav') {
-    const horse = col(kind === 'heavyCav' ? 0x5a4632 : 0x6b4a2f);
-    const s = kind === 'heavyCav' ? 1.1 : 1;
-    b.box(-0.28 * s, 0.3, -0.09 * s, 0.24 * s, 0.5, 0.09 * s, horse);
-    for (const [lx, lz] of [
-      [-0.22, -0.06],
-      [-0.22, 0.06],
-      [0.18, -0.06],
-      [0.18, 0.06],
-    ]) b.box(lx * s - 0.025, 0, lz * s - 0.025, lx * s + 0.025, 0.32, lz * s + 0.025, horse);
-    b.box(0.2 * s, 0.42, -0.05, 0.32 * s, 0.66, 0.05, horse);
-    b.box(0.28 * s, 0.58, -0.045, 0.42 * s, 0.68, 0.045, horse);
-    b.box(-0.34 * s, 0.32, -0.02, -0.28 * s, 0.48, 0.02, col(0x3f2b1b));
-    infantry(b, kind, 0.42);
-    const len = kind === 'heavyCav' ? 1.3 : 0.95;
-    b.box(-0.1, 0.72, 0.12, len - 0.1, 0.75, 0.15, pole);
-    b.box(len - 0.12, 0.71, 0.11, len, 0.76, 0.16, metal);
-    return b.geometry();
-  }
-  infantry(b, kind);
-  switch (kind) {
-    case 'spear':
-      if (pose === 'brace') {
-        b.box(-0.3, 0.36, 0.12, 1.4, 0.39, 0.15, pole);
-        b.box(1.4, 0.355, 0.115, 1.52, 0.395, 0.155, metal);
-      } else {
-        b.box(0.02, 0, 0.12, 0.05, 1.8, 0.15, pole);
-        b.box(0.01, 1.8, 0.115, 0.06, 1.92, 0.155, metal);
-      }
-      break;
-    case 'sword':
-      b.box(0.06, 0.3, 0.12, 0.09, 0.62, 0.14, metal);
-      break;
-    case 'archer':
-      b.box(0.08, 0.2, -0.16, 0.1, 0.75, -0.14, pole);
-      b.box(-0.12, 0.3, 0.02, -0.07, 0.6, 0.08, col(0x4a3a2a));
-      break;
-    case 'light':
-      b.box(0.0, 0.2, 0.12, 0.02, 0.95, 0.14, pole);
-      b.box(0.04, 0.2, 0.12, 0.06, 0.92, 0.14, pole);
-      break;
-    default:
-      break;
-  }
-  return b.geometry();
-}
-
-/** 隊伍色的部分（白色，實際顏色由 instanceColor 給）：底座、盾面、馬衣 */
-function teamParts(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
-  const b = new Builder();
-  const white = new THREE.Color(1, 1, 1);
-  const rim = new THREE.Color(0.45, 0.45, 0.45);
-  if (kind === 'lightCav' || kind === 'heavyCav') {
-    const s = kind === 'heavyCav' ? 1.1 : 1;
-    b.box(-0.39 * s, 0, -0.22 * s, 0.39 * s, 0.035, 0.22 * s, rim, white);
-    if (kind === 'heavyCav') b.box(-0.26, 0.22, -0.11, 0.26, 0.47, 0.11, white);
-    else b.box(-0.1, 0.5, -0.1, 0.1, 0.52, 0.1, white);
-    return b.geometry();
-  }
-  if (kind === 'archer' || kind === 'light') {
-    b.prism(0, 0, 0, 0.035, kind === 'archer' ? 0.2 : 0.17, kind === 'archer' ? 0.2 : 0.17, 10, rim);
-    b.prism(0, 0, 0.035, 0.04, 0.17, 0.17, 10, white);
-  } else b.box(-0.2, 0, -0.2, 0.2, 0.035, 0.2, rim, white);
-  if (kind === 'shield') {
-    if (pose === 'wall') b.box(0.12, 0.05, -0.26, 0.17, 0.7, 0.26, white);
-    else b.box(0.12, 0.1, -0.16, 0.16, 0.55, 0.16, white);
-  } else if (kind === 'sword') b.prism(0.12, -0.13, 0.3, 0.32, 0.09, 0.09, 8, white, 0, true);
-  return b.geometry();
-}
+export type { Pose } from './unitModels.ts';
 
 interface Layer {
   readonly fig: THREE.InstancedMesh;
@@ -141,8 +45,8 @@ export class Soldiers {
       if (n <= 0) continue;
       const poses: Pose[] = kind === 'spear' ? ['stand', 'brace'] : kind === 'shield' ? ['stand', 'wall'] : ['stand'];
       for (const pose of poses) {
-        const fig = new THREE.InstancedMesh(figure(kind, pose), this.figMat, n);
-        const team = new THREE.InstancedMesh(teamParts(kind, pose), this.teamMat, n);
+        const fig = new THREE.InstancedMesh(figureGeometry(kind, pose), this.figMat, n);
+        const team = new THREE.InstancedMesh(teamGeometry(kind, pose), this.teamMat, n);
         for (const im of [fig, team]) {
           im.castShadow = true;
           im.receiveShadow = true;
