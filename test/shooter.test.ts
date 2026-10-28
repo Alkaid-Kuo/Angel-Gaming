@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { cdegDiff, iatan2, iatan2C, icosC, isinC } from '../src/shared/geom.ts';
 import { iatan2 as legionIatan2 } from '../src/legion/geom.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
-import { SCENARIOS } from '../src/shooter/acceptance.ts';
-import { FRIENDLY_FIRE_PCT, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS } from '../src/shooter/config.ts';
+import { ECONOMY_SCENARIOS, SCENARIOS } from '../src/shooter/acceptance.ts';
+import { ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS } from '../src/shooter/config.ts';
 import { applyPercent } from '../src/shared/intmath.ts';
 import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
@@ -338,7 +338,7 @@ describe('友軍傷害與狙擊鏡', () => {
     expect(m.players[5].hp).toBe(100);
   });
 
-  it('隊殺不算擊殺數', () => {
+  it('隊殺不算擊殺數、扣 300', () => {
     const m = live();
     const [x, y] = at(106, 80);
     m.teleport(0, x, y, 270);
@@ -349,6 +349,7 @@ describe('友軍傷害與狙擊鏡', () => {
     m.step();
     expect(m.players[1].alive).toBe(false);
     expect(m.players[0].kills).toBe(0);
+    expect(m.players[0].money).toBe(ECONOMY.startMoney + ECONOMY.teamKillPenalty);
     expect(m.kills.at(-1)).toMatchObject({ killer: 0, victim: 1 });
   });
 
@@ -392,6 +393,209 @@ describe('友軍傷害與狙擊鏡', () => {
 
 describe('回合勝利條件與回合流程（驗收情境）', () => {
   for (const s of SCENARIOS) {
+    it(`${s.id} ${s.name}：${s.expect}`, () => {
+      const r = s.run();
+      expect(r.pass, r.detail).toBe(true);
+    });
+  }
+});
+
+describe('購買', () => {
+  /** 凍結時間、人在出生區、每人 16000 */
+  const rich = (opts: Partial<ShooterMatchOptions> = {}): ShooterMatch => new ShooterMatch({ seed: 3, startMoney: 16000, ...opts });
+  const T0 = 0;
+  const CT0 = TEAM_SIZE;
+
+  it('槽位替換：買新槍把舊槍丟在腳邊（可撿），手槍被換掉不退錢', () => {
+    const m = rich();
+    const p = m.players[T0];
+    m.applyCommands(T0, [{ type: 'buy', items: ['smg', 'ak', 'deagle'] }]);
+    expect(p.primary?.id).toBe('ak');
+    expect(p.secondary?.id).toBe('deagle');
+    expect(p.money).toBe(16000 - WEAPONS.smg.price - WEAPONS.ak.price - WEAPONS.deagle.price);
+    expect(m.items.map((i) => i.weapon?.id).sort()).toEqual(['pistol', 'smg']);
+    expect(m.items.every((i) => i.x === p.x && i.y === p.y)).toBe(true);
+    // 別人撿得起來
+    m.teleport(1, p.x, p.y);
+    m.applyCommands(1, [{ type: 'pickup' }]);
+    expect(m.items.length).toBe(1);
+  });
+
+  it('錢不夠的項目跳過，其餘照買', () => {
+    const m = new ShooterMatch({ seed: 3 });
+    const p = m.players[T0];
+    m.applyCommands(T0, [{ type: 'buy', items: ['ak', 'armor', 'flash'] }]);
+    expect(p.primary).toBeNull();
+    expect(p.armor).toBe(ARMOR.points);
+    expect(p.money).toBe(ECONOMY.startMoney - ARMOR.price);
+    expect(p.grenades).toEqual([]);
+  });
+
+  it('陣營限制：T 只能買 AK、燃燒瓶；CT 才能買 M4、拆彈器、燃燒彈', () => {
+    const m = rich();
+    m.applyCommands(T0, [{ type: 'buy', items: ['m4', 'kit', 'incendiary'] }]);
+    expect(m.players[T0].money).toBe(16000);
+    m.applyCommands(T0, [{ type: 'buy', items: ['ak', 'molotov'] }]);
+    expect(m.players[T0].primary?.id).toBe('ak');
+    expect(m.players[T0].grenades).toEqual(['molotov']);
+    m.applyCommands(CT0, [{ type: 'buy', items: ['ak', 'molotov', 'pistol', 'knife', 'nope'] }]);
+    expect(m.players[CT0].money).toBe(16000);
+    m.applyCommands(CT0, [{ type: 'buy', items: ['m4', 'kit', 'kit', 'incendiary'] }]);
+    const ct = m.players[CT0];
+    expect(ct.primary?.id).toBe('m4');
+    expect(ct.kit).toBe(true);
+    expect(ct.money).toBe(16000 - WEAPONS.m4.price - DEFUSE_KIT.price - GRENADES.incendiary.price);
+  });
+
+  it('護甲已滿不重複扣錢', () => {
+    const m = rich();
+    m.applyCommands(T0, [{ type: 'buy', items: ['armor'] }]);
+    m.applyCommands(T0, [{ type: 'buy', items: ['armor', 'armor'] }]);
+    expect(m.players[T0].money).toBe(16000 - ARMOR.price);
+    const full = rich({ defaultArmor: 100 });
+    full.applyCommands(T0, [{ type: 'buy', items: ['armor'] }]);
+    expect(full.players[T0].money).toBe(16000);
+  });
+
+  it('道具：同種上限（閃光 2）與總格數 4', () => {
+    const m = rich();
+    m.applyCommands(T0, [{ type: 'buy', items: ['flash', 'flash', 'flash', 'smoke', 'smoke', 'he', 'molotov'] }]);
+    const p = m.players[T0];
+    expect(p.grenades).toEqual(['flash', 'flash', 'smoke', 'he']);
+    expect(p.money).toBe(16000 - 2 * GRENADES.flash.price - GRENADES.smoke.price - GRENADES.he.price);
+    expect(m.observe(T0).me.loadout.grenades).toEqual(['flash', 'flash', 'smoke', 'he']);
+  });
+
+  it('購買時間＝從凍結開始算 20 秒：開打後第 5 秒內還能買，之後買不到', () => {
+    const m = rich();
+    while (m.tick - m.roundStartTick < ROUND.buyTicks - 1) m.step();
+    expect(m.phase).toBe('live');
+    expect(m.tick - m.liveStartTick).toBe(ROUND.buyTicks - ROUND.freezeTicks - 1);
+    expect(m.observe(T0).round.canBuy).toBe(true);
+    m.applyCommands(T0, [{ type: 'buy', items: ['armor'] }]);
+    expect(m.players[T0].armor).toBe(ARMOR.points);
+    m.step();
+    expect(m.observe(1).round.canBuy).toBe(false);
+    m.applyCommands(1, [{ type: 'buy', items: ['armor'] }]);
+    expect(m.players[1].armor).toBe(0);
+    expect(m.players[1].money).toBe(16000);
+  });
+
+  it('不在出生區買不到', () => {
+    const m = rich();
+    while (m.phase === 'freeze') m.step();
+    const [x, y] = at(54, 90); // T 中路，出生區外
+    m.teleport(T0, x, y);
+    expect(m.observe(T0).round.canBuy).toBe(false);
+    m.applyCommands(T0, [{ type: 'buy', items: ['ak'] }]);
+    expect(m.players[T0].primary).toBeNull();
+    expect(m.observe(1).round.canBuy).toBe(true);
+  });
+
+  it('拆彈器死亡掉落，CT 撿得起來、T 撿不到', () => {
+    const m = rich();
+    m.applyCommands(CT0, [{ type: 'buy', items: ['kit'] }]);
+    while (m.phase === 'freeze') m.step();
+    const ct = m.players[CT0];
+    m.kill(CT0);
+    expect(ct.kit).toBe(false);
+    expect(m.items.filter((i) => i.kind === 'kit').length).toBe(1);
+    m.teleport(T0, ct.x, ct.y);
+    m.applyCommands(T0, [{ type: 'pickup' }]);
+    expect(m.players[T0].kit).toBe(false);
+    m.teleport(CT0 + 1, ct.x, ct.y);
+    m.applyCommands(CT0 + 1, [{ type: 'pickup' }]);
+    expect(m.players[CT0 + 1].kit).toBe(true);
+    expect(m.items.length).toBe(0);
+  });
+
+  it('存活者保留武器、甲值、道具到下一回合；死亡者重發手槍＋刀；掉落物在回合交接時清除', () => {
+    const m = rich();
+    m.applyCommands(T0, [{ type: 'buy', items: ['ak', 'armor', 'he'] }]);
+    m.applyCommands(1, [{ type: 'buy', items: ['ak', 'armor'] }]);
+    while (m.phase === 'freeze') m.step();
+    m.players[T0].primary!.mag = 7;
+    m.kill(1);
+    expect(m.items.some((i) => i.weapon?.id === 'ak')).toBe(true);
+    for (let i = TEAM_SIZE; i < PLAYER_COUNT; i++) m.kill(i);
+    while (m.roundNumber === 1) m.step();
+    const a = m.players[T0];
+    expect(a.primary).toEqual({ id: 'ak', mag: 7, reserve: WEAPONS.ak.reserve });
+    expect(a.armor).toBe(ARMOR.points);
+    expect(a.grenades).toEqual(['he']);
+    expect(a.money).toBe(16000 - WEAPONS.ak.price - ARMOR.price - GRENADES.he.price + ECONOMY.winElimination);
+    const b = m.players[1];
+    expect(b.primary).toBeNull();
+    expect(b.secondary?.id).toBe('pistol');
+    expect(b.armor).toBe(0);
+    // 12650 + 3250 = 15900；再多就封頂
+    expect(b.money).toBe(16000 - WEAPONS.ak.price - ARMOR.price + ECONOMY.winElimination);
+    expect(m.items.length).toBe(0);
+  });
+
+  it('觀察資料：自己的金錢、隊友金錢公開', () => {
+    const m = rich();
+    m.applyCommands(1, [{ type: 'buy', items: ['armor'] }]);
+    const o = m.observe(T0);
+    expect(o.me.money).toBe(16000);
+    expect(o.teammates.find((t) => t.id === 1)?.money).toBe(16000 - ARMOR.price);
+    expect(o.round.canBuy).toBe(true);
+  });
+
+  it('金錢計入雜湊', () => {
+    const a = rich();
+    const b = rich();
+    b.applyCommands(T0, [{ type: 'buy', items: ['armor'] }]);
+    b.players[T0].armor = 0;
+    expect(a.hash()).not.toBe(b.hash());
+  });
+});
+
+describe('擊殺獎金與自殺', () => {
+  function killWith(weapon: 'pistol' | 'smg' | 'ak' | 'knife'): number {
+    const m = live(weapon === 'pistol' || weapon === 'knife' ? {} : { defaultLoadout: { T: weapon } });
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(5, x, y - 1000, 90);
+    parkOthers(m, [0, 5]);
+    m.players[5].hp = 1;
+    if (weapon === 'knife') m.applyCommands(0, [{ type: 'switch', slot: 'knife' }]);
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 1000 }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.players[5].alive).toBe(false);
+    return m.players[0].money - ECONOMY.startMoney;
+  }
+
+  it('擊殺當下依武器表發獎金給擊殺者', () => {
+    expect(killWith('pistol')).toBe(WEAPONS.pistol.killReward);
+    expect(killWith('smg')).toBe(WEAPONS.smg.killReward);
+    expect(killWith('ak')).toBe(WEAPONS.ak.killReward);
+    expect(killWith('knife')).toBe(WEAPONS.knife.killReward);
+  });
+
+  it('引爆炸死自己隊的 T 算自殺 −300；炸死的 CT 不算誰的擊殺、不發獎金', () => {
+    const m = live();
+    const carrier = m.players.find((p) => p.hasBomb)!;
+    const mate = m.players.find((p) => p.team === 'T' && p.id !== carrier.id)!;
+    const [x, y] = at(19, 36);
+    m.teleport(carrier.id, x, y, 270);
+    m.applyCommands(carrier.id, [{ type: 'plant' }]);
+    for (let i = 0; i < ROUND.plantTicks + 2; i++) m.step();
+    expect(m.phase).toBe('planted');
+    m.teleport(mate.id, x + UNIT, y, 0);
+    m.teleport(TEAM_SIZE, x - UNIT, y, 0);
+    while (m.rounds.length === 0) m.step();
+    expect(m.rounds[0].reason).toBe('bomb');
+    expect(mate.alive).toBe(false);
+    expect(m.players[TEAM_SIZE].alive).toBe(false);
+    expect(mate.money).toBe(ECONOMY.startMoney + ECONOMY.teamKillPenalty + ECONOMY.winBomb);
+    expect(m.players[TEAM_SIZE].money).toBe(ECONOMY.startMoney + ECONOMY.lossBonus[0]);
+    expect(m.players.every((p) => p.kills === 0)).toBe(true);
+  });
+});
+
+describe('回合結算（驗收情境）', () => {
+  for (const s of ECONOMY_SCENARIOS) {
     it(`${s.id} ${s.name}：${s.expect}`, () => {
       const r = s.run();
       expect(r.pass, r.detail).toBe(true);
@@ -469,6 +673,24 @@ describe('確定性與效能', () => {
     expect(run.wallMs).toBeLessThan(5000);
     // 有人真的開槍打死人
     expect(run.result.stats.reduce((a, s) => a + s.kills, 0)).toBeGreaterThan(0);
+  });
+
+  it('eco 對全買：玩家 0～4 每回合開局 16000、玩家 5～9 只有 800，20 個種子短賽制回合勝率 ≥ 75%', () => {
+    let won = 0;
+    let total = 0;
+    let fullBuy = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const run = runShooterMatch({ seed, ...short, roundMoney: [16000, 800], controllers: practiceControllers(seed), record: false });
+      for (const r of run.result.rounds) {
+        total += 1;
+        if (r.winnerGroup === 0) won += 1;
+        if (r.fullBuy[0]) fullBuy += 1;
+        expect(r.money).toEqual([16000, 800]);
+        expect(r.fullBuy[1]).toBe(false);
+      }
+    }
+    expect(won / total).toBeGreaterThanOrEqual(0.75);
+    expect(fullBuy).toBe(total);
   });
 
   it('隊伍人數與地圖：每隊 5 人、出生點不在牆裡', () => {

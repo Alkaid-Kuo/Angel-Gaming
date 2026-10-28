@@ -1,7 +1,7 @@
-// CS 射擊步驟 1 驗收情境：四種回合勝利條件與回合流程，用寫死的腳本控制器（不用陪練 Bot）。
-// test/shooter.test.ts 檢查全部通過。
+// CS 射擊驗收情境，用寫死的腳本控制器（不用陪練 Bot）；test/shooter.test.ts 檢查全部通過。
+// SCENARIOS（步驟 1）：四種回合勝利條件與回合流程。ECONOMY_SCENARIOS（步驟 2）：回合結算。
 import type { ShooterCommand, ShooterObservation } from './api.ts';
-import { ROUND, TEAM_SIZE, UNIT, ticks } from './config.ts';
+import { ECONOMY, ROUND, TEAM_SIZE, UNIT, ticks } from './config.ts';
 import { isSolidCell } from './map.ts';
 import { ScriptController, ShooterDriver } from './runner.ts';
 import { PLAYER_COUNT, type ShooterMatchOptions } from './sim.ts';
@@ -213,6 +213,140 @@ export const SCENARIOS: readonly Scenario[] = [
       const m = d.match;
       playRounds(d, 30, (n) => (n <= ROUND.roundsPerHalf ? 1 : 0));
       return { pass: m.over && m.winner === null && m.score[0] === 12 && m.score[1] === 12 && m.rounds.length === 24, detail: `結束 ${m.over}、勝方 ${m.winner}、比分 ${m.score.join(':')}、${m.rounds.length} 回合` };
+    },
+  },
+];
+
+// ───────── 步驟 2：回合結算 ─────────
+
+/** 依序指定每回合被殲滅的組別；回傳每回合結算後（下一回合開始前）玩家 0 與玩家 5 的金錢 */
+function moneyLog(d: ShooterDriver, losers: readonly (0 | 1)[]): [number, number][] {
+  const m = d.match;
+  const out: [number, number][] = [];
+  for (const g of losers) {
+    if (m.over) break;
+    const want = m.rounds.length + 1;
+    toLive(d);
+    for (const p of m.players) if (p.group === g) m.kill(p.id);
+    runUntil(d, () => roundOver(d, want), 10);
+    out.push([m.players[0].money, m.players[TEAM_SIZE].money]);
+    runUntil(d, () => m.roundNumber > want || m.over, ROUND.roundEndTicks + 5);
+  }
+  return out;
+}
+
+/** 相鄰兩筆的差（第一筆對起始金錢） */
+function deltas(log: readonly [number, number][], who: 0 | 1): number[] {
+  return log.map((x, i) => x[who] - (i === 0 ? ECONOMY.startMoney : log[i - 1][who]));
+}
+
+const S0 = ECONOMY.startMoney;
+
+export const ECONOMY_SCENARIOS: readonly Scenario[] = [
+  {
+    id: 'E1',
+    name: '殲滅獎金與首敗補償',
+    expect: `勝方每人 +${ECONOMY.winElimination}、敗方每人 +${ECONOMY.lossBonus[0]}`,
+    run: () => {
+      const d = driver({});
+      const [r] = moneyLog(d, [1]);
+      const all = d.match.players.every((p) => p.money === (p.group === 0 ? r[0] : r[1]));
+      return { pass: all && r[0] === S0 + ECONOMY.winElimination && r[1] === S0 + ECONOMY.lossBonus[0], detail: `玩家 0：${r[0]}、玩家 5：${r[1]}` };
+    },
+  },
+  {
+    id: 'E2',
+    name: '時間到獎金',
+    expect: `時間到 CT 每人 +${ECONOMY.winTimeout}、T 每人 +${ECONOMY.lossBonus[0]}`,
+    run: () => {
+      const d = driver({});
+      toLive(d);
+      runUntil(d, () => roundOver(d, 1), ROUND.roundTicks + 10);
+      const m = d.match;
+      return { pass: m.rounds[0]?.reason === 'timeout' && m.players[TEAM_SIZE].money === S0 + ECONOMY.winTimeout && m.players[0].money === S0 + ECONOMY.lossBonus[0], detail: `${last(d)}；T ${m.players[0].money}、CT ${m.players[TEAM_SIZE].money}` };
+    },
+  },
+  {
+    id: 'E3',
+    name: '引爆獎金與下包者獎金',
+    expect: `引爆 T 每人 +${ECONOMY.winBomb}、下包者另加 ${ECONOMY.planterBonus}（下包當下發）；CT +${ECONOMY.lossBonus[0]}`,
+    run: () => {
+      const scripts: Partial<Record<number, Script>> = {};
+      for (let i = 0; i < TEAM_SIZE; i++) scripts[i] = planter;
+      const d = driver(scripts);
+      const carrier = plantAtB(d);
+      const m = d.match;
+      const atPlant = m.players[carrier].money;
+      for (let i = 0; i < TEAM_SIZE; i++) m.kill(i);
+      runUntil(d, () => roundOver(d, 1), ROUND.bombTicks + 10);
+      const other = m.players.find((p) => p.team === 'T' && p.id !== carrier)!;
+      const pass = m.rounds[0]?.reason === 'bomb' && atPlant === S0 + ECONOMY.planterBonus && m.players[carrier].money === S0 + ECONOMY.planterBonus + ECONOMY.winBomb && other.money === S0 + ECONOMY.winBomb && m.players.filter((p) => p.team === 'CT').every((p) => p.money === S0 + ECONOMY.lossBonus[0]);
+      return { pass, detail: `${last(d)}；下包當下 ${atPlant}、下包者 ${m.players[carrier].money}、其他 T ${other.money}、CT ${m.players[TEAM_SIZE].money}` };
+    },
+  },
+  {
+    id: 'E4',
+    name: '拆彈獎金、拆包者獎金、下包敗補償',
+    expect: `拆彈 CT 每人 +${ECONOMY.winDefuse}、拆包者另加 ${ECONOMY.defuserBonus}；T 敗但有下包，每人 +${ECONOMY.lossBonus[0]}＋${ECONOMY.plantedLossBonus}`,
+    run: () => {
+      const scripts: Partial<Record<number, Script>> = {};
+      for (let i = 0; i < TEAM_SIZE; i++) scripts[i] = planter;
+      scripts[TEAM_SIZE] = defuser;
+      const d = driver(scripts);
+      const carrier = plantAtB(d);
+      const m = d.match;
+      m.teleport(TEAM_SIZE, m.bomb.x + UNIT, m.bomb.y, 180);
+      runUntil(d, () => roundOver(d, 1), ROUND.bombTicks + 10);
+      const other = m.players.find((p) => p.team === 'T' && p.id !== carrier)!;
+      const tLoss = S0 + ECONOMY.lossBonus[0] + ECONOMY.plantedLossBonus;
+      const pass =
+        m.rounds[0]?.reason === 'defuse' &&
+        m.players[TEAM_SIZE].money === S0 + ECONOMY.winDefuse + ECONOMY.defuserBonus &&
+        m.players[TEAM_SIZE + 1].money === S0 + ECONOMY.winDefuse &&
+        other.money === tLoss &&
+        m.players[carrier].money === tLoss + ECONOMY.planterBonus;
+      return { pass, detail: `${last(d)}；拆包者 ${m.players[TEAM_SIZE].money}、其他 CT ${m.players[TEAM_SIZE + 1].money}、下包者 ${m.players[carrier].money}、其他 T ${other.money}` };
+    },
+  },
+  {
+    id: 'E5',
+    name: '連敗階梯：勝一場退一階',
+    expect: '玩家 5～9 輸、輸、輸、贏、輸：補償 1400／1900／2400、勝利 3250、再輸是 2400（退一階後再升一階，不是歸零的 1400）；玩家 0～4 贏三場後首敗 1400',
+    run: () => {
+      const d = driver({});
+      const log = moneyLog(d, [1, 1, 1, 0, 1]);
+      const b = deltas(log, 1);
+      const a = deltas(log, 0);
+      const L = ECONOMY.lossBonus;
+      const W = ECONOMY.winElimination;
+      const pass = b.join() === [L[0], L[1], L[2], W, L[2]].join() && a.join() === [W, W, W, L[0], W].join();
+      return { pass, detail: `玩家 5～9：${b.join('／')}；玩家 0～4：${a.join('／')}` };
+    },
+  },
+  {
+    id: 'E6',
+    name: '連敗封頂與金錢上限',
+    expect: `連輸 6 場補償 1400／1900／2400／2900／3400／3400；雙方金錢都封頂 ${ECONOMY.maxMoney}`,
+    run: () => {
+      const d = driver({});
+      const log = moneyLog(d, [1, 1, 1, 1, 1, 1]);
+      const b = deltas(log, 1);
+      const L = ECONOMY.lossBonus;
+      const final = log[log.length - 1];
+      const pass = b.slice(0, 5).join() === L.join() && final[1] === ECONOMY.maxMoney && final[0] === ECONOMY.maxMoney && d.match.players.every((p) => p.money <= ECONOMY.maxMoney);
+      return { pass, detail: `玩家 5～9 每回合增加：${b.join('／')}；最後 ${final.join('／')}` };
+    },
+  },
+  {
+    id: 'E7',
+    name: '半場歸零',
+    expect: '短賽制（每半場 3 回合）上半場玩家 5～9 連輸 3 場；第 4 回合（下半場首回合）全員金錢回到 800、連敗階梯歸零，再輸補償 1400',
+    run: () => {
+      const d = driver({}, { roundsPerHalf: 3, winRounds: 5 });
+      const log = moneyLog(d, [1, 1, 1, 1]);
+      const r4 = d.match.rounds[3];
+      const pass = r4 !== undefined && r4.money[0] === S0 && r4.money[1] === S0 && log[3][1] === S0 + ECONOMY.lossBonus[0] && log[3][0] === S0 + ECONOMY.winElimination;
+      return { pass, detail: `第 4 回合開局平均 ${r4?.money.join('／')}；結算後玩家 0 ${log[3]?.[0]}、玩家 5 ${log[3]?.[1]}` };
     },
   },
 ];
