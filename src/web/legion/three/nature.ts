@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { T } from '../../../legion/config.ts';
 import type { LegionMap } from '../../../legion/map.ts';
 import { Builder, type V3 } from './builder.ts';
-import { WATER_Y, type Ground } from './ground.ts';
+import { WATER_Y, type Ground, type Style } from './ground.ts';
 import { PAL, col, rand } from './palette.ts';
 
 /** 凹凸不平的球（苔蘚球樹冠、灌木、石塊）：二十面體細分後依位置擾動 */
@@ -35,13 +35,13 @@ function trunk(b: Builder, h: number, r: number): void {
   b.prism(0, 0, -0.1, h, r, r * 0.75, 6, col(PAL.woodDark));
 }
 
-/** 闊葉樹（三團苔蘚球） */
-function broadleaf(): THREE.BufferGeometry {
+/** 闊葉樹（三團苔蘚球；低多邊形用最粗的二十面體） */
+function broadleaf(detail: number): THREE.BufferGeometry {
   const b = new Builder();
   trunk(b, 0.75, 0.08);
-  lumpy(b, 0, 1.05, 0, 0.55, 0.9, col(PAL.crownMid), 1, 1);
-  lumpy(b, 0.3, 0.8, 0.18, 0.38, 0.85, col(PAL.crownDark), 1, 2);
-  lumpy(b, -0.25, 0.85, -0.2, 0.36, 0.85, col(PAL.crownLight), 1, 3);
+  lumpy(b, 0, 1.05, 0, 0.55, 0.9, col(PAL.crownMid), detail, 1);
+  lumpy(b, 0.3, 0.8, 0.18, 0.38, 0.85, col(PAL.crownDark), detail, 2);
+  lumpy(b, -0.25, 0.85, -0.2, 0.36, 0.85, col(PAL.crownLight), detail, 3);
   return b.geometry();
 }
 
@@ -57,10 +57,10 @@ function pine(): THREE.BufferGeometry {
 }
 
 /** 柳（高瘦、下垂、黃綠） */
-function willow(): THREE.BufferGeometry {
+function willow(detail: number): THREE.BufferGeometry {
   const b = new Builder();
   trunk(b, 0.9, 0.09);
-  lumpy(b, 0, 1.25, 0, 0.6, 1.05, col(PAL.willow), 1, 4, 0.6);
+  lumpy(b, 0, 1.25, 0, 0.6, 1.05, col(PAL.willow), detail, 4, 0.6);
   lumpy(b, 0.15, 1.6, 0.05, 0.35, 0.8, col(PAL.willow).multiplyScalar(1.08), 0, 5);
   return b.geometry();
 }
@@ -93,7 +93,7 @@ export class Nature {
   /** 每棵樹的位置（隱蔽的軍團附近樹冠變淡用） */
   readonly trees: { mesh: THREE.InstancedMesh; spots: Placement[] }[] = [];
 
-  constructor(map: LegionMap, ground: Ground) {
+  constructor(map: LegionMap, ground: Ground, style: Style = 'smooth') {
     const { width: w, height: h, terrain } = map;
     const broad: Placement[] = [];
     const pines: Placement[] = [];
@@ -132,9 +132,10 @@ export class Nature {
       const s = 0.95 + rand(d.seed ?? d.x0, d.y0, 3) * 0.4;
       add(d.kind === 'willow' ? willows : broad, d.x0 + 0.5, d.y0 + 0.5, s, d.x0 * 977 + d.y0);
     }
-    this.place(broadleaf(), broad, ground);
+    const detail = style === 'lowpoly' ? 0 : 1;
+    this.place(broadleaf(detail), broad, ground);
     this.place(pine(), pines, ground);
-    this.place(willow(), willows, ground);
+    this.place(willow(detail), willows, ground);
     this.place(bush(), bushes, ground, false);
     this.place(rock(), rocks, ground, false);
   }

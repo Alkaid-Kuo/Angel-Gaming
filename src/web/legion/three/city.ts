@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { T } from '../../../legion/config.ts';
 import type { LegionMap, MapDecor } from '../../../legion/map.ts';
 import { Builder, type V3 } from './builder.ts';
-import { Ground, WALL_H } from './ground.ts';
+import { Ground, WALL_H, type Style } from './ground.ts';
 import { PAL, col, rand, vary } from './palette.ts';
 import { brickTexture, roof, roofTexture } from './roofs.ts';
 
@@ -37,7 +37,7 @@ export class City {
   private readonly ground: Ground;
   private readonly team: readonly string[];
 
-  constructor(map: LegionMap, ground: Ground, team: readonly string[]) {
+  constructor(map: LegionMap, ground: Ground, team: readonly string[], style: Style = 'smooth') {
     this.map = map;
     this.ground = ground;
     this.team = team;
@@ -48,8 +48,10 @@ export class City {
     for (const a of arches) for (let y = a.y0; y < a.y1; y++) for (let x = a.x0; x < a.x1; x++) this.wallMass[y * w + x] = 2;
     for (const g of map.gates) for (let y = g.y0; y < g.y1; y++) for (let x = g.x0; x < g.x1; x++) this.wallMass[y * w + x] = 3;
     this.stairAt = new Int16Array(w * h).fill(-1);
-    const brick = new THREE.MeshStandardMaterial({ map: brickTexture(), vertexColors: true, roughness: 0.92, metalness: 0 });
-    const roofMat = new THREE.MeshStandardMaterial({ map: roofTexture(), vertexColors: true, roughness: 0.8, metalness: 0 });
+    // 低多邊形：不用貼圖，只靠色塊與切面
+    const low = style === 'lowpoly';
+    const brick = new THREE.MeshStandardMaterial({ map: low ? null : brickTexture(), vertexColors: true, roughness: 0.92, metalness: 0 });
+    const roofMat = new THREE.MeshStandardMaterial({ map: low ? null : roofTexture(), vertexColors: true, roughness: low ? 0.9 : 0.8, metalness: 0 });
     const plain = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
     this.materials.push(brick, roofMat, plain);
     const walls = new Builder();
@@ -200,6 +202,18 @@ export class City {
               const mz0 = dy === 0 ? y + f : sz0;
               const mz1 = dy === 0 ? y + f + 0.32 : sz1;
               b.box(mx0, yt + ph, mz0, mx1, yt + ph + 0.26, mz1, merlonC, top);
+            }
+            // 每隔一段插一面守方的旗（旗桿立在垛口內側，旗面順著牆）
+            if (this.map.defender >= 0 && (x * 7 + y * 13) % 29 === 0) {
+              const px = dx === 0 ? x + 0.5 : dx === 1 ? x + 1 - t - 0.06 : x + t + 0.06;
+              const pz = dy === 0 ? y + 0.5 : dy === 1 ? y + 1 - t - 0.06 : y + t + 0.06;
+              const flag = new THREE.Color(this.team[this.map.defender] ?? '#ef4444');
+              things.box(px - 0.03, yt, pz - 0.03, px + 0.03, yt + 1.5, pz + 0.03, col(PAL.woodDark));
+              const along: V3 = dx === 0 ? [1, 0, 0] : [0, 0, 1];
+              const fx = (k: number): number => px + along[0] * k;
+              const fz = (k: number): number => pz + along[2] * k;
+              const nrm: V3 = dx === 0 ? [0, 0, 1] : [1, 0, 0];
+              for (const s of [1, -1]) things.quad([fx(0.03), yt + 1.48, fz(0.03)], [fx(0.6), yt + 1.42, fz(0.6)], [fx(0.6), yt + 1.0, fz(0.6)], [fx(0.03), yt + 1.04, fz(0.03)], flag, [nrm[0] * s, 0, nrm[2] * s]);
             }
           }
         }

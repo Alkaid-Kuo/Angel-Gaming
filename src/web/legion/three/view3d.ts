@@ -9,7 +9,7 @@ import { DOWN_BIT, LAYER_SHIFT, REG_MASK, type LegionFrame, type LegionMeta, typ
 import { DASH_COLOR, DASH_NAME, TAG, TEAM, TEAM_LIGHT, type Camera, type DrawOptions } from '../render.ts';
 import type { BattleView } from '../view.ts';
 import { City } from './city.ts';
-import { Ground } from './ground.ts';
+import { Ground, type Style } from './ground.ts';
 import { Nature } from './nature.ts';
 import { PAL } from './palette.ts';
 import { Siege } from './siege.ts';
@@ -40,6 +40,14 @@ const PITCH_NEAR = 32 * DEG;
 const MAX_YAW = 35 * DEG;
 const MAX_SCALE = 140;
 
+function savedStyle(): Style {
+  try {
+    return localStorage.getItem('legion.style') === 'lowpoly' ? 'lowpoly' : 'smooth';
+  } catch {
+    return 'smooth';
+  }
+}
+
 /** 依地圖名稱找回地圖（meta 只有名稱；城門洞、建物外觀要從地圖資料拿） */
 function mapByName(name: string): LegionMap {
   for (const id of Object.keys(MAPS)) {
@@ -62,10 +70,12 @@ export class Legion3DView implements BattleView {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(34, 1, 0.5, 2000);
   private readonly sun: THREE.DirectionalLight;
-  private readonly ground: Ground;
-  private readonly city: City;
-  private readonly nature: Nature;
-  private readonly siege: Siege;
+  private ground!: Ground;
+  private city!: City;
+  private nature!: Nature;
+  private siege!: Siege;
+  private styleName: Style;
+  private readonly hemi: THREE.HemisphereLight;
   private readonly soldiers: Soldiers;
   private readonly fallen: Soldiers;
   private readonly arrows = new Arrows(800);
@@ -118,35 +128,72 @@ export class Legion3DView implements BattleView {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene.background = new THREE.Color(PAL.bg);
     // 光：西北上方的暖色主光、天空與地面的半球光（v2 第七節）
-    this.scene.add(new THREE.HemisphereLight(0xe9eff6, 0x5a5040, 1.15));
+    this.hemi = new THREE.HemisphereLight(0xe9eff6, 0x5a5040, 1.15);
+    this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff0dc, 2.7);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
     this.sun.shadow.bias = -0.0003;
     this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.sun, this.sun.target);
-    // 世界
-    this.ground = new Ground(this.map);
-    this.city = new City(this.map, this.ground, meta.players.map((p) => p.color));
-    this.nature = new Nature(this.map, this.ground);
-    this.siege = new Siege(this.city, this.ground, meta.mode === 'capture' || meta.mode === 'siege' ? meta.flags : [], this.map.ram !== undefined);
+    // 世界（地形、城池、樹、攻城物件；換畫風時整組重建）
+    this.styleName = savedStyle();
+    this.buildWorld();
     const cap: Partial<Record<UnitKind, number>> = {};
     for (const r of meta.regs) cap[r.kind] = (cap[r.kind] ?? 0) + r.men0;
     this.soldiers = new Soldiers(cap);
     this.fallen = new Soldiers(cap);
-    this.scene.add(this.ground.group, this.city.group, this.nature.group, this.siege.group, this.soldiers.group, this.fallen.group, this.arrows.mesh, this.decals.mesh, this.deploy.mesh);
-    this.buildDeploy();
+    this.scene.add(this.soldiers.group, this.fallen.group, this.arrows.mesh, this.decals.mesh, this.deploy.mesh);
     this.bindRotate();
     // 開發時從主控台檢查場景用（正式建置不帶）
     if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__v3d = { view: this, scene: this.scene };
   }
 
-  dispose(): void {
-    for (const d of this.disposers) d();
+  /** 畫風：smooth 平滑起伏（城磚、瓦壟貼圖）、lowpoly 切面低多邊形（純色塊、平面著色） */
+  get style(): Style {
+    return this.styleName;
+  }
+
+  setStyle(s: Style): void {
+    if (s === this.styleName) return;
+    this.styleName = s;
+    this.disposeWorld();
+    this.buildWorld();
+    try {
+      localStorage.setItem('legion.style', s);
+    } catch {
+      // 記不住也沒關係
+    }
+  }
+
+  private buildWorld(): void {
+    const s = this.styleName;
+    const meta = this.meta;
+    this.ground = new Ground(this.map, s);
+    this.city = new City(this.map, this.ground, meta.players.map((p) => p.color), s);
+    this.nature = new Nature(this.map, this.ground, s);
+    this.siege = new Siege(this.city, this.ground, meta.mode === 'capture' || meta.mode === 'siege' ? meta.flags : [], this.map.ram !== undefined);
+    this.scene.add(this.ground.group, this.city.group, this.nature.group, this.siege.group);
+    this.buildDeploy();
+    // 低多邊形：色塊不要被 ACES 壓灰，主光的明暗差拉大讓切面看得出來
+    const low = s === 'lowpoly';
+    this.renderer.toneMapping = low ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = low ? 0.95 : 1.05;
+    this.hemi.intensity = low ? 0.9 : 1.15;
+    this.sun.intensity = low ? 3.0 : 2.7;
+  }
+
+  private disposeWorld(): void {
+    this.scene.remove(this.ground.group, this.city.group, this.nature.group, this.siege.group);
     this.ground.dispose();
     this.city.dispose();
     this.nature.dispose();
     this.siege.dispose();
+  }
+
+  dispose(): void {
+    for (const d of this.disposers) d();
+    this.disposeWorld();
     this.soldiers.dispose();
     this.fallen.dispose();
     this.arrows.dispose();
