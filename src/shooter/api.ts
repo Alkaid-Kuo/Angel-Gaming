@@ -118,6 +118,8 @@ export interface RulesInfo {
   readonly startHp: number;
   readonly maxArmor: number;
   readonly armorPrice: number;
+  /** 彈藥（補滿主武器與手槍備彈）的價格（v0.5） */
+  readonly ammoPrice: number;
   readonly kitPrice: number;
   /** 道具總格數 */
   readonly grenadeSlots: number;
@@ -411,7 +413,8 @@ export interface ShooterObservation {
 
 // ───────── 指令 ─────────
 
-export type BuyItem = WeaponId | GrenadeId | 'armor' | 'kit';
+/** ammo（v0.5）：補滿身上主武器與手槍的備彈（兩把都滿就不扣錢） */
+export type BuyItem = WeaponId | GrenadeId | 'armor' | 'kit' | 'ammo';
 
 export type ShooterCommand =
   /** 走到目標點（引擎尋路；到達後停） */

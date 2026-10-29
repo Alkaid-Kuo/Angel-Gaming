@@ -35,6 +35,7 @@ import {
   ARMOR,
   ATTRIBUTE_KEYS,
   DECISION_INTERVAL,
+  AMMO,
   DEFUSE_KIT,
   ECONOMY,
   FRIENDLY_FIRE_PCT,
@@ -502,6 +503,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       startHp: ROUND.startHp,
       maxArmor: ROUND.maxArmor,
       armorPrice: ARMOR.price,
+      ammoPrice: AMMO.price,
       kitPrice: DEFUSE_KIT.price,
       grenadeSlots: GRENADE_RULES.totalSlots,
       grenadeRules: {
@@ -654,7 +656,7 @@ export class ShooterMatch {
       if (firstOfHalf) p.money = clamp(this.startMoney, 0, ECONOMY.maxMoney);
       const fixed = this.roundMoney[p.group];
       if (fixed !== null) p.money = clamp(fixed, 0, ECONOMY.maxMoney);
-      // 存活者保留武器、甲值、道具、拆彈器（彈藥補滿）；死亡者（與半場首回合）重發手槍＋刀
+      // 存活者保留武器、彈藥（不自動補，要買）、甲值、道具、拆彈器；死亡者（與半場首回合）重發手槍＋刀
       if (firstOfHalf || !p.alive) {
         const prim = this.defaultLoadout[p.team];
         p.primary = prim !== undefined && WEAPONS[prim].slot === 'primary' ? weaponState(prim) : null;
@@ -662,13 +664,6 @@ export class ShooterMatch {
         p.armor = this.defaultArmor;
         p.kit = false;
         p.grenades = [];
-      } else {
-        // 存活者的槍在新回合補滿彈匣與備彈（v0.5；沒有另外買彈藥）
-        for (const ws of [p.primary, p.secondary]) {
-          if (ws === null) continue;
-          ws.mag = WEAPONS[ws.id].magazine;
-          ws.reserve = WEAPONS[ws.id].reserve;
-        }
       }
       const sp = this.map.spawns[p.team][p.slot];
       p.alive = true;
@@ -986,6 +981,13 @@ export class ShooterMatch {
       if (p.armor >= ARMOR.points || p.money < ARMOR.price) return;
       p.money -= ARMOR.price;
       p.armor = ARMOR.points;
+      return;
+    }
+    if (item === 'ammo') {
+      const guns = [p.primary, p.secondary].filter((w): w is WeaponState => w !== null && w.reserve < WEAPONS[w.id].reserve);
+      if (guns.length === 0 || p.money < AMMO.price) return;
+      p.money -= AMMO.price;
+      for (const w of guns) w.reserve = WEAPONS[w.id].reserve;
       return;
     }
     if (item === 'kit') {
@@ -1673,8 +1675,9 @@ export class ShooterMatch {
     for (const s of this.shotLog) {
       if (s.tick < from || s.tick >= this.tick || s.shooter !== pid) continue;
       const v = s.victim < 0 ? null : this.players[s.victim];
-      const shown = (s.seeVictim & (1 << pid)) !== 0;
-      shots.push({ tick: s.tick, x: shown ? s.ex : s.wx, y: shown ? s.ey : s.wy, hit: v === null ? null : v.team === me.team ? 'teammate' : 'enemy', kill: s.kill, damage: s.damage });
+      // 打中自己看不見的人：當作沒打中（不給命中、傷害、擊殺，終點是撞牆處；擊殺訊息另外公開）
+      const shown = v !== null && (s.seeVictim & (1 << pid)) !== 0;
+      shots.push(shown ? { tick: s.tick, x: s.ex, y: s.ey, hit: v.team === me.team ? 'teammate' : 'enemy', kill: s.kill, damage: s.damage } : { tick: s.tick, x: s.wx, y: s.wy, hit: null, kill: false, damage: 0 });
     }
     // 別人的子彈（v0.5）：隊友的、或開槍當下自己看得見的敵人的；終點同上，打中自己看不見的人只畫到撞牆處
     const tracers: TracerInfo[] = [];

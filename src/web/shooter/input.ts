@@ -50,6 +50,7 @@ export class ShooterInput {
   private lastAimX = NaN;
   private lastAimY = NaN;
   private fireHeld = false;
+  private scopeHeld = false;
   private readonly host: InputHost;
   private readonly el: HTMLElement;
   private readonly off: (() => void)[] = [];
@@ -336,11 +337,18 @@ export class ShooterInput {
       this.fireHeld = true;
       this.host.send([{ type: 'fire', on: true }]);
     } else if (e.button === 2) {
-      this.host.send([{ type: 'scope', on: !s.me.scoped }]);
+      // 狙擊鏡：按住右鍵開鏡、放開收鏡
+      this.scopeHeld = true;
+      this.host.send([{ type: 'scope', on: true }]);
     }
   }
 
   private mouseUp(e: MouseEvent): void {
+    if (e.button === 2 && this.scopeHeld) {
+      this.scopeHeld = false;
+      if (this.alive() !== null) this.host.send([{ type: 'scope', on: false }]);
+      return;
+    }
     if (e.button !== 0) return;
     if (this.grenade !== null && this.chargeStart !== null) {
       const s = this.alive();
@@ -386,6 +394,8 @@ export class ShooterInput {
     this.chargeStart = null;
     if (this.alive() === null) return;
     const cmds: ShooterCommand[] = [{ type: 'walk', on: false }, { type: 'crouch', on: false }];
+    if (this.scopeHeld) cmds.push({ type: 'scope', on: false });
+    this.scopeHeld = false;
     if (this.moving) cmds.push({ type: 'stop' });
     if (this.fireHeld) cmds.push({ type: 'fire', on: false });
     this.moving = false;

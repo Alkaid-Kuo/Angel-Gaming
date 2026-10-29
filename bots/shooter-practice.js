@@ -40,13 +40,14 @@ export default class ShooterPractice {
   declare() {
     return {
       name: 'shooter-practice',
-      version: '3',
+      version: '4',
       style: '陪練',
       knobs: [
         { key: 'reaction', name: '反應', description: '看到敵人後等幾次決策（每次 0.1 秒）才開火', min: 0, max: 5, default: 1, integer: true },
         { key: 'aimJitter', name: '瞄準抖動', description: '瞄準點的隨機偏移（座標單位，1 格 = 1000）', min: 0, max: 600, default: 150, integer: true },
         { key: 'aSplit', name: '守 A 人數', description: 'CT 守 A 點的人數（依隊內序號，其餘守 B）', min: 0, max: 5, default: 3, integer: true },
         { key: 'buyThreshold', name: '全買門檻', description: '錢到多少才全買（步槍＋護甲）；0 = 剛好買得起步槍＋護甲', min: 0, max: 16000, default: 0, integer: true },
+        { key: 'awpSlot', name: '狙擊手', description: '隊內序號幾號在錢夠時改買狙擊槍（5 = 沒有狙擊手）', min: 0, max: 5, default: 4, integer: true },
       ],
     };
   }
@@ -130,6 +131,9 @@ export default class ShooterPractice {
       out.push({ type: 'aim', x: enemy.x + (this.h.random() * 2 - 1) * j, y: enemy.y + (this.h.random() * 2 - 1) * j });
       if (me.ammoMag === 0 && me.weapon !== 'knife') {
         out.push({ type: 'fire', on: false }, { type: 'reload' });
+      } else if (me.weapon === 'awp' && !me.scoped) {
+        // 狙擊槍不開鏡極不準：先開鏡，下一次決策才開火
+        out.push({ type: 'fire', on: false }, { type: 'scope', on: true });
       } else {
         out.push({ type: 'fire', on: this.seen >= (this.k.reaction ?? 0) });
       }
@@ -152,6 +156,11 @@ export default class ShooterPractice {
     if (me.plantTicks > 0 || me.defuseTicks > 0) return out;
     const goal = me.team === 'T' ? this.tGoal(obs, out) : this.ctGoal(obs, out);
     if (goal !== null) out.push({ type: 'move', x: goal.x, y: goal.y });
+    // 狙擊槍：站定（快到目標點）就開鏡架點，要跑遠路就收鏡（開鏡移動慢一半）
+    if (me.weapon === 'awp') {
+      const holding = goal === null || this.h.dist(me.x, me.y, goal.x, goal.y) < 2 * UNIT;
+      if (holding !== me.scoped) out.push({ type: 'scope', on: holding });
+    }
     this.look(obs, out);
     return out;
   }
@@ -177,8 +186,11 @@ export default class ShooterPractice {
     const primary = me.loadout.primary;
     /** @type {import('../src/shooter/api.ts').BuyItem[]} */
     const items = [];
-    if (me.money >= full) {
-      if (primary === null || this.price(primary) < this.price(rifle)) items.push(rifle);
+    // 狙擊手：錢夠狙擊槍＋護甲就改買狙擊槍
+    const awper = this.data.slot === (this.k.awpSlot ?? 4) && me.money >= this.price('awp') + rules.armorPrice;
+    if (awper && primary !== 'awp') items.push('awp');
+    if (me.money >= full || awper) {
+      if (!awper && (primary === null || this.price(primary) < this.price(rifle))) items.push(rifle);
       if (needArmor) items.push('armor');
       if (me.team === 'CT' && !me.loadout.kit) items.push('kit');
       const nade = me.team === 'T' ? 'smoke' : 'flash';
@@ -190,6 +202,9 @@ export default class ShooterPractice {
       const pistolRound = obs.round.number === 1 || obs.round.number === rules.roundsPerHalf + 1;
       if (pistolRound && needArmor) items.push('armor');
     }
+    // 彈藥不會自動補：手上的槍備彈剩一半以下就買（新買的槍本來就是滿的）
+    const w = this.data.weapons.find((x) => x.id === me.weapon);
+    if (w !== undefined && w.reserve > 0 && me.ammoReserve < w.reserve / 2) items.push('ammo');
     if (items.length > 0) out.push({ type: 'buy', items });
   }
 

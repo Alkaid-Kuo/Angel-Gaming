@@ -4,7 +4,7 @@ import { cdegDiff, iatan2, iatan2C, icosC, isinC } from '../src/shared/geom.ts';
 import { iatan2 as legionIatan2 } from '../src/legion/geom.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
 import { ECONOMY_SCENARIOS, GRENADE_SCENARIOS, SCENARIOS } from '../src/shooter/acceptance.ts';
-import { ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, GRENADE_RULES, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS, ticks, type GrenadeId } from '../src/shooter/config.ts';
+import { AMMO, ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, GRENADE_RULES, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS, ticks, type GrenadeId } from '../src/shooter/config.ts';
 import { applyPercent } from '../src/shared/intmath.ts';
 import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
@@ -510,7 +510,7 @@ describe('購買', () => {
     expect(m.items.length).toBe(0);
   });
 
-  it('存活者保留武器（彈藥補滿）、甲值、道具到下一回合；死亡者重發手槍＋刀；掉落物在回合交接時清除', () => {
+  it('存活者保留武器（彈藥不補）、甲值、道具到下一回合；死亡者重發手槍＋刀；掉落物在回合交接時清除', () => {
     const m = rich();
     m.applyCommands(T0, [{ type: 'buy', items: ['ak', 'armor', 'he'] }]);
     m.applyCommands(1, [{ type: 'buy', items: ['ak', 'armor'] }]);
@@ -521,8 +521,8 @@ describe('購買', () => {
     for (let i = TEAM_SIZE; i < PLAYER_COUNT; i++) m.kill(i);
     while (m.roundNumber === 1) m.step();
     const a = m.players[T0];
-    // v0.5：存活者的槍在新回合補滿彈藥
-    expect(a.primary).toEqual({ id: 'ak', mag: WEAPONS.ak.magazine, reserve: WEAPONS.ak.reserve });
+    // 彈藥不會自動補（v0.5 第四輪：要買）
+    expect(a.primary).toEqual({ id: 'ak', mag: 7, reserve: WEAPONS.ak.reserve });
     expect(a.armor).toBe(ARMOR.points);
     expect(a.grenades).toEqual(['he']);
     expect(a.money).toBe(16000 - WEAPONS.ak.price - ARMOR.price - GRENADES.he.price + ECONOMY.winElimination);
@@ -1457,13 +1457,14 @@ describe('命中回饋（v0.5）', () => {
     expect(Math.abs(s.x - 112 * UNIT)).toBeLessThan(400);
   });
 
-  it('打中看不見的人（致盲中）：只說有打中，終點給撞牆處不給位置', () => {
+  it('打中看不見的人（致盲中）：當作沒打中，不給命中、傷害、位置', () => {
     const { m, x, y } = duel();
     m.players[0].blindTicks = 200;
     m.applyCommands(0, [{ type: 'aim', x, y: y - 5 * UNIT }, { type: 'fire', on: true }]);
     m.step();
     const s = m.observe(0).me.shots[0];
-    expect(s.hit).toBe('enemy');
+    expect(m.players[5].hp).toBeLessThan(100);
+    expect(s).toMatchObject({ hit: null, kill: false, damage: 0 });
     expect(s.y).toBeLessThan(m.players[5].y - 5 * UNIT);
   });
 
@@ -1515,15 +1516,37 @@ describe('別人的子彈與彈藥補充（v0.5）', () => {
     expect(t.y1).toBeLessThan(m.players[5].y - 5 * UNIT);
   });
 
-  it('存活者的槍在新回合補滿彈藥；死亡者重發手槍', () => {
+  it('彈藥不自動補；買彈藥補滿主武器與手槍的備彈，都滿就不扣錢', () => {
     const m = live({ defaultLoadout: { T: 'ak' } });
     const p = m.players[0];
     p.primary!.mag = 3;
     p.primary!.reserve = 10;
+    p.secondary!.reserve = 5;
     for (let i = TEAM_SIZE; i < PLAYER_COUNT; i++) m.kill(i);
     while (m.roundNumber === 1) m.step();
-    expect(p.primary!.mag).toBe(WEAPONS.ak.magazine);
+    expect(p.primary).toMatchObject({ mag: 3, reserve: 10 });
+    const money = p.money;
+    m.applyCommands(0, [{ type: 'buy', items: ['ammo'] }]);
     expect(p.primary!.reserve).toBe(WEAPONS.ak.reserve);
+    expect(p.secondary!.reserve).toBe(WEAPONS.pistol.reserve);
+    expect(p.money).toBe(money - AMMO.price);
+    m.applyCommands(0, [{ type: 'buy', items: ['ammo'] }]);
+    expect(p.money).toBe(money - AMMO.price);
+  });
+
+  it('開鏡視野上限 60 格：70 格外開鏡也看不見', () => {
+    const m = live({ defaultLoadout: { T: 'awp' } });
+    const [x, y] = at(106, 104);
+    m.teleport(0, x, y, 270);
+    m.teleport(5, x, y - 55 * UNIT, 90);
+    m.teleport(6, x, y - 66 * UNIT, 90);
+    parkOthers(m, [0, 5, 6]);
+    m.applyCommands(0, [{ type: 'scope', on: true }]);
+    m.step();
+    expect(VISION.scopedViewRange).toBe(60);
+    const ids = m.observe(0).enemies.map((e) => e.id);
+    expect(ids).toContain(5);
+    expect(ids).not.toContain(6);
   });
 });
 
@@ -1558,5 +1581,23 @@ describe('傷害數字與手雷掩護（v0.5）', () => {
     };
     expect(run(true)).toBe(100);
     expect(run(false)).toBe(100 - heDamageAt(2000));
+  });
+});
+
+describe('陪練 Bot v4（v0.5）', () => {
+  it('錢夠時隊內 4 號買狙擊槍，架點時開鏡', () => {
+    const map = MAPS.redrock();
+    const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(practice, 'shooter-practice.js', 3, pid, map));
+    const d = new ShooterDriver({ seed: 3, controllers, record: false, roundMoney: [16000, 16000], roundsPerHalf: 2, winRounds: 3 });
+    let awp = false;
+    let scoped = false;
+    for (let i = 0; i < 20000 && !d.match.over; i++) {
+      d.step();
+      const p = d.match.players[4];
+      if (p.primary?.id === 'awp') awp = true;
+      if (p.scoped) scoped = true;
+    }
+    expect(awp).toBe(true);
+    expect(scoped).toBe(true);
   });
 });

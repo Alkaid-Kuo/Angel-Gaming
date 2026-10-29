@@ -35,8 +35,8 @@ export const VISION = {
   scopedFovDeg: 30,
   /** 視野距離（格，v0.5，待審）：不開鏡超過這個距離一律看不見 */
   viewRange: 30,
-  /** 開鏡的視野距離（格）；null = 不設上限（由牆與煙霧決定） */
-  scopedViewRange: null as number | null,
+  /** 開鏡的視野距離（格，待審）；null = 不設上限。v0.5 第四輪：無限距離太強，設 60 格 */
+  scopedViewRange: 60 as number | null,
   /** 矮牆掩護（格，v0.5）：蹲著的人與矮牆距離在此以內，矮牆就擋住他和對方之間的視線與子彈 */
   lowCoverRange: 2,
   /** 轉身速度上限（度／秒，待審）。玩家與 Bot 都受限 */
@@ -157,6 +157,8 @@ export const ARMOR = { price: 650, points: 100 } as const;
 /** 友軍傷害（%，待審）：子彈打到隊友只造成這個比例的傷害；隊友會擋子彈（子彈打到第一個人就停） */
 export const FRIENDLY_FIRE_PCT = 30;
 export const DEFUSE_KIT = { price: 400, team: 'CT' as Team } as const;
+/** 彈藥（v0.5，待審）：補滿身上主武器與手槍的備彈；兩把都是滿的就不扣錢。子彈不會在回合間自動補充 */
+export const AMMO = { price: 100 } as const;
 
 // ───────── 經濟 ─────────
 

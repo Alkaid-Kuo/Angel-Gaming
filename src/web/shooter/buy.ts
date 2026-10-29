@@ -36,6 +36,8 @@ export class BuyMenu {
       ...meta.weapons.filter((w) => w.teams.length > 0 && w.slot === 'secondary').map((w) => ({ id: w.id, name: w.name, group: gName.secondary, price: w.price, teams: w.teams })),
       ...meta.weapons.filter((w) => w.teams.length > 0 && w.slot === 'primary').map((w) => ({ id: w.id, name: w.name, group: gName.primary, price: w.price, teams: w.teams })),
       { id: 'armor', name: '護甲', group: '裝備', price: rules.armorPrice, teams: ['T', 'CT'] },
+      // 彈藥不會在回合間自動補；買一次補滿主武器與手槍的備彈（都滿就不扣錢）
+      { id: 'ammo', name: '彈藥（補滿備彈）', group: '裝備', price: rules.ammoPrice, teams: ['T', 'CT'] },
       { id: 'kit', name: '拆彈器', group: '裝備', price: rules.kitPrice, teams: ['CT'] },
       ...meta.grenades.map((g) => ({ id: g.id, name: g.name, group: '道具', price: g.price, teams: g.teams })),
     ];
@@ -107,8 +109,13 @@ export class BuyMenu {
     for (const e of this.entries) {
       const b = this.buttons.get(e.id)!;
       const g = this.meta.grenades.find((x) => x.id === e.id);
+      // 彈藥：看得到的只有手上那把的備彈，手上那把滿了而且沒有別的槍才算「已滿」
+      const activeW = this.meta.weapons.find((w) => w.id === me.weapon);
+      const ammoFull = activeW !== undefined && me.ammoReserve >= activeW.reserve && (lo.primary === null || lo.secondary === null);
       const owned =
-        e.id === 'armor'
+        e.id === 'ammo'
+          ? ammoFull
+          : e.id === 'armor'
           ? lo.armor >= this.meta.rules.maxArmor
           : e.id === 'kit'
             ? lo.kit
