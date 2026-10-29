@@ -64,7 +64,10 @@ function renderArmy(): void {
   const player = blueSel.value === 'player';
   armyEl.classList.toggle('hidden', !player);
   startBtn.textContent = player ? '開始指揮' : '開始觀戰';
-  if (!player) return;
+  if (!player) {
+    startBtn.disabled = launching;
+    return;
+  }
   const cap = mode() === 'capture';
   const lim = limits();
   rowsEl.classList.toggle('no-reserve', !cap);
@@ -83,7 +86,15 @@ function renderArmy(): void {
   const bad = armyProblem();
   totalEl.textContent = (cap ? `場上 ${f} / ${lim.field}　後備 ${r}　總計 ${f + r} / ${lim.total}` : `${f} / ${lim.field} 點`) + (bad ? `　⚠ ${bad}` : '');
   totalEl.classList.toggle('over', bad !== '');
-  startBtn.disabled = bad !== '';
+  startBtn.disabled = launching || bad !== '';
+}
+
+/** 啟動中（Worker 還沒回報 meta）鎖住開始鈕，避免連按建出多個 Worker */
+let launching = false;
+function setLaunching(on: boolean): void {
+  launching = on;
+  if (on) startBtn.disabled = true;
+  else renderArmy();
 }
 
 rowsEl.addEventListener('click', (e) => {
@@ -99,6 +110,11 @@ document.getElementById('army-reset')!.addEventListener('click', () => {
   army.reserve = { ...DEFAULT_RESERVE };
   renderArmy();
 });
+// 攻城戰的對手說明：插在雙方選單下面（HTML 不動，由這裡建立）
+const siegeNoteEl = document.createElement('p');
+siegeNoteEl.className = 'muted small';
+siegeNoteEl.textContent = '攻城戰只開放「玩家」與「攻城陪練」：其他 BOT 的布陣是照大河谷等佔點地圖寫的，在石關城會被判不在布陣區內，守方開場就少團甚至全沒。';
+document.querySelector('.lg-pick')!.after(siegeNoteEl);
 /** 地圖卡片跟著選的地圖換 */
 const MAP_TEXT: Record<string, [string, string]> = {
   'stone-pass': [
@@ -116,13 +132,22 @@ const MAP_TEXT: Record<string, [string, string]> = {
 };
 function renderMode(): void {
   mapSel.closest('label')!.classList.toggle('hidden', mode() !== 'capture');
-  // 攻城陪練只在攻城戰出現；換到別的模式時，選著它的那一方改回預設
+  const siege = mode() === 'siege';
   for (const sel of document.querySelectorAll<HTMLSelectElement>('.lg-pick select')) {
-    const opt = sel.querySelector<HTMLOptionElement>('option[data-siege]')!;
-    opt.hidden = mode() !== 'siege';
-    opt.disabled = mode() !== 'siege';
-    if (opt.disabled && sel.value === opt.value) sel.value = sel.name === 'blue' ? 'push' : 'ambush';
+    for (const o of sel.options) {
+      o.dataset.label ??= o.textContent!;
+      // 攻城陪練只在攻城戰出現；攻城戰只有玩家與攻城陪練能用（舊 BOT 的布陣座標不合石關城，「隨機」也只抽舊 BOT）
+      const isSiegeBot = o.hasAttribute('data-siege');
+      const noSiege = siege && !isSiegeBot && o.value !== 'player';
+      o.hidden = isSiegeBot && !siege;
+      o.disabled = (isSiegeBot && !siege) || noSiege;
+      o.textContent = noSiege ? `${o.dataset.label}（不會攻城）` : o.dataset.label;
+      o.title = noSiege ? '這隻 BOT 的布陣不合石關城，攻城戰只開放玩家與攻城陪練' : '';
+    }
+    // 選中的選項被灰掉：攻城戰改選攻城陪練，其他模式改回預設
+    if (sel.selectedOptions[0]?.disabled) sel.value = siege ? 'siege' : sel.name === 'blue' ? 'push' : 'ambush';
   }
+  siegeNoteEl.classList.toggle('hidden', !siege);
   const [name, desc] = MAP_TEXT[mapId()];
   document.getElementById('map-name')!.textContent = name;
   document.getElementById('map-desc')!.textContent = desc;
@@ -153,11 +178,17 @@ function launch(): void {
   const m = mode();
   const blue = blueSel.value === 'player' ? 'player' : pick('blue');
   if (blue === 'player' && armyProblem() !== '') return;
+  // 每次啟動都拆掉舊畫面與舊 Worker：否則第二次的 meta 會被當成「重看」而沿用綁著舊 Worker 的畫面
+  screen?.dispose();
+  screen = null;
   worker?.terminate();
+  setLaunching(true);
   const w = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
   worker = w;
   w.onmessage = (ev: MessageEvent<FromLegionWorker>) => {
+    if (w !== worker) return; // 已被取代的舊 Worker 的殘留訊息
     const msg = ev.data;
+    if (msg.type === 'meta' || msg.type === 'error') setLaunching(false);
     if (msg.type === 'meta') {
       // 重看：同一種畫面（觀戰／玩家）沿用；玩家打完改成重播（觀戰畫面）就換新的
       if (screen !== null) {
@@ -171,7 +202,11 @@ function launch(): void {
       alert(`引擎錯誤：\n${msg.message}`);
     } else screen?.handle(msg);
   };
-  w.onerror = (e) => alert(`Worker 錯誤：${e.message}`);
+  w.onerror = (e) => {
+    if (w !== worker) return;
+    setLaunching(false);
+    alert(`Worker 錯誤：${e.message}`);
+  };
   const start: ToLegionWorker = { type: 'start', setup: { bots: [blue, pick('red')], mode: m, mapId: mapId(), seed, army: blue === 'player' ? playerArmy() : undefined } };
   w.postMessage(start);
 }
