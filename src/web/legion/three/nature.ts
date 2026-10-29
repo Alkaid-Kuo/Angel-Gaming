@@ -6,6 +6,7 @@ import type { LegionMap } from '../../../legion/map.ts';
 import { Builder, type V3 } from './builder.ts';
 import { WATER_Y, type Ground } from './ground.ts';
 import { PAL, col, rand } from './palette.ts';
+import type { SeeThrough } from './seeThrough.ts';
 
 /** 凹凸不平的球（苔蘚球樹冠、灌木、石塊）：二十面體細分後依位置擾動；smooth 用球面法線（柔軟的樹冠），否則每面一個法線（有稜角的石頭） */
 function lumpy(b: Builder, cx: number, cy: number, cz: number, r: number, sy: number, color: THREE.Color, detail: number, seed: number, droop = 0, smooth = true): void {
@@ -245,6 +246,11 @@ export class Nature {
       }
     }
     for (const k of touched) this.trees[k].fade.needsUpdate = true;
+  }
+
+  /** 擋住視線時淡掉（和軍團附近的變淡取大的） */
+  seeThrough(st: SeeThrough): void {
+    st.patch(this.mat);
   }
 
   dispose(): void {
