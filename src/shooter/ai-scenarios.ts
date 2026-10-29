@@ -425,7 +425,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'P6',
     name: '被閃後退開',
-    expect: 'CT 往守位走 4 秒後被閃 2 秒：1.5 秒內往來的方向退開至少 1 格，被閃期間有蹲下',
+    expect: 'CT 往守位走 4 秒後被閃 2 秒：致盲結束時已往來的方向退開至少 1 格，被閃期間有蹲下',
     run: (bot, seed) => {
       const d = driver(bot, { seed, seats: [CT0], alive: [CT0, T0] });
       toLive(d);
