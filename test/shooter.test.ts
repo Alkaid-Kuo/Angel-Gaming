@@ -510,7 +510,7 @@ describe('購買', () => {
     expect(m.items.length).toBe(0);
   });
 
-  it('存活者保留武器、甲值、道具到下一回合；死亡者重發手槍＋刀；掉落物在回合交接時清除', () => {
+  it('存活者保留武器（彈藥補滿）、甲值、道具到下一回合；死亡者重發手槍＋刀；掉落物在回合交接時清除', () => {
     const m = rich();
     m.applyCommands(T0, [{ type: 'buy', items: ['ak', 'armor', 'he'] }]);
     m.applyCommands(1, [{ type: 'buy', items: ['ak', 'armor'] }]);
@@ -521,7 +521,8 @@ describe('購買', () => {
     for (let i = TEAM_SIZE; i < PLAYER_COUNT; i++) m.kill(i);
     while (m.roundNumber === 1) m.step();
     const a = m.players[T0];
-    expect(a.primary).toEqual({ id: 'ak', mag: 7, reserve: WEAPONS.ak.reserve });
+    // v0.5：存活者的槍在新回合補滿彈藥
+    expect(a.primary).toEqual({ id: 'ak', mag: WEAPONS.ak.magazine, reserve: WEAPONS.ak.reserve });
     expect(a.armor).toBe(ARMOR.points);
     expect(a.grenades).toEqual(['he']);
     expect(a.money).toBe(16000 - WEAPONS.ak.price - ARMOR.price - GRENADES.he.price + ECONOMY.winElimination);
@@ -1473,5 +1474,55 @@ describe('命中回饋（v0.5）', () => {
     m.step();
     expect(m.observe(0).me.shots[0].kill).toBe(true);
     expect(m.players[5].alive).toBe(false);
+  });
+});
+
+describe('別人的子彈與彈藥補充（v0.5）', () => {
+  it('隊友開槍：隊友看得到彈道與槍口火光；敵人看得見開槍的人才有彈道，看不見就沒有', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(1, x + 2 * UNIT, y + 3 * UNIT, 270); // 隊友在後面
+    m.teleport(5, x, y - 8 * UNIT, 90); // 面向 0：看得見
+    m.teleport(6, x + 3 * UNIT, y - 12 * UNIT, 270); // 背對：看不見
+    parkOthers(m, [0, 1, 5, 6]);
+    m.players[5].hp = 1000;
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 8 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    const mate = m.observe(1);
+    expect(mate.tracers.length).toBe(1);
+    expect(mate.tracers[0]).toMatchObject({ x0: x, y0: y, friendly: true });
+    expect(mate.teammates.find((t) => t.id === 0)?.firing).toBe(true);
+    const seen = m.observe(5);
+    expect(seen.tracers.length).toBe(1);
+    expect(seen.tracers[0]).toMatchObject({ x1: m.players[5].x, y1: m.players[5].y, friendly: false });
+    expect(m.observe(6).tracers).toEqual([]);
+    expect(m.observe(0).tracers).toEqual([]);
+  });
+
+  it('打中看不見的人：別人看到的彈道只畫到撞牆處', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(1, x - 3 * UNIT, y, 90); // 隊友面南：看得到 0 開槍（同隊一律算），看不到北邊中彈的 5
+    m.teleport(5, x, y - 8 * UNIT, 0);
+    parkOthers(m, [0, 1, 5]);
+    m.players[5].hp = 1000;
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 8 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    const t = m.observe(1).tracers[0];
+    expect(m.players[5].hp).toBeLessThan(1000);
+    expect(t.y1).toBeLessThan(m.players[5].y - 5 * UNIT);
+  });
+
+  it('存活者的槍在新回合補滿彈藥；死亡者重發手槍', () => {
+    const m = live({ defaultLoadout: { T: 'ak' } });
+    const p = m.players[0];
+    p.primary!.mag = 3;
+    p.primary!.reserve = 10;
+    for (let i = TEAM_SIZE; i < PLAYER_COUNT; i++) m.kill(i);
+    while (m.roundNumber === 1) m.step();
+    expect(p.primary!.mag).toBe(WEAPONS.ak.magazine);
+    expect(p.primary!.reserve).toBe(WEAPONS.ak.reserve);
   });
 });

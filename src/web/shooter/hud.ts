@@ -50,6 +50,8 @@ export class ShooterHud {
   private feedItems: { item: KillFeedItem; t: number }[] = [];
   private bannerUntil = 0;
   private boardShown = false;
+  /** 這回合自己是被誰、用什麼打死的（擊殺訊息是公開資訊） */
+  private myDeath: KillFeedItem | null = null;
   readonly rounds: RoundMark[] = [];
 
   constructor(root: HTMLElement, meta: ShooterMeta) {
@@ -83,7 +85,10 @@ export class ShooterHud {
   }
 
   addFeed(items: readonly KillFeedItem[], now: number): void {
-    for (const item of items) this.feedItems.push({ item, t: now });
+    for (const item of items) {
+      this.feedItems.push({ item, t: now });
+      if (!this.meta.spectate && item.victim === this.meta.playerId) this.myDeath = item;
+    }
     if (this.feedItems.length > 6) this.feedItems.splice(0, this.feedItems.length - 6);
   }
 
@@ -94,6 +99,10 @@ export class ShooterHud {
 
   setPaused(p: boolean): void {
     this.pause.classList.toggle('hidden', !p);
+  }
+
+  private weaponName(weapon: string): string {
+    return weapon === 'bomb' ? '炸彈' : weapon in WEAPON_TAG ? WEAPON_TAG[weapon as keyof typeof WEAPON_TAG] : GRENADE_TAG[weapon as keyof typeof GRENADE_TAG];
   }
 
   private name(id: number, board: readonly BoardRow[]): string {
@@ -137,9 +146,9 @@ export class ShooterHud {
       this.feed,
       this.feedItems
         .map(({ item }) => {
-          const w = item.weapon === 'bomb' ? '炸彈' : item.weapon in WEAPON_TAG ? WEAPON_TAG[item.weapon as keyof typeof WEAPON_TAG] : GRENADE_TAG[item.weapon as keyof typeof GRENADE_TAG];
           const killer = item.killer >= 0 && item.killer !== item.victim ? this.name(item.killer, f.board) : '';
-          return `<div class="k">${killer}<span class="w">${w}</span>${this.name(item.victim, f.board)}</div>`;
+          const mine = !this.meta.spectate && (item.killer === this.meta.playerId || item.victim === this.meta.playerId);
+          return `<div class="k${mine ? ' mine' : ''}">${killer}<span class="w">${this.weaponName(item.weapon)}</span>${this.name(item.victim, f.board)}</div>`;
         })
         .join(''),
     );
@@ -150,9 +159,12 @@ export class ShooterHud {
     if (this.meta.spectate) {
       hints.push(`觀戰模式・跟隨 ${this.name(f.viewId, f.board)}（← → 切換）・<kbd>X</kbd> 全圖透視 ${extra.xray ? '開' : '關'}・<kbd>[</kbd><kbd>]</kbd> 速度 ${extra.speed}×・<kbd>空白</kbd> 暫停`);
     } else if (!self.me.alive) {
-      if (view.me.alive) hints.push(`你已陣亡・觀看 ${this.name(f.viewId, f.board)}（← → 或滑鼠左右鍵切換隊友）`);
+      const d = this.myDeath;
+      if (d !== null) hints.push(d.killer >= 0 && d.killer !== d.victim ? `你被 ${this.name(d.killer, f.board)} 用 ${this.weaponName(d.weapon)} 擊殺` : `你被${this.weaponName(d.weapon)}炸死`);
+      if (view.me.alive) hints.push(`觀看 ${this.name(f.viewId, f.board)}（← → 或滑鼠左右鍵切換隊友）`);
       else hints.push('全隊陣亡・等待下一回合');
     } else {
+      this.myDeath = null;
       if (r.phase === 'freeze') hints.push(`凍結中：${clock(r.phaseTicksLeft, tps)} 後開打`);
       if (self.round.canBuy) hints.push('可購買：按 <kbd>B</kbd>');
       if (self.me.hasBomb && r.phase === 'live') hints.push('你帶著炸彈：到 A／B 點按住 <kbd>E</kbd>（或 <kbd>5</kbd> 選炸彈後按住左鍵）下包');

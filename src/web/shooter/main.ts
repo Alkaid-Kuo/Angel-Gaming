@@ -5,7 +5,7 @@ import { BuyMenu } from './buy.ts';
 import { ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { FromShooterWorker, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
-import { HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type HurtMark, type Tracer } from './render.ts';
+import { HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 /** 縮放倍率（1 = 剛好看得到 30 格視野距離） */
@@ -32,6 +32,8 @@ class Game {
   /** 所看選手的子彈與受傷（觀察資料有上一次決策以來的紀錄，依 tick 去重） */
   private tracers: Tracer[] = [];
   private hurts: HurtMark[] = [];
+  private others: OtherTracer[] = [];
+  private lastOtherTick = -1;
   private lastShotTick = -1;
   private lastHurtTick = -1;
   private zoomIdx = 3;
@@ -152,7 +154,11 @@ class Game {
       this.sounds = [];
       this.tracers = [];
       this.hurts = [];
+      this.others = [];
     }
+    for (const s of f.view.tracers) if (s.tick > this.lastOtherTick) this.others.push({ x0: s.x0, y0: s.y0, x1: s.x1, y1: s.y1, friendly: s.friendly, t: now });
+    this.lastOtherTick = Math.max(this.lastOtherTick, ...f.view.tracers.map((s) => s.tick));
+    this.others = this.others.filter((t) => now - t.t < TRACER_MS);
     // 子彈與受傷：觀察資料給的是上一次決策以來的紀錄，同一筆會出現在好幾個 frame，依 tick 去重
     for (const s of f.view.me.shots) if (s.tick > this.lastShotTick) this.tracers.push({ x: s.x, y: s.y, hit: s.hit, kill: s.kill, t: now });
     for (const h of f.view.me.hurt) if (h.tick > this.lastHurtTick) this.hurts.push({ dirDeg: h.dirDeg, t: now });
@@ -186,7 +192,7 @@ class Game {
     this.input.update(t);
     const cdTicks = this.meta.rules.grenadeRules.throwCooldownTicks;
     const throwCd = f.tick < this.throwCdUntil ? (this.throwCdUntil - f.tick) / cdTicks : 0;
-    const input = { cur: f, prev: this.prev, alpha, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.xray, charge: this.input.charge(t), sounds: this.sounds, now: t, throwCd, tracers: this.tracers, hurts: this.hurts };
+    const input = { cur: f, prev: this.prev, alpha, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.xray, charge: this.input.charge(t), sounds: this.sounds, now: t, throwCd, tracers: this.tracers, hurts: this.hurts, others: this.others };
     this.renderer.draw(input);
     this.renderer.drawMinimap(this.mini, input);
     this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.xray });

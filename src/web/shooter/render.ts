@@ -68,6 +68,16 @@ export interface Tracer {
   readonly t: number;
 }
 
+/** 別人的一顆子彈（隊友，或開槍當下看得見的敵人） */
+export interface OtherTracer {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+  readonly friendly: boolean;
+  readonly t: number;
+}
+
 export interface HurtMark {
   readonly dirDeg: number;
   readonly t: number;
@@ -99,6 +109,8 @@ export interface DrawInput {
   /** 所看選手的子彈與受傷（v0.5 觀察資料 me.shots／me.hurt） */
   readonly tracers: readonly Tracer[];
   readonly hurts: readonly HurtMark[];
+  /** 別人的子彈（觀察資料 tracers） */
+  readonly others: readonly OtherTracer[];
 }
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -360,7 +372,7 @@ export class ShooterRenderer {
       for (const t of view.teammates) {
         if (!t.alive) continue;
         const p = interp(t, prev?.teammates, d.alpha);
-        this.drawPlayer(cam, p.x, p.y, p.facing, view.me.team, { weapon: t.weapon, hp: t.hp, hasBomb: t.hasBomb, blind: t.blind, label: this.meta.names[t.id], dim: false, planting: t.planting || t.defusing });
+        this.drawPlayer(cam, p.x, p.y, p.facing, view.me.team, { weapon: t.weapon, hp: t.hp, hasBomb: t.hasBomb, blind: t.blind, label: this.meta.names[t.id], dim: false, planting: t.planting || t.defusing, firing: t.firing });
       }
       if (view.me.alive) this.drawPlayer(cam, meNow.x, meNow.y, meNow.facing, view.me.team, { weapon: view.me.weapon, hp: view.me.hp, hasBomb: view.me.hasBomb, blind: view.me.blindTicks > 0, label: view.me.id === this.meta.playerId && !this.meta.spectate ? null : this.meta.names[view.me.id], self: true, dim: false, crouch: view.me.crouching, planting: view.me.plantTicks > 0 || view.me.defuseTicks > 0, firing: d.tracers.some((t) => d.now - t.t < 70) });
       const foe: Team = view.me.team === 'T' ? 'CT' : 'T';
@@ -400,12 +412,15 @@ export class ShooterRenderer {
       ctx.textBaseline = 'bottom';
       ctx.fillText(GRENADE_TAG[g.kind], sx, sy - 5);
     }
-    // 子彈彈道（所看選手自己的子彈）
+    // 子彈彈道：別人的（隊友、看得見的敵人）與所看選手自己的
+    this.drawOtherTracers(cam, d);
     if (view.me.alive) this.drawTracers(cam, meNow, d);
     // 投擲預估與準心（玩家模式、活著）
     if (mine && view.me.alive) {
       if (d.charge !== null) this.drawThrowPreview(cam, meNow, view, d);
       this.drawCrosshair(d, view, meNow);
+      this.drawReload(d, view);
+      this.drawAmmoTag(d, view);
       this.drawHitMarker(d, view.me.team);
     }
     this.drawSoundArrows(cam, meNow, d.sounds, d.now);
@@ -791,6 +806,70 @@ export class ShooterRenderer {
     }
   }
 
+  /** 別人的子彈：細線，開槍那一側淡、終點亮，同樣很快淡出 */
+  private drawOtherTracers(cam: Camera, d: DrawInput): void {
+    const ctx = this.ctx;
+    for (const t of d.others) {
+      const age = d.now - t.t;
+      if (age > TRACER_MS) continue;
+      const k = 1 - age / TRACER_MS;
+      const [ax, ay] = toScreen(cam, t.x0, t.y0);
+      const [bx, by] = toScreen(cam, t.x1, t.y1);
+      ctx.strokeStyle = `rgba(31, 41, 55, ${0.45 * k})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.strokeStyle = t.friendly ? `rgba(226, 232, 240, ${0.9 * k})` : `rgba(255, 253, 242, ${0.95 * k})`;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+  }
+
+  /** 換彈：準心外圈一圈進度弧＋剩餘秒數 */
+  private drawReload(d: DrawInput, view: ShooterObservation): void {
+    const left = view.me.reloadTicksLeft;
+    if (left <= 0) return;
+    const total = this.meta.weapons.find((w) => w.id === view.me.weapon)?.reloadTicks ?? left;
+    const frac = Math.max(0, Math.min(1, 1 - left / Math.max(1, total)));
+    const ctx = this.ctx;
+    const x = d.mouse.x;
+    const y = d.mouse.y;
+    const r = 22;
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = 'rgba(31, 41, 55, 0.25)';
+    ctx.stroke();
+    ctx.strokeStyle = PAL.ink;
+    ctx.beginPath();
+    ctx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+    ctx.stroke();
+    labelText(ctx, `換彈 ${(left / this.meta.rules.ticksPerSecond).toFixed(1)}s`, x, y + r + 8);
+  }
+
+  /** 準心右下角的彈匣數；空了提示按 R */
+  private drawAmmoTag(d: DrawInput, view: ShooterObservation): void {
+    const me = view.me;
+    if (me.weapon === 'knife' || me.reloadTicksLeft > 0 || d.charge !== null) return;
+    const mag = this.meta.weapons.find((w) => w.id === me.weapon)?.magazine ?? 1;
+    const low = me.ammoMag <= Math.max(1, Math.floor(mag * 0.2));
+    const text = me.ammoMag === 0 ? (me.ammoReserve > 0 ? '按 R 換彈' : '沒子彈') : String(me.ammoMag);
+    if (!low && me.ammoMag > 0) {
+      this.ctx.font = '11px "Segoe UI", sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.textBaseline = 'top';
+      this.ctx.fillStyle = 'rgba(31, 41, 55, 0.7)';
+      this.ctx.fillText(text, d.mouse.x + 12, d.mouse.y + 10);
+      return;
+    }
+    labelText(this.ctx, text, d.mouse.x, d.mouse.y + 30);
+  }
+
   /** 命中標記：準心四個斜角；擊殺時加粗、換成敵方隊伍色 */
   private drawHitMarker(d: DrawInput, myTeam: Team): void {
     let last: Tracer | null = null;
@@ -905,6 +984,16 @@ export class ShooterRenderer {
     }
     if (view.me.alive) {
       const a = rad(view.me.facing);
+      // 自己的視野扇形（視野距離；開鏡不限時畫到地圖對角）
+      const rules = this.meta.rules;
+      const fov = rad(view.me.scoped ? rules.scopedFovDeg : rules.fovDeg);
+      const range = (view.me.scoped ? rules.scopedViewRange : rules.viewRange) ?? this.meta.map.width * 1.5;
+      g.fillStyle = 'rgba(31, 41, 55, 0.16)';
+      g.beginPath();
+      g.moveTo(view.me.x * k, view.me.y * k);
+      g.arc(view.me.x * k, view.me.y * k, range * UNIT * k, a - fov / 2, a + fov / 2);
+      g.closePath();
+      g.fill();
       dot(view.me.x, view.me.y, PAL.ink, 3.5);
       g.strokeStyle = PAL.ink;
       g.lineWidth = 1.5;
@@ -926,6 +1015,18 @@ export class ShooterRenderer {
 }
 
 /** 聲音：方向箭頭＋種類圖示（腳步＝兩點、槍聲＝放射線、落地＝圓、爆炸＝星、換彈＝弧、下包／拆包／嗶聲＝方塊） */
+/** 準心附近的小標籤：深底白字，亮暗背景都看得清楚 */
+function labelText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number): void {
+  ctx.font = 'bold 12px "Segoe UI", "Microsoft JhengHei", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const w = ctx.measureText(text).width + 12;
+  ctx.fillStyle = 'rgba(17, 24, 39, 0.82)';
+  ctx.fillRect(x - w / 2, y - 2, w, 18);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillText(text, x, y + 1);
+}
+
 /** 槍口火光：朝向前方的小星形（白芯深邊） */
 function drawMuzzle(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, r: number): void {
   const s = Math.max(4, r * 0.9);

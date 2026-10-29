@@ -271,6 +271,20 @@ export interface ShotTrace {
   readonly kill: boolean;
 }
 
+/**
+ * 別人的一顆子彈（v0.5）：隊友開的、或開槍當下自己看得見的敵人開的。起點是開槍位置；
+ * 終點是子彈停下的地方，打中自己看不見的人時改給撞牆處（不洩漏位置）
+ */
+export interface TracerInfo {
+  readonly tick: number;
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+  /** 隊友開的 */
+  readonly friendly: boolean;
+}
+
 /** 自己受到的一次傷害（v0.5）：子彈為開槍者位置、手雷為爆炸點的方向，量化同聲音（整數度） */
 export interface HurtEvent {
   readonly tick: number;
@@ -291,6 +305,8 @@ export interface TeammateInfo {
   readonly planting: boolean;
   readonly defusing: boolean;
   readonly blind: boolean;
+  /** 上一次決策以來開過火（v0.5） */
+  readonly firing: boolean;
 }
 
 /** 自己視錐內且有視線的敵人。沒有血量、沒有金錢 */
@@ -374,6 +390,8 @@ export interface ShooterObservation {
   readonly teammates: readonly TeammateInfo[];
   readonly enemies: readonly EnemyInfo[];
   readonly radar: readonly RadarContact[];
+  /** 上一次決策以來別人的子彈（v0.5；自己的在 me.shots） */
+  readonly tracers: readonly TracerInfo[];
   /** 自上次決策以來的聲音事件 */
   readonly sounds: readonly SoundEvent[];
   readonly bomb: BombInfo;

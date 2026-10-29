@@ -18,6 +18,7 @@ import type {
   EnemyInfo,
   HurtEvent,
   ShotTrace,
+  TracerInfo,
   KnobValues,
   ProjectileInfo,
   RadarContact,
@@ -279,6 +280,9 @@ export interface ShooterMatchOptions {
 interface ShotRec {
   readonly tick: number;
   readonly shooter: number;
+  /** 開槍位置 */
+  readonly sx: number;
+  readonly sy: number;
   /** 子彈停下的位置：打中人為該人位置，否則撞牆處 */
   readonly ex: number;
   readonly ey: number;
@@ -286,8 +290,9 @@ interface ShotRec {
   readonly wx: number;
   readonly wy: number;
   readonly victim: number;
-  /** 開槍當下看得見中彈的人（隊友一律算看得見） */
-  readonly seen: boolean;
+  /** 開槍當下誰看得見開槍的人、誰看得見中彈的人（第 i 位 = 選手 i；同隊一律算看得見） */
+  readonly seeShooter: number;
+  readonly seeVictim: number;
   kill: boolean;
 }
 
@@ -645,7 +650,7 @@ export class ShooterMatch {
       if (firstOfHalf) p.money = clamp(this.startMoney, 0, ECONOMY.maxMoney);
       const fixed = this.roundMoney[p.group];
       if (fixed !== null) p.money = clamp(fixed, 0, ECONOMY.maxMoney);
-      // 存活者保留武器、彈藥、甲值、道具、拆彈器；死亡者（與半場首回合）重發手槍＋刀
+      // 存活者保留武器、甲值、道具、拆彈器（彈藥補滿）；死亡者（與半場首回合）重發手槍＋刀
       if (firstOfHalf || !p.alive) {
         const prim = this.defaultLoadout[p.team];
         p.primary = prim !== undefined && WEAPONS[prim].slot === 'primary' ? weaponState(prim) : null;
@@ -653,6 +658,13 @@ export class ShooterMatch {
         p.armor = this.defaultArmor;
         p.kit = false;
         p.grenades = [];
+      } else {
+        // 存活者的槍在新回合補滿彈匣與備彈（v0.5；沒有另外買彈藥）
+        for (const ws of [p.primary, p.secondary]) {
+          if (ws === null) continue;
+          ws.mag = WEAPONS[ws.id].magazine;
+          ws.reserve = WEAPONS[ws.id].reserve;
+        }
       }
       const sp = this.map.spawns[p.team][p.slot];
       p.alive = true;
@@ -1209,6 +1221,8 @@ export class ShooterMatch {
   private fireAll(): void {
     const hits: PendingHit[] = [];
     const fired = new Uint8Array(PLAYER_COUNT);
+    let smokes: readonly SightBlocker[] | undefined;
+    const victimMasks: (number | undefined)[] = [];
     for (const p of this.players) {
       if (!p.alive || p.plantTicks > 0 || p.defuseTicks > 0) continue;
       const wid = activeWeaponId(p);
@@ -1234,6 +1248,8 @@ export class ShooterMatch {
       fired[p.id] = 1;
       const spread = spreadOf(p);
       const maxLen = wid === 'knife' ? def.range * UNIT + VISION.bodyRadius : MAX_RAY;
+      smokes ??= this.smokeBlockers();
+      const seeShooter = this.seenMask(p, smokes);
       for (let k = 0; k < def.pellets; k++) {
         const off = spread > 0 ? this.prng.range(-spread, spread) : 0;
         const ang = normCdeg(p.facing + off);
@@ -1244,8 +1260,8 @@ export class ShooterMatch {
         const wy = p.y + tdiv(dy * tr.wall, 10000);
         const hit = tr.victim < 0 ? null : tr;
         const vq = hit === null ? null : this.players[hit.victim];
-        const seen = vq !== null && (vq.team === p.team || (p.blindTicks === 0 && this.sees(p, p.scoped ? VISION.scopedFovDeg : VISION.fovDeg, vq.x, vq.y, this.smokeBlockers(), vq.crouching)));
-        this.shotLog.push({ tick: this.tick, shooter: p.id, ex: vq?.x ?? wx, ey: vq?.y ?? wy, wx, wy, victim: hit?.victim ?? -1, seen, kill: false });
+        const seeVictim = vq === null ? 0 : (victimMasks[vq.id] ??= this.seenMask(vq, smokes));
+        this.shotLog.push({ tick: this.tick, shooter: p.id, sx: p.x, sy: p.y, ex: vq?.x ?? wx, ey: vq?.y ?? wy, wx, wy, victim: hit?.victim ?? -1, seeShooter, seeVictim, kill: false });
         if (hit === null) continue;
         const dmg = damageAt(def, hit.dist);
         const friendly = this.players[hit.victim].team === p.team;
@@ -1556,6 +1572,16 @@ export class ShooterMatch {
     return inCone(a.facing, fov, a.x, a.y, x, y) && lineOfSight(this.map, a.x, a.y, x, y, smokes, a.crouching, targetLow);
   }
 
+  /** 此刻誰看得見 target（位元遮罩，第 i 位 = 選手 i）：同隊一律算；敵人要活著、沒被致盲、視錐內有視線（v0.5，彈道顯示用） */
+  private seenMask(target: Player, smokes: readonly SightBlocker[]): number {
+    let mask = 0;
+    for (const q of this.players) {
+      if (q.team === target.team) mask |= 1 << q.id;
+      else if (q.alive && q.blindTicks === 0 && this.sees(q, q.scoped ? VISION.scopedFovDeg : VISION.fovDeg, target.x, target.y, smokes, target.crouching)) mask |= 1 << q.id;
+    }
+    return mask;
+  }
+
   /** 選手 pid 是否看得見敵人 eid（測試用） */
   canSee(pid: number, eid: number): boolean {
     return this.visibility()[pid * PLAYER_COUNT + eid] === 1;
@@ -1608,6 +1634,7 @@ export class ShooterMatch {
       planting: m.plantTicks > 0,
       defusing: m.defuseTicks > 0,
       blind: m.blindTicks > 0,
+      firing: this.tick - m.lastShotTick <= DECISION_INTERVAL,
     }));
     const smokes = this.smokeBlockers();
     const canLook = me.alive && !blind;
@@ -1640,7 +1667,17 @@ export class ShooterMatch {
     for (const s of this.shotLog) {
       if (s.tick < from || s.tick >= this.tick || s.shooter !== pid) continue;
       const v = s.victim < 0 ? null : this.players[s.victim];
-      shots.push({ tick: s.tick, x: s.seen ? s.ex : s.wx, y: s.seen ? s.ey : s.wy, hit: v === null ? null : v.team === me.team ? 'teammate' : 'enemy', kill: s.kill });
+      const shown = (s.seeVictim & (1 << pid)) !== 0;
+      shots.push({ tick: s.tick, x: shown ? s.ex : s.wx, y: shown ? s.ey : s.wy, hit: v === null ? null : v.team === me.team ? 'teammate' : 'enemy', kill: s.kill });
+    }
+    // 別人的子彈（v0.5）：隊友的、或開槍當下自己看得見的敵人的；終點同上，打中自己看不見的人只畫到撞牆處
+    const tracers: TracerInfo[] = [];
+    if (me.alive && !blind) {
+      for (const s of this.shotLog) {
+        if (s.tick < from || s.tick >= this.tick || s.shooter === pid || (s.seeShooter & (1 << pid)) === 0) continue;
+        const shown = s.victim >= 0 && (s.seeVictim & (1 << pid)) !== 0;
+        tracers.push({ tick: s.tick, x0: s.sx, y0: s.sy, x1: shown ? s.ex : s.wx, y1: shown ? s.ey : s.wy, friendly: this.players[s.shooter].team === me.team });
+      }
     }
     const hurt: HurtEvent[] = [];
     for (const r of this.hurtLog) {
@@ -1690,6 +1727,7 @@ export class ShooterMatch {
       teammates,
       enemies,
       radar,
+      tracers,
       sounds,
       bomb: this.bombInfo(me, enemies, smokes),
       effects,
