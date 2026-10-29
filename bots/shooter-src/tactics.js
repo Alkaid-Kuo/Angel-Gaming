@@ -802,7 +802,7 @@ export class Tactics {
         const sp = this.smokePoint(exec, ent);
         if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
       } else if (this.util.has(me, 'flash') && (idx === 0 || (sinceExec > 2.5 && this.flashHeard < 0)) && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > 1.5)) {
-        const fp = this.flashPoint(obs, exec, ent, smokeFirst ? 0 : 5);
+        const fp = this.flashPoint(obs, exec, ent, smokeFirst ? 2 : 5);
         // 照計畫執行（隊友在待命格等）照例先閃；其他時候（rush）要可能有人看得到爆點才丟
         if (fp !== null && (smokeFirst || this.viewer(fp, exec))) wish = { kind: 'flash', x: fp.x, y: fp.y, why: '閃進點' };
       }
@@ -811,8 +811,8 @@ export class Tactics {
       const pending = this.mateFlash.some((x) => t <= x.pop);
       const near = st !== null && dist(me.x, me.y, st.x, st.y) < 6 * UNIT;
       const waiting = smokeFirst && near && wish === null && (pending || (sinceExec < 3 && this.flashHeard < 0 && !this.util.used.has('flash')));
-      // 正在準備丟煙／閃的人也留在待命格
-      if ((waiting || (smokeFirst && near && wish !== null)) && st !== null) {
+      // 正在準備丟煙／閃的人也留在待命格（最多到執行後 4 秒，丟不出去就照樣進）
+      if ((waiting || (smokeFirst && near && wish !== null && sinceExec < 4)) && st !== null) {
         out.goal = { x: st.x, y: st.y };
         out.hold = st;
         out.role = wish !== null ? '丟道具' : '等閃光';
@@ -894,6 +894,33 @@ export class Tactics {
     const d = dist(best.x, best.y, e.ix, e.iy);
     const f = Math.min(0.6, (P.smokeOff * UNIT) / Math.max(d, 1));
     return { x: e.ix + (best.x - e.ix) * f, y: e.iy + (best.y - e.iy) * f };
+  }
+
+  /** (x, y) 走 depth 步內有沒有看不到爆點 c 的格（BFS） @param {number} x @param {number} y @param {import('./base.js').Pt} c @param {number} depth */
+  canHide(x, y, c, depth) {
+    const g = this.g;
+    const start = g.cellOf(x, y);
+    if (start < 0) return false;
+    let frontier = [start];
+    const seen = new Set(frontier);
+    for (let d = 0; d <= depth; d++) {
+      /** @type {number[]} */
+      const next = [];
+      for (const i of frontier) {
+        const q = g.center(i);
+        if (!g.los(q.x, q.y, c.x, c.y)) return true;
+        const cx = i % g.W;
+        const cy = (i - cx) / g.W;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const j = (cy + dy) * g.W + cx + dx;
+          if (g.isBlock(cx + dx, cy + dy) || seen.has(j)) continue;
+          seen.add(j);
+          next.push(j);
+        }
+      }
+      frontier = next;
+    }
+    return false;
   }
 
   /**
@@ -988,7 +1015,7 @@ export class Tactics {
     }
     // 丟得到的候選中取「預期閃到敵人 ÷ 閃到自己人」最好的：敵方算正閃（×6）、己方看得到爆點的人算背閃，
     // 都乘距離係數 1 − d／(2R)；自己丟完 6 步內有看不到爆點的格可以躲就不算自己。比值不到 ratio 就不丟
-    // （照計畫執行時隊友在待命格等閃光、收到 E:flash 會躲，不檢查；其他時候用 5）
+    // （照計畫執行時隊友在待命格等閃光、收到 E:flash 會躲，用 2；其他時候用 5）
     const me = obs.me;
     const B = this.util.blindRange;
     const mates = obs.teammates.filter((m) => m.alive);
@@ -1001,7 +1028,8 @@ export class Tactics {
       let cost = 0;
       for (const m of mates) {
         const d = dist(m.x, m.y, c.x, c.y);
-        if (d < B && g.los(m.x, m.y, c.x, c.y)) cost += 1 - d / B;
+        // 照計畫執行時隊友收到 E:flash 會躲：4 步內躲得到的不算
+        if (d < B && g.los(m.x, m.y, c.x, c.y) && !(ratio < 5 && this.canHide(m.x, m.y, c, 4))) cost += 1 - d / B;
       }
       const hide = this.nav?.escape(obs, (i) => {
         const q = g.center(i);
