@@ -141,10 +141,10 @@ export default class ShooterBaseline {
     }
     // ── 瞄準 ──
     const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
-    const aim = (tac.urgent && !fight.engaged ? tac.look : null) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
+    const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
     if (aim !== null && (Math.abs(aim.x - me.x) > 50 || Math.abs(aim.y - me.y) > 50)) out.push({ type: 'aim', x: Math.round(aim.x), y: Math.round(aim.y) });
     // ── 開火與武器 ──
-    out.push({ type: 'fire', on: (fight.fire || (tac.noise && !fight.engaged)) && !tac.objective });
+    out.push({ type: 'fire', on: (fight.fire || (tac.noise && !fight.engaged)) && !tac.objective && !tac.hard });
     out.push(...fight.cmds);
     if (!fight.engaged) out.push(...this.combat.upkeep(obs, holding && !moving));
     // ── 姿勢：移動時不蹲 ──

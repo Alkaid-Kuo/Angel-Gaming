@@ -25,6 +25,11 @@ export class Utility {
     this.lastThrow = -1000000;
     /** 最後一次看到敵人的 tick（交戰剛結束時之前送出的移動指令還沒生效，不丟） */
     this.lastEnemy = -1000000;
+    /** 從哪個 tick 開始一直瞄著這次的投擲目標（之前送出的瞄準指令還在延遲裡，要等它們都生效） */
+    this.aimSince = -1;
+    this.lastLook = -1;
+    /** @type {import('./base.js').Pt | null} */
+    this.aimAt = null;
     /** 自己丟的閃光：指令生效前（from）繼續看投擲方向，之後背對到 until @type {{ x: number, y: number, tx: number, ty: number, from: number, until: number } | null} */
     this.away = null;
     /** 本回合丟過的種類（每種每人一次） @type {Set<string>} */
@@ -35,6 +40,8 @@ export class Utility {
   reset() {
     this.lastThrow = -1000000;
     this.lastEnemy = -1000000;
+    this.aimSince = -1;
+    this.aimAt = null;
     this.away = null;
     this.used = new Set();
   }
@@ -112,7 +119,7 @@ export class Utility {
       const d = dist(m.x, m.y, x, y);
       if (d < P.flashMateClear * UNIT) return false;
       // 最近在開火的隊友（交戰中轉不開）
-      if (busy.has(m.id) && d < this.flashR) return false;
+      if (busy.has(m.id) && d < this.blindRange) return false;
     }
     return true;
   }
@@ -145,6 +152,10 @@ export class Utility {
     if (wish.kind === 'flash' && !this.flashSafe(obs, s.x, s.y, busy)) return out;
     out.look = { x: wish.x, y: wish.y };
     out.stop = true;
+    if (this.aimAt === null || dist(this.aimAt.x, this.aimAt.y, wish.x, wish.y) > UNIT || t - this.lastLook > this.rules.decisionInterval) this.aimSince = t;
+    this.aimAt = { x: wish.x, y: wish.y };
+    this.lastLook = t;
+    if (t - this.aimSince <= this.rules.reactionTicks) return out;
     // 方向要在視錐內（引擎會把視錐外的方向夾到邊界），留 15° 裕度；還在走就先停（指令延遲生效時位置會偏，窄處會撞牆反彈）
     const half = (me.scoped ? this.rules.scopedFovDeg : this.rules.fovDeg) / 2;
     if (Math.abs(adiff(s.deg, me.facing)) > half - 15 || Math.abs(me.vx) + Math.abs(me.vy) > 20) return out;
@@ -162,8 +173,13 @@ export class Utility {
     return out;
   }
 
-  /** 閃光的影響範圍（座標單位） */
+  /** 閃光的半徑（座標單位） */
   get flashRadius() {
     return this.flashR;
+  }
+
+  /** 閃光真正會致盲的距離：距離係數 1 − d／(2R) 到 2R 才歸零（座標單位） */
+  get blindRange() {
+    return 2 * this.flashR;
   }
 }

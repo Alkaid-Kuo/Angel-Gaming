@@ -178,6 +178,8 @@ export const P = {
   /** 回防／保槍：時間不夠的裕度（秒）；保槍要離炸彈幾格 */
   saveMargin: 2,
   saveDist: 22,
+  /** 殘局：只剩自己、對方 ≤ 2 人時，侵略 ≥ 這個值（0～1）的 CT 會主動找人 */
+  huntAggr: 0.65,
   /** 換血：隊友在這麼近（格）陣亡就朝他死的方向架槍幾秒 */
   tradeRange: 8,
   tradeHold: 1.5,
@@ -185,8 +187,7 @@ export const P = {
   chaseHp: 40,
   chaseRange: 15,
   chaseTime: 3,
-  /** 閃光：爆點在入口內側幾格；隊友離爆點太近（格）就不丟 */
-  flashDepth: 4,
+  /** 閃光：隊友離爆點太近（格）就不丟 */
   flashMateClear: 4,
   /** 煙霧：放在入口往架點方向幾格 */
   smokeOff: 4.5,
