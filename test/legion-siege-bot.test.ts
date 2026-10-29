@@ -101,7 +101,7 @@ describe('攻城陪練', () => {
 
   it('攻城陪練當攻方、三隻舊陪練當守方：正常開打不出錯，攻方布陣零拒絕、會撞門與架雲梯', () => {
     for (const def of ['push', 'ambush', 'ranged']) {
-      // 衝車沿軌道約 99 秒推到正門、再 18 秒破門（約第 1165 tick），之後主力進城才跟守軍接觸
+      // 衝車附上後約 65 秒推到正門（第一下約第 813 tick）、再 15 秒左右破門，之後主力進城才跟守軍接觸
       const { d, events } = start('siege', def, 7);
       play(d, 1800);
       expect(rejectedDeploys(events, 0)).toEqual([]);

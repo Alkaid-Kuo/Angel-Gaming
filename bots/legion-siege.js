@@ -1,6 +1,6 @@
 // @ts-check
 // 軍團戰陪練：攻城陪練（只給攻城戰用）。攻守兩邊都會打，讓玩家在石關城有一場像樣的攻城可以練。
-// 守方：弓兵、長槍上牆（正門兩側、甕城、缺口兩側），長槍與盾兵守正門內側的 A 旗圈，劍士守缺口、側門與本陣；開場關門；
+// 守方：弓兵、長槍上牆（正門兩側、門樓、缺口兩側），長槍在正門後排兩道槍林、盾兵守 A 旗圈，劍士守缺口、側門與本陣；開場關門；
 //       攻方的雲梯一架好就派最近的牆頂團去推倒；A 失守全軍退守 B。
 // 攻方：一團劍士推衝車撞正門、盾兵跟著護送；兩團劍士到離門樓遠的牆段架雲梯；弓兵在護城河外壓制牆頂；
 //       砲擊打牆頂與門後聚集的守軍（避開陰影區與自己人）；破門、佔下 A 或過了強攻時間，主力從城門推進 A、再推進 B。
@@ -1214,9 +1214,8 @@ export default class SiegeSparring extends LegionBase {
     const wallSpot = (p, along, back) => this.go(...this.xy(this.go(p.x, p.y, side, along)), (out + 180) % 360, back);
     put('archer', 'wallArcher', this.pt(wallSpot(gate, -7000, 0)), 1, { width: 6 });
     put('archer', 'wallArcher', this.pt(wallSpot(gate, 7000, 0)), 1, { width: 6 });
-    // 甕城的牆（離正門最近的橋外側）
-    const bridge = f.chokes.filter((c) => c.kind === 'bridge' || c.kind === 'arch').sort((a, b) => this.dist(a, gate) - this.dist(b, gate))[0];
-    put('archer', 'wallArcher', bridge ? this.pt(this.go(bridge.x, bridge.y, out, 4000)) : this.pt(wallSpot(gate, 0, 2000)), 1, { width: 6 });
+    // 門樓頂
+    put('archer', 'wallArcher', this.pt(gate), 1, { width: 6 });
     // 缺口兩側的牆頂：長槍（攻方從缺口或附近架雲梯上來）
     const breach = f.chokes.find((c) => c.kind === 'breach');
     if (breach) {
@@ -1226,10 +1225,10 @@ export default class SiegeSparring extends LegionBase {
       put('spear', 'wallSpear', this.pt(wallSpot(gate, -14000, 0)), 1, { formation: 'line', width: 8 });
       put('spear', 'wallSpear', this.pt(wallSpot(gate, 14000, 0)), 1, { formation: 'line', width: 8 });
     }
-    // A 旗圈（正門內側）：長槍對著城門、盾兵在兩旁
-    const inside = this.go(A.x, A.y, (out + 180) % 360, 2500);
-    put('spear', 'gateSpear', this.pt(this.go(inside.x, inside.y, side, -2500)), 0, { formation: 'square' });
-    put('spear', 'gateSpear', this.pt(this.go(inside.x, inside.y, side, 2500)), 0, { formation: 'square' });
+    // 正門後的槍林：兩道橫隊對著城門，一道貼著門洞內側、一道在後面（破門衝進來的人先撞上槍林）；盾兵在 A 旗圈兩旁
+    const half = g ? (Math.max(g.x1 - g.x0, g.y1 - g.y0) * TILE) / 2 : 0;
+    put('spear', 'gateSpear', this.pt(this.go(gate.x, gate.y, out, half + 2500)), 0, { formation: 'line', width: 10 });
+    put('spear', 'gateSpear', this.pt(this.go(gate.x, gate.y, out, half + 8000)), 0, { formation: 'line', width: 10 });
     put('shield', 'gateShield', this.pt(this.go(A.x, A.y, side, -4500)), 0);
     put('shield', 'gateShield', this.pt(this.go(A.x, A.y, side, 4500)), 0);
     // 劍士：缺口內側、側門內側、A 後方、本陣
@@ -1332,12 +1331,15 @@ export default class SiegeSparring extends LegionBase {
       if (this.ladderSpots.some((s) => this.dist(s.wall, c.wall) < 6 * TILE)) continue;
       this.ladderSpots.push({ wall: c.wall, foot: c.foot });
     }
-    // 正門前的隘口（橋；沒有橋就是正門外 3.5 格）：弓兵在它外側、主力在更外側等
+    // 正門前的隘口（橋；沒有橋就是正門外 3.5 格）：弓兵在它外側、主力在更外側等；
+    // 兩者都要在門樓兩側牆頂弓兵的射程外（牆頂比城外高約 4 階、每階射程 +1 格；往上射反而短 4 格，對射一定吃虧）
     const out = (this.attackDir + 180) % 360;
     const half = Math.max(g.x1 - g.x0, g.y1 - g.y0) * TILE;
     const choke = m.features.chokes.filter((c) => c.kind === 'bridge').sort((a, b) => this.dist(a, g) - this.dist(b, g))[0] || this.go(g.x, g.y, out, half / 2 + 3500);
-    this.archerPost = this.go(choke.x, choke.y, out, 6000);
-    this.stage = this.go(choke.x, choke.y, out, 14000);
+    const reach = this.units.archer.range + 7000;
+    const post = this.go(choke.x, choke.y, out, 6000);
+    this.archerPost = this.dist(post, g) >= reach ? post : this.go(g.x, g.y, out, reach);
+    this.stage = this.go(this.archerPost.x, this.archerPost.y, out, 8000);
   }
 
   /** 從 (x, y) 往 deg 方向走 dist（單位）的點（引擎的整數三角函數） @param {number} x @param {number} y @param {number} deg @param {number} dist @returns {Pt} */

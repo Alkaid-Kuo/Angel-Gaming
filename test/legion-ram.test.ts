@@ -67,12 +67,24 @@ describe('軍團戰 0.4：衝車（軌道）', () => {
       expect(mapFeatures(MAPS[id]()).ramTrack).toEqual([]);
       expect(legionInitData(MAPS[id](), 'annihilation', 0, {}, 100).map.ram).toBeNull();
     }
-    // 石關城：軌道從營地的衝車起點經西橋、甕城到正門外 1.5 格
+    // 石關城：軌道從營地的衝車起點（布陣區外的大道）經西橋直通正門外 1.5 格；沿途都是地面（不碰河、牆），過護城河的那段在橋上
     const sp = MAPS['stone-pass']();
     const t = mapFeatures(sp).ramTrack;
     expect(t[0]).toEqual({ x: sp.ram!.x, y: sp.ram!.y });
+    expect(Math.floor(t[0].x / 1000)).toBeGreaterThanOrEqual(sp.deploy[0].x1);
+    expect(sp.terrain[Math.floor(t[0].y / 1000) * sp.width + Math.floor(t[0].x / 1000)]).toBe(T.Road);
     const g = sp.gates.find((q) => q.kind === 'main')!;
     expect(t.at(-1)).toEqual({ x: g.x0 * 1000 - RAM.contact, y: ((g.y0 + g.y1) * 1000) / 2 });
+    expect(t.at(-2)!.y).toBe(t.at(-1)!.y);
+    for (let i = 1; i < t.length; i++) {
+      for (let k = 0; k <= 100; k++) {
+        const x = Math.floor((t[i - 1].x + ((t[i].x - t[i - 1].x) * k) / 100) / 1000);
+        const y = Math.floor((t[i - 1].y + ((t[i].y - t[i - 1].y) * k) / 100) / 1000);
+        const c = sp.terrain[y * sp.width + x];
+        expect([T.Road, T.Plain, T.Bridge]).toContain(c);
+        if (x >= 99 && x <= 101) expect(c).toBe(T.Bridge);
+      }
+    }
   });
 
   it('沒人推衝車不動；man 從遠處下：引擎帶那一團走過來，到 5 格內附上，之後沿軌道每 tick 前進 speed', () => {
