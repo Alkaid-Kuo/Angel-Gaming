@@ -22,6 +22,8 @@ export interface BattleView {
   regAt(id: number, alpha: number): { x: number; y: number; facing: number } | null;
   shown(id: number, viewer: number): boolean;
   pick(px: number, py: number, viewer: number, alpha: number): number;
+  /** 點到的軍團旗標或畫面邊緣的殘兵箭頭（-1 ＝ 沒點到）；點到就把鏡頭帶過去。只有 3D 有 */
+  bannerAt?(px: number, py: number): number;
   draw(alpha: number, now: number, opt: DrawOptions): void;
   ping(x: number, y: number, color: string): void;
 }

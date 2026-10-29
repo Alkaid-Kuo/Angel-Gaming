@@ -2,7 +2,9 @@
 // 指令送到 Worker 排隊，下一個決策 tick（每 0.5 秒）交給引擎；暫停中也能下。
 import type { FormationKind, UnitKind } from '../../legion/config.ts';
 import { TILE, UNITS } from '../../legion/config.ts';
-import type { LegionFrame, RegFrame } from './protocol.ts';
+import { ladderSpots, snapLadder, type LadderReg, type LadderSpot } from '../../legion/ladderSpots.ts';
+import type { LegionMap } from '../../legion/map.ts';
+import { LAYER_SHIFT, REG_MASK, type LegionFrame, type RegFrame } from './protocol.ts';
 import type { BattleView } from './view.ts';
 
 export interface Pt {
@@ -21,7 +23,7 @@ export const HOTKEYS: readonly [string, string][] = [
   ['T', '轉向滑鼠'],
   ['F', '跟隨滑鼠下的友軍（保持目前相對位置）'],
   ['Z X C V', '橫陣、方陣、楔形陣、圓陣'],
-  ['L', '攻城：在滑鼠指的城牆格架雲梯（劍士、盾兵、長槍、輕步兵）'],
+  ['L', '攻城：按住瞄準雲梯（能架的牆格亮綠、不能架的亮紅，梯子吸附到最近能架的牆格），左鍵架下；放開 L、右鍵或 Esc 取消（劍士、盾兵、長槍、輕步兵）'],
   ['R', '攻城：附上／卸下衝車'],
   ['B', '攻城：砲擊滑鼠位置（每場 3 發，不必選取）'],
   ['Ctrl+A', '全選；Esc 取消選取'],
@@ -44,16 +46,21 @@ export class PlayerControl {
   order: { from: Pt; to: Pt } | null = null;
   /** 按住 Q 瞄準中（放開才施放） */
   aiming = false;
+  /** 按住 L 架梯瞄準中（左鍵架下） */
+  ladderAim = false;
   /** 目前的繪製器（2D／3D 切換時換掉） */
   r: BattleView;
   private readonly sendCmds: (cmds: unknown[]) => void;
   private readonly toast: (text: string) => void;
+  /** 地圖（架梯瞄準算能架的牆格用；沒有城的地圖也照算，全部不能架） */
+  private readonly map: LegionMap | null;
 
-  constructor(r: BattleView, side: number, sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void) {
+  constructor(r: BattleView, side: number, sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void, map: LegionMap | null = null) {
     this.r = r;
     this.side = side;
     this.sendCmds = sendCmds;
     this.toast = toast;
+    this.map = map;
   }
 
   private get frame(): LegionFrame | null {
@@ -158,8 +165,10 @@ export class PlayerControl {
       return true;
     }
     if (key === 'escape') {
-      if (this.aiming) this.aiming = false;
-      else this.selection.clear();
+      if (this.aiming || this.ladderAim) {
+        this.aiming = false;
+        this.ladderAim = false;
+      } else this.selection.clear();
       return true;
     }
     if (key === 'b') {
@@ -192,8 +201,9 @@ export class PlayerControl {
         for (const r of sel) cmds.push({ type: 'hold', id: r.id, intent: '玩家：堅守' });
         break;
       case 'l':
-        if (m) for (const r of sel) cmds.push({ type: 'ladder', id: r.id, x: Math.round(m.x), y: Math.round(m.y), intent: '玩家：架雲梯' });
-        break;
+        // 按住瞄準（畫面標出能架的牆格與吸附的梯子），左鍵架下（placeLadder）
+        this.ladderAim = true;
+        return true;
       case 'r': {
         const crew = this.frame?.structures.ram?.crew ?? null;
         const r = sel[0];
@@ -252,6 +262,54 @@ export class PlayerControl {
       }
     }
     if (cmds.length > 0) this.sendCmds(cmds);
+  }
+
+  /** 選取的團的架梯資料（層取多數士兵所在的層） */
+  private ladderRegs(): LadderReg[] {
+    const f = this.frame;
+    if (f === null) return [];
+    const sel = this.selected();
+    const count = new Map<number, [number, number, number]>();
+    const s = f.soldiers;
+    for (let i = 0; i < s.length; i += 4) {
+      const reg = s[i + 3] & REG_MASK;
+      if (!this.selection.has(reg)) continue;
+      const c = count.get(reg) ?? [0, 0, 0];
+      c[(s[i + 3] >> LAYER_SHIFT) & 3] += 1;
+      count.set(reg, c);
+    }
+    const crew = f.structures.ram?.crew ?? null;
+    return sel.map((r) => {
+      const c = count.get(r.id) ?? [1, 0, 0];
+      const layer = c[1] > c[0] && c[1] >= c[2] ? 1 : c[2] > c[0] ? 2 : 0;
+      return { id: r.id, owner: this.side, kind: this.r.kindOf[r.id], x: r.x, y: r.y, layer, building: r.status === 'laddering', manning: crew === r.id };
+    });
+  }
+
+  /** 架梯瞄準的畫面資料：附近牆格能不能架、滑鼠吸附到的牆格、滑鼠指的那格不能架的原因 */
+  ladderPreview(m: Pt | null): { spots: LadderSpot[]; snap: LadderSpot | null; why: string; at: Pt | null } | null {
+    if (!this.ladderAim || this.map === null) return null;
+    const spots = ladderSpots(this.map, this.ladderRegs(), this.frame?.structures.ladders ?? []);
+    const snap = m === null ? null : snapLadder(spots, m.x, m.y);
+    let why = '';
+    if (snap === null) {
+      const at = m === null ? undefined : spots.find((q) => q.tx === Math.floor(m.x / TILE) && q.ty === Math.floor(m.y / TILE));
+      why = at?.why ?? (spots.some((q) => q.ok) ? '' : (spots.find((q) => q.why !== '')?.why ?? '附近沒有城牆'));
+    }
+    return { spots, snap, why, at: m };
+  }
+
+  /** 架梯瞄準中按左鍵：在吸附到的牆格架梯（由離梯腳最近、能架的那團架）；結束瞄準 */
+  placeLadder(m: Pt | null): void {
+    const p = this.ladderPreview(m);
+    this.ladderAim = false;
+    if (p === null) return;
+    if (p.snap === null) {
+      this.toast(p.why !== '' ? `不能架雲梯：${p.why}` : '附近沒有能架雲梯的城牆');
+      return;
+    }
+    this.sendCmds([{ type: 'ladder', id: p.snap.reg, x: p.snap.x, y: p.snap.y, intent: '玩家：架雲梯' }]);
+    this.r.ping(p.snap.footX, p.snap.footY, '#4ade80');
   }
 
   /** 名冊點後備：選了一團場上的就換兵，否則從出生點召喚 */

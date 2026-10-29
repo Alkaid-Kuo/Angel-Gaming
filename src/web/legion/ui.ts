@@ -2,6 +2,7 @@
 import type { RegimentStatus } from '../../legion/api.ts';
 import { BOMBARD, DASH, FORMATION_NAMES, MODE_NAMES, RAM, RULES, SIEGE, T, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type SkillKind, type UnitKind } from '../../legion/config.ts';
 import { unitSvg } from './icons.ts';
+import { mapByName } from './maps.ts';
 import type { Caption, FromLegionWorker, LegionFrame, LegionMeta, ToLegionWorker } from './protocol.ts';
 import { LegionRenderer } from './render.ts';
 import type { Legion3DView } from './three/view3d.ts';
@@ -128,7 +129,7 @@ export class LegionScreen {
     this.r2d = new LegionRenderer(this.el.canvas as HTMLCanvasElement, meta);
     this.r = this.r2d;
     if (meta.playerSide >= 0) {
-      this.control = new PlayerControl(this.r, meta.playerSide, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t));
+      this.control = new PlayerControl(this.r, meta.playerSide, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t), mapByName(meta.mapName));
       this.viewer = meta.playerSide;
       this.director = false;
     }
@@ -281,9 +282,15 @@ export class LegionScreen {
         const rect = canvas.getBoundingClientRect();
         const px = me.clientX - rect.left;
         const py = me.clientY - rect.top;
-        if (me.button === 2 && this.control.aiming) {
+        if (me.button === 2 && (this.control.aiming || this.control.ladderAim)) {
           // 瞄準中按右鍵：取消
           this.control.aiming = false;
+          this.control.ladderAim = false;
+          return;
+        }
+        if (me.button === 0 && this.control.ladderAim) {
+          // 架梯瞄準中按左鍵：架在吸附到的牆格
+          this.control.placeLadder(this.r.toWorld(px, py));
           return;
         }
         if (me.button === 0) this.boxStart = { x: px, y: py };
@@ -334,9 +341,11 @@ export class LegionScreen {
         if (me.button === 0 && this.boxStart) {
           if (c.box) c.finishBox(this.alpha(), me.shiftKey);
           else if (me.target === canvas) {
-            const id = this.r.pick(px, py, this.viewer, this.alpha());
+            // 點到旗標或殘兵箭頭：選取並把鏡頭帶過去
+            const flag = this.r.bannerAt?.(px, py) ?? -1;
+            const id = flag >= 0 ? flag : this.r.pick(px, py, this.viewer, this.alpha());
             c.click(id, me.shiftKey);
-            this.select(id, false);
+            this.select(id, flag >= 0);
           }
           this.boxStart = null;
           c.box = null;
@@ -350,7 +359,10 @@ export class LegionScreen {
       }
       if (this.drag !== null && !this.drag.moved && me.target === canvas) {
         const rect = canvas.getBoundingClientRect();
-        this.select(this.r.pick(me.clientX - rect.left, me.clientY - rect.top, this.viewer, this.alpha()), false);
+        const px = me.clientX - rect.left;
+        const py = me.clientY - rect.top;
+        const flag = this.r.bannerAt?.(px, py) ?? -1;
+        this.select(flag >= 0 ? flag : this.r.pick(px, py, this.viewer, this.alpha()), flag >= 0);
       }
       this.drag = null;
     });
@@ -365,9 +377,14 @@ export class LegionScreen {
       this.keysDown.delete(k);
       // 放開 Q：朝滑鼠施放（按住時是瞄準）
       if (k === 'q' && this.control) this.control.releaseSkill(this.mouse ? this.r.toWorld(this.mouse.x, this.mouse.y) : null);
+      // 放開 L：結束架梯瞄準（沒按左鍵就不架）
+      if (k === 'l' && this.control) this.control.ladderAim = false;
     });
     on(window, 'blur', () => {
-      if (this.control) this.control.aiming = false;
+      if (this.control) {
+        this.control.aiming = false;
+        this.control.ladderAim = false;
+      }
     });
     on(window, 'keydown', (e) => {
       const ke = e as KeyboardEvent;
@@ -637,6 +654,7 @@ export class LegionScreen {
       <table class="lg-table">${TERRAIN_NAMES.map((n, i) => (TERRAIN_TIP[i] ? `<tr><td>${n}</td><td>${TERRAIN_TIP[i]}</td></tr>` : '')).join('')}</table>
       <h3>操作</h3>
       <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>I</kbd> AI 意圖・<kbd>Home</kbd> 全圖・<kbd>M</kbd> 切換 2D／3D・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）・3D 時 <kbd>Alt</kbd>＋拖曳（指揮時也可）、右鍵拖曳或 <kbd>[</kbd> <kbd>]</kbd> 轉鏡頭，任何縮放都能自由轉</p>
+      <p class="small">3D 找人：點軍團旗標就選取並把鏡頭帶過去；剩 3 人以下的團在畫面內有脈動圈、在畫面外由邊緣的箭頭指出（圓章裡是人數，點箭頭就跳過去）。鏡頭拉低時，擋在鏡頭與畫面中心、選取的團之間的城牆、屋頂、樹冠會淡掉，被擋住的士兵畫成隊伍色的半透明剪影。攻城時選了劍士、盾兵、長槍或輕步兵，按住 <kbd>L</kbd>：能架雲梯的牆格亮綠、不能架的亮紅，梯子吸附到最近能架的牆格，按左鍵架下。</p>
     </div>`;
     h.classList.remove('hidden');
   }
@@ -878,7 +896,8 @@ export class LegionScreen {
     }
     const c = this.control;
     const aim = c && c.aiming && this.mouse ? { ids: [...c.selection], to: this.r.toWorld(this.mouse.x, this.mouse.y) } : null;
-    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent, selection: c?.selection, box: c?.box, order: c?.order, aim });
+    const ladder = c && c.ladderAim ? c.ladderPreview(this.mouse ? this.r.toWorld(this.mouse.x, this.mouse.y) : null) : null;
+    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent, selection: c?.selection, box: c?.box, order: c?.order, aim, ladder });
     if (this.toastUntil > 0 && now > this.toastUntil) {
       this.toastUntil = 0;
       this.el.toast.classList.add('hidden');
@@ -931,7 +950,7 @@ export class LegionScreen {
   private updateTip(a: number): void {
     const tip = this.el.tip;
     // 瞄準技能時不顯示提示框，免得蓋住路線與落點
-    if (this.mouse === null || this.drag?.moved || this.control?.aiming) {
+    if (this.mouse === null || this.drag?.moved || this.control?.aiming || this.control?.ladderAim) {
       tip.classList.add('hidden');
       return;
     }
