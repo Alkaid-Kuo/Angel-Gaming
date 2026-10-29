@@ -78,6 +78,16 @@ export interface OtherTracer {
   readonly t: number;
 }
 
+/** 傷害數字：打中的地方往上飄、淡出；擊殺放大換成敵方隊伍色 */
+export interface DamagePop {
+  readonly x: number;
+  readonly y: number;
+  readonly amount: number;
+  readonly kill: boolean;
+  readonly t: number;
+}
+export const DAMAGE_MS = 800;
+
 export interface HurtMark {
   readonly dirDeg: number;
   readonly t: number;
@@ -111,6 +121,7 @@ export interface DrawInput {
   readonly hurts: readonly HurtMark[];
   /** 別人的子彈（觀察資料 tracers） */
   readonly others: readonly OtherTracer[];
+  readonly pops: readonly DamagePop[];
 }
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -423,6 +434,7 @@ export class ShooterRenderer {
       this.drawAmmoTag(d, view);
       this.drawHitMarker(d, view.me.team);
     }
+    this.drawDamagePops(cam, d, view.me.team);
     this.drawSoundArrows(cam, meNow, d.sounds, d.now);
     if (view.me.alive) this.drawHurt(cam, meNow, d);
     // 致盲：全白，最後 0.8 秒淡出
@@ -804,6 +816,30 @@ export class ShooterRenderer {
         ctx.stroke();
       }
     }
+  }
+
+  /** 傷害數字：從打中的位置往上飄 0.8 秒；白字深邊，擊殺放大、敵方隊伍色 */
+  private drawDamagePops(cam: Camera, d: DrawInput, myTeam: Team): void {
+    const ctx = this.ctx;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.lineJoin = 'round';
+    for (const p of d.pops) {
+      const age = d.now - p.t;
+      if (age > DAMAGE_MS) continue;
+      const k = age / DAMAGE_MS;
+      const [sx, sy] = toScreen(cam, p.x, p.y);
+      const size = p.kill ? 22 : 16;
+      ctx.font = `800 ${size}px "Segoe UI", sans-serif`;
+      ctx.globalAlpha = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
+      const y = sy - 14 - 28 * k;
+      ctx.strokeStyle = PAL.ink;
+      ctx.lineWidth = 4;
+      ctx.strokeText(String(p.amount), sx + 8, y);
+      ctx.fillStyle = p.kill ? TEAM_COLOR[myTeam === 'T' ? 'CT' : 'T'] : '#ffffff';
+      ctx.fillText(String(p.amount), sx + 8, y);
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** 別人的子彈：細線，開槍那一側淡、終點亮，同樣很快淡出 */

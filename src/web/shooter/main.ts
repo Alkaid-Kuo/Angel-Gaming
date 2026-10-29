@@ -5,7 +5,7 @@ import { BuyMenu } from './buy.ts';
 import { ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { FromShooterWorker, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
-import { HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
+import { DAMAGE_MS, HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type DamagePop, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 /** 縮放倍率（1 = 剛好看得到 30 格視野距離） */
@@ -33,6 +33,7 @@ class Game {
   private tracers: Tracer[] = [];
   private hurts: HurtMark[] = [];
   private others: OtherTracer[] = [];
+  private pops: DamagePop[] = [];
   private lastOtherTick = -1;
   private lastShotTick = -1;
   private lastHurtTick = -1;
@@ -107,8 +108,12 @@ class Game {
     this.raf = requestAnimationFrame((t) => this.frame(t));
     // 切到別的分頁：玩家模式自動暫停（Worker 不會停，回來時不要已經被打死）
     document.addEventListener('visibilitychange', this.onHidden);
+    // 不小心按到 Esc／被瀏覽器踢出全螢幕：玩家模式自動暫停
+    document.addEventListener('fullscreenchange', this.onFullscreen);
+    // 比賽中關分頁、重新整理、上一頁：瀏覽器先問一次
+    window.addEventListener('beforeunload', this.onUnload);
     // 除錯掛勾（瀏覽器驗收用，開發模式或網址帶 ?debug）：只有主執行緒本來就有的畫面資料，沒有引擎
-    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera };
+    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length }) };
   }
 
   private togglePause(): void {
@@ -155,12 +160,23 @@ class Game {
       this.tracers = [];
       this.hurts = [];
       this.others = [];
+      this.pops = [];
     }
     for (const s of f.view.tracers) if (s.tick > this.lastOtherTick) this.others.push({ x0: s.x0, y0: s.y0, x1: s.x1, y1: s.y1, friendly: s.friendly, t: now });
     this.lastOtherTick = Math.max(this.lastOtherTick, ...f.view.tracers.map((s) => s.tick));
     this.others = this.others.filter((t) => now - t.t < TRACER_MS);
     // 子彈與受傷：觀察資料給的是上一次決策以來的紀錄，同一筆會出現在好幾個 frame，依 tick 去重
-    for (const s of f.view.me.shots) if (s.tick > this.lastShotTick) this.tracers.push({ x: s.x, y: s.y, hit: s.hit, kill: s.kill, t: now });
+    // 傷害數字：同一個 tick 的彈丸（霰彈）合成一個數字，畫在最後一顆打中的位置
+    const dmgByTick = new Map<number, { x: number; y: number; amount: number; kill: boolean }>();
+    for (const s of f.view.me.shots) {
+      if (s.tick <= this.lastShotTick) continue;
+      this.tracers.push({ x: s.x, y: s.y, hit: s.hit, kill: s.kill, t: now });
+      if (s.damage <= 0) continue;
+      const g = dmgByTick.get(s.tick);
+      dmgByTick.set(s.tick, { x: s.x, y: s.y, amount: (g?.amount ?? 0) + s.damage, kill: (g?.kill ?? false) || s.kill });
+    }
+    for (const g of dmgByTick.values()) this.pops.push({ ...g, t: now });
+    this.pops = this.pops.filter((p) => now - p.t < DAMAGE_MS);
     for (const h of f.view.me.hurt) if (h.tick > this.lastHurtTick) this.hurts.push({ dirDeg: h.dirDeg, t: now });
     this.lastShotTick = Math.max(this.lastShotTick, ...f.view.me.shots.map((s) => s.tick));
     this.lastHurtTick = Math.max(this.lastHurtTick, ...f.view.me.hurt.map((h) => h.tick));
@@ -192,7 +208,7 @@ class Game {
     this.input.update(t);
     const cdTicks = this.meta.rules.grenadeRules.throwCooldownTicks;
     const throwCd = f.tick < this.throwCdUntil ? (this.throwCdUntil - f.tick) / cdTicks : 0;
-    const input = { cur: f, prev: this.prev, alpha, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.xray, charge: this.input.charge(t), sounds: this.sounds, now: t, throwCd, tracers: this.tracers, hurts: this.hurts, others: this.others };
+    const input = { cur: f, prev: this.prev, alpha, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.xray, charge: this.input.charge(t), sounds: this.sounds, now: t, throwCd, tracers: this.tracers, hurts: this.hurts, others: this.others, pops: this.pops };
     this.renderer.draw(input);
     this.renderer.drawMinimap(this.mini, input);
     this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.xray });
@@ -207,24 +223,46 @@ class Game {
     }
   };
 
+  private readonly onFullscreen = (): void => {
+    if (document.fullscreenElement === null && !leavingFullscreen && !this.meta.spectate && !this.paused && this.over === null) this.togglePause();
+    leavingFullscreen = false;
+  };
+
+  private readonly onUnload = (e: BeforeUnloadEvent): void => {
+    if (this.over !== null) return;
+    e.preventDefault();
+    e.returnValue = '';
+  };
+
   dispose(): void {
     document.removeEventListener('visibilitychange', this.onHidden);
+    document.removeEventListener('fullscreenchange', this.onFullscreen);
+    window.removeEventListener('beforeunload', this.onUnload);
     cancelAnimationFrame(this.raf);
     this.input.dispose();
     this.root.innerHTML = '';
   }
 }
 
+/** 自己按 F／選單離開全螢幕時不自動暫停 */
+let leavingFullscreen = false;
+
 /** 全螢幕＋鎖鍵盤（Chrome 系）：Ctrl＋W 等組合鍵交給網頁，Ctrl 蹲著前進不會關分頁 */
-function toggleFullscreen(): void {
-  if (document.fullscreenElement !== null) {
-    void document.exitFullscreen();
-    return;
-  }
+function enterFullscreen(): void {
+  if (document.fullscreenElement !== null) return;
   void document.documentElement
     .requestFullscreen()
     .then(() => (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard?.lock?.())
     .catch(() => undefined);
+}
+
+function toggleFullscreen(): void {
+  if (document.fullscreenElement !== null) {
+    leavingFullscreen = true;
+    void document.exitFullscreen();
+    return;
+  }
+  enterFullscreen();
 }
 
 function randomSeed(): number {
@@ -278,6 +316,8 @@ function init(): void {
     seed.value = String(randomSeed());
   });
   $('start').addEventListener('click', () => {
+    // 開始是使用者點擊，可以直接進全螢幕並鎖鍵盤（Ctrl＋W 不會關分頁）
+    if ($<HTMLInputElement>('fullscreen').checked) enterFullscreen();
     const team = (document.querySelector('input[name="team"]:checked') as HTMLInputElement | null)?.value === 'CT' ? 'CT' : 'T';
     const n = Number(seed.value);
     start({ team, seed: Number.isFinite(n) && n >= 0 ? Math.floor(n) : randomSeed(), spectate: $<HTMLInputElement>('spectate').checked });

@@ -269,6 +269,8 @@ export interface ShotTrace {
   readonly hit: 'enemy' | 'teammate' | null;
   /** 這一發造成擊殺 */
   readonly kill: boolean;
+  /** 這一發實際扣的血（v0.5；沒打中為 0，超過對方剩餘血量的部分不算） */
+  readonly damage: number;
 }
 
 /**

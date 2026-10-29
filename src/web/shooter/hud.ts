@@ -101,6 +101,22 @@ export class ShooterHud {
     this.pause.classList.toggle('hidden', !p);
   }
 
+  /** 座標（座標單位）周圍 r 格內有沒有矮牆 */
+  private nearLow(x: number, y: number, r: number): boolean {
+    const map = this.meta.map;
+    const cx = x / 1000;
+    const cy = y / 1000;
+    for (let gy = Math.floor(cy - r); gy <= Math.floor(cy + r); gy++) {
+      for (let gx = Math.floor(cx - r); gx <= Math.floor(cx + r); gx++) {
+        if (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height || map.solid[gy * map.width + gx] !== 2) continue;
+        const dx = Math.max(gx - cx, 0, cx - (gx + 1));
+        const dy = Math.max(gy - cy, 0, cy - (gy + 1));
+        if (dx * dx + dy * dy <= r * r) return true;
+      }
+    }
+    return false;
+  }
+
   private weaponName(weapon: string): string {
     return weapon === 'bomb' ? '炸彈' : weapon in WEAPON_TAG ? WEAPON_TAG[weapon as keyof typeof WEAPON_TAG] : GRENADE_TAG[weapon as keyof typeof GRENADE_TAG];
   }
@@ -167,6 +183,10 @@ export class ShooterHud {
       this.myDeath = null;
       if (r.phase === 'freeze') hints.push(`凍結中：${clock(r.phaseTicksLeft, tps)} 後開打`);
       if (self.round.canBuy) hints.push('可購買：按 <kbd>B</kbd>');
+      // 矮牆掩護：蹲著且 lowCoverRange 格內有矮牆才算；站在箱子旁提醒要蹲
+      const cover = this.nearLow(self.me.x, self.me.y, this.meta.rules.lowCoverRange);
+      if (self.me.crouching && cover) hints.push('蹲在掩體後：箱子另一側的人看不到、打不到你（你也看不到他）');
+      else if (!self.me.crouching && this.nearLow(self.me.x, self.me.y, 1.2)) hints.push('靠著箱子：按住 <kbd>C</kbd> 蹲下才有掩護，站著會被打到');
       if (self.me.hasBomb && r.phase === 'live') hints.push('你帶著炸彈：到 A／B 點按住 <kbd>E</kbd>（或 <kbd>5</kbd> 選炸彈後按住左鍵）下包');
       if (self.me.team === 'CT' && (self.bomb.state === 'planted' || self.bomb.state === 'defusing') && self.bomb.x !== null && Math.hypot(self.bomb.x - self.me.x, (self.bomb.y ?? 0) - self.me.y) <= 1500 && self.me.defuseTicks === 0) hints.push('按住 <kbd>E</kbd> 拆包');
     }

@@ -294,6 +294,8 @@ interface ShotRec {
   readonly seeShooter: number;
   readonly seeVictim: number;
   kill: boolean;
+  /** 這一發實際扣的血（v0.5，跳傷害數字用；超過剩餘血量的部分不算） */
+  damage: number;
 }
 
 /** 受傷紀錄（v0.5）：給被打的人畫受傷方向 */
@@ -305,6 +307,8 @@ interface HurtRec {
 }
 
 interface PendingHit {
+  /** 對應的子彈紀錄（扣血後回填實際傷害） */
+  readonly rec: ShotRec;
   readonly attacker: number;
   readonly victim: number;
   readonly damage: number;
@@ -1261,11 +1265,12 @@ export class ShooterMatch {
         const hit = tr.victim < 0 ? null : tr;
         const vq = hit === null ? null : this.players[hit.victim];
         const seeVictim = vq === null ? 0 : (victimMasks[vq.id] ??= this.seenMask(vq, smokes));
-        this.shotLog.push({ tick: this.tick, shooter: p.id, sx: p.x, sy: p.y, ex: vq?.x ?? wx, ey: vq?.y ?? wy, wx, wy, victim: hit?.victim ?? -1, seeShooter, seeVictim, kill: false });
+        const rec: ShotRec = { tick: this.tick, shooter: p.id, sx: p.x, sy: p.y, ex: vq?.x ?? wx, ey: vq?.y ?? wy, wx, wy, victim: hit?.victim ?? -1, seeShooter, seeVictim, kill: false, damage: 0 };
+        this.shotLog.push(rec);
         if (hit === null) continue;
         const dmg = damageAt(def, hit.dist);
         const friendly = this.players[hit.victim].team === p.team;
-        hits.push({ attacker: p.id, victim: hit.victim, damage: friendly ? applyPercent(dmg, FRIENDLY_FIRE_PCT) : dmg, pen: def.armorPen, weapon: wid });
+        hits.push({ rec, attacker: p.id, victim: hit.victim, damage: friendly ? applyPercent(dmg, FRIENDLY_FIRE_PCT) : dmg, pen: def.armorPen, weapon: wid });
       }
       p.recoil += def.recoilStep;
       const heavy = wid === 'ak' || wid === 'm4' || wid === 'awp';
@@ -1282,6 +1287,7 @@ export class ShooterMatch {
       const { hpLoss, armorLoss } = armorSplit(h.damage, v.armor, h.pen);
       v.armor -= armorLoss;
       const wasAlive = v.hp > 0;
+      h.rec.damage = Math.min(hpLoss, Math.max(0, v.hp));
       v.hp -= hpLoss;
       if (wasAlive && v.hp <= 0) {
         killedBy[v.id] = h.attacker;
@@ -1474,7 +1480,7 @@ export class ShooterMatch {
     return p.team === owner.team ? FRIENDLY_FIRE_PCT : 100;
   }
 
-  /** 手雷：半徑內線性衰減、有視線才算（牆擋）；護甲吸收 heArmorPct% 並扣甲；傷害同時結算，擊殺歸投擲者 */
+  /** 手雷：半徑內線性衰減、有視線才算（牆擋；蹲在矮牆後也擋，v0.5）；護甲吸收 heArmorPct% 並扣甲；傷害同時結算，擊殺歸投擲者 */
   private heBlast(g: Projectile): void {
     this.emit('explosion', g.x, g.y, g.owner, null, SOUND.explosionRange * UNIT);
     const smokes = GRENADE_RULES.heBlockedBySmoke ? this.smokeBlockers() : [];
@@ -1482,7 +1488,7 @@ export class ShooterMatch {
     for (const p of this.players) {
       if (!p.alive) continue;
       const raw = heDamageAt(distance(p.x, p.y, g.x, g.y));
-      if (raw <= 0 || !lineOfSight(this.map, g.x, g.y, p.x, p.y, smokes)) continue;
+      if (raw <= 0 || !lineOfSight(this.map, g.x, g.y, p.x, p.y, smokes, false, p.crouching)) continue;
       this.hurtLog.push({ tick: this.tick, victim: p.id, fx: g.x, fy: g.y });
       const { hpLoss, armorLoss } = armorSplit(applyPercent(raw, this.grenadeDamagePct(owner, p)), p.armor, 100 - GRENADE_RULES.heArmorPct);
       p.armor -= armorLoss;
@@ -1668,7 +1674,7 @@ export class ShooterMatch {
       if (s.tick < from || s.tick >= this.tick || s.shooter !== pid) continue;
       const v = s.victim < 0 ? null : this.players[s.victim];
       const shown = (s.seeVictim & (1 << pid)) !== 0;
-      shots.push({ tick: s.tick, x: shown ? s.ex : s.wx, y: shown ? s.ey : s.wy, hit: v === null ? null : v.team === me.team ? 'teammate' : 'enemy', kill: s.kill });
+      shots.push({ tick: s.tick, x: shown ? s.ex : s.wx, y: shown ? s.ey : s.wy, hit: v === null ? null : v.team === me.team ? 'teammate' : 'enemy', kill: s.kill, damage: s.damage });
     }
     // 別人的子彈（v0.5）：隊友的、或開槍當下自己看得見的敵人的；終點同上，打中自己看不見的人只畫到撞牆處
     const tracers: TracerInfo[] = [];

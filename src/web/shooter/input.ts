@@ -74,6 +74,12 @@ export class ShooterInput {
     on(el, 'mousedown', (e) => this.mouseDown(e));
     on(window, 'mouseup', (e) => this.mouseUp(e));
     on(el, 'contextmenu', (e) => e.preventDefault());
+    // 滑鼠側鍵（上一頁／下一頁）：遊戲中攔下，不要離開頁面
+    const noNav = (e: MouseEvent): void => {
+      if (e.button === 3 || e.button === 4) e.preventDefault();
+    };
+    on(window, 'mousedown', noNav);
+    on(window, 'auxclick', noNav);
     on(el, 'wheel', (e) => this.wheel(e), { passive: false });
   }
 
@@ -140,13 +146,14 @@ export class ShooterInput {
 
   private keyDown(e: KeyboardEvent): void {
     const code = e.code;
+    // 遊戲中攔下瀏覽器快捷鍵（Ctrl＋S／D／F／R、F1／F3／F5／F7、Alt 選單、Backspace…），讓 Ctrl 蹲著也能按 A／S／D。
+    // Ctrl＋W／T／N 只有全螢幕鎖鍵盤時攔得住（瀏覽器限制）；F11、F12 保留
+    if (code !== 'F11' && code !== 'F12') e.preventDefault();
     if (code === 'Tab') {
-      e.preventDefault();
       this.host.setBoard(true);
       return;
     }
-    // 不攔瀏覽器快捷鍵；全螢幕鎖鍵盤時例外（Ctrl 蹲著也能按 WASD）
-    if (e.ctrlKey && code !== 'ControlLeft' && code !== 'ControlRight' && !keysLocked()) return;
+    if (e.ctrlKey && code === 'KeyW' && !keysLocked()) return;
     if (this.host.buyOpen() && !e.repeat && this.host.buyKey(code)) {
       e.preventDefault();
       return;
@@ -252,8 +259,9 @@ export class ShooterInput {
 
   private keyUp(e: KeyboardEvent): void {
     const code = e.code;
+    // 放開 Alt 會打開瀏覽器選單，一併攔下
+    if (code !== 'F11' && code !== 'F12') e.preventDefault();
     if (code === 'Tab') {
-      e.preventDefault();
       this.host.setBoard(false);
       return;
     }

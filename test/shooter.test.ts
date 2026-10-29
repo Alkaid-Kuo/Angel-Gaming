@@ -1526,3 +1526,37 @@ describe('別人的子彈與彈藥補充（v0.5）', () => {
     expect(p.primary!.reserve).toBe(WEAPONS.ak.reserve);
   });
 });
+
+describe('傷害數字與手雷掩護（v0.5）', () => {
+  it('me.shots 帶實際扣血；擊殺那一發只算到剩餘血量', () => {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(5, x, y - 5 * UNIT, 90);
+    parkOthers(m, [0, 5]);
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 5 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.observe(0).me.shots[0].damage).toBe(damageAt(WEAPONS.pistol, 5 * UNIT));
+    for (let i = 0; i < 12; i++) m.step();
+    m.players[5].hp = 4;
+    m.applyCommands(0, [{ type: 'fire', on: true }]);
+    m.step();
+    const s = m.observe(0).me.shots.at(-1)!;
+    expect(s).toMatchObject({ kill: true, damage: 4 });
+  });
+
+  it('手雷：蹲在矮牆後（2 格內）不受傷，站著照扣', () => {
+    const run = (crouch: boolean): number => {
+      const m = live();
+      const [x, y] = at(106, 80);
+      m.teleport(0, x, y, 270);
+      parkOthers(m, [0]);
+      for (let cx = 100; cx < 112; cx++) m.map.solid[79 * m.map.width + cx] = 2;
+      if (crouch) m.applyCommands(0, [{ type: 'crouch', on: true }]);
+      pop(m, 'he', 5, x, y - 2 * UNIT);
+      return m.players[0].hp;
+    };
+    expect(run(true)).toBe(100);
+    expect(run(false)).toBe(100 - heDamageAt(2000));
+  });
+});
