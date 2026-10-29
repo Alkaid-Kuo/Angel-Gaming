@@ -1,5 +1,7 @@
 // 3D 沙盤的士兵：每種兵 × 姿勢一個「人物」InstancedMesh（中性色）與一個「隊伍色」InstancedMesh（上衣、盾面、馬衣、鞍墊），
 // 兩者共用同一組矩陣；造型在 unitModels.ts。槍林（長槍放平）、盾牆（蹲低、盾頂在身前）各有一個姿勢；倒地的人側躺。
+// 透牆輪廓（ghost）：被牆、建物、地形擋住的士兵，用隊伍色低透明度的剪影畫出來——再畫一次同樣的 InstancedMesh（共用矩陣與隊伍色），
+// 只在「比擋住它的東西還深」的像素畫（深度測試反過來）；看得到的士兵寫模板 1，剪影只畫在模板 0 的像素並加一，同一格不疊兩層。
 import * as THREE from 'three';
 import type { UnitKind } from '../../../legion/config.ts';
 import { Builder } from './builder.ts';
@@ -14,6 +16,8 @@ const NEUTRAL = col(0x857a66);
 interface Layer {
   readonly fig: THREE.InstancedMesh;
   readonly team: THREE.InstancedMesh;
+  /** 透牆輪廓（人物、隊伍色兩層各一個）；沒開輪廓時是空的 */
+  readonly ghosts: THREE.InstancedMesh[];
   n: number;
 }
 
@@ -30,12 +34,25 @@ export interface SoldierDraw {
   team: THREE.Color | null;
 }
 
+/** 看得到的士兵寫模板 1（透牆輪廓不畫在這些像素上） */
+const STENCIL_SOLID = { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp } as const;
+
 /** 一種兵、一種姿勢的士兵層 */
 export class Soldiers {
   readonly group = new THREE.Group();
   private readonly layers = new Map<string, Layer>();
-  private readonly figMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0 });
-  private readonly teamMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0 });
+  private readonly figMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0, ...STENCIL_SOLID });
+  private readonly teamMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, ...STENCIL_SOLID });
+  private readonly ghostMat = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0.42,
+    depthWrite: false,
+    depthFunc: THREE.GreaterDepth,
+    stencilWrite: true,
+    stencilRef: 0,
+    stencilFunc: THREE.EqualStencilFunc,
+    stencilZPass: THREE.IncrementStencilOp,
+  });
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
   private readonly e = new THREE.Euler();
@@ -43,7 +60,12 @@ export class Soldiers {
   private readonly one = new THREE.Vector3(1, 1, 1);
   private readonly c = new THREE.Color();
 
-  constructor(capacity: Partial<Record<UnitKind, number>>) {
+  /** ghost：要不要畫透牆輪廓（陣亡的人不畫） */
+  constructor(capacity: Partial<Record<UnitKind, number>>, ghost = false) {
+    // 剪影往鏡頭推近 0.35 格再比深度：腳踩進地面、斜坡上的小遮擋不算被擋住，只有牆、屋這種真正擋在前面的才畫
+    this.ghostMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nmvPosition.z += 0.35;\ngl_Position = projectionMatrix * mvPosition;');
+    };
     for (const [kind, n] of Object.entries(capacity) as [UnitKind, number][]) {
       if (n <= 0) continue;
       const poses: Pose[] = kind === 'spear' ? ['stand', 'brace'] : kind === 'shield' ? ['stand', 'wall'] : ['stand'];
@@ -56,9 +78,24 @@ export class Soldiers {
           im.frustumCulled = false;
           im.count = 0;
           im.setColorAt(0, new THREE.Color(1, 1, 1));
+          // 畫在建物之後（模板才不會被後畫的牆蓋掉還留著 1）
+          im.renderOrder = 1;
           this.group.add(im);
         }
-        this.layers.set(`${kind}:${pose}`, { fig, team, n: 0 });
+        const ghosts: THREE.InstancedMesh[] = [];
+        if (ghost) {
+          for (const src of [fig, team]) {
+            const g = new THREE.InstancedMesh(src.geometry, this.ghostMat, n);
+            g.instanceMatrix = src.instanceMatrix;
+            g.instanceColor = team.instanceColor;
+            g.frustumCulled = false;
+            g.count = 0;
+            g.renderOrder = 1;
+            ghosts.push(g);
+            this.group.add(g);
+          }
+        }
+        this.layers.set(`${kind}:${pose}`, { fig, team, ghosts, n: 0 });
       }
     }
   }
@@ -89,7 +126,13 @@ export class Soldiers {
         im.instanceMatrix.needsUpdate = true;
         if (im.instanceColor !== null) im.instanceColor.needsUpdate = true;
       }
+      for (const g of l.ghosts) g.count = l.n;
     }
+  }
+
+  /** 開關透牆輪廓 */
+  setGhosts(on: boolean): void {
+    for (const l of this.layers.values()) for (const g of l.ghosts) g.visible = on;
   }
 
   dispose(): void {
@@ -101,6 +144,7 @@ export class Soldiers {
     }
     this.figMat.dispose();
     this.teamMat.dispose();
+    this.ghostMat.dispose();
   }
 }
 

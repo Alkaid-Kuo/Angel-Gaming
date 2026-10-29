@@ -277,8 +277,10 @@ export interface RamInfo {
   readonly y: number;
   /** 衝車正面朝向（度）；正面 ±90° 射來的箭對附上的兵團無效 */
   readonly facing: number;
-  /** 附上的兵團（null = 沒有人推，衝車不動） */
+  /** 附上的兵團（null = 沒有人推，衝車不動；下了 man 還在走過來的團不算，它自己的 order 是 'man'） */
   readonly crew: number | null;
+  /** 沿軌道（data.map.features.ramTrack）的進度：0 ＝ 起點、1 ＝ 終點（正門外的撞擊點） */
+  readonly t: number;
   /** 正在撞的城門（null = 沒貼著關閉的城門）與下一撞還要幾個 tick */
   readonly gate: number | null;
   readonly nextHit: number;
