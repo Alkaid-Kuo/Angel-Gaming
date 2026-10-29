@@ -27,7 +27,7 @@ export const HOTKEYS: readonly [string, string][] = [
   ['R', '攻城：附上／卸下衝車'],
   ['B', '攻城：砲擊滑鼠位置（每場 3 發，不必選取）'],
   ['Ctrl+A', '全選；Esc 取消選取'],
-  ['WASD', '平移鏡頭（也可以中鍵拖曳）'],
+  ['WASD', '平移鏡頭（照畫面方向；也可以中鍵拖曳）'],
 ];
 
 const deg = (a: Pt, b: Pt): number => {

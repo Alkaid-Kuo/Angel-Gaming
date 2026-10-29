@@ -332,6 +332,10 @@ export class Legion3DView implements BattleView {
 
   // ───────── 鏡頭 ─────────
 
+  get heading(): number {
+    return wrapYaw(this.yaw);
+  }
+
   get fitScale(): number {
     return Math.min(this.canvas.clientWidth / this.meta.width, this.canvas.clientHeight / (this.meta.height * 0.92)) * 0.88;
   }

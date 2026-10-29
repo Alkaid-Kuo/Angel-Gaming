@@ -12,6 +12,8 @@ export interface BattleView {
   readonly ownerOf: number[];
   readonly frame: LegionFrame | null;
   readonly fitScale: number;
+  /** 鏡頭水平轉角（弧度，0 ＝ 北朝上；只有 3D 會轉）：平移、WASD 照畫面方向走 */
+  readonly heading?: number;
   reg(id: number): RegFrame | undefined;
   push(f: LegionFrame, now: number): void;
   reset(): void;
