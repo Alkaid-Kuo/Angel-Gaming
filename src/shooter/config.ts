@@ -278,5 +278,8 @@ export const ATTRIBUTE_NAMES: Readonly<Record<AttributeKey, string>> = {
   discipline: '紀律',
   movement: '走位',
 };
-/** Bot 反應延遲下限（毫秒）：屬性只能讓它更慢 */
-export const MIN_REACTION_MS = 150;
+/**
+ * Bot 反應延遲下限（tick，v1.0 引擎強制）：Bot 在 tick t 決策出的指令，從 t + 反應延遲起才生效。
+ * 5 tick ≈ 167 毫秒（≥ 150 毫秒）；屬性「反應」只能讓它更慢。人類玩家不延遲（本來就有生理反應時間）
+ */
+export const MIN_REACTION_TICKS = 5;

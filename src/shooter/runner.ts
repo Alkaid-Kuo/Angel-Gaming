@@ -1,6 +1,8 @@
 // CS 射擊比賽驅動：載入選手 → init → 每 DECISION_INTERVAL tick 呼叫 decide；人類玩家的指令每個 tick 套用；可錄製回放。
 // 回放保存比賽選項與每次決策的指令，重播不需要選手程式。
 // 時間限制：decide 超過硬上限（50 ms）當該次無指令；同一回合連續超時 idleAfterTimeouts 次，該回合剩下的時間閒置。
+// 反應延遲（v1.0 引擎強制）：Bot 在 tick t 決策出的指令排隊到 t + reactionTicks（≥ MIN_REACTION_TICKS）才套用；
+// 回合交接時還沒生效的指令作廢。人類玩家（takeRealtime）不延遲。回放記錄實際套用的 tick，重播不需要知道延遲。
 import type { KnobValues } from '../api/types.ts';
 import { iatan2, offset } from '../shared/geom.ts';
 import { roundHalfEven } from '../shared/intmath.ts';
@@ -8,7 +10,7 @@ import { Prng } from '../shared/prng.ts';
 import { BotLoadError, type CompiledBot } from '../sandbox/compile.ts';
 import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
 import type { ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, Team, WeaponId } from './api.ts';
-import { SHOOTER_ENGINE_VERSION, TIMING } from './config.ts';
+import { MIN_REACTION_TICKS, SHOOTER_ENGINE_VERSION, TIMING } from './config.ts';
 import { DEFAULT_MAP_ID, MAPS, blocksMove, regionsAt, type ShooterMap } from './map.ts';
 import { HASH_INTERVAL, PLAYER_COUNT, ShooterMatch, shooterInitData, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
 import { lineOfSight } from './vision.ts';
@@ -28,6 +30,8 @@ export interface ShooterReplay {
     readonly winRounds?: number;
     /** 加時規則（v1.0）；沒寫＝預設 MR3 */
     readonly overtime?: ShooterMatchOptions['overtime'];
+    /** 各選手的反應延遲（tick，v1.0；只供查閱，decisions 已是實際套用的 tick） */
+    readonly reactionTicks?: readonly number[];
     readonly players: readonly { readonly playerId: number; readonly bot: string; readonly version: string; readonly knobs: KnobValues }[];
   };
   readonly decisions: { readonly tick: number; readonly playerId: number; readonly commands: unknown }[];
@@ -171,6 +175,14 @@ export interface ShooterRunOptions extends ShooterMatchOptions {
   readonly controllers: readonly ShooterController[];
   readonly knobs?: readonly KnobValues[];
   readonly record: boolean;
+  /** 依 playerId 的 Bot 反應延遲（tick，v1.0）：預設 MIN_REACTION_TICKS，小於下限夾到下限（屬性只能讓它更慢） */
+  readonly reactionTicks?: readonly number[];
+}
+
+/** 反應延遲夾到下限；非整數取整、非數字用下限 */
+export function clampReaction(v: number | undefined): number {
+  if (v === undefined || !Number.isFinite(v)) return MIN_REACTION_TICKS;
+  return Math.max(MIN_REACTION_TICKS, Math.floor(v));
 }
 
 export class ShooterDriver {
@@ -183,6 +195,10 @@ export class ShooterDriver {
   private readonly streakRound: number[] = Array.from({ length: PLAYER_COUNT }, () => 0);
   private readonly idleRound: number[];
   private readonly dead: boolean[];
+  /** 各選手的反應延遲（tick）；人類玩家為 0 */
+  readonly reactionTicks: readonly number[];
+  /** 排隊中的 Bot 指令（依決策順序；套用 tick 遞增） */
+  private pending: { readonly at: number; readonly round: number; readonly playerId: number; readonly commands: unknown[] }[] = [];
 
   constructor(opts: ShooterRunOptions) {
     if (opts.controllers.length !== PLAYER_COUNT) throw new Error(`射擊比賽需要 ${PLAYER_COUNT} 個控制器，收到 ${opts.controllers.length}`);
@@ -194,8 +210,10 @@ export class ShooterDriver {
     this.idleRound = opts.controllers.map(() => 0);
     this.dead = opts.controllers.map(() => false);
     const knobs = opts.knobs ?? opts.controllers.map(() => ({}));
+    this.reactionTicks = opts.controllers.map((c, pid) => (c.takeRealtime !== undefined ? 0 : clampReaction(opts.reactionTicks?.[pid])));
     opts.controllers.forEach((c, pid) => {
-      const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], opts));
+      const init = { roundsPerHalf: opts.roundsPerHalf, winRounds: opts.winRounds, startMoney: opts.startMoney, overtime: opts.overtime, reactionTicks: this.reactionTicks[pid] };
+      const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init));
       const rt = this.runtime[pid];
       if (out.exception !== null) this.error(pid, `init: ${out.exception}`);
       // init 超時：整場閒置（沿用 RTS／軍團戰）
@@ -219,6 +237,7 @@ export class ShooterDriver {
             ...(opts.roundsPerHalf !== undefined ? { roundsPerHalf: opts.roundsPerHalf } : {}),
             ...(opts.winRounds !== undefined ? { winRounds: opts.winRounds } : {}),
             ...(opts.overtime !== undefined ? { overtime: opts.overtime } : {}),
+            reactionTicks: this.reactionTicks,
             players: opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: knobs[i] })),
           },
           decisions: [],
@@ -237,6 +256,14 @@ export class ShooterDriver {
   step(): void {
     const m = this.match;
     if (m.over) return;
+    // 到期的 Bot 指令先套用（依決策順序）；上一回合決策、還沒生效的作廢
+    while (this.pending.length > 0 && this.pending[0].at <= m.tick) {
+      const q = this.pending[0];
+      this.pending.shift();
+      if (q.round !== m.roundNumber) continue;
+      this.replay?.decisions.push({ tick: m.tick, playerId: q.playerId, commands: q.commands });
+      m.applyCommands(q.playerId, q.commands);
+    }
     if (m.isDecisionTick()) {
       // 先讓每個人都觀察完，再依序下指令：後面的人不會看到前面的人剛下的指令
       const views = this.controllers.map((_, pid) => m.observe(pid));
@@ -267,8 +294,16 @@ export class ShooterDriver {
         }
         const cmds = out.value;
         if (Array.isArray(cmds) && cmds.length > 0) {
-          this.replay?.decisions.push({ tick: m.tick, playerId: pid, commands: cmds });
-          m.applyCommands(pid, cmds);
+          if (this.reactionTicks[pid] === 0) {
+            this.replay?.decisions.push({ tick: m.tick, playerId: pid, commands: cmds });
+            m.applyCommands(pid, cmds);
+          } else {
+            // 依套用 tick 插入（延遲不同的選手可能後決策先生效）；同 tick 維持決策順序
+            const at = m.tick + this.reactionTicks[pid];
+            let i = this.pending.length;
+            while (i > 0 && this.pending[i - 1].at > at) i -= 1;
+            this.pending.splice(i, 0, { at, round: m.roundNumber, playerId: pid, commands: cmds as unknown[] });
+          }
         }
       }
     }

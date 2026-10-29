@@ -1,7 +1,7 @@
 // CS 射擊驗收情境，用寫死的腳本控制器（不用陪練 Bot）；test/shooter.test.ts 檢查全部通過。
 // SCENARIOS（步驟 1）：四種回合勝利條件與回合流程。ECONOMY_SCENARIOS（步驟 2）：回合結算。GRENADE_SCENARIOS（步驟 3）：道具。
 import type { ShooterCommand, ShooterObservation } from './api.ts';
-import { ECONOMY, GRENADES, GRENADE_RULES, ROUND, TEAM_SIZE, UNIT, ticks, type GrenadeId } from './config.ts';
+import { DECISION_INTERVAL, ECONOMY, GRENADES, GRENADE_RULES, MIN_REACTION_TICKS, ROUND, TEAM_SIZE, UNIT, ticks, type GrenadeId } from './config.ts';
 import { isSolidCell } from './map.ts';
 import { ScriptController, ShooterDriver } from './runner.ts';
 import { FIRE_TICK_DAMAGE, PLAYER_COUNT, type ShooterMatchOptions } from './sim.ts';
@@ -142,9 +142,9 @@ export const SCENARIOS: readonly Scenario[] = [
       const t0 = m.tick;
       runUntil(d, () => roundOver(d, 1), ROUND.bombTicks + 10);
       const r = m.rounds[0];
-      // endTick 是最後處理的 tick，所以經過的時間是 endTick + 1 − t0；指令最晚在下一個決策 tick 才送出
+      // endTick 是最後處理的 tick，所以經過的時間是 endTick + 1 − t0；指令最晚在下一個決策 tick 送出，再過反應延遲才生效（v1.0）
       const took = r === undefined ? -1 : r.endTick + 1 - t0;
-      const pass = r !== undefined && r.winner === 'CT' && r.reason === 'defuse' && took >= ROUND.defuseTicks && took <= ROUND.defuseTicks + 3;
+      const pass = r !== undefined && r.winner === 'CT' && r.reason === 'defuse' && took >= ROUND.defuseTicks + MIN_REACTION_TICKS && took <= ROUND.defuseTicks + DECISION_INTERVAL + MIN_REACTION_TICKS;
       return { pass, detail: `${last(d)}；拆了 ${took} tick` };
     },
   },

@@ -4,7 +4,7 @@ import { cdegDiff, iatan2, iatan2C, icosC, isinC } from '../src/shared/geom.ts';
 import { iatan2 as legionIatan2 } from '../src/legion/geom.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
 import { ECONOMY_SCENARIOS, GRENADE_SCENARIOS, SCENARIOS } from '../src/shooter/acceptance.ts';
-import { AMMO, ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, GRENADE_RULES, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS, ticks, type GrenadeId } from '../src/shooter/config.ts';
+import { AMMO, ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, GRENADE_RULES, MIN_REACTION_TICKS, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS, ticks, type GrenadeId } from '../src/shooter/config.ts';
 import { applyPercent } from '../src/shared/intmath.ts';
 import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
@@ -12,7 +12,7 @@ import { ShooterHumanController } from '../src/shooter/human.ts';
 import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, shooterHelpers, type ShooterController } from '../src/shooter/runner.ts';
 import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, moveOrder, shooterInitData, burnCells, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
 import { lineOfSight, quantizeDir, rayWallDistance, soundRange } from '../src/shooter/vision.ts';
-import type { ShooterObservation, SoundEvent } from '../src/shooter/api.ts';
+import type { ShooterInitData, ShooterObservation, SoundEvent } from '../src/shooter/api.ts';
 
 const map = MAPS.dust();
 const practice = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'shooter-practice.js');
@@ -1609,6 +1609,108 @@ describe('投擲方向夾視錐（v0.4）', () => {
 
   it('開鏡時用開鏡視錐（30°）', () => {
     expect(throwDir(270, 0, true)).toBe(285);
+  });
+});
+
+describe('Bot 反應延遲（v1.0 引擎強制）', () => {
+  /** pid 0 在開打後第一個決策 tick 下 fire（朝牆），回傳 [決策 tick, 第一次扣彈的 tick] */
+  function fireDelay(opts: { reactionTicks?: readonly number[]; human?: boolean } = {}): { decided: number; fired: number; init: number | null; replayTick: number | null } {
+    let decided = -1;
+    let init: number | null = null;
+    const bot = new ScriptController('fire', (obs: ShooterObservation) => {
+      if (obs.round.phase !== 'live' || decided >= 0) return [];
+      decided = obs.tick;
+      return [{ type: 'fire', on: true }];
+    });
+    const origInit = bot.init.bind(bot);
+    bot.init = (data?: ShooterInitData) => {
+      init = data?.rules.reactionTicks ?? null;
+      return origInit();
+    };
+    const human = new ShooterHumanController();
+    const controllers: ShooterController[] = Array.from({ length: PLAYER_COUNT }, (_, i) => (i === 0 ? (opts.human === true ? human : bot) : new ScriptController(`idle-${i}`, () => [])));
+    const d = new ShooterDriver({ mapId: 'dust', seed: 1, controllers, record: true, ...(opts.reactionTicks !== undefined ? { reactionTicks: opts.reactionTicks } : {}) });
+    const p = d.match.players[0];
+    const mag0 = p.secondary!.mag;
+    let fired = -1;
+    for (let i = 0; i < ROUND.freezeTicks + 60 && fired < 0; i++) {
+      const t = d.match.tick;
+      if (opts.human === true && d.match.phase === 'live' && decided < 0) {
+        decided = t;
+        human.enqueue([{ type: 'fire', on: true }]);
+      }
+      d.step();
+      if (p.secondary!.mag < mag0) fired = t;
+    }
+    const rec = d.replay!.decisions.find((x) => x.playerId === 0);
+    if (opts.human === true) init = d.reactionTicks[0];
+    return { decided, fired, init, replayTick: rec?.tick ?? null };
+  }
+
+  it(`Bot 在 tick t 下 fire，tick t + ${MIN_REACTION_TICKS} 才開火（t + ${MIN_REACTION_TICKS - 1} 不開）；回放記實際套用的 tick；開局資料帶延遲`, () => {
+    const r = fireDelay();
+    expect(r.decided % 3).toBe(0);
+    expect(r.fired).toBe(r.decided + MIN_REACTION_TICKS);
+    expect(r.replayTick).toBe(r.decided + MIN_REACTION_TICKS);
+    expect(r.init).toBe(MIN_REACTION_TICKS);
+  });
+
+  it('人類控制器不延遲：當 tick 套用', () => {
+    const r = fireDelay({ human: true });
+    expect(r.fired).toBe(r.decided);
+    expect(r.init).toBe(0);
+  });
+
+  it('reactionTicks 小於下限夾到 5、大於下限照用（傳 2 → 5、傳 9 → 9）', () => {
+    const a = fireDelay({ reactionTicks: [2] });
+    expect(a.init).toBe(MIN_REACTION_TICKS);
+    expect(a.fired).toBe(a.decided + MIN_REACTION_TICKS);
+    const b = fireDelay({ reactionTicks: [9] });
+    expect(b.init).toBe(9);
+    expect(b.fired).toBe(b.decided + 9);
+  });
+
+  it('延遲不同的選手：後決策先生效也照套用 tick 排序；上一回合排隊的指令作廢', () => {
+    const order: number[] = [];
+    const controllers: ShooterController[] = Array.from({ length: PLAYER_COUNT }, (_, i) =>
+      new ScriptController(`s-${i}`, (obs: ShooterObservation) => (obs.round.phase === 'live' && i < 2 ? [{ type: 'say', text: `${i}@${obs.tick}` }] : [])),
+    );
+    const d = new ShooterDriver({ mapId: 'dust', seed: 1, controllers, record: true, reactionTicks: [9, 5] });
+    while (d.match.phase !== 'live') d.step();
+    for (let i = 0; i < 20; i++) d.step();
+    for (const x of d.replay!.decisions) order.push(x.tick);
+    // 套用 tick 遞增（重播依序套用）
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(d.replay!.header.reactionTicks).toEqual([9, 5, 5, 5, 5, 5, 5, 5, 5, 5]);
+
+    // 回合交接：上一回合最後幾個 tick 決策的指令不帶進下一回合
+    let decidedR1 = 0;
+    const talk: ShooterController[] = Array.from({ length: PLAYER_COUNT }, (_, i) =>
+      new ScriptController(`t-${i}`, (obs: ShooterObservation) => {
+        if (i !== 0) return [];
+        if (obs.round.number === 1) decidedR1 += 1;
+        return [{ type: 'say', text: `r${obs.round.number}` }];
+      }),
+    );
+    const e = new ShooterDriver({ mapId: 'dust', seed: 1, controllers: talk, record: true });
+    while (e.match.phase !== 'live') e.step();
+    for (const p of e.match.players) if (p.group === 1) e.match.kill(p.id);
+    while (e.match.roundNumber === 1) e.step();
+    const r2start = e.match.roundStartTick;
+    for (let i = 0; i < 20; i++) e.step();
+    const r1 = e.replay!.decisions.filter((x) => (x.commands as { text: string }[])[0].text === 'r1');
+    expect(r1.every((x) => x.tick < r2start)).toBe(true);
+    expect(r1.length).toBeLessThan(decidedR1);
+  });
+
+  it('回放重播雜湊相同（含延遲）', () => {
+    const seed = 4;
+    const a = runShooterMatch({ seed, mapId: 'dust', roundsPerHalf: 2, winRounds: 3, overtime: false, controllers: practiceControllers(seed), record: true, reactionTicks: [5, 6, 7, 8, 9, 5, 5, 5, 5, 5] });
+    const bots = a.replay!.decisions.filter((x) => x.playerId === 0);
+    expect(bots.every((x) => x.tick % 3 === MIN_REACTION_TICKS % 3)).toBe(true);
+    const r = runShooterReplay(JSON.parse(JSON.stringify(a.replay)));
+    expect(r.desyncTick).toBeNull();
+    expect(r.finalHash).toBe(a.finalHash);
   });
 });
 

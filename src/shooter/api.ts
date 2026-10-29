@@ -108,7 +108,13 @@ export interface RulesInfo {
   /** 矮牆掩護距離（格，v0.5） */
   readonly lowCoverRange: number;
   readonly turnDegPerSec: number;
+  /** 角色碰撞半徑（座標單位）：活人之間圓心距不得小於 2 × bodyRadius（v1.0，不分敵我，死人不擋） */
   readonly bodyRadius: number;
+  /**
+   * 自己的反應延遲（tick，v1.0 引擎強制）：在 tick t 回傳的指令從 tick t + reactionTicks 起才生效。
+   * Bot 至少 5（167 毫秒）；人類玩家為 0
+   */
+  readonly reactionTicks: number;
   readonly footstepRange: number;
   /** 友軍傷害（%）：子彈打到隊友的傷害比例；隊友會擋子彈 */
   readonly friendlyFirePct: number;

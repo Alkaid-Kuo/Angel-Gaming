@@ -41,6 +41,7 @@ import {
   ECONOMY,
   FRIENDLY_FIRE_PCT,
   GRENADES,
+  MIN_REACTION_TICKS,
   GRENADE_IDS,
   GRENADE_RULES,
   MOVE,
@@ -542,7 +543,7 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 export const DEFAULT_ATTRIBUTES: Attributes = Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, 50])) as unknown as Attributes;
 
 /** 開局資料（JSON 安全） */
-export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney' | 'overtime'> = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
+export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney' | 'overtime'> & { readonly reactionTicks?: number } = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
   const group = playerId < TEAM_SIZE ? 0 : 1;
   const ids = Array.from({ length: PLAYER_COUNT }, (_, i) => i);
   return {
@@ -565,6 +566,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       lowCoverRange: VISION.lowCoverRange,
       turnDegPerSec: VISION.turnDegPerSec,
       bodyRadius: VISION.bodyRadius,
+      reactionTicks: opts.reactionTicks ?? MIN_REACTION_TICKS,
       footstepRange: SOUND.footstepRange,
       friendlyFirePct: FRIENDLY_FIRE_PCT,
       roundsPerHalf: opts.roundsPerHalf ?? ROUND.roundsPerHalf,
