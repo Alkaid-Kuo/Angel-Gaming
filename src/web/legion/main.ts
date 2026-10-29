@@ -8,6 +8,7 @@ import { LegionScreen } from './ui.ts';
 const setupEl = document.getElementById('setup')!;
 const gameEl = document.getElementById('game')!;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
+// 「隨機」只抽一般陪練；攻城陪練（siege）只在攻城戰出現、不進隨機
 const BOT_KEYS: BotKey[] = ['push', 'ambush', 'ranged', 'commander', 'marshal', 'general2', 'marshal2'];
 
 let worker: Worker | null = null;
@@ -115,6 +116,13 @@ const MAP_TEXT: Record<string, [string, string]> = {
 };
 function renderMode(): void {
   mapSel.closest('label')!.classList.toggle('hidden', mode() !== 'capture');
+  // 攻城陪練只在攻城戰出現；換到別的模式時，選著它的那一方改回預設
+  for (const sel of document.querySelectorAll<HTMLSelectElement>('.lg-pick select')) {
+    const opt = sel.querySelector<HTMLOptionElement>('option[data-siege]')!;
+    opt.hidden = mode() !== 'siege';
+    opt.disabled = mode() !== 'siege';
+    if (opt.disabled && sel.value === opt.value) sel.value = sel.name === 'blue' ? 'push' : 'ambush';
+  }
   const [name, desc] = MAP_TEXT[mapId()];
   document.getElementById('map-name')!.textContent = name;
   document.getElementById('map-desc')!.textContent = desc;

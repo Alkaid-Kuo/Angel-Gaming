@@ -3,7 +3,7 @@
 //       node scripts/build-legion-bots.ts --check  只檢查產生的檔案是否和原始碼一致（不一致時結束碼為 1）
 import { readFileSync, writeFileSync } from 'node:fs';
 
-export const LEGION_STRATEGIES = ['push', 'ambush', 'ranged', 'commander'] as const;
+export const LEGION_STRATEGIES = ['push', 'ambush', 'ranged', 'commander', 'siege'] as const;
 
 const lines = (s: string): string[] => s.replaceAll('\r\n', '\n').split('\n');
 

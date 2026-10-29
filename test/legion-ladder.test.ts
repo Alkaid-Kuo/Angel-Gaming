@@ -1,7 +1,8 @@
 // 引擎 0.4 步驟 3：雲梯（架設、通過量、推倒、摔傷、再架）。測試圖見 legion-castle-map.ts。
 import { describe, expect, it } from 'vitest';
 import { LADDER_LAYER, RULES, T, UNITS, WALL_LAYER } from '../src/legion/config.ts';
-import { castleMap, castleMatch, hpOf, rejected, run, tileAt } from './legion-castle-map.ts';
+import { LegionMatch } from '../src/legion/sim.ts';
+import { WALL_X, castleMap, castleMatch, hpOf, rejected, run, tileAt } from './legion-castle-map.ts';
 
 const map = castleMap('test-ladder');
 const M = 'test-ladder';
@@ -95,6 +96,32 @@ describe('軍團戰 0.4：爬雲梯', () => {
     expect(maxOn).toBe(L.climbTicks / L.entryTicks);
     expect(r.layer).toBe(WALL_LAYER);
     for (const sid of r.slots) expect([T.Wall, T.Gatehouse]).toContain(tileAt(map, m.soldiers[sid].x, m.soldiers[sid].y));
+  });
+
+  it('爬梯上牆、再走樓梯下到城裡：中心先下去，還在梯腳排隊的人照順序爬梯、走同一座樓梯下來，整團都進城', () => {
+    const { m } = castleMatch(M, [sword], [farRed]);
+    m.applyCommands(0, [{ type: 'ladder', id: 0, ...ladderAt }]);
+    run(m, L.buildTicks);
+    const r = m.regiments[0];
+    // 城內地面 (25, 4)：路徑是梯腳 → 梯口 → 牆頂往北 → 樓梯 (21, 4) → 城內
+    const inside = { x: 25500, y: 4500 };
+    let wasUp = false;
+    let leftOutside = -1;
+    for (let i = 0; i < 600; i++) {
+      if (m.isDecisionTick()) m.applyCommands(0, [{ type: 'move', id: 0, ...inside }]);
+      m.step();
+      if (r.layer === WALL_LAYER) wasUp = true;
+      // 中心剛下到城裡的那一刻：還在牆外（地面或梯上）的人數
+      if (wasUp && leftOutside < 0 && r.layer === 0) leftOutside = r.slots.filter((sid) => m.soldiers[sid].x < WALL_X * 1000 || m.soldiers[sid].climb >= 0).length;
+    }
+    expect(leftOutside).toBeGreaterThan(0);
+    expect(r.xseq).toBe(2);
+    expect(r.layer).toBe(0);
+    for (const sid of r.slots) {
+      const s = m.soldiers[sid];
+      expect(s.layer).toBe(0);
+      expect(s.x).toBeGreaterThan((WALL_X + 1) * 1000);
+    }
   });
 
   it('爬梯中的人不和任何人近戰（層 2）；obs 的 climbers 計數', () => {
@@ -223,3 +250,24 @@ function teleportRedToMouth(m: ReturnType<typeof castleMatch>['m']): void {
     s.y = 7500;
   }
 }
+
+describe('軍團戰 0.4：換層紀錄', () => {
+  it('後備入場清掉換層紀錄：入場的士兵不會照撤回前的紀錄去走樓梯、雲梯', () => {
+    const m = new LegionMatch({ seed: 7, mode: 'capture', deployments: [[{ type: 'sword', x: 10000, y: 20000 }, { type: 'spear', reserve: true }], [{ type: 'spear', x: 230000, y: 20000 }]] });
+    const reserve = m.regiments.find((r) => r.owner === 0 && r.reserve)!;
+    // 假裝這一團撤回前留下過換層紀錄（爬雲梯上牆、走樓梯下來）
+    reserve.xfers = [{ seq: 1, ladder: 0, x: 20500, y: 6500, to: 1 }, { seq: 2, ladder: -1, x: 21500, y: 4500, to: 0 }];
+    reserve.xseq = 3;
+    for (const sid of reserve.parked) m.soldiers[sid].owe = 1;
+    m.applyCommands(0, [{ type: 'summon', id: reserve.id }]);
+    run(m, RULES.capture.enterTicks + 2);
+    expect(reserve.reserve).toBe(false);
+    expect(reserve.xfers).toEqual([]);
+    expect(reserve.xseq).toBe(0);
+    expect(reserve.slots.length).toBe(UNITS.spear.men);
+    for (const sid of reserve.slots) {
+      expect(m.soldiers[sid].owe).toBe(-1);
+      expect(m.soldiers[sid].layer).toBe(0);
+    }
+  });
+});

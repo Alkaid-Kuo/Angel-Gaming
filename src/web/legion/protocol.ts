@@ -4,7 +4,7 @@ import type { DashKind, FormationKind, LegionMode, ShieldStance, UnitKind } from
 import type { MapGate } from '../../legion/map.ts';
 import type { LegionResult } from '../../legion/sim.ts';
 
-export type BotKey = 'push' | 'ambush' | 'ranged' | 'commander' | 'marshal' | 'general2' | 'marshal2';
+export type BotKey = 'push' | 'ambush' | 'ranged' | 'commander' | 'marshal' | 'general2' | 'marshal2' | 'siege';
 
 /** 玩家的陣容：場上、後備（佔點模式）各幾團 */
 export interface PlayerArmy {

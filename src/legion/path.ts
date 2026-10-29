@@ -278,9 +278,13 @@ export function findPath(map: LegionMap, sx: number, sy: number, gx: number, gy:
         if (s.closed[ns] === gen) continue;
         const diag = dx !== 0 && dy !== 0;
         if (diag) {
+          // 斜走要能經過兩側任一格，而且經過那格之後到目的格的層一樣（不然會從樓梯斜切到牆頂：實際走的人經過旁邊的地面格就換回地面層，跟不上）
           const ai = cy * w + nx;
           const bi = ny * w + cx;
-          if (stepTo(cl, ct, terrain[ai], cavalry, open !== null && open[ai] === 1) < 0 || stepTo(cl, ct, terrain[bi], cavalry, open !== null && open[bi] === 1) < 0) continue;
+          const la = stepTo(cl, ct, terrain[ai], cavalry, open !== null && open[ai] === 1);
+          const lb = stepTo(cl, ct, terrain[bi], cavalry, open !== null && open[bi] === 1);
+          if (la < 0 || lb < 0) continue;
+          if (stepTo(la, terrain[ai], terrain[ni], cavalry, open !== null && open[ni] === 1) !== nl || stepTo(lb, terrain[bi], terrain[ni], cavalry, open !== null && open[ni] === 1) !== nl) continue;
         }
         const g = s.g[cur] + idiv(tileCost(map, ni) * (diag ? SQRT2 : 100), 100);
         if (s.stamp[ns] === gen && s.g[ns] <= g) continue;
