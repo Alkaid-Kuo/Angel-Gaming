@@ -9,10 +9,11 @@ import { roundHalfEven } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
 import { BotLoadError, type CompiledBot } from '../sandbox/compile.ts';
 import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
-import type { ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, Team, WeaponId } from './api.ts';
+import type { Attributes, ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, Team, WeaponId } from './api.ts';
 import { MIN_REACTION_TICKS, SHOOTER_ENGINE_VERSION, TIMING } from './config.ts';
 import { DEFAULT_MAP_ID, MAPS, blocksMove, regionsAt, type ShooterMap } from './map.ts';
-import { HASH_INTERVAL, PLAYER_COUNT, ShooterMatch, shooterInitData, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
+import { reactionTicksFor } from './players.ts';
+import { DEFAULT_ATTRIBUTES, HASH_INTERVAL, PLAYER_COUNT, ShooterMatch, shooterInitData, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
 import { lineOfSight } from './vision.ts';
 
 export interface ShooterReplay {
@@ -32,7 +33,8 @@ export interface ShooterReplay {
     readonly overtime?: ShooterMatchOptions['overtime'];
     /** 各選手的反應延遲（tick，v1.0；只供查閱，decisions 已是實際套用的 tick） */
     readonly reactionTicks?: readonly number[];
-    readonly players: readonly { readonly playerId: number; readonly bot: string; readonly version: string; readonly knobs: KnobValues }[];
+    /** attributes：選手屬性包（步驟 7；只供查閱與顯示，重播不需要） */
+    readonly players: readonly { readonly playerId: number; readonly bot: string; readonly version: string; readonly knobs: KnobValues; readonly attributes?: Attributes }[];
   };
   readonly decisions: { readonly tick: number; readonly playerId: number; readonly commands: unknown }[];
   readonly hashes: { readonly tick: number; readonly hash: string }[];
@@ -175,8 +177,10 @@ export interface ShooterRunOptions extends ShooterMatchOptions {
   readonly controllers: readonly ShooterController[];
   readonly knobs?: readonly KnobValues[];
   readonly record: boolean;
-  /** 依 playerId 的 Bot 反應延遲（tick，v1.0）：預設 MIN_REACTION_TICKS，小於下限夾到下限（屬性只能讓它更慢） */
+  /** 依 playerId 的 Bot 反應延遲（tick，v1.0）：有給就照給的（小於下限夾到下限）；沒給時有 attributes 就由 reactionTicksFor 算，都沒有就是 MIN_REACTION_TICKS */
   readonly reactionTicks?: readonly number[];
+  /** 依 playerId 的屬性包（步驟 7）：傳進 InitData.attributes；沒給（或該座位 undefined）＝全 50 */
+  readonly attributes?: readonly (Attributes | undefined)[];
 }
 
 /** 反應延遲夾到下限；非整數取整、非數字用下限 */
@@ -197,6 +201,8 @@ export class ShooterDriver {
   private readonly dead: boolean[];
   /** 各選手的反應延遲（tick）；人類玩家為 0 */
   readonly reactionTicks: readonly number[];
+  /** 各選手的屬性包（InitData.attributes） */
+  readonly attributes: readonly Attributes[];
   /** 排隊中的 Bot 指令（依決策順序；套用 tick 遞增） */
   private pending: { readonly at: number; readonly round: number; readonly playerId: number; readonly commands: unknown[] }[] = [];
 
@@ -210,10 +216,16 @@ export class ShooterDriver {
     this.idleRound = opts.controllers.map(() => 0);
     this.dead = opts.controllers.map(() => false);
     const knobs = opts.knobs ?? opts.controllers.map(() => ({}));
-    this.reactionTicks = opts.controllers.map((c, pid) => (c.takeRealtime !== undefined ? 0 : clampReaction(opts.reactionTicks?.[pid])));
+    this.attributes = opts.controllers.map((_, pid) => opts.attributes?.[pid] ?? DEFAULT_ATTRIBUTES);
+    this.reactionTicks = opts.controllers.map((c, pid) => {
+      if (c.takeRealtime !== undefined) return 0;
+      const given = opts.reactionTicks?.[pid];
+      if (given === undefined && opts.attributes !== undefined) return clampReaction(reactionTicksFor(this.attributes[pid]));
+      return clampReaction(given);
+    });
     opts.controllers.forEach((c, pid) => {
       const init = { roundsPerHalf: opts.roundsPerHalf, winRounds: opts.winRounds, startMoney: opts.startMoney, overtime: opts.overtime, reactionTicks: this.reactionTicks[pid] };
-      const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init));
+      const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init, this.attributes[pid]));
       const rt = this.runtime[pid];
       if (out.exception !== null) this.error(pid, `init: ${out.exception}`);
       // init 超時：整場閒置（沿用 RTS／軍團戰）
@@ -238,7 +250,7 @@ export class ShooterDriver {
             ...(opts.winRounds !== undefined ? { winRounds: opts.winRounds } : {}),
             ...(opts.overtime !== undefined ? { overtime: opts.overtime } : {}),
             reactionTicks: this.reactionTicks,
-            players: opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: knobs[i] })),
+            players: opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: knobs[i], attributes: this.attributes[i] })),
           },
           decisions: [],
           hashes: [],
@@ -329,13 +341,20 @@ export interface ShooterRunOutput {
   readonly finalHash: string;
   readonly wallMs: number;
   readonly match: ShooterMatch;
+  /** 各選手的屬性包與反應延遲（步驟 7；結果顯示用） */
+  readonly players: readonly { readonly attributes: Attributes; readonly reactionTicks: number }[];
 }
 
 export function runShooterMatch(opts: ShooterRunOptions): ShooterRunOutput {
   const t0 = performance.now();
   const d = new ShooterDriver(opts);
   while (!d.match.over) d.step();
-  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match };
+  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match, players: driverPlayers(d) };
+}
+
+/** 驅動層的選手資料（屬性包、反應延遲） */
+export function driverPlayers(d: ShooterDriver): ShooterRunOutput['players'] {
+  return d.attributes.map((attributes, pid) => ({ attributes, reactionTicks: d.reactionTicks[pid] }));
 }
 
 /** 回放重建：逐 tick 套用紀錄的指令，比對雜湊 */

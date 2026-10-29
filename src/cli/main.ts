@@ -17,7 +17,8 @@ import { OfficialController } from '../sandbox/official.ts';
 import { runMatch } from '../sandbox/runner.ts';
 import { TPS as SHOOTER_TPS, WEAPONS, WEAPON_IDS, type Team, type WeaponId } from '../shooter/config.ts';
 import { DEFAULT_MAP_ID, MAPS as SHOOTER_MAPS, cellOf as shooterCellOf, dumpAscii, inRect as shooterInRect } from '../shooter/map.ts';
-import { ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOutput } from '../shooter/runner.ts';
+import { derivePlayer, type ShooterPlayerSpec } from '../shooter/players.ts';
+import { ShooterBatchController, ShooterDriver, driverPlayers, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOutput } from '../shooter/runner.ts';
 import { PLAYER_COUNT, type ShooterMatch } from '../shooter/sim.ts';
 import { renderPng } from './png.ts';
 import { eloFromWins, gameOutput, summarize, type BotInfo, type GameOutput } from './stats.ts';
@@ -396,17 +397,48 @@ function shooterRoundMoneyArg(args: Args): readonly [number | null, number | nul
   return [parse(parts[0]), parse(parts[1])];
 }
 
+/** --players a.json：10 個 ShooterPlayerSpec（或 null ＝ 全 50 基準）依座位 */
+function shooterPlayersArg(args: Args): readonly (ShooterPlayerSpec | null)[] | undefined {
+  const file = one(args, 'players');
+  if (file === undefined) return undefined;
+  let list: unknown;
+  try {
+    list = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (e) {
+    throw new ArgError(`無法讀取 --players ${file}：${(e as Error).message}`);
+  }
+  if (!Array.isArray(list) || list.length !== PLAYER_COUNT) throw new ArgError(`--players 要 ${PLAYER_COUNT} 個選手規格（或 null）的陣列`);
+  return list.map((x, i) => {
+    if (x === null) return null;
+    const spec = x as ShooterPlayerSpec;
+    try {
+      derivePlayer({ role: spec.role, version: spec.version, habit: spec.habit ?? 0 });
+    } catch (e) {
+      throw new ArgError(`--players 第 ${i} 個：${(e as Error).message}`);
+    }
+    return { role: spec.role, version: spec.version, habit: spec.habit ?? 0 };
+  });
+}
+
 interface ShooterPlayOptions {
   readonly loadout?: Partial<Record<Team, WeaponId>>;
   readonly roundMoney?: readonly [number | null, number | null];
+  readonly players?: readonly (ShooterPlayerSpec | null)[];
 }
 
 function playShooter(files: readonly BotFile[], seed: number, mapId: string, opts: ShooterPlayOptions, record: boolean, probe?: (m: ShooterMatch) => void): ShooterRunOutput {
   const map = SHOOTER_MAPS[mapId]();
   const pick = (pid: number): BotFile => files[pid < PLAYER_COUNT / 2 ? 0 : files.length - 1];
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(pick(pid).compiled, pick(pid).label, seed, pid, map));
-  const knobs = controllers.map((c) => resolveKnobs(c.declaration, undefined, c.label));
-  const runOpts = { seed, mapId, defaultLoadout: opts.loadout, roundMoney: opts.roundMoney, controllers, knobs, record };
+  const derived = opts.players?.map((s) => (s === null ? null : derivePlayer(s)));
+  // 選手規格的旋鈕只給宣告了那顆旋鈕的選手（例如陪練 Bot 沒有 role）
+  const knobs = controllers.map((c, pid) => {
+    const want = derived?.[pid]?.knobs ?? {};
+    const own = Object.fromEntries(Object.entries(want).filter(([k]) => c.declaration.knobs.some((d) => d.key === k)));
+    return resolveKnobs(c.declaration, own, c.label);
+  });
+  const attributes = derived === undefined ? undefined : derived.map((d) => d?.attributes);
+  const runOpts = { seed, mapId, defaultLoadout: opts.loadout, roundMoney: opts.roundMoney, controllers, knobs, record, attributes };
   if (probe === undefined) return runShooterMatch(runOpts);
   const t0 = performance.now();
   const d = new ShooterDriver(runOpts);
@@ -414,7 +446,7 @@ function playShooter(files: readonly BotFile[], seed: number, mapId: string, opt
     d.step();
     probe(d.match);
   }
-  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match };
+  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match, players: driverPlayers(d) };
 }
 
 /** 炸彈點到達時間：每回合從開打到第一個 T 踏進 A／B 點的秒數（v1.0，量走位與碰撞的影響） */
@@ -449,7 +481,7 @@ function siteArrivalProbe(): { probe: (m: ShooterMatch) => void; summary: () => 
   };
 }
 
-function shooterSummary(run: ShooterRunOutput): Record<string, unknown> {
+function shooterSummary(run: ShooterRunOutput, specs?: readonly (ShooterPlayerSpec | null)[]): Record<string, unknown> {
   const r = run.result;
   return {
     winner: r.winner === null ? 'draw' : r.winner === 0 ? 'players0-4' : 'players5-9',
@@ -462,32 +494,36 @@ function shooterSummary(run: ShooterRunOutput): Record<string, unknown> {
     roundLog: r.rounds.map((x) => `${x.number}:${x.winner}:${x.reason}`),
     players: r.stats.map((s, pid) => {
       const rt = run.runtime[pid];
-      return { playerId: pid, kills: s.kills, deaths: s.deaths, exceptions: rt.exceptions, timeouts: rt.timeouts, decideMsMax: Math.round(rt.decideMsMax * 100) / 100, errors: rt.errors };
+      const spec = specs?.[pid] ?? null;
+      const who = specs === undefined ? {} : { role: spec?.role ?? null, version: spec?.version ?? null, habit: spec?.habit ?? null, attributes: run.players[pid].attributes, reactionTicks: run.players[pid].reactionTicks };
+      return { playerId: pid, ...who, kills: s.kills, deaths: s.deaths, exceptions: rt.exceptions, timeouts: rt.timeouts, decideMsMax: Math.round(rt.decideMsMax * 100) / 100, errors: rt.errors };
     }),
   };
 }
 
 function cmdShooterMatch(args: Args): void {
-  knownArgs(args, ['seed', 'bots', 'map', 'replay', 'loadout', 'round-money', 'out']);
+  knownArgs(args, ['seed', 'bots', 'map', 'replay', 'loadout', 'round-money', 'players', 'out']);
   const seed = intArg(args, 'seed', randomInt(0, 2 ** 31), 0)!;
   const files = shooterBotFiles(args);
   const mapId = shooterMapArg(args);
   const replayPath = one(args, 'replay');
-  const run = playShooter(files, seed, mapId, { loadout: shooterLoadoutArg(args), roundMoney: shooterRoundMoneyArg(args) }, replayPath !== undefined);
+  const players = shooterPlayersArg(args);
+  const run = playShooter(files, seed, mapId, { loadout: shooterLoadoutArg(args), roundMoney: shooterRoundMoneyArg(args), players }, replayPath !== undefined);
   if (replayPath !== undefined && run.replay !== null) {
     mkdirSync(dirname(resolve(replayPath)), { recursive: true });
     writeFileSync(replayPath, JSON.stringify(run.replay));
   }
-  emit({ seed, map: mapId, bots: files.map((f) => f.path), ...shooterSummary(run) }, one(args, 'out'));
+  emit({ seed, map: mapId, bots: files.map((f) => f.path), ...shooterSummary(run, players) }, one(args, 'out'));
 }
 
 function cmdShooterBatch(args: Args): void {
-  knownArgs(args, ['games', 'seed', 'bots', 'map', 'loadout', 'round-money', 'out']);
+  knownArgs(args, ['games', 'seed', 'bots', 'map', 'loadout', 'round-money', 'players', 'out']);
   const games = intArg(args, 'games', 10, 1)!;
   const seed = intArg(args, 'seed', 1, 0)!;
   const files = shooterBotFiles(args);
   const mapId = shooterMapArg(args);
-  const opts: ShooterPlayOptions = { loadout: shooterLoadoutArg(args), roundMoney: shooterRoundMoneyArg(args) };
+  const players = shooterPlayersArg(args);
+  const opts: ShooterPlayOptions = { loadout: shooterLoadoutArg(args), roundMoney: shooterRoundMoneyArg(args), players };
   const wins = [0, 0];
   const groupRoundWins = [0, 0];
   // 經濟統計：依陣營與依組別的回合開局平均金錢總和、全買回合數
@@ -550,6 +586,7 @@ function cmdShooterBatch(args: Args): void {
       seedFrom: seed,
       map: mapId,
       bots: files.map((f) => f.path),
+      ...(players !== undefined ? { players: players.map((p, pid) => (p === null ? null : { playerId: pid, ...p, ...derivePlayer(p) })) } : {}),
       matchWins: { 'players0-4': wins[0], 'players5-9': wins[1], draws },
       overtimeGames,
       botExceptions: exceptions,
@@ -695,8 +732,8 @@ const USAGE = `用法：
   rts-sim mapgen     --mode 1v1|ffa4 [--seed S] [--format ascii|png] [--validate N] [--out F]
   rts-sim bench      --mode 1v1|ffa4 [--games N] [--exec batch|official] [--seed S] [--bot F] [--out F]
   rts-sim viewer     [--port 8000] [--host 127.0.0.1|0.0.0.0] [--dir D]
-  rts-sim shooter match  [--seed N] [--bots a.js [b.js]] [--map dust] [--replay out.json] [--loadout ak,m4] [--round-money 16000,800] [--out F]
-  rts-sim shooter batch  [--games N] [--seed S] [--bots a.js [b.js]] [--map dust] [--loadout ak,m4] [--round-money 16000,800] [--out F]
+  rts-sim shooter match  [--seed N] [--bots a.js [b.js]] [--map dust] [--players p.json] [--replay out.json] [--loadout ak,m4] [--round-money 16000,800] [--out F]
+  rts-sim shooter batch  [--games N] [--seed S] [--bots a.js [b.js]] [--map dust] [--players p.json] [--loadout ak,m4] [--round-money 16000,800] [--out F]
   rts-sim shooter replay file.json
   rts-sim shooter map    [--id dust]`;
 

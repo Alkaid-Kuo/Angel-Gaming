@@ -3,7 +3,7 @@
 // 以及 A 的行為指標（從 A 的喊話與回合紀錄算，只記錄不當門檻）：T 計畫使用與勝率、每回合道具數、閃光致盲敵我秒數、
 // 首次接觸時間、換血率、下包率、回防成功率。
 // 用法：node scripts/shooter-eval.ts [--a bots/shooter-baseline.js] [--b bots/shooter-practice.js] [--map redrock] [--games 20] [--seed 1] [--jobs 10]
-//       [--attrs aim=80,aggression=20]（只套在 A 身上；預設全部 50）[--json out.json]
+//       [--attrs aim=80,aggression=20]（只套在 A 身上；預設全部 50；走驅動層的正式屬性路徑，反應延遲由 reaction 算）[--json out.json]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
@@ -79,19 +79,8 @@ interface Opts {
   readonly attrs: Partial<Record<AttributeKey, number>>;
 }
 
-/** 屬性覆寫：在 init 資料裡換掉 attributes（只給評測用，不經過引擎） */
+/** A 的控制器：記錄 A 的喊話（屬性由驅動層的 attributes 傳入） */
 class AttrController extends ShooterBatchController {
-  private readonly attrs: Attributes;
-
-  constructor(compiled: ReturnType<typeof compileBot>, label: string, seed: number, pid: number, mapId: string, attrs: Attributes) {
-    super(compiled, label, seed, pid, MAPS[mapId]());
-    this.attrs = attrs;
-  }
-
-  override init(data: ShooterInitData): CallOutcome<null> {
-    return super.init({ ...data, attributes: this.attrs });
-  }
-
   /** 每回合的喊話紀錄（所有 A 共用） */
   log: Map<number, SayLog> | null = null;
 
@@ -120,7 +109,7 @@ function play(o: Opts, job: Job): GameOut {
   const cb = compileBot(readFileSync(o.b, 'utf8'), o.b);
   const attrs = Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, o.attrs[k] ?? 50])) as Attributes;
   const isA = (pid: number): boolean => (pid < TEAM_SIZE) === job.aFirst;
-  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => (isA(pid) ? new AttrController(ca, o.a, job.seed, pid, o.map, attrs) : new ShooterBatchController(cb, o.b, job.seed, pid, MAPS[o.map]())));
+  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => (isA(pid) ? new AttrController(ca, o.a, job.seed, pid, MAPS[o.map]()) : new ShooterBatchController(cb, o.b, job.seed, pid, MAPS[o.map]())));
   const knobs = controllers.map((c) => resolveKnobs(c.declaration, undefined, c.label));
   const log = new Map<number, SayLog>();
   for (const c of controllers) {
@@ -129,7 +118,8 @@ function play(o: Opts, job: Job): GameOut {
       c.roundTicks = shooterInitData(MAPS[o.map](), 0, {}).rules.roundTicks;
     }
   }
-  const run = runShooterMatch({ seed: job.seed, mapId: o.map, controllers, knobs, record: false });
+  const attributes = controllers.map((_, pid) => (isA(pid) ? attrs : undefined));
+  const run = runShooterMatch({ seed: job.seed, mapId: o.map, controllers, knobs, record: false, attributes });
   const r = run.result;
   const beh: Beh = { plans: {}, throws: 0, flashEnemy: 0, flashTeam: 0, rounds: 0, contactSec: 0, contacts: 0, deaths: 0, traded: 0, tRounds: 0, planted: 0, retakes: 0, retakeWins: 0 };
   for (const x of r.rounds) {
