@@ -914,7 +914,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     mode: 'siege',
     abs: true,
     seats: [0],
-    expect: '石關城攻方：西牆北段（y 38～52）有兩團弓兵＋一團長槍守，甕城西牆一團弓兵，西牆南段（y 87～103）只有一團輕步兵；守方站著不動。我方從西橋外出發（要自己去看）。150 秒內第一架開始架的雲梯要在南段（梯口 y ≥ 84）',
+    expect: '石關城攻方：西牆北段（y 38～52）有兩團弓兵＋一團長槍守，門樓頂一團弓兵，西牆南段（y 87～103）只有一團輕步兵；守方站著不動。我方從西橋外出發（要自己去看）。150 秒內第一架開始架的雲梯要在南段（梯口 y ≥ 84）',
     bot: [
       { type: 'sword', x: 84, y: 58 },
       { type: 'sword', x: 84, y: 67 },
@@ -926,7 +926,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       { type: 'archer', x: 111.5, y: 40, layer: 1 },
       { type: 'archer', x: 111.5, y: 51, layer: 1 },
       { type: 'spear', x: 111.5, y: 45.5, layer: 1 },
-      { type: 'archer', x: 97.5, y: 72, layer: 1 },
+      { type: 'archer', x: 112, y: 69.5, layer: 1 },
       { type: 'light', x: 111.5, y: 99, layer: 1 },
     ],
     ticks: 1500,
@@ -936,7 +936,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       if (first === undefined) return { pass: false, detail: `150 秒內沒架雲梯、我方剩 ${groupPct(c.A)}%` };
       const l = c.m.ladders[first.ladder];
       const y = l.ty / TILE;
-      const where = y >= 84 ? '南段（薄弱）' : y <= 55 ? '北段（重兵）' : '甕城';
+      const where = y >= 84 ? '南段（薄弱）' : y <= 55 ? '北段（重兵）' : '正門一帶';
       return { pass: y >= 84, detail: `${sec(first.tick)}第一架雲梯在${where}（梯口 ${(l.tx / TILE).toFixed(1)}, ${y.toFixed(1)}）、共架 ${ladderEvents(c, c.me, 'building').length} 次` };
     },
   },
@@ -1098,7 +1098,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     mode: 'siege',
     abs: true,
     seats: [1],
-    expect: '石關城守方：攻方兩團弓兵沒有護衛、站在甕城裡離正門 8 格處，一直射我方牆頂的長槍；我方兩團劍士在正門內側（我方沒有弓兵，不出擊打不到它們）。要開門出擊：90 秒內敵方弓兵損失五成以上，而且 90 秒時我方地面部隊都回到城內（地面不在正門以西 x < 110，退回）',
+    expect: '石關城守方：攻方兩團弓兵沒有護衛、站在正門外的護城堤上（西橋與正門之間）離正門 8 格處，一直射我方牆頂的長槍；我方兩團劍士在正門內側（我方沒有弓兵，不出擊打不到它們）。要開門出擊：90 秒內敵方弓兵損失五成以上，而且 90 秒時我方地面部隊都回到城內（地面不在正門以西 x < 110，退回）',
     bot: [
       { type: 'sword', x: 117, y: 66 },
       { type: 'sword', x: 117, y: 73 },
@@ -1114,7 +1114,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     script: (c, t) => (t === 0 ? c.B.map((r) => ({ type: 'hold', id: r.id })) : []),
     judge: (c) => {
       const foe = groupPct(c.B);
-      // 城外 ＝ 地面、在正門以西（城牆 x 110～113 的地面不可走，門洞外就是甕城）
+      // 城外 ＝ 地面、在正門以西（城牆 x 110～113 的地面不可走，門洞外就是護城堤）
       const out = c.A.filter((r) => !gone(r) && r.layer === 0 && pos(c, r)[0] < 110).length;
       return { pass: foe <= 50 && out === 0, detail: `敵弓兵剩 ${foe}%、城外還有 ${out} 團、我方劍士剩 ${groupPct(c.A.slice(0, 2))}%、正門${c.m.gates[0].state}` };
     },
@@ -1247,26 +1247,26 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     mode: 'siege',
     abs: true,
     seats: [0],
-    expect: '石關城攻方：甕城（西橋過去、正門外的轉角）裡藏著守方一團重騎兵與一團劍士（甕城南半部，從城外看不到），甕城北牆頂有一團弓兵。我方要往正門走就得經過甕城口。90 秒內：要有輕單位先進甕城（x 96～110、y 60～78）或看到藏兵，而且在任何主力（劍、槍、盾、弓）進甕城之前；主力不能吃到伏兵的衝鋒。伏兵：有我方軍團進到甕城或它 8 格內就衝',
+    expect: '石關城攻方：北側門開著，門內的夾道（北牆與內城北牆之間）藏著守方一團重騎兵（側門東邊、營房後面）與一團劍士（側門西邊），從城外看不到；側門東邊的北牆頂有一團弓兵。我方在北橋外，要往 A 走就得穿過北側門。90 秒內：要有輕單位先進門內夾道（x 160～176、y 36～45）或看到藏兵，而且在任何主力（劍、槍、盾、弓）進夾道之前；主力不能吃到伏兵的衝鋒。伏兵：有我方軍團進到夾道或它 8 格內就衝',
     bot: [
-      { type: 'light', x: 86, y: 62.5 },
-      { type: 'sword', x: 82, y: 58 },
-      { type: 'sword', x: 82, y: 67 },
-      { type: 'spear', x: 78, y: 62.5, formation: 'square' },
+      { type: 'light', x: 166.5, y: 18 },
+      { type: 'sword', x: 162, y: 13 },
+      { type: 'sword', x: 171, y: 13 },
+      { type: 'spear', x: 166.5, y: 8, formation: 'square' },
     ],
     foe: [
-      { type: 'heavyCav', x: 104, y: 74, formation: 'wedge', facing: 270 },
-      { type: 'sword', x: 107, y: 73, facing: 270 },
-      { type: 'archer', x: 104, y: 59, layer: 1, facing: 180 },
+      { type: 'heavyCav', x: 174, y: 44, formation: 'wedge', facing: 180 },
+      { type: 'sword', x: 159, y: 44, facing: 0 },
+      { type: 'archer', x: 174, y: 33.5, layer: 1, facing: 270 },
     ],
     ticks: 900,
     script: (c, t) => {
       const [cav, sw, ar] = c.B;
-      if (t === 0) return [{ type: 'hold', id: cav.id }, { type: 'hold', id: sw.id }, { type: 'hold', id: ar.id }];
+      if (t === 0) return [{ type: 'hold', id: cav.id }, { type: 'hold', id: sw.id }, { type: 'hold', id: ar.id }, { type: 'gate', gate: 1, action: 'open' }];
       if (c.mem.sprung !== undefined || gone(cav)) return [];
       const inside = (r: Regiment): boolean => {
         const [x, y] = pos(c, r);
-        return x >= 96 && x <= 110 && y >= 60 && y <= 78;
+        return x >= 160 && x <= 176 && y >= 36 && y <= 45;
       };
       const prey = c.A.find((r) => !gone(r) && r.layer === 0 && (inside(r) || tilesBetween(r, cav) <= 8));
       if (prey === undefined) return [];
@@ -1276,7 +1276,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     watch: (c) => {
       const inside = (r: Regiment): boolean => {
         const [x, y] = pos(c, r);
-        return !gone(r) && r.layer === 0 && x >= 96 && x <= 110 && y >= 60 && y <= 78;
+        return !gone(r) && r.layer === 0 && x >= 160 && x <= 176 && y >= 36 && y <= 45;
       };
       once(c, 'scout', c.m.visible[c.me][c.B[0].id] === 1 || c.A.some((r) => !mainBody(r) && inside(r)));
       once(c, 'main', c.A.some((r) => mainBody(r) && inside(r)));
@@ -1285,7 +1285,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       const { scout, main } = c.mem;
       const hit = impacts(c, 1).filter((e) => e.kind === 'charge' && mainBody(c.m.regiments[e.target])).length;
       const ok = scout !== undefined && (main === undefined || scout < main) && hit === 0;
-      return { pass: ok, detail: `${scout === undefined ? '沒探甕城' : `${sec(scout)}探到甕城`}、${main === undefined ? '主力沒進甕城' : `${sec(main)}主力進甕城`}、主力吃到衝鋒 ${hit} 次` };
+      return { pass: ok, detail: `${scout === undefined ? '沒探門內' : `${sec(scout)}探到門內`}、${main === undefined ? '主力沒進門內' : `${sec(main)}主力進門內`}、主力吃到衝鋒 ${hit} 次` };
     },
   },
   {
@@ -1375,7 +1375,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     mode: 'siege',
     abs: true,
     seats: [0],
-    expect: '石關城攻方：我方四團（兩劍、盾、槍）在衝車起點（46, 61.5）旁；守方兩團劍士在正門內側，衝車走完四分之三軌道時開門出擊、打推車的團，打 25 秒或剩一半就退回關門；甕城北牆頂一團弓兵。200 秒內衝車至少撞門一下（要有團推車、護衛擋住出擊）',
+    expect: '石關城攻方：我方四團（兩劍、盾、槍）在衝車起點（46, 61.5）旁；守方兩團劍士在正門內側，衝車走完四分之三軌道時開門出擊、打推車的團，打 25 秒或剩一半就退回關門；門樓頂一團弓兵。200 秒內衝車至少撞門一下（要有團推車、護衛擋住出擊）',
     bot: [
       { type: 'sword', x: 48, y: 58 },
       { type: 'sword', x: 48, y: 65 },
@@ -1385,7 +1385,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     foe: [
       { type: 'sword', x: 118, y: 66 },
       { type: 'sword', x: 118, y: 73 },
-      { type: 'archer', x: 104, y: 59, layer: 1 },
+      { type: 'archer', x: 112, y: 69.5, layer: 1 },
     ],
     ticks: 2000,
     script: (c, t) => {

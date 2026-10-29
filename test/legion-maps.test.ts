@@ -61,14 +61,18 @@ describe('軍團戰 0.4：石關城', () => {
     for (let y = 31; y < 109; y++) expect(tt(213, y)).toBe(T.River);
   });
 
-  it('郭城城牆四格厚（牆頂站得下方陣）、角樓 8 × 8、正門外有甕城（入口在西面）', () => {
+  it('郭城城牆四格厚（牆頂站得下方陣）、角樓 8 × 8；正門直接開在西牆上、正對西橋（沒有甕城）', () => {
     for (const x of [130, 160]) for (let y = 32; y <= 35; y++) expect(tt(x, y)).toBe(T.Wall);
     for (let x = 110; x <= 113; x++) expect(tt(x, 50)).toBe(T.Wall);
     for (let y = 30; y <= 37; y++) for (let x = 108; x <= 115; x++) expect(tt(x, y)).toBe(T.Wall);
-    // 甕城：三面三格厚的牆、西面北段的入口、裡面鋪石
-    expect(tt(97, 70)).toBe(T.Wall);
-    expect(tt(97, 62)).toBe(T.Paved);
-    expect(tt(104, 70)).toBe(T.Paved);
+    // 正門外到護城河之間只有護城堤：沒有城牆、沒有鋪石，大道從西橋直通門洞
+    const g = m.gates[0];
+    for (let y = 56; y <= 82; y++) for (let x = 92; x < g.x0; x++) if (x < 99 || x > 101) expect([T.Plain, T.Road]).toContain(tt(x, y));
+    for (let x = 102; x < g.x0; x++) for (let y = g.y0; y < g.y1; y++) expect(tt(x, y)).toBe(T.Road);
+    // 西橋 5 格寬（y 67～71），正門（y 68～70）在橋的正中
+    for (let y = 67; y <= 71; y++) for (let x = 99; x <= 101; x++) expect(tt(x, y)).toBe(T.Bridge);
+    for (const y of [66, 72]) expect(tt(100, y)).toBe(T.River);
+    expect([g.y0, g.y1]).toEqual([68, 71]);
   });
 
   it('三道防線：郭城（高 2）→ 三格厚的內城牆與三個門洞（高 3）→ 子城（院落高 4）', () => {
@@ -98,8 +102,9 @@ describe('軍團戰 0.4：石關城', () => {
     expect(tt(100, 40)).toBe(T.River);
     expect(tt(140, 24)).toBe(T.River);
     expect(tt(140, 115)).toBe(T.River);
-    expect(tt(90, 70)).toBe(T.River);
-    expect(tt(90, 62)).toBe(T.Bridge);
+    // 西面一直線：x 99～101 從北到南都是河（只有西橋），外面沒有往外繞的一段
+    for (let y = 23; y <= 116; y++) for (let x = 99; x <= 101; x++) expect(tt(x, y)).toBe(y >= 67 && y <= 71 ? T.Bridge : T.River);
+    for (let y = 23; y <= 116; y++) for (let x = 85; x <= 98; x++) expect(tt(x, y)).not.toBe(T.River);
     expect(tt(167, 24)).toBe(T.Bridge);
     expect(tt(132, 115)).toBe(T.Shallow);
     // 護城堤（城牆與護城河之間）是地面，可以架雲梯
@@ -108,18 +113,17 @@ describe('軍團戰 0.4：石關城', () => {
     expect(tt(105, 45)).toBe(T.Plain);
   });
 
-  it('守方布陣區：郭城、內城、子城、甕城、城牆；護城堤、護城河不行', () => {
+  it('守方布陣區：郭城、內城、子城、城牆；護城堤（含正門外）、護城河、西橋不行', () => {
     const mask = m.deployMask![1]!;
     expect(m.deployMask![0]).toBeNull();
-    for (const [x, y] of [[121, 69], [167, 40], [165, 69], [193, 69], [111, 50], [104, 70]]) expect(mask[ti(x, y)]).toBe(1);
-    expect(mask[ti(140, 28)]).toBe(0);
-    expect(mask[ti(100, 40)]).toBe(0);
+    for (const [x, y] of [[121, 69], [167, 40], [165, 69], [193, 69], [111, 50], [112, 69]]) expect(mask[ti(x, y)]).toBe(1);
+    for (const [x, y] of [[140, 28], [100, 40], [104, 70], [100, 69]]) expect(mask[ti(x, y)]).toBe(0);
     const d = legionInitData(m, 'siege', 1, {}, 100);
     expect(d.map.deployMask[1]![ti(121, 69)]).toBe(1);
     expect(d.map.deployMask[0]).toBeNull();
   });
 
-  it('features 與地形一致：城門在門樓上、馬道在樓梯格且貼著城牆、隘口含兩座橋、淺灘、兩座城門、五個門洞與缺口', () => {
+  it('features 與地形一致：城門在門樓上、馬道在樓梯格且貼著城牆、隘口含兩座橋、淺灘、兩座城門、四個門洞與缺口', () => {
     expect(f.gates.length).toBe(2);
     for (const g of f.gates) for (let y = g.y0; y < g.y1; y++) for (let x = g.x0; x < g.x1; x++) expect(tt(x, y)).toBe(T.Gatehouse);
     expect(f.stairs.length).toBeGreaterThanOrEqual(60);
@@ -131,11 +135,10 @@ describe('軍團戰 0.4：石關城', () => {
     }
     expect(f.chokes.map((c) => [c.kind, c.width])).toEqual([
       ['bridge', 2],
-      ['bridge', 4],
+      ['bridge', 5],
       ['ford', 5],
       ['gate', 3],
       ['gate', 2],
-      ['arch', 4],
       ['arch', 5],
       ['arch', 5],
       ['arch', 5],
@@ -150,7 +153,7 @@ describe('軍團戰 0.4：石關城', () => {
     expect(f.covers.some((c) => c.x < 95000 && c.y < 45000)).toBe(true);
   });
 
-  it('從攻方布陣區到衙署：門都關著走南牆缺口；正門開著走甕城、正門、內城西門洞與子城門洞；北側門開著從北邊進城', () => {
+  it('從攻方布陣區到衙署：門都關著走南牆缺口；正門開著走西橋、正門、內城西門洞與子城門洞；北側門開著從北邊進城', () => {
     const [sx, sy] = [10500, 63500];
     const [gx, gy] = [m.flags[1].x, m.flags[1].y];
     const none = (): Uint8Array => new Uint8Array(m.width * m.height);
@@ -164,11 +167,12 @@ describe('軍團戰 0.4：石關城', () => {
     const a = tilesAlong(m, sx, sy, closed!);
     const b = tilesAlong(m, sx, sy, viaGate!);
     const breach = m.breaches![0];
-    const [barbican, innerWest, , , citadel] = m.archways!;
+    const [innerWest, , , citadel] = m.archways!;
+    const westBridge = { x0: 99, y0: 67, x1: 102, y1: 72 };
     const inRect = (set: Set<number>, r: { x0: number; y0: number; x1: number; y1: number }): boolean => [...set].some((i) => i % m.width >= r.x0 && i % m.width < r.x1 && Math.floor(i / m.width) >= r.y0 && Math.floor(i / m.width) < r.y1);
     expect(inRect(a, breach)).toBe(true);
     expect(inRect(a, g)).toBe(false);
-    for (const r of [g, barbican, innerWest, citadel]) expect(inRect(b, r)).toBe(true);
+    for (const r of [g, westBridge, innerWest, citadel]) expect(inRect(b, r)).toBe(true);
     expect(inRect(b, breach)).toBe(false);
     const side = none();
     const sg = m.gates[1];
