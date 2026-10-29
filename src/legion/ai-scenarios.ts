@@ -1295,14 +1295,14 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     pending: true,
     mapId: 'grand-valley',
     abs: true,
-    expect: '大河谷殲滅戰：敵方一團輕步兵在北橋西端，開打就往東過橋退進東岸樹林（中心約 152, 16）；樹林裡藏著敵方重騎兵與長槍。我方兩團劍士、一團輕騎在北橋西岸。90 秒內我方不吃到伏兵的衝鋒，而且總損失 ≤ 15%（追擊組停在橋口外）。伏兵：有我方軍團進到重騎兵 10 格內就衝',
+    expect: '大河谷殲滅戰：敵方一團輕步兵在北橋東端（130, 27.5），開打就往東退進東岸樹林（中心約 152, 16）；樹林裡藏著敵方重騎兵與長槍。我方兩團劍士、一團輕騎在北橋西岸（離誘餌約 14 格，看得到它）。90 秒內要有追擊：至少一團追到北橋西端（123, 27.5）5 格內（完全不追算不過）；而且不吃到伏兵的衝鋒、總損失 ≤ 15%（追擊組停在橋口外）。伏兵：有我方軍團進到重騎兵 10 格內就衝',
     bot: [
-      { type: 'sword', x: 114, y: 24 },
-      { type: 'sword', x: 114, y: 31 },
-      { type: 'lightCav', x: 109, y: 28, formation: 'wedge' },
+      { type: 'sword', x: 116, y: 24 },
+      { type: 'sword', x: 116, y: 31 },
+      { type: 'lightCav', x: 112, y: 28, formation: 'wedge' },
     ],
     foe: [
-      { type: 'light', x: 121, y: 27.5 },
+      { type: 'light', x: 130, y: 27.5 },
       { type: 'heavyCav', x: 150, y: 15, formation: 'wedge' },
       { type: 'spear', x: 153, y: 19 },
     ],
@@ -1316,10 +1316,12 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       c.mem.sprung = t;
       return [chargeAt(cav, prey), strike(c, sp, prey)];
     },
+    watch: (c) => once(c, 'chased', c.A.some((r) => !gone(r) && tilesTo(c, r, 123, 27.5) <= 5)),
     judge: (c) => {
       const hit = impacts(c, 1).filter((e) => e.kind === 'charge').length;
       const lost = 100 - groupPct(c.A);
-      return { pass: hit === 0 && lost <= 15, detail: `${c.mem.sprung === undefined ? '伏兵沒出動' : `${sec(c.mem.sprung)}伏兵出動`}、吃到衝鋒 ${hit} 次、我方損失 ${lost}%、誘餌剩 ${pct(c.B[0])}%` };
+      const chased = c.mem.chased;
+      return { pass: chased !== undefined && hit === 0 && lost <= 15, detail: `${chased === undefined ? '沒追到橋口' : `${sec(chased)}追到橋口`}、${c.mem.sprung === undefined ? '伏兵沒出動' : `${sec(c.mem.sprung)}伏兵出動`}、吃到衝鋒 ${hit} 次、我方損失 ${lost}%、誘餌剩 ${pct(c.B[0])}%` };
     },
   },
   {
