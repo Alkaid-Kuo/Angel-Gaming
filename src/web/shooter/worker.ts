@@ -98,7 +98,7 @@ function cycleView(step: number): void {
 
 function fullState(m: ShooterMatch): FullState {
   return {
-    players: m.players.map((p) => ({ id: p.id, team: p.team, alive: p.alive, x: p.x, y: p.y, facing: Math.round(p.facing / 100) % 360, hp: p.hp, weapon: activeWeaponId(p), hasBomb: p.hasBomb, blind: p.blindTicks > 0, scoped: p.scoped })),
+    players: m.players.map((p) => ({ id: p.id, team: p.team, alive: p.alive, x: p.x, y: p.y, facing: Math.round(p.facing / 100) % 360, hp: p.hp, weapon: activeWeaponId(p), hasBomb: p.hasBomb, blind: p.blindTicks > 0, scoped: p.scoped, firing: m.tick - p.lastShotTick <= 3 })),
     smokes: m.smokes.filter((s) => m.tick < s.endTick).map((s) => ({ x: s.x, y: s.y, radius: smokeRadius(s, m.tick) })),
     fires: m.fires.map((f) => ({ x: f.x, y: f.y, radius: GRENADES[f.kind].radius })),
     projectiles: m.projectiles.map((g) => ({ kind: g.kind, x: g.x, y: g.y })),

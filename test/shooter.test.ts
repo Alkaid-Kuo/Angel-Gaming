@@ -676,7 +676,7 @@ describe('確定性與效能', () => {
     expect(run.result.stats.reduce((a, s) => a + s.kills, 0)).toBeGreaterThan(0);
   });
 
-  // 沙城：陪練 Bot 的閃光只丟 10～20 格的敵人，赤岩鎮開闊、交火距離遠，很少丟（見步驟 4 後續修正報告）
+  // 沙城：陪練 Bot 的閃光只丟 10～20 格的敵人，赤岩鎮開闊、交火距離遠，很少丟（規格 v0.5 第十四節待審）
   it('陪練 Bot v3 會丟道具：全買局 T 丟煙霧、CT 丟閃光（沙城，10 個種子短賽制）', () => {
     let tThrows = 0;
     let ctThrows = 0;

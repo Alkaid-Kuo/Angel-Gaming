@@ -45,7 +45,8 @@ export class ShooterHud {
   private readonly bombBar: HTMLElement;
   private readonly board: HTMLElement;
   readonly end: HTMLElement;
-  private readonly pause: HTMLElement;
+  /** 暫停選單（Esc）：繼續、全螢幕、離開比賽 */
+  readonly pause: HTMLElement;
   private feedItems: { item: KillFeedItem; t: number }[] = [];
   private bannerUntil = 0;
   private boardShown = false;
@@ -63,7 +64,14 @@ export class ShooterHud {
     this.board = el('div', 'sg-board hidden', root);
     this.end = el('div', 'sg-end hidden', root);
     this.pause = el('div', 'sg-pause hidden', root);
-    this.pause.innerHTML = '<b>暫停</b><span>按 Esc 繼續</span>';
+    const resume = meta.spectate ? '繼續（空白鍵）' : '繼續（Esc）';
+    const quit = meta.spectate ? '離開觀戰' : '離開比賽';
+    this.pause.innerHTML =
+      `<div class="box"><b>暫停</b>` +
+      `<div class="col"><button type="button" class="primary" data-act="resume">${resume}</button>` +
+      `<button type="button" data-act="fullscreen">全螢幕（F）</button>` +
+      `<button type="button" data-act="quit">${quit}</button></div>` +
+      `<p class="muted small">全螢幕時 Ctrl 蹲著按 W 不會關掉分頁（按住 Esc 離開全螢幕）。${meta.spectate ? '' : '離開比賽＝直接回開局畫面，不計成績。'}</p></div>`;
   }
 
   showBanner(html: string, now: number): void {
@@ -86,7 +94,6 @@ export class ShooterHud {
 
   setPaused(p: boolean): void {
     this.pause.classList.toggle('hidden', !p);
-    if (this.meta.spectate) this.pause.innerHTML = '<b>暫停</b><span>按空白鍵繼續</span>';
   }
 
   private name(id: number, board: readonly BoardRow[]): string {
@@ -95,7 +102,7 @@ export class ShooterHud {
     return `<span style="color:${color}">${this.meta.names[id] ?? `#${id}`}</span>`;
   }
 
-  update(f: ShooterFrame, now: number, extra: { throwCdFrac: number; grenade: string | null; speed: number; xray: boolean }): void {
+  update(f: ShooterFrame, now: number, extra: { throwCdFrac: number; grenade: string | null; bomb: boolean; speed: number; xray: boolean }): void {
     const view = f.view;
     const self = f.self;
     const tps = this.meta.rules.ticksPerSecond;
@@ -148,7 +155,7 @@ export class ShooterHud {
     } else {
       if (r.phase === 'freeze') hints.push(`凍結中：${clock(r.phaseTicksLeft, tps)} 後開打`);
       if (self.round.canBuy) hints.push('可購買：按 <kbd>B</kbd>');
-      if (self.me.hasBomb && r.phase === 'live') hints.push('你帶著炸彈：到 A／B 點按住 <kbd>E</kbd> 下包');
+      if (self.me.hasBomb && r.phase === 'live') hints.push('你帶著炸彈：到 A／B 點按住 <kbd>E</kbd>（或 <kbd>5</kbd> 選炸彈後按住左鍵）下包');
       if (self.me.team === 'CT' && (self.bomb.state === 'planted' || self.bomb.state === 'defusing') && self.bomb.x !== null && Math.hypot(self.bomb.x - self.me.x, (self.bomb.y ?? 0) - self.me.y) <= 1500 && self.me.defuseTicks === 0) hints.push('按住 <kbd>E</kbd> 拆包');
     }
     setHtml(this.hint, hints.join('<span class="sep"></span>'));
@@ -163,21 +170,27 @@ export class ShooterHud {
         (this.meta.spectate ? `<div class="stat"><span class="lb">錢</span><b>$${vm.money}</b></div>` : `<div class="stat money"><span class="lb">錢</span><b>$${self.me.money}</b></div>`),
     );
 
-    // 右下：武器、彈藥、道具格
-    const wname = this.meta.weapons.find((w) => w.id === vm.weapon)?.name ?? vm.weapon;
-    const ammo = vm.weapon === 'knife' ? '—' : vm.reloadTicksLeft > 0 ? '換彈中…' : `<b>${vm.ammoMag}</b><span class="res">/ ${vm.ammoReserve}</span>`;
-    const slots = Array.from({ length: this.meta.rules.grenadeSlots }, (_, i) => {
-      const g = vm.loadout.grenades[i];
-      const sel = g !== undefined && extra.grenade === g && vm.id === this.meta.playerId;
-      const name = g === undefined ? '' : (this.meta.grenades.find((x) => x.id === g)?.name ?? g);
-      return `<div class="gs${sel ? ' sel' : ''}${g === undefined ? ' empty' : ''}"><kbd>${i + 4}</kbd><span>${name}</span></div>`;
-    }).join('');
-    const loadout = [vm.loadout.primary, vm.loadout.secondary].filter((x) => x !== null).map((x) => WEAPON_TAG[x!]).join('・');
+    // 右下：武器欄 1～5（主武器、手槍、刀、道具、炸彈；沒有的格子變暗）、彈藥
+    const mine = vm.id === this.meta.playerId && !this.meta.spectate;
+    const gName = (g: string): string => this.meta.grenades.find((x) => x.id === g)?.name ?? g;
+    const wName = (w: string | null): string => (w === null ? '' : (this.meta.weapons.find((x) => x.id === w)?.name ?? w));
+    const curSlot = mine && extra.bomb ? 5 : mine && extra.grenade !== null ? 4 : (['primary', 'secondary', 'knife'].indexOf(this.meta.weapons.find((w) => w.id === vm.weapon)?.slot ?? 'knife') + 1);
+    const kinds = [...new Set(vm.loadout.grenades)];
+    const nades = kinds.map((g) => `<span class="${mine && extra.grenade === g ? 'on' : ''}">${gName(g)}${vm.loadout.grenades.filter((x) => x === g).length > 1 ? '×2' : ''}</span>`).join('');
+    const cells: [number, string, boolean][] = [
+      [1, wName(vm.loadout.primary), vm.loadout.primary !== null],
+      [2, wName(vm.loadout.secondary), vm.loadout.secondary !== null],
+      [3, '刀', true],
+      [4, nades, kinds.length > 0],
+      [5, '炸彈', vm.hasBomb],
+    ];
+    const bar = cells.map(([n, name, has]) => `<div class="ws${n === curSlot ? ' sel' : ''}${has ? '' : ' empty'}"><kbd>${n}</kbd><span class="nm">${has ? name : '—'}</span></div>`).join('');
+    const ammo = curSlot >= 4 || vm.weapon === 'knife' ? '' : vm.reloadTicksLeft > 0 ? '換彈中…' : `<b>${vm.ammoMag}</b><span class="res">/ ${vm.ammoReserve}</span>`;
+    const pose = `${vm.scoped ? '開鏡' : ''}${vm.walking ? '・靜步' : ''}${vm.crouching ? '・蹲' : ''}`.replace(/^・/, '');
     setHtml(
       this.right,
-      `<div class="wp"><span class="nm">${wname}${vm.scoped ? '（開鏡）' : ''}</span><span class="am">${ammo}</span></div>` +
-        `<div class="lo muted small">${loadout}${vm.walking ? '・靜步' : ''}${vm.crouching ? '・蹲' : ''}</div>` +
-        `<div class="gslots">${slots}</div>` +
+      `<div class="wp"><span class="lo muted small">${pose}</span><span class="am">${ammo}</span></div>` +
+        `<div class="wbar">${bar}</div>` +
         `<div class="cd"><i style="width:${Math.round(extra.throwCdFrac * 100)}%"></i></div>`,
     );
 

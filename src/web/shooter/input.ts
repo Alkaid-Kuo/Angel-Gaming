@@ -31,12 +31,18 @@ export interface InputHost {
   /** 觀戰模式：全圖透視、播放速度 */
   toggleXray(): void;
   speed(step: number): void;
+  toggleFullscreen(): void;
 }
+
+/** 全螢幕且鎖住鍵盤時，Ctrl＋W 之類的組合鍵會交給網頁（不會關分頁） */
+const keysLocked = (): boolean => document.fullscreenElement !== null;
 
 export class ShooterInput {
   readonly mouse = { x: 0, y: 0 };
-  /** 選中的道具（4～7）；null = 手上的槍 */
+  /** 選中的道具（4 輪流切換）；null = 手上的槍 */
   grenade: GrenadeId | null = null;
+  /** 選中炸彈（5）：左鍵等同 E 下包（引擎沒有「手持炸彈」，只是畫面狀態） */
+  bomb = false;
   private chargeStart: number | null = null;
   private readonly held = new Set<string>();
   private moving = false;
@@ -91,6 +97,7 @@ export class ShooterInput {
     const s = this.alive();
     if (s === null) {
       this.grenade = null;
+      this.bomb = false;
       this.chargeStart = null;
       return;
     }
@@ -98,6 +105,7 @@ export class ShooterInput {
       this.grenade = null;
       this.chargeStart = null;
     }
+    if (this.bomb && !s.me.hasBomb) this.bomb = false;
     if (now - this.lastAim < AIM_MS) return;
     const [wx, wy] = toWorld(this.host.camera(), this.mouse.x, this.mouse.y);
     const x = Math.round(wx);
@@ -137,7 +145,8 @@ export class ShooterInput {
       this.host.setBoard(true);
       return;
     }
-    if (e.ctrlKey && code !== 'ControlLeft' && code !== 'ControlRight') return; // 不攔瀏覽器快捷鍵
+    // 不攔瀏覽器快捷鍵；全螢幕鎖鍵盤時例外（Ctrl 蹲著也能按 WASD）
+    if (e.ctrlKey && code !== 'ControlLeft' && code !== 'ControlRight' && !keysLocked()) return;
     if (this.host.buyOpen() && !e.repeat && this.host.buyKey(code)) {
       e.preventDefault();
       return;
@@ -188,6 +197,9 @@ export class ShooterInput {
       case 'BracketRight':
         this.host.speed(1);
         return;
+      case 'KeyF':
+        this.host.toggleFullscreen();
+        return;
     }
     if (s === null) return;
     switch (code) {
@@ -198,21 +210,28 @@ export class ShooterInput {
       case 'Digit2':
       case 'Digit3':
         this.grenade = null;
+        this.bomb = false;
         this.chargeStart = null;
         this.host.send([{ type: 'switch', slot: SLOT_ORDER[Number(code.slice(5)) - 1] }]);
         return;
-      case 'Digit4':
-      case 'Digit5':
-      case 'Digit6':
-      case 'Digit7': {
-        const g = s.me.loadout.grenades[Number(code.slice(5)) - 4];
-        if (g === undefined) return;
-        // 再按一次同一格：收起道具
-        this.grenade = this.grenade === g ? null : g;
+      case 'Digit4': {
+        // 道具：每按一次換下一種（身上有的種類，依購買順序），換完一輪回到槍
+        const kinds = [...new Set(s.me.loadout.grenades)];
+        if (kinds.length === 0) return;
+        const i = this.grenade === null ? -1 : kinds.indexOf(this.grenade);
+        this.grenade = i + 1 < kinds.length ? kinds[i + 1] : null;
+        this.bomb = false;
         this.chargeStart = null;
         if (this.fireHeld) this.stopFire();
         return;
       }
+      case 'Digit5':
+        if (!s.me.hasBomb) return;
+        this.bomb = !this.bomb;
+        this.grenade = null;
+        this.chargeStart = null;
+        if (this.fireHeld) this.stopFire();
+        return;
       case 'ShiftLeft':
       case 'ShiftRight':
         this.host.send([{ type: 'walk', on: true }]);
@@ -256,13 +275,17 @@ export class ShooterInput {
         this.host.send([{ type: 'crouch', on: false }]);
         return;
       case 'KeyE':
-        // 放開 E：中斷下包／拆包（引擎的中斷方式是移動指令；沒按方向鍵就再送停止）
-        if (s.me.plantTicks > 0 || s.me.defuseTicks > 0) {
-          this.host.send([{ type: 'moveDir', deg: s.me.facing }, { type: 'stop' }]);
-          this.moving = false;
-          this.sendMove();
-        }
+        this.cancelAction(s);
         return;
+    }
+  }
+
+  /** 放開 E（或選中炸彈時放開左鍵）：中斷下包／拆包（引擎的中斷方式是移動指令；沒按方向鍵就再送停止） */
+  private cancelAction(s: ShooterObservation): void {
+    if (s.me.plantTicks > 0 || s.me.defuseTicks > 0) {
+      this.host.send([{ type: 'moveDir', deg: s.me.facing }, { type: 'stop' }]);
+      this.moving = false;
+      this.sendMove();
     }
   }
 
@@ -298,6 +321,10 @@ export class ShooterInput {
         if (!this.host.throwCooling()) this.chargeStart = performance.now();
         return;
       }
+      if (this.bomb) {
+        this.interact(s);
+        return;
+      }
       this.fireHeld = true;
       this.host.send([{ type: 'fire', on: true }]);
     } else if (e.button === 2) {
@@ -315,6 +342,11 @@ export class ShooterInput {
       const [wx, wy] = toWorld(this.host.camera(), this.mouse.x, this.mouse.y);
       const deg = Math.round((Math.atan2(wy - s.me.y, wx - s.me.x) * 180) / Math.PI + 360) % 360;
       this.host.send([{ type: 'throw', grenade: this.grenade, deg, power }]);
+      return;
+    }
+    if (this.bomb) {
+      const s = this.alive();
+      if (s !== null) this.cancelAction(s);
       return;
     }
     if (this.fireHeld) this.stopFire();
@@ -335,6 +367,7 @@ export class ShooterInput {
     const i = have.indexOf(cur);
     const next = have[(((i + (e.deltaY > 0 ? 1 : -1)) % have.length) + have.length) % have.length];
     this.grenade = null;
+    this.bomb = false;
     this.chargeStart = null;
     this.host.send([{ type: 'switch', slot: next }]);
   }

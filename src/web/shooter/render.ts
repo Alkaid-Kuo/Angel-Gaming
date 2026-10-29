@@ -1,5 +1,6 @@
-// CS 射擊可玩版的畫面：Canvas 2D 俯視。畫面資料只來自觀察資料（觀戰模式另有全狀態）。
-// 視錐迷霧：從所看選手的位置對視錐內打一圈射線，遇牆或看得見的煙霧就停，射線扇形之外全部壓暗。
+// CS 射擊可玩版的畫面：Canvas 2D 俯視，白天配色（亮地面、深灰牆）。畫面資料只來自觀察資料（觀戰模式另有全狀態）。
+// 視錐迷霧：從所看選手的位置對視錐內打一圈射線，遇牆、看得見的煙霧、視野距離（v0.5）就停，蹲著時貼近的矮牆也擋；
+// 射線扇形之外稍微壓暗（看得出地形，看不到人）。
 import type { AreaEffect, GrenadeId, MapInfo, ShooterObservation, SoundEvent, SoundKind, Team, WeaponId } from '../../shooter/api.ts';
 import type { FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
 
@@ -13,7 +14,24 @@ const UNIT = 1000;
 /** 地圖預先繪製的解析度（px／格） */
 const MAP_PX = 16;
 const RAYS_PER_DEG = 2;
-const FOG = 'rgba(4, 6, 10, 0.68)';
+/** 白天配色：地面暖灰、牆深灰、矮牆中灰；文字與線條用深色墨 */
+const PAL = {
+  bg: '#3d4147',
+  floorA: '#d8d3c8',
+  floorB: '#d3cec2',
+  wall: '#62666d',
+  wallEdge: '#33373d',
+  low: '#a39d92',
+  lowEdge: '#5a554d',
+  ink: '#1f2937',
+  inkSoft: 'rgba(31, 41, 55, 0.45)',
+} as const;
+/** 視野外：稍微壓暗，不是黑夜 */
+const FOG = 'rgba(30, 34, 42, 0.32)';
+/** 子彈彈道顯示時間、命中標記時間、受傷方向顯示時間（毫秒） */
+export const TRACER_MS = 140;
+export const HIT_MS = 260;
+export const HURT_MS = 900;
 /** 自己身邊一點點不壓暗（只是讓自己的圖示不被蓋住；不代表看得見背後） */
 const SELF_REVEAL = 0.7;
 export const SOUND_MS = 500;
@@ -37,6 +55,20 @@ export interface ActiveSound {
   readonly t: number;
 }
 
+/** 自己（或所看隊友）的一顆子彈：終點、命中，收到時間 */
+export interface Tracer {
+  readonly x: number;
+  readonly y: number;
+  readonly hit: 'enemy' | 'teammate' | null;
+  readonly kill: boolean;
+  readonly t: number;
+}
+
+export interface HurtMark {
+  readonly dirDeg: number;
+  readonly t: number;
+}
+
 export interface ThrowPreview {
   readonly grenade: GrenadeId;
   /** 0～100 */
@@ -50,7 +82,7 @@ export interface DrawInput {
   readonly alpha: number;
   /** 滑鼠的畫面座標（CSS px） */
   readonly mouse: { readonly x: number; readonly y: number };
-  /** 縮放：px／格 */
+  /** 縮放倍率（1 = 滑鼠往前推一點就看得到整個視野距離） */
   readonly zoom: number;
   /** 觀戰模式的全圖透視 */
   readonly xray: boolean;
@@ -60,6 +92,9 @@ export interface DrawInput {
   readonly now: number;
   /** 本機投擲冷卻剩餘（0～1），只用來畫準心 */
   readonly throwCd: number;
+  /** 所看選手的子彈與受傷（v0.5 觀察資料 me.shots／me.hurt） */
+  readonly tracers: readonly Tracer[];
+  readonly hurts: readonly HurtMark[];
 }
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -77,8 +112,8 @@ function interp<T extends { readonly id: number; readonly x: number; readonly y:
   return { x: lerp(p.x, cur.x, a), y: lerp(p.y, cur.y, a), facing: lerpDeg(p.facing, cur.facing, a) };
 }
 
-/** 格子射線（浮點 DDA）：回傳從 (ox, oy) 沿 (dx, dy) 到第一個牆格的距離（格）；最多 maxT */
-function castRay(map: MapInfo, ox: number, oy: number, dx: number, dy: number, maxT: number): number {
+/** 格子射線（浮點 DDA）：回傳從 (ox, oy) 沿 (dx, dy) 到第一個牆格的距離（格）；最多 maxT。lowT 內的矮牆也擋（自己蹲著時） */
+function castRay(map: MapInfo, ox: number, oy: number, dx: number, dy: number, maxT: number, lowT = 0): number {
   let cx = Math.floor(ox);
   let cy = Math.floor(oy);
   const sx = dx > 0 ? 1 : -1;
@@ -99,7 +134,9 @@ function castRay(map: MapInfo, ox: number, oy: number, dx: number, dy: number, m
       cy += sy;
     }
     if (t >= maxT) return maxT;
-    if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height || map.solid[cy * map.width + cx] === 1) return t;
+    if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return t;
+    const v = map.solid[cy * map.width + cx];
+    if (v === 1 || (v === 2 && t <= lowT)) return t;
   }
   return maxT;
 }
@@ -177,14 +214,27 @@ export class ShooterRenderer {
     c.width = map.width * MAP_PX;
     c.height = map.height * MAP_PX;
     const g = c.getContext('2d')!;
-    g.fillStyle = '#05070b';
+    g.fillStyle = PAL.wall;
     g.fillRect(0, 0, c.width, c.height);
-    // 地板
+    // 地板與矮牆（矮牆畫成箱子：中灰底、深色框、對角線）
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        if (map.solid[y * map.width + x] === 1) continue;
-        g.fillStyle = (x + y) % 2 === 0 ? '#2a313b' : '#272e37';
+        const v = map.solid[y * map.width + x];
+        if (v === 1) continue;
+        g.fillStyle = v === 2 ? PAL.low : (x + y) % 2 === 0 ? PAL.floorA : PAL.floorB;
         g.fillRect(x * MAP_PX, y * MAP_PX, MAP_PX, MAP_PX);
+      }
+    }
+    g.strokeStyle = PAL.lowEdge;
+    g.lineWidth = 2;
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        if (map.solid[y * map.width + x] !== 2) continue;
+        g.strokeRect(x * MAP_PX + 1, y * MAP_PX + 1, MAP_PX - 2, MAP_PX - 2);
+        g.beginPath();
+        g.moveTo(x * MAP_PX + 3, y * MAP_PX + 3);
+        g.lineTo((x + 1) * MAP_PX - 3, (y + 1) * MAP_PX - 3);
+        g.stroke();
       }
     }
     // 出生區、炸彈點
@@ -194,22 +244,22 @@ export class ShooterRenderer {
       g.fillRect(z.x0 * MAP_PX, z.y0 * MAP_PX, (z.x1 - z.x0) * MAP_PX, (z.y1 - z.y0) * MAP_PX);
     }
     for (const s of map.sites) {
-      g.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      g.fillStyle = 'rgba(31, 41, 55, 0.05)';
       g.fillRect(s.x0 * MAP_PX, s.y0 * MAP_PX, (s.x1 - s.x0) * MAP_PX, (s.y1 - s.y0) * MAP_PX);
       g.setLineDash([MAP_PX / 2, MAP_PX / 2]);
-      g.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+      g.strokeStyle = PAL.inkSoft;
       g.lineWidth = 2;
       g.strokeRect(s.x0 * MAP_PX + 1, s.y0 * MAP_PX + 1, (s.x1 - s.x0) * MAP_PX - 2, (s.y1 - s.y0) * MAP_PX - 2);
       g.setLineDash([]);
-      g.fillStyle = 'rgba(255, 255, 255, 0.16)';
+      g.fillStyle = 'rgba(31, 41, 55, 0.14)';
       g.font = `bold ${MAP_PX * 5}px "Segoe UI", sans-serif`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillText(s.id, ((s.x0 + s.x1) / 2) * MAP_PX, ((s.y0 + s.y1) / 2) * MAP_PX);
     }
-    // 牆邊（牆與地板的交界畫亮線）
-    g.strokeStyle = '#4a5566';
-    g.lineWidth = 2;
+    // 牆邊（牆與地板的交界畫深線）
+    g.strokeStyle = PAL.wallEdge;
+    g.lineWidth = 3;
     g.beginPath();
     const solid = (x: number, y: number): boolean => x < 0 || y < 0 || x >= map.width || y >= map.height || map.solid[y * map.width + x] === 1;
     for (let y = 0; y < map.height; y++) {
@@ -262,15 +312,17 @@ export class ShooterRenderer {
     const prev = d.prev?.view;
     const meNow = interp(view.me, prev !== undefined && prev.me.id === view.me.id ? [prev.me] : undefined, d.alpha);
     const full = d.cur.full;
-    // 鏡頭：跟隨所看的選手，往滑鼠方向偏一點（玩家模式）
-    const scale = d.zoom / UNIT;
-    const lead = !this.meta.spectate && view.me.id === this.meta.playerId ? 0.45 : 0;
+    // 鏡頭：跟隨所看的選手，往滑鼠方向偏（玩家模式；開鏡偏更多，看得到遠處）。
+    // 縮放：倍率 1 時短邊的一半是 24 格，滑鼠往前推一點就看得到整個 30 格視野
+    const scale = ((Math.min(w, h) / 2 / 24) * d.zoom) / UNIT;
+    const mine = !this.meta.spectate && view.me.id === this.meta.playerId;
+    const lead = mine ? (view.me.scoped ? 1.6 : 0.5) : 0;
     const cx = meNow.x + ((d.mouse.x - w / 2) * lead) / scale;
     const cy = meNow.y + ((d.mouse.y - h / 2) * lead) / scale;
     const cam: Camera = { cx, cy, scale, w, h };
     this.camera = cam;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#05070b';
+    ctx.fillStyle = PAL.bg;
     ctx.fillRect(0, 0, w, h);
     // 地圖
     const [mx, my] = toScreen(cam, 0, 0);
@@ -296,11 +348,11 @@ export class ShooterRenderer {
         const p = interp(t, prev?.teammates, d.alpha);
         this.drawPlayer(cam, p.x, p.y, p.facing, view.me.team, { weapon: t.weapon, hp: t.hp, hasBomb: t.hasBomb, blind: t.blind, label: this.meta.names[t.id], dim: false, planting: t.planting || t.defusing });
       }
-      if (view.me.alive) this.drawPlayer(cam, meNow.x, meNow.y, meNow.facing, view.me.team, { weapon: view.me.weapon, hp: view.me.hp, hasBomb: view.me.hasBomb, blind: view.me.blindTicks > 0, label: view.me.id === this.meta.playerId && !this.meta.spectate ? null : this.meta.names[view.me.id], self: true, dim: false, planting: view.me.plantTicks > 0 || view.me.defuseTicks > 0 });
+      if (view.me.alive) this.drawPlayer(cam, meNow.x, meNow.y, meNow.facing, view.me.team, { weapon: view.me.weapon, hp: view.me.hp, hasBomb: view.me.hasBomb, blind: view.me.blindTicks > 0, label: view.me.id === this.meta.playerId && !this.meta.spectate ? null : this.meta.names[view.me.id], self: true, dim: false, crouch: view.me.crouching, planting: view.me.plantTicks > 0 || view.me.defuseTicks > 0, firing: d.tracers.some((t) => d.now - t.t < 70) });
       const foe: Team = view.me.team === 'T' ? 'CT' : 'T';
       for (const e of view.enemies) {
         const p = interp(e, prev?.enemies, d.alpha);
-        this.drawPlayer(cam, p.x, p.y, p.facing, foe, { weapon: e.weapon, hp: null, hasBomb: e.hasBomb, blind: false, label: null, dim: false, crouch: e.crouching, planting: e.planting || e.defusing });
+        this.drawPlayer(cam, p.x, p.y, p.facing, foe, { weapon: e.weapon, hp: null, hasBomb: e.hasBomb, blind: false, label: null, dim: false, crouch: e.crouching, planting: e.planting || e.defusing, firing: e.firing });
         this.drawOffscreen(cam, p.x, p.y, TEAM_COLOR[foe]);
       }
       // 雷達紅點：隊友看見、自己沒看見的敵人（只有座標）
@@ -322,20 +374,28 @@ export class ShooterRenderer {
     for (const g of full !== null && d.xray ? full.projectiles : view.projectiles) {
       const [sx, sy] = toScreen(cam, g.x, g.y);
       ctx.fillStyle = '#f8fafc';
+      ctx.strokeStyle = PAL.ink;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
       ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = PAL.ink;
       ctx.font = '10px "Segoe UI", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.fillText(GRENADE_TAG[g.kind], sx, sy - 5);
     }
+    // 子彈彈道（所看選手自己的子彈）
+    if (view.me.alive) this.drawTracers(cam, meNow, d);
     // 投擲預估與準心（玩家模式、活著）
-    if (!this.meta.spectate && view.me.id === this.meta.playerId && view.me.alive) {
+    if (mine && view.me.alive) {
       if (d.charge !== null) this.drawThrowPreview(cam, meNow, view, d);
       this.drawCrosshair(d, view, meNow);
+      this.drawHitMarker(d, view.me.team);
     }
     this.drawSoundArrows(cam, meNow, d.sounds, d.now);
+    if (view.me.alive) this.drawHurt(cam, meNow, d);
     // 致盲：全白，最後 0.8 秒淡出
     const blind = view.me.blindTicks;
     if (blind > 0) {
@@ -373,7 +433,7 @@ export class ShooterRenderer {
     ctx.font = '12px "Segoe UI", "Microsoft JhengHei", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(203, 213, 225, 0.30)';
+    ctx.fillStyle = 'rgba(31, 41, 55, 0.38)';
     const seen = new Set<string>();
     for (const r of this.meta.map.regions) {
       if (seen.has(r.name) || r.x1 - r.x0 > 40 || r.y1 - r.y0 > 40) continue;
@@ -396,10 +456,14 @@ export class ShooterRenderer {
       f.globalCompositeOperation = 'destination-out';
       const ox = me.x / UNIT;
       const oy = me.y / UNIT;
-      const fov = view.me.scoped ? this.meta.rules.scopedFovDeg : this.meta.rules.fovDeg;
+      const rules = this.meta.rules;
+      const fov = view.me.scoped ? rules.scopedFovDeg : rules.fovDeg;
       const smokes = view.effects.filter((e) => e.kind === 'smoke').map((e) => ({ x: e.x / UNIT, y: e.y / UNIT, r: e.radius / UNIT }));
       const n = Math.max(2, Math.round(fov * RAYS_PER_DEG));
-      const maxT = Math.hypot(this.meta.map.width, this.meta.map.height);
+      // 視野距離（v0.5）：開鏡另計；蹲著時貼近的矮牆也擋
+      const range = view.me.scoped ? rules.scopedViewRange : rules.viewRange;
+      const maxT = range ?? Math.hypot(this.meta.map.width, this.meta.map.height);
+      const lowT = view.me.crouching ? rules.lowCoverRange : 0;
       f.beginPath();
       const [sx0, sy0] = toScreen(cam, me.x, me.y);
       f.moveTo(sx0, sy0);
@@ -407,7 +471,7 @@ export class ShooterRenderer {
         const a = rad(me.facing - fov / 2 + (fov * i) / n);
         const dx = Math.cos(a);
         const dy = Math.sin(a);
-        let t = castRay(this.meta.map, ox, oy, dx, dy, maxT);
+        let t = castRay(this.meta.map, ox, oy, dx, dy, maxT, lowT);
         for (const s of smokes) t = Math.min(t, rayCircle(ox, oy, dx, dy, s.x, s.y, s.r));
         const [sx, sy] = toScreen(cam, (ox + dx * t) * UNIT, (oy + dy * t) * UNIT);
         f.lineTo(sx, sy);
@@ -429,13 +493,16 @@ export class ShooterRenderer {
     const [sx, sy] = toScreen(cam, e.x, e.y);
     const r = e.radius * cam.scale;
     const g = ctx.createRadialGradient(sx, sy, r * 0.2, sx, sy, r);
-    g.addColorStop(0, 'rgba(148, 158, 170, 0.97)');
-    g.addColorStop(0.85, 'rgba(120, 130, 142, 0.95)');
-    g.addColorStop(1, 'rgba(110, 120, 132, 0.6)');
+    g.addColorStop(0, 'rgba(246, 247, 248, 0.98)');
+    g.addColorStop(0.8, 'rgba(226, 229, 233, 0.97)');
+    g.addColorStop(1, 'rgba(190, 195, 202, 0.85)');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(sx, sy, r, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = 'rgba(31, 41, 55, 0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   }
 
   private drawFire(cam: Camera, e: AreaEffect, now: number): void {
@@ -458,9 +525,9 @@ export class ShooterRenderer {
     for (const it of items) {
       if (it.kind === 'bomb') continue;
       const [sx, sy] = toScreen(cam, it.x, it.y);
-      ctx.fillStyle = '#94a3b8';
+      ctx.fillStyle = '#475569';
       ctx.fillRect(sx - 7, sy - 3, 14, 6);
-      ctx.fillStyle = '#e2e8f0';
+      ctx.fillStyle = PAL.ink;
       ctx.font = '10px "Segoe UI", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
@@ -498,11 +565,11 @@ export class ShooterRenderer {
     }
     ctx.fillStyle = state === 'exploded' ? '#475569' : '#f59e0b';
     ctx.fillRect(sx - 6, sy - 4, 12, 8);
-    ctx.strokeStyle = '#0b0e13';
+    ctx.strokeStyle = PAL.ink;
     ctx.lineWidth = 1;
     ctx.strokeRect(sx - 6, sy - 4, 12, 8);
     if (planted && left !== null) {
-      ctx.fillStyle = '#fef3c7';
+      ctx.fillStyle = PAL.ink;
       ctx.font = 'bold 12px "Segoe UI", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
@@ -516,7 +583,7 @@ export class ShooterRenderer {
     y: number,
     facing: number,
     team: Team,
-    o: { weapon: WeaponId; hp: number | null; hasBomb: boolean; blind: boolean; label: string | null; self?: boolean; dim: boolean; crouch?: boolean; planting?: boolean },
+    o: { weapon: WeaponId; hp: number | null; hasBomb: boolean; blind: boolean; label: string | null; self?: boolean; dim: boolean; crouch?: boolean; planting?: boolean; firing?: boolean },
   ): void {
     const ctx = this.ctx;
     const [sx, sy] = toScreen(cam, x, y);
@@ -524,25 +591,43 @@ export class ShooterRenderer {
     const a = rad(facing);
     ctx.globalAlpha = o.dim ? 0.45 : 1;
     // 槍管（朝向）
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = PAL.ink;
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(sx + Math.cos(a) * r * 0.6, sy + Math.sin(a) * r * 0.6);
     ctx.lineTo(sx + Math.cos(a) * r * 2.1, sy + Math.sin(a) * r * 2.1);
     ctx.stroke();
+    // 槍口火光（最近開過火）
+    if (o.firing === true) drawMuzzle(ctx, sx + Math.cos(a) * r * 2.5, sy + Math.sin(a) * r * 2.5, a, r);
     ctx.fillStyle = TEAM_COLOR[team];
     ctx.beginPath();
     ctx.arc(sx, sy, r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.lineWidth = o.self === true ? 2.5 : 1.5;
-    ctx.strokeStyle = o.self === true ? '#ffffff' : '#0b0e13';
+    ctx.lineWidth = o.self === true ? 3 : 1.5;
+    ctx.strokeStyle = PAL.ink;
     ctx.stroke();
+    if (o.self === true) {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r - 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (o.crouch === true) {
+      // 蹲：中間一條橫線
+      ctx.strokeStyle = PAL.ink;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(sx - r * 0.5, sy);
+      ctx.lineTo(sx + r * 0.5, sy);
+      ctx.stroke();
+    }
     if (o.hasBomb) {
-      ctx.fillStyle = '#0b0e13';
+      ctx.fillStyle = PAL.ink;
       ctx.fillRect(sx - r * 0.45, sy - r * 0.3, r * 0.9, r * 0.6);
     }
     if (o.planting === true) {
-      ctx.strokeStyle = '#fef3c7';
+      ctx.strokeStyle = PAL.ink;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.arc(sx, sy, r + 5, 0, Math.PI * 2);
@@ -550,7 +635,7 @@ export class ShooterRenderer {
       ctx.setLineDash([]);
     }
     if (o.blind) {
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = PAL.ink;
       ctx.lineWidth = 1.5;
       for (let i = 0; i < 4; i++) {
         const b = (i * Math.PI) / 2 + Math.PI / 4;
@@ -564,18 +649,18 @@ export class ShooterRenderer {
     ctx.font = '10px "Segoe UI", "Microsoft JhengHei", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = '#cbd5e1';
+    ctx.fillStyle = PAL.ink;
     ctx.fillText(WEAPON_TAG[o.weapon], sx, sy + r + 3);
     if (o.hp !== null) {
       const bw = 22;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.fillStyle = 'rgba(31, 41, 55, 0.35)';
       ctx.fillRect(sx - bw / 2, sy - r - 7, bw, 3);
-      ctx.fillStyle = o.hp > 30 ? '#e2e8f0' : TEAM_COLOR[team];
+      ctx.fillStyle = o.hp > 30 ? PAL.ink : TEAM_COLOR[team];
       ctx.fillRect(sx - bw / 2, sy - r - 7, (bw * Math.max(0, o.hp)) / 100, 3);
     }
     if (o.label !== null) {
       ctx.textBaseline = 'bottom';
-      ctx.fillStyle = 'rgba(226, 232, 240, 0.85)';
+      ctx.fillStyle = PAL.ink;
       ctx.fillText(o.label, sx, sy - r - 9);
     }
     ctx.globalAlpha = 1;
@@ -585,7 +670,7 @@ export class ShooterRenderer {
     for (const p of full.players) {
       if (!p.alive) continue;
       const q = interp(p, prev?.players, alpha);
-      this.drawPlayer(cam, q.x, q.y, q.facing, p.team, { weapon: p.weapon, hp: p.hp, hasBomb: p.hasBomb, blind: p.blind, label: this.meta.names[p.id], self: p.id === viewId, dim: false });
+      this.drawPlayer(cam, q.x, q.y, q.facing, p.team, { weapon: p.weapon, hp: p.hp, hasBomb: p.hasBomb, blind: p.blind, label: this.meta.names[p.id], self: p.id === viewId, dim: false, firing: p.firing });
     }
   }
 
@@ -600,7 +685,7 @@ export class ShooterRenderer {
     if (Math.abs(off) > half) deg = me.facing + Math.sign(off) * half;
     const dist = (charge.power / 100) * this.meta.rules.grenadeRules.maxThrowRange;
     const path = predictThrow(this.meta.map, me.x / UNIT, me.y / UNIT, deg, dist);
-    ctx.strokeStyle = 'rgba(248, 250, 252, 0.75)';
+    ctx.strokeStyle = PAL.ink;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([5, 5]);
     ctx.beginPath();
@@ -615,16 +700,16 @@ export class ShooterRenderer {
     const [sx, sy] = toScreen(cam, lx * UNIT, ly * UNIT);
     const info = this.meta.grenades.find((g) => g.id === charge.grenade);
     const rr = charge.grenade === 'flash' ? 1.2 * UNIT : (info?.radius ?? UNIT);
-    ctx.strokeStyle = 'rgba(248, 250, 252, 0.6)';
+    ctx.strokeStyle = PAL.ink;
     ctx.beginPath();
     ctx.arc(sx, sy, Math.max(6, rr * cam.scale), 0, Math.PI * 2);
     ctx.stroke();
     // 蓄力條（準心下方）
     const bx = d.mouse.x - 30;
     const by = d.mouse.y + 22;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillStyle = 'rgba(31, 41, 55, 0.35)';
     ctx.fillRect(bx, by, 60, 6);
-    ctx.fillStyle = '#f8fafc';
+    ctx.fillStyle = PAL.ink;
     ctx.fillRect(bx, by, (60 * charge.power) / 100, 6);
     ctx.font = '11px "Segoe UI", "Microsoft JhengHei", sans-serif';
     ctx.textAlign = 'center';
@@ -640,8 +725,7 @@ export class ShooterRenderer {
     const gap = Math.max(3, Math.min(70, dist * Math.tan(rad(view.me.spread / 100))));
     const x = d.mouse.x;
     const y = d.mouse.y;
-    ctx.strokeStyle = view.me.reloadTicksLeft > 0 || d.throwCd > 0 ? 'rgba(248, 250, 252, 0.35)' : '#f8fafc';
-    ctx.lineWidth = 1.5;
+    const faded = view.me.reloadTicksLeft > 0 || d.throwCd > 0;
     ctx.beginPath();
     for (const [dx, dy] of [
       [1, 0],
@@ -652,9 +736,100 @@ export class ShooterRenderer {
       ctx.moveTo(x + dx * gap, y + dy * gap);
       ctx.lineTo(x + dx * (gap + 7), y + dy * (gap + 7));
     }
+    // 白邊深芯：亮地面、暗處都看得清楚
+    ctx.strokeStyle = faded ? 'rgba(255, 255, 255, 0.4)' : '#ffffff';
+    ctx.lineWidth = 3.5;
     ctx.stroke();
-    ctx.fillStyle = '#f8fafc';
+    ctx.strokeStyle = faded ? 'rgba(31, 41, 55, 0.4)' : PAL.ink;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = PAL.ink;
     ctx.fillRect(x - 1, y - 1, 2, 2);
+  }
+
+  /** 子彈彈道：從自己畫到子彈停下的地方，很快淡出；打中人的那一端畫一個小爆點 */
+  private drawTracers(cam: Camera, me: { x: number; y: number }, d: DrawInput): void {
+    const ctx = this.ctx;
+    const [px, py] = toScreen(cam, me.x, me.y);
+    for (const t of d.tracers) {
+      const age = d.now - t.t;
+      if (age > TRACER_MS) continue;
+      const k = 1 - age / TRACER_MS;
+      const [ex, ey] = toScreen(cam, t.x, t.y);
+      ctx.strokeStyle = `rgba(31, 41, 55, ${0.55 * k})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255, 253, 242, ${0.95 * k})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      if (t.hit !== null) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${k})`;
+        ctx.strokeStyle = `rgba(31, 41, 55, ${k})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(ex, ey, 3 + 3 * k, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+  }
+
+  /** 命中標記：準心四個斜角；擊殺時加粗、換成敵方隊伍色 */
+  private drawHitMarker(d: DrawInput, myTeam: Team): void {
+    let last: Tracer | null = null;
+    for (const t of d.tracers) if (t.hit !== null && (last === null || t.t > last.t || (t.t === last.t && t.kill))) last = t;
+    if (last === null) return;
+    const span = last.kill ? HIT_MS * 2 : HIT_MS;
+    const age = d.now - last.t;
+    if (age > span) return;
+    const ctx = this.ctx;
+    const x = d.mouse.x;
+    const y = d.mouse.y;
+    const r0 = 6;
+    const r1 = last.kill ? 16 : 12;
+    const color = last.kill ? TEAM_COLOR[myTeam === 'T' ? 'CT' : 'T'] : last.hit === 'teammate' ? '#94a3b8' : '#ffffff';
+    ctx.globalAlpha = 1 - age / span;
+    ctx.beginPath();
+    for (const [dx, dy] of [
+      [1, 1],
+      [1, -1],
+      [-1, 1],
+      [-1, -1],
+    ] as const) {
+      ctx.moveTo(x + dx * r0, y + dy * r0);
+      ctx.lineTo(x + dx * r1, y + dy * r1);
+    }
+    ctx.strokeStyle = PAL.ink;
+    ctx.lineWidth = last.kill ? 5 : 4;
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = last.kill ? 3 : 2;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  /** 受傷方向：自己周圍一段弧，指向傷害來的方向 */
+  private drawHurt(cam: Camera, me: { x: number; y: number }, d: DrawInput): void {
+    const ctx = this.ctx;
+    const [px, py] = toScreen(cam, me.x, me.y);
+    const R = Math.max(54, Math.min(cam.w, cam.h) * 0.12);
+    for (const h of d.hurts) {
+      const age = d.now - h.t;
+      if (age > HURT_MS) continue;
+      const k = 1 - age / HURT_MS;
+      const a = rad(h.dirDeg);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 * k})`;
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.arc(px, py, R, a - 0.38, a + 0.38);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(17, 24, 39, ${0.9 * k})`;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+    }
   }
 
   private drawSoundArrows(cam: Camera, me: { x: number; y: number }, sounds: readonly ActiveSound[], now: number): void {
@@ -716,8 +891,8 @@ export class ShooterRenderer {
     }
     if (view.me.alive) {
       const a = rad(view.me.facing);
-      dot(view.me.x, view.me.y, '#ffffff', 3.5);
-      g.strokeStyle = '#ffffff';
+      dot(view.me.x, view.me.y, PAL.ink, 3.5);
+      g.strokeStyle = PAL.ink;
       g.lineWidth = 1.5;
       g.beginPath();
       g.moveTo(view.me.x * k, view.me.y * k);
@@ -737,8 +912,26 @@ export class ShooterRenderer {
 }
 
 /** 聲音：方向箭頭＋種類圖示（腳步＝兩點、槍聲＝放射線、落地＝圓、爆炸＝星、換彈＝弧、下包／拆包／嗶聲＝方塊） */
+/** 槍口火光：朝向前方的小星形（白芯深邊） */
+function drawMuzzle(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, r: number): void {
+  const s = Math.max(4, r * 0.9);
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const b = a + (i * Math.PI) / 4;
+    const rr = i === 0 ? s * 1.4 : i % 2 === 0 ? s : s * 0.45;
+    if (i === 0) ctx.moveTo(x + Math.cos(b) * rr, y + Math.sin(b) * rr);
+    else ctx.lineTo(x + Math.cos(b) * rr, y + Math.sin(b) * rr);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#fffdf2';
+  ctx.fill();
+  ctx.strokeStyle = PAL.ink;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
 function drawSoundGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, size: number, kind: SoundKind, friendly: boolean): void {
-  const color = friendly ? 'rgba(148, 163, 184, 0.9)' : '#f8fafc';
+  const color = friendly ? 'rgba(100, 116, 139, 0.9)' : PAL.ink;
   ctx.fillStyle = color;
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;

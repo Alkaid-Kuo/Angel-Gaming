@@ -5,10 +5,11 @@ import { BuyMenu } from './buy.ts';
 import { ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { FromShooterWorker, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
-import { ShooterRenderer, SOUND_MS, type ActiveSound } from './render.ts';
+import { HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type HurtMark, type Tracer } from './render.ts';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
-const ZOOMS = [10, 14, 18, 22, 28, 36];
+/** 縮放倍率（1 = 剛好看得到 30 格視野距離） */
+const ZOOMS = [0.55, 0.7, 0.85, 1, 1.2, 1.45];
 const SPEEDS = [0.5, 1, 2, 4, 8];
 
 let worker: Worker | null = null;
@@ -28,7 +29,12 @@ class Game {
   private prev: ShooterFrame | null = null;
   private recvAt = 0;
   private sounds: ActiveSound[] = [];
-  private zoomIdx = 2;
+  /** 所看選手的子彈與受傷（觀察資料有上一次決策以來的紀錄，依 tick 去重） */
+  private tracers: Tracer[] = [];
+  private hurts: HurtMark[] = [];
+  private lastShotTick = -1;
+  private lastHurtTick = -1;
+  private zoomIdx = 3;
   private speedIdx = 1;
   private xray = false;
   private paused = false;
@@ -51,7 +57,7 @@ class Game {
     this.renderer = new ShooterRenderer(this.canvas, meta);
     this.hud = new ShooterHud(this.root, meta);
     this.buy = new BuyMenu(this.root.querySelector('.sg-buy')!, meta, (items: BuyItem[]) => this.send([{ type: 'buy', items }]));
-    this.zoomIdx = meta.spectate ? 1 : 2;
+    this.zoomIdx = meta.spectate ? 2 : 3;
     this.input = new ShooterInput(this.canvas, {
       meta,
       self: () => this.cur?.self ?? null,
@@ -69,13 +75,7 @@ class Game {
         return true;
       },
       setBoard: (show) => this.hud.setBoard(show),
-      togglePause: () => {
-        if (this.over !== null) return;
-        this.paused = !this.paused;
-        this.post({ type: 'pause', paused: this.paused });
-        this.hud.setPaused(this.paused);
-        if (this.paused) this.input.releaseAll();
-      },
+      togglePause: () => this.togglePause(),
       cycleView: (step) => this.post({ type: 'view', step }),
       zoom: (step) => {
         this.zoomIdx = Math.max(0, Math.min(ZOOMS.length - 1, this.zoomIdx + step));
@@ -89,6 +89,13 @@ class Game {
         this.speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, this.speedIdx + step));
         this.post({ type: 'speed', speed: SPEEDS[this.speedIdx] });
       },
+      toggleFullscreen,
+    });
+    this.hud.pause.addEventListener('click', (e) => {
+      const act = (e.target as HTMLElement).closest('button')?.dataset.act;
+      if (act === 'resume') this.togglePause();
+      else if (act === 'fullscreen') toggleFullscreen();
+      else if (act === 'quit') home();
     });
     this.hud.end.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).closest('button')?.dataset.act;
@@ -100,6 +107,14 @@ class Game {
     document.addEventListener('visibilitychange', this.onHidden);
     // 除錯掛勾（瀏覽器驗收用，開發模式或網址帶 ?debug）：只有主執行緒本來就有的畫面資料，沒有引擎
     if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera };
+  }
+
+  private togglePause(): void {
+    if (this.over !== null) return;
+    this.paused = !this.paused;
+    this.post({ type: 'pause', paused: this.paused });
+    this.hud.setPaused(this.paused);
+    if (this.paused) this.input.releaseAll();
   }
 
   private send(cmds: ShooterCommand[]): void {
@@ -133,7 +148,18 @@ class Game {
     // 聲音
     for (const ev of f.sounds) this.sounds.push({ ev, t: now });
     this.sounds = this.sounds.filter((s) => now - s.t < SOUND_MS);
-    if (old !== null && old.viewId !== f.viewId) this.sounds = [];
+    if (old !== null && old.viewId !== f.viewId) {
+      this.sounds = [];
+      this.tracers = [];
+      this.hurts = [];
+    }
+    // 子彈與受傷：觀察資料給的是上一次決策以來的紀錄，同一筆會出現在好幾個 frame，依 tick 去重
+    for (const s of f.view.me.shots) if (s.tick > this.lastShotTick) this.tracers.push({ x: s.x, y: s.y, hit: s.hit, kill: s.kill, t: now });
+    for (const h of f.view.me.hurt) if (h.tick > this.lastHurtTick) this.hurts.push({ dirDeg: h.dirDeg, t: now });
+    this.lastShotTick = Math.max(this.lastShotTick, ...f.view.me.shots.map((s) => s.tick));
+    this.lastHurtTick = Math.max(this.lastHurtTick, ...f.view.me.hurt.map((h) => h.tick));
+    this.tracers = this.tracers.filter((t) => now - t.t < Math.max(TRACER_MS, 600));
+    this.hurts = this.hurts.filter((h) => now - h.t < HURT_MS);
     this.hud.addFeed(f.feed, now);
     // 插值：同一個 tick 的重送（暫停、切換視角）不推進
     if (old === null || f.tick !== old.tick) {
@@ -160,10 +186,10 @@ class Game {
     this.input.update(t);
     const cdTicks = this.meta.rules.grenadeRules.throwCooldownTicks;
     const throwCd = f.tick < this.throwCdUntil ? (this.throwCdUntil - f.tick) / cdTicks : 0;
-    const input = { cur: f, prev: this.prev, alpha, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.xray, charge: this.input.charge(t), sounds: this.sounds, now: t, throwCd };
+    const input = { cur: f, prev: this.prev, alpha, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.xray, charge: this.input.charge(t), sounds: this.sounds, now: t, throwCd, tracers: this.tracers, hurts: this.hurts };
     this.renderer.draw(input);
     this.renderer.drawMinimap(this.mini, input);
-    this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, speed: SPEEDS[this.speedIdx], xray: this.xray });
+    this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.xray });
   }
 
   private readonly onHidden = (): void => {
@@ -181,6 +207,18 @@ class Game {
     this.input.dispose();
     this.root.innerHTML = '';
   }
+}
+
+/** 全螢幕＋鎖鍵盤（Chrome 系）：Ctrl＋W 等組合鍵交給網頁，Ctrl 蹲著前進不會關分頁 */
+function toggleFullscreen(): void {
+  if (document.fullscreenElement !== null) {
+    void document.exitFullscreen();
+    return;
+  }
+  void document.documentElement
+    .requestFullscreen()
+    .then(() => (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard?.lock?.())
+    .catch(() => undefined);
 }
 
 function randomSeed(): number {

@@ -65,6 +65,8 @@ export interface FullPlayer {
   readonly hasBomb: boolean;
   readonly blind: boolean;
   readonly scoped: boolean;
+  /** 最近 3 tick 內開過火（畫槍口火光） */
+  readonly firing: boolean;
 }
 
 export interface FullState {
