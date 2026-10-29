@@ -2596,7 +2596,7 @@ class Economy {
     } else if (mode === 'full' || (good && mode !== 'eco')) {
       const awper = slot === this.opts.awpSlot && money >= this.cost('awp') + rules.armorPrice + 200;
       if (awper && primary !== 'awp') take('awp', this.cost('awp'));
-      else if (!good) take(rifle, this.cost(rifle)) || take('smg', this.cost('smg'));
+      else if (!good && !take(rifle, this.cost(rifle))) take('smg', this.cost('smg'));
       armor();
       kit();
       util(4);
@@ -3049,9 +3049,7 @@ class Tactics {
     const live = obs.round.phase === 'live';
     out.allowPeek = live && obs.round.phaseTicksLeft > 25 * this.tps;
     /** @type {ThrowWish | null} */
-    let wish = null;
-    if (me.team === 'T') wish = this.tGoal(obs, out);
-    else wish = this.ctGoal(obs, out);
+    let wish = me.team === 'T' ? this.tGoal(obs, out) : this.ctGoal(obs, out);
     if (wish === null) wish = this.anyNade(obs);
     this.overlay(obs, out);
     /** @type {Set<number>} */

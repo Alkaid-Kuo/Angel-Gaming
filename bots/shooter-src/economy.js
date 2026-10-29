@@ -188,7 +188,7 @@ export class Economy {
     } else if (mode === 'full' || (good && mode !== 'eco')) {
       const awper = slot === this.opts.awpSlot && money >= this.cost('awp') + rules.armorPrice + 200;
       if (awper && primary !== 'awp') take('awp', this.cost('awp'));
-      else if (!good) take(rifle, this.cost(rifle)) || take('smg', this.cost('smg'));
+      else if (!good && !take(rifle, this.cost(rifle))) take('smg', this.cost('smg'));
       armor();
       kit();
       util(4);

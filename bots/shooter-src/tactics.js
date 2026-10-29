@@ -9,7 +9,7 @@
 //   CT 「P:hold A=2 M=1 B=2[ rot=B][ go]」（開局配置；rot＝輪轉到哪個點；go＝回防集結完畢一起進）
 // 事件（感知輸出產生，隊友據此更新）：「E:contact <區域> <人數>」「E:dead <區域>」「E:planted <點>」「E:flash x y tick」「E:smoke x y」「E:kit」。
 // 經濟「B:full／force／half／eco」見 economy.js；道具的彈道見 utility.js。全部由地圖資料與觀察資料算，不寫死座標或區域代號。
-import { P, UNIT, adiff, angleTo, clamp, cosd, dist, inRect, lerp, segDist, sind } from './base.js';
+import { P, UNIT, clamp, cosd, dist, inRect, lerp, segDist, sind } from './base.js';
 import { Economy, parseBuy } from './economy.js';
 import { Utility } from './utility.js';
 
@@ -295,9 +295,7 @@ export class Tactics {
     const live = obs.round.phase === 'live';
     out.allowPeek = live && obs.round.phaseTicksLeft > 25 * this.tps;
     /** @type {import('./utility.js').ThrowWish | null} */
-    let wish = null;
-    if (me.team === 'T') wish = this.tGoal(obs, out);
-    else wish = this.ctGoal(obs, out);
+    let wish = me.team === 'T' ? this.tGoal(obs, out) : this.ctGoal(obs, out);
     if (wish === null) wish = this.anyNade(obs);
     this.overlay(obs, out);
     /** @type {Set<number>} */
