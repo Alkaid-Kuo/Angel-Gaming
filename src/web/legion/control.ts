@@ -18,7 +18,7 @@ export const HOTKEYS: readonly [string, string][] = [
   ['右鍵', '移動（拖曳＝指定朝向）／點敵軍攻擊'],
   ['Q', '按住瞄準（顯示衝刺路線、會被地形擋下的位置、齊射落點），放開施放：槍林、突擊、切入、衝鋒、齊射；盾兵開關盾牆。按住時右鍵或 Esc 取消'],
   ['E', '收起槍林；盾兵切換舉盾／持盾'],
-  ['A', '邊走邊打到滑鼠位置'],
+  ['G', '邊走邊打到滑鼠位置'],
   ['H', '堅守原地'],
   ['T', '轉向滑鼠'],
   ['F', '跟隨滑鼠下的友軍（保持目前相對位置）'],
@@ -193,7 +193,7 @@ export class PlayerControl {
           if (kind === 'shield') cmds.push({ type: 'shield', id: r.id, mode: r.stance === 'raise' ? 'carry' : 'raise', intent: r.stance === 'raise' ? '玩家：持盾' : '玩家：舉盾' });
         }
         break;
-      case 'a':
+      case 'g':
         if (m) for (const r of sel) cmds.push({ type: 'attackMove', id: r.id, x: Math.round(m.x), y: Math.round(m.y), intent: '玩家：邊走邊打' });
         if (m) this.r.ping(m.x, m.y, '#fca5a5');
         break;

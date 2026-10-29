@@ -432,7 +432,7 @@ export class LegionScreen {
   private playerKey(ke: KeyboardEvent): boolean {
     const c = this.control!;
     const k = ke.key.toLowerCase();
-    if (k === 'w' || k === 's' || k === 'd' || k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright') {
+    if ((!ke.ctrlKey && !ke.metaKey && (k === 'w' || k === 'a' || k === 's' || k === 'd')) || k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright') {
       this.keysDown.add(k);
       this.setDirector(false);
       ke.preventDefault();
@@ -440,11 +440,6 @@ export class LegionScreen {
     }
     const mouse = this.mouse ? this.r.toWorld(this.mouse.x, this.mouse.y) : null;
     const hover = this.mouse ? this.r.pick(this.mouse.x, this.mouse.y, this.viewer, this.alpha()) : -1;
-    // a 同時是平移鍵（WASD）與「邊走邊打」：有選取時當指令
-    if (k === 'a' && c.selected().length === 0 && !ke.ctrlKey) {
-      this.keysDown.add(k);
-      return true;
-    }
     if (c.key(ke.key, ke.ctrlKey || ke.metaKey, mouse, hover)) {
       ke.preventDefault();
       this.renderDetail();
