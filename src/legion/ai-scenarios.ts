@@ -1,10 +1,12 @@
-// AI 情境測試：把受測 AI（0 號）放進固定的戰術情境，對手（1 號）照腳本行動，檢查 AI 有沒有做對事。
+// AI 情境測試：把受測 AI 放進固定的戰術情境，對手照腳本行動，檢查 AI 有沒有做對事。
 // 用來量化「AI 懂不懂規則」：不正面衝槍林、錘砧戰術、弓兵集火、護弓兵、不送頭、佔點、搶高地、搜敵……
-// scripts/legion-ai-scenarios.ts 印出各 AI 的結果表；test/legion-ai.test.ts 檢查官方基準 AI 全部通過。
+// S1～S18 是統帥的情境；S19～S42 是基準 BOT 二代的情境（docs/2026-10-27_基準BOT訓練計畫與規格.md 第五章），
+// 可以指定地圖、模式（攻城、佔點、殲滅）、層（牆頂）、種子與受測 AI 的座位。
+// scripts/legion-ai-scenarios.ts 印出各 AI 的結果表；test/legion-ai.test.ts 檢查官方基準 AI 通過 S1～S18。
 import type { LegionEvent } from './api.ts';
-import { T, TILE, type FormationKind, type LegionMode, type ShieldStance, type UnitKind } from './config.ts';
+import { GROUND_FAST, T, TILE, WALL_LAYER, walkableAt, type FormationKind, type LegionMode, type ShieldStance, type UnitKind } from './config.ts';
 import { flatArea, teleport } from './acceptance.ts';
-import { heightAt, terrainAt } from './map.ts';
+import { MAPS, defaultMapId, heightAt, terrainAt, type LegionMap } from './map.ts';
 import { LegionBatchController } from './runner.ts';
 import { LegionMatch, legionInitData, type Regiment } from './sim.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
@@ -14,44 +16,78 @@ import { resolveKnobs } from '../sandbox/controller.ts';
 
 interface Unit {
   readonly type: UnitKind;
-  /** 相對情境中心的位置（格）：x 往東（0 號的進攻方向）、y 往南；abs = true 時是地圖上的格座標 */
+  /**
+   * 情境座標（格）：受測 AI 在西、對手在東。abs = false 時是相對情境中心的位置（x 往東、y 往南）；abs = true 時是地圖上的格座標。
+   * 受測 AI 坐 1 號時整個情境旋轉 180°（只有旋轉對稱的地圖可以；攻城圖照角色固定座位、不旋轉）
+   */
   readonly x: number;
   readonly y: number;
-  /** 朝向（度）；預設 0 號朝東、1 號朝西 */
+  /** 朝向（度）；預設受測 AI 朝東、對手朝西（攻城圖：攻方朝東、守方朝西） */
   readonly facing?: number;
   readonly formation?: FormationKind;
   readonly stance?: ShieldStance;
+  /** 橫陣的橫寬（人） */
+  readonly width?: number;
+  /** 層：0 地面（預設）、1 牆頂 */
+  readonly layer?: number;
 }
 
 export interface Ctx {
   readonly m: LegionMatch;
-  /** 0 號（受測 AI）、1 號（腳本）的軍團，順序同情境定義 */
+  /** 受測 AI、腳本方的軍團，順序同情境定義 */
   readonly A: Regiment[];
   readonly B: Regiment[];
-  /** 情境中心（單位） */
+  /** 受測 AI 的座位與腳本方的座位 */
+  readonly me: number;
+  readonly them: number;
+  readonly seed: number;
+  /** 情境中心（單位）；abs 情境是 0 */
   readonly cx: number;
   readonly cy: number;
   readonly events: LegionEvent[];
-  /** 0 號射出的箭：[目標軍團 id（-1 = 沒有）, 射手所在高度, tick] */
+  /** 受測 AI 射出的箭：[目標軍團 id（-1 = 沒有）, 射手所在高度, tick] */
   readonly arrows: [number, number, number][];
   /** 每面旗被爭奪的 tick 數 */
   readonly contested: number[];
+  /** 情境自己的量測紀錄（watch 寫、judge 讀） */
+  readonly mem: Record<string, number>;
+  /** 情境座標（格）→ 地圖座標（單位） */
+  at(x: number, y: number): { x: number; y: number };
+  /** 地圖座標（單位）→ 情境座標（格） */
+  local(x: number, y: number): [number, number];
+  /** 某點往情境座標的東（dx 格）、南（dy 格）偏移後的地圖座標 */
+  near(p: { readonly x: number; readonly y: number }, dx: number, dy: number): { x: number; y: number };
+  /** 情境的朝向（度）→ 地圖上的朝向 */
+  face(deg: number): number;
+  /** 情境裡的第 i 面旗 → 地圖的旗號 */
+  flag(i: number): number;
 }
 
 interface AiScenario {
   readonly id: string;
   readonly name: string;
+  /** 檢查什麼、怎麼量 */
   readonly expect: string;
+  /** 對應的機動（第四章） */
+  readonly skill?: string;
+  /** 規格待審（S38～S42）：照樣跑，但結果表上標「待審」 */
+  readonly pending?: boolean;
   readonly mode?: LegionMode;
+  /** 地圖（預設依模式：殲滅戰河谷、佔點大河谷、攻城石關城） */
+  readonly mapId?: string;
   /** 用地圖格座標擺位（不找平坦區） */
   readonly abs?: boolean;
+  /** 受測 AI 能坐的座位：預設 [0, 1]（雙座位）；攻城情境照角色只有一個（0 攻、1 守） */
+  readonly seats?: readonly number[];
   readonly bot: readonly Unit[];
   readonly foe: readonly Unit[];
   readonly ticks: number;
   /** 開打前的設定（例如旗點歸屬） */
   readonly setup?: (c: Ctx) => void;
-  /** 1 號的腳本：每次決策回傳指令 */
+  /** 腳本方：每次決策回傳指令 */
   readonly script?: (c: Ctx, tick: number) => unknown[];
+  /** 每個 tick 結束後的量測（寫進 c.mem） */
+  readonly watch?: (c: Ctx, tick: number) => void;
   readonly judge: (c: Ctx) => { pass: boolean; detail: string };
 }
 
@@ -61,12 +97,17 @@ export interface AiScenarioResult {
   readonly pass: boolean;
   readonly expect: string;
   readonly detail: string;
+  readonly seed: number;
+  readonly seat: number;
 }
 
-const pct = (r: Regiment): number => Math.round((r.slots.length * 100) / r.men0);
-const impacts = (c: Ctx, owner: number): Extract<LegionEvent, { type: 'impact' }>[] =>
-  c.events.filter((e): e is Extract<LegionEvent, { type: 'impact' }> => e.type === 'impact' && c.m.regiments[e.reg].owner === owner);
+/** 情境的固定種子（規格第五章：每個情境 5 個種子、雙座位，全過才算過）；第一個是 S1～S18 一直以來用的 11 */
+export const SCENARIO_SEEDS: readonly number[] = [11, 23, 37, 41, 59];
 
+const pct = (r: Regiment): number => Math.round((r.slots.length * 100) / r.men0);
+/** side：0 = 受測 AI、1 = 腳本方 */
+const impacts = (c: Ctx, side: number): Extract<LegionEvent, { type: 'impact' }>[] =>
+  c.events.filter((e): e is Extract<LegionEvent, { type: 'impact' }> => e.type === 'impact' && c.m.regiments[e.reg].owner === (side === 0 ? c.me : c.them));
 export const AI_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'S1',
@@ -78,7 +119,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       { type: 'archer', x: 9, y: 0 },
     ],
     ticks: 600,
-    script: (c, t) => (t === 0 ? [{ type: 'brace', id: c.B[0].id, facing: 180 }] : []),
+    script: (c, t) => (t === 0 ? [{ type: 'brace', id: c.B[0].id, facing: c.face(180) }] : []),
     judge: (c) => {
       const bad = impacts(c, 0).filter((e) => e.braced).length;
       return { pass: bad === 0 && pct(c.A[0]) >= 70, detail: `撞上槍林 ${bad} 次、騎兵剩 ${pct(c.A[0])}%、敵弓兵剩 ${pct(c.B[1])}%` };
@@ -157,7 +198,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       { type: 'archer', x: 9, y: 0 },
     ],
     ticks: 600,
-    script: (c, t) => (t === 0 ? [{ type: 'brace', id: c.B[0].id, facing: 180 }] : []),
+    script: (c, t) => (t === 0 ? [{ type: 'brace', id: c.B[0].id, facing: c.face(180) }] : []),
     judge: (c) => {
       const bad = impacts(c, 0).filter((e) => e.braced).length;
       return { pass: bad === 0 && pct(c.A[0]) >= 50, detail: `撞上槍林 ${bad} 次、劍士剩 ${pct(c.A[0])}%、敵弓兵剩 ${pct(c.B[1])}%` };
@@ -254,8 +295,8 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     ticks: 1000,
     script: (c, t) => (t === 0 ? [{ type: 'hold', id: c.B[0].id }] : []),
     judge: (c) => {
-      const held = c.m.flags.filter((f) => f.owner === 0).length;
-      return { pass: held >= 2, detail: `佔下 ${held} 面旗、分數 ${c.m.scoreOf(0)}` };
+      const held = c.m.flags.filter((f) => f.owner === c.me).length;
+      return { pass: held >= 2, detail: `佔下 ${held} 面旗、分數 ${c.m.scoreOf(c.me)}` };
     },
   },
   {
@@ -274,13 +315,13 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     foe: [{ type: 'light', x: 150, y: 27 }],
     ticks: 900,
     setup: (c) => {
-      for (const f of c.m.flags) f.owner = 0;
+      for (const f of c.m.flags) f.owner = c.me;
     },
-    script: (c, t) => (t % 50 === 0 && c.B[0].slots.length > 0 ? [{ type: 'move', id: c.B[0].id, x: c.m.flags[0].x + 1500, y: c.m.flags[0].y }] : []),
+    script: (c, t) => (t % 50 === 0 && c.B[0].slots.length > 0 ? [{ type: 'move', id: c.B[0].id, ...c.near(c.m.flags[c.flag(0)], 1.5, 0) }] : []),
     judge: (c) => {
-      const f = c.m.flags[0];
-      const sec = Math.round(c.contested[0] / 10);
-      return { pass: f.owner === 0 && sec <= 30, detail: `北橋${f.owner === 0 ? '仍是我方' : '失守'}、被爭奪 ${sec} 秒、敵輕步兵剩 ${pct(c.B[0])}%` };
+      const f = c.m.flags[c.flag(0)];
+      const sec = Math.round(c.contested[c.flag(0)] / 10);
+      return { pass: f.owner === c.me && sec <= 30, detail: `北橋${f.owner === c.me ? '仍是我方' : '失守'}、被爭奪 ${sec} 秒、敵輕步兵剩 ${pct(c.B[0])}%` };
     },
   },
   {
@@ -318,7 +359,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     foe: [{ type: 'archer', x: 101, y: 13 }, { type: 'light', x: 90, y: 50 }],
     ticks: 1500,
     script: (c, t) => (t === 0 ? [{ type: 'hold', id: c.B[0].id }, { type: 'attackMove', id: c.B[1].id, x: c.A[0].x, y: c.A[0].y }] : []),
-    judge: (c) => ({ pass: c.m.over && c.m.result().winner === 0, detail: c.m.over ? `${Math.round(c.m.tick / 10)} 秒結束，${c.m.result().winner === 0 ? '找到並打垮' : '沒有獲勝'}` : `時間到還沒找到（弓兵剩 ${pct(c.B[0])}%）` }),
+    judge: (c) => ({ pass: c.m.over && c.m.result().winner === c.me, detail: c.m.over ? `${Math.round(c.m.tick / 10)} 秒結束，${c.m.result().winner === c.me ? '找到並打垮' : '沒有獲勝'}` : `時間到還沒找到（弓兵剩 ${pct(c.B[0])}%）` }),
   },
   {
     id: 'S14',
@@ -377,7 +418,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     script: (c, t) => {
       const sp = c.B[0];
       if (sp.slots.length === 0) return [];
-      if (t === 0) return [{ type: 'brace', id: sp.id, facing: 180 }, { type: 'hold', id: c.B[1].id }];
+      if (t === 0) return [{ type: 'brace', id: sp.id, facing: c.face(180) }, { type: 'hold', id: c.B[1].id }];
       if (t % 10 !== 0) return [];
       // 天真的對手：12 格內最近、正在逼近的我方軍團，槍林就轉過去對著它
       let near: Regiment | null = null;
@@ -427,7 +468,7 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
     ticks: 1500,
     script: (c, t) => {
       const [a1, a2, a3, s1, s2, sp] = c.B;
-      if (t === 0) return [...[a1, a2, a3, s1, s2].map((r): unknown => ({ type: 'hold', id: r.id })), { type: 'brace', id: sp.id, facing: 180 }];
+      if (t === 0) return [...[a1, a2, a3, s1, s2].map((r): unknown => ({ type: 'hold', id: r.id })), { type: 'brace', id: sp.id, facing: c.face(180) }];
       return [];
     },
     judge: (c) => {
@@ -480,55 +521,167 @@ function openArea(m: LegionMatch, units: readonly Unit[]): [number, number] {
   return flatArea(m, 24, 7);
 }
 
-/** 執行一個情境：0 號由受測 AI 指揮（用自己的預設旋鈕），1 號照腳本 */
-export function runAiScenario(sc: AiScenario, bot: CompiledBot, label: string, trace?: (c: Ctx) => void): AiScenarioResult {
+/** 情境用到的座位（預設雙座位） */
+export function scenarioSeats(sc: AiScenario): readonly number[] {
+  return sc.seats ?? [0, 1];
+}
+
+/**
+ * 攻城圖的集結位置：布陣區（含遮罩）裡依層找可布陣的格，彼此相隔 12 格以上。
+ * 只用來通過布陣檢查，開打前再搬到情境指定的位置。
+ */
+function stagingSpots(map: LegionMap, p: number, units: readonly Unit[]): object[] {
+  const z = map.deploy[p];
+  const mask = map.deployMask?.[p] ?? null;
+  const used: [number, number, number][] = [];
+  return units.map((u) => {
+    // 攻方布陣區沒有牆：牆頂的團先在地面集結，搬過去時再換層
+    const layer = p === map.defender ? (u.layer ?? 0) : 0;
+    for (let ty = z.y0 + 1; ty < z.y1 - 1; ty++) {
+      for (let tx = z.x0 + 1; tx < z.x1 - 1; tx++) {
+        const k = ty * map.width + tx;
+        if (mask !== null && mask[k] !== 1) continue;
+        const t = map.terrain[k];
+        if (layer === WALL_LAYER ? t !== T.Wall : GROUND_FAST[t] !== 1 || t === T.Shallow) continue;
+        if (used.some(([x, y, l]) => l === layer && Math.abs(x - tx) < 12 && Math.abs(y - ty) < 12)) continue;
+        used.push([tx, ty, layer]);
+        return { type: u.type, x: tx * TILE + 500, y: ty * TILE + 500, layer, ...(u.formation ? { formation: u.formation } : {}), ...(u.stance ? { stance: u.stance } : {}), ...(u.width ? { width: u.width } : {}) };
+      }
+    }
+    throw new Error(`${map.id}：${p} 號找不到第 ${used.length} 團的集結位置`);
+  });
+}
+
+/** 搬到新位置後重排隊形、士兵直接站到隊形位置（同布陣） */
+function relayout(m: LegionMatch, r: Regiment): void {
+  (m as unknown as { layout(reg: Regiment, force: boolean): void }).layout(r, true);
+  for (const sid of r.slots) {
+    const s = m.soldiers[sid];
+    s.x = s.sx;
+    s.y = s.sy;
+  }
+}
+
+export interface AiScenarioOptions {
+  /** 種子（預設 11） */
+  readonly seed?: number;
+  /** 受測 AI 的座位（預設情境的第一個座位） */
+  readonly seat?: number;
+  readonly trace?: (c: Ctx) => void;
+}
+
+/** 執行一個情境：受測 AI（用自己的預設旋鈕）坐 seat 號，另一方照腳本 */
+export function runAiScenario(sc: AiScenario, bot: CompiledBot, label: string, opts: AiScenarioOptions = {}): AiScenarioResult {
   const mode = sc.mode ?? 'annihilation';
-  const dep = (u: Unit, i: number, p: number): object => ({ type: u.type, x: p === 0 ? 8000 : (mode === 'capture' ? 232000 : 152000), y: 6000 + i * 12000, ...(u.formation ? { formation: u.formation } : {}), ...(u.stance ? { stance: u.stance } : {}) });
-  const m = new LegionMatch({ seed: 11, mode, deployments: [sc.bot.map((u, i) => dep(u, i, 0)), sc.foe.map((u, i) => dep(u, i, 1))] });
-  const A = m.regiments.filter((r) => r.owner === 0);
-  const B = m.regiments.filter((r) => r.owner === 1);
-  if (A.length !== sc.bot.length || B.length !== sc.foe.length) throw new Error(`${sc.id}：布陣失敗`);
+  const seed = opts.seed ?? 11;
+  const me = opts.seat ?? scenarioSeats(sc)[0];
+  if (!scenarioSeats(sc).includes(me)) throw new Error(`${sc.id}：受測 AI 不能坐 ${me} 號`);
+  const them = 1 - me;
+  const siege = mode === 'siege';
+  const map = MAPS[sc.mapId ?? defaultMapId(mode)]();
+  // 旋轉 180°：受測 AI 坐 1 號的野戰情境（攻城圖照角色固定座位）
+  const rot = me === 1 && !siege;
+  if (rot && !map.symmetric) throw new Error(`${sc.id}：${map.id} 不是旋轉對稱的地圖，不能換座位`);
+  const s = rot ? -1 : 1;
+  const deployments: object[][] = [[], []];
+  if (siege) {
+    deployments[me] = stagingSpots(map, me, sc.bot);
+    deployments[them] = stagingSpots(map, them, sc.foe);
+  } else {
+        // 指定地圖的情境：在布陣區正中排一列；預設地圖照舊
+    const zx = (p: number): number => (sc.mapId ? ((map.deploy[p].x0 + map.deploy[p].x1) * TILE) / 2 : p === 0 ? 8000 : mode === 'capture' ? 232000 : 152000);
+    const dep = (u: Unit, i: number, p: number): object => ({ type: u.type, x: zx(p), y: 6000 + i * 12000, ...(u.formation ? { formation: u.formation } : {}), ...(u.stance ? { stance: u.stance } : {}), ...(u.width ? { width: u.width } : {}) });
+    deployments[me] = sc.bot.map((u, i) => dep(u, i, me));
+    deployments[them] = sc.foe.map((u, i) => dep(u, i, them));
+  }
+  const m = new LegionMatch({ seed, mode, ...(sc.mapId ? { mapId: sc.mapId } : {}), deployments });
+  const A = m.regiments.filter((r) => r.owner === me);
+  const B = m.regiments.filter((r) => r.owner === them);
+  if (A.length !== sc.bot.length || B.length !== sc.foe.length) {
+    const why = m.events.filter((e) => e.type === 'deployRejected').map((e) => (e.type === 'deployRejected' ? `${e.player} 號第 ${e.index} 團：${e.reason}` : ''));
+    throw new Error(`${sc.id}：布陣失敗 ${why.join('；')}`);
+  }
   let cx = 0;
   let cy = 0;
   if (!sc.abs) {
+    // 坐 1 號：用 0 號的中心再旋轉 180°（地圖旋轉對稱，兩個座位的地形完全鏡像）
     const [fx, fy] = openArea(m, [...sc.bot, ...sc.foe]);
-    cx = fx * TILE;
-    cy = fy * TILE;
+    cx = rot ? m.map.width * TILE - fx * TILE : fx * TILE;
+    cy = rot ? m.map.height * TILE - fy * TILE : fy * TILE;
   }
-  const place = (r: Regiment, u: Unit, p: number): void => teleport(m, r, cx + u.x * TILE, cy + u.y * TILE, u.facing ?? (p === 0 ? 0 : 180));
+  const W = m.map.width * TILE;
+  const H = m.map.height * TILE;
+  const at = (x: number, y: number): { x: number; y: number } => {
+    if (sc.abs) return rot ? { x: Math.round(W - x * TILE), y: Math.round(H - y * TILE) } : { x: Math.round(x * TILE), y: Math.round(y * TILE) };
+    return { x: Math.round(cx + s * x * TILE), y: Math.round(cy + s * y * TILE) };
+  };
+  const local = (x: number, y: number): [number, number] => {
+    if (sc.abs) return rot ? [(W - x) / TILE, (H - y) / TILE] : [x / TILE, y / TILE];
+    return [(s * (x - cx)) / TILE, (s * (y - cy)) / TILE];
+  };
+  const face = (deg: number): number => (rot ? (deg + 180) % 360 : deg);
+  const flag = (i: number): number => {
+    if (!rot) return i;
+    const f = m.map.flags[i];
+    const j = m.map.flags.findIndex((g) => Math.abs(g.x - (W - f.x)) <= TILE && Math.abs(g.y - (H - f.y)) <= TILE);
+    if (j < 0) throw new Error(`${sc.id}：第 ${i} 面旗沒有對稱的旗`);
+    return j;
+  };
+  const events: LegionEvent[] = [];
+  const ctx: Ctx = {
+    m, A, B, me, them, seed, cx, cy, events, arrows: [], contested: m.flags.map(() => 0), mem: {},
+    at, local, face, flag,
+    near: (p, dx, dy) => {
+      const [x, y] = local(p.x, p.y);
+      return at(x + dx, y + dy);
+    },
+  };
+  const legacy = Number(sc.id.slice(1)) <= 18;
+  const place = (r: Regiment, u: Unit, side: number): void => {
+    const p = at(u.x, u.y);
+    const layer = u.layer ?? 0;
+    // S1～S18 照舊不檢查（S11 有一團擺在河上，由引擎吸附到岸邊）
+    if (!legacy && !walkableAt(terrainAt(m.map, p.x, p.y), layer)) throw new Error(`${sc.id}：${side === 0 ? '受測方' : '腳本方'}的 ${u.type} (${u.x}, ${u.y}) 層 ${layer} 不可通行`);
+    // 預設朝向：情境裡受測 AI 朝東、對手朝西；攻城圖不旋轉，攻方朝東、守方朝西
+    const deg = u.facing ?? ((siege ? r.owner : side) === 0 ? 0 : 180);
+    if (siege || layer !== r.layer) {
+      r.layer = layer;
+      for (const sid of r.slots) m.soldiers[sid].layer = layer;
+    }
+    teleport(m, r, p.x, p.y, face(deg));
+    if (siege) relayout(m, r);
+  };
   sc.bot.forEach((u, i) => place(A[i], u, 0));
   sc.foe.forEach((u, i) => place(B[i], u, 1));
   for (const r of m.regiments) {
     r.tx = r.x;
     r.ty = r.y;
   }
-  const events: LegionEvent[] = [];
   m.eventTap = (e) => events.push(e);
-  const ctx: Ctx = { m, A, B, cx, cy, events, arrows: [], contested: m.flags.map(() => 0) };
   sc.setup?.(ctx);
   // 視野依擺好的位置重算，AI 第一次決策就看得到敵人
   m.refreshVision();
-  const ctrl = new LegionBatchController(bot, label, m.map, 11, 0);
-  const data = legionInitData(m.map, mode, 0, resolveKnobs(ctrl.declaration, undefined, label), m.timeLimitTicks);
+  const ctrl = new LegionBatchController(bot, label, m.map, seed, me);
+  const data = legionInitData(m.map, mode, me, resolveKnobs(ctrl.declaration, undefined, label), m.timeLimitTicks);
   ctrl.init(data);
   ctrl.deploy(data);
   for (let t = 0; t < sc.ticks && !m.over; t++) {
     if (m.isDecisionTick()) {
-      const out = ctrl.decide(m.observe(0));
+      const out = ctrl.decide(m.observe(me));
       if (out.exception !== null) throw new Error(`${sc.id}：${label} 例外 ${out.exception}`);
-      m.applyCommands(0, out.value);
-      m.observe(1);
-      if (sc.script) m.applyCommands(1, sc.script(ctx, t));
+      m.applyCommands(me, out.value);
+      m.observe(them);
+      if (sc.script) m.applyCommands(them, sc.script(ctx, t));
     }
     m.step();
-    // 這個 tick 新射出的箭（0 號）：目標軍團與射手高度
+    // 這個 tick 新射出的箭（受測 AI）：目標軍團與射手高度
     for (const pj of m.projectiles) {
-      if (pj.t0 !== m.tick - 1 || pj.owner !== 0) continue;
+      if (pj.t0 !== m.tick - 1 || pj.owner !== me) continue;
       let target = pj.target >= 0 ? m.soldiers[pj.target].reg : -1;
       if (pj.target === -2) {
         let best = Infinity;
         for (const r of m.regiments) {
-          if (r.owner === 0 || r.destroyed) continue;
+          if (r.owner === me || r.destroyed) continue;
           const d = (r.x - pj.x1) * (r.x - pj.x1) + (r.y - pj.y1) * (r.y - pj.y1);
           if (d < best) {
             best = d;
@@ -541,12 +694,14 @@ export function runAiScenario(sc: AiScenario, bot: CompiledBot, label: string, t
     m.flags.forEach((f, i) => {
       if (f.contested) ctx.contested[i] += 1;
     });
-    trace?.(ctx);
+    sc.watch?.(ctx, t);
+    opts.trace?.(ctx);
   }
   const j = sc.judge(ctx);
-  return { id: sc.id, name: sc.name, expect: sc.expect, pass: j.pass, detail: j.detail };
+  return { id: sc.id, name: sc.name, expect: sc.expect, pass: j.pass, detail: j.detail, seed, seat: me };
 }
 
+/** 跑一組情境（各一個種子、預設座位） */
 export function runAiScenarios(bot: CompiledBot, label: string, filter?: (id: string) => boolean, trace?: (c: Ctx) => void): AiScenarioResult[] {
-  return AI_SCENARIOS.filter((s) => !filter || filter(s.id)).map((s) => runAiScenario(s, bot, label, trace));
+  return AI_SCENARIOS.filter((s) => !filter || filter(s.id)).map((s) => runAiScenario(s, bot, label, { trace }));
 }
