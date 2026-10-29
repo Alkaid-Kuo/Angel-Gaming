@@ -36,7 +36,7 @@ export interface MapInfo {
   /** 格數 */
   readonly width: number;
   readonly height: number;
-  /** 列優先：1 = 牆（擋移動、擋子彈、擋視線），0 = 可走 */
+  /** 列優先；0 = 可走、1 = 牆、2 = 矮牆（v0.5：擋移動；站著的人視線與子彈越得過去，蹲著的人貼近時才擋） */
   readonly solid: readonly number[];
   /** 炸彈點（格矩形，含 x0/y0、不含 x1/y1） */
   readonly sites: readonly { readonly id: 'A' | 'B'; readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];
@@ -94,6 +94,12 @@ export interface RulesInfo {
   readonly teamSize: number;
   readonly fovDeg: number;
   readonly scopedFovDeg: number;
+  /** 視野距離（格，v0.5）；開鏡另計 */
+  readonly viewRange: number;
+  /** 開鏡的視野距離（格）；null = 不設上限 */
+  readonly scopedViewRange: number | null;
+  /** 矮牆掩護距離（格，v0.5） */
+  readonly lowCoverRange: number;
   readonly turnDegPerSec: number;
   readonly bodyRadius: number;
   readonly footstepRange: number;
@@ -171,9 +177,9 @@ export interface ShooterInitData {
 export interface ShooterHelpers {
   /** 確定性亂數 [0, 1) */
   random(): number;
-  /** 格子是否為牆（格座標；出界視為牆） */
+  /** 格子是否擋路（牆或矮牆；格座標；出界視為牆） */
   isSolid(cx: number, cy: number): boolean;
-  /** 兩點（座標單位）之間有無牆阻擋（不含煙霧） */
+  /** 兩點（座標單位）之間有無牆阻擋（不含煙霧；站姿，矮牆不擋） */
   clearLine(ax: number, ay: number, bx: number, by: number): boolean;
   dist(ax: number, ay: number, bx: number, by: number): number;
   /** 方位角（整數度） */
@@ -246,6 +252,29 @@ export interface SelfInfo {
   /** 速度向量（座標單位／tick），供選手判斷自己是否在動 */
   readonly vx: number;
   readonly vy: number;
+  /** 上一次決策以來自己打出的子彈（每顆一筆，v0.5） */
+  readonly shots: readonly ShotTrace[];
+  /** 上一次決策以來受到的傷害，各帶來源方向（v0.5） */
+  readonly hurt: readonly HurtEvent[];
+}
+
+/**
+ * 自己的一顆子彈（v0.5）：停下的位置與有沒有打中人。
+ * 打中看得見的人時終點是那個人；打中看不見的人（煙霧後、視野外）終點改給撞牆處，只告訴你「有打中」，不給位置
+ */
+export interface ShotTrace {
+  readonly tick: number;
+  readonly x: number;
+  readonly y: number;
+  readonly hit: 'enemy' | 'teammate' | null;
+  /** 這一發造成擊殺 */
+  readonly kill: boolean;
+}
+
+/** 自己受到的一次傷害（v0.5）：子彈為開槍者位置、手雷為爆炸點的方向，量化同聲音（整數度） */
+export interface HurtEvent {
+  readonly tick: number;
+  readonly dirDeg: number;
 }
 
 export interface TeammateInfo {
@@ -275,6 +304,8 @@ export interface EnemyInfo {
   readonly planting: boolean;
   readonly defusing: boolean;
   readonly hasBomb: boolean;
+  /** 上一次決策以來開過火（v0.5，看得見槍口火光） */
+  readonly firing: boolean;
 }
 
 /** 隊友此刻看見、自己沒看見的敵人：只有座標 */

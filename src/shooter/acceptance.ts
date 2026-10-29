@@ -37,7 +37,7 @@ const defuser: Script = (obs) => (obs.bomb.state === 'planted' ? [{ type: 'defus
 /** 依 playerId 指定腳本；沒指定的閒置 */
 function driver(scripts: Partial<Record<number, Script>>, opts: Partial<ShooterMatchOptions> = {}): ShooterDriver {
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ScriptController(`script-${pid}`, scripts[pid] ?? idle));
-  return new ShooterDriver({ seed: 7, ...opts, controllers, record: false });
+  return new ShooterDriver({ seed: 7, mapId: 'dust', ...opts, controllers, record: false });
 }
 
 /** 一格的中心（座標單位）；確認不是牆 */

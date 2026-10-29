@@ -9,7 +9,7 @@ import { BotLoadError, type CompiledBot } from '../sandbox/compile.ts';
 import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
 import type { ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, Team, WeaponId } from './api.ts';
 import { SHOOTER_ENGINE_VERSION, TIMING } from './config.ts';
-import { DEFAULT_MAP_ID, MAPS, isSolidCell, regionsAt, type ShooterMap } from './map.ts';
+import { DEFAULT_MAP_ID, MAPS, blocksMove, regionsAt, type ShooterMap } from './map.ts';
 import { HASH_INTERVAL, PLAYER_COUNT, ShooterMatch, shooterInitData, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
 import { lineOfSight } from './vision.ts';
 
@@ -56,7 +56,7 @@ export function shooterHelpers(map: ShooterMap, seed: number, playerId: number):
   const rng = Prng.fromInts(seed, playerId, 0x5eed);
   return {
     random: () => rng.nextFloat(),
-    isSolid: (cx, cy) => isSolidCell(map, Math.floor(cx), Math.floor(cy)),
+    isSolid: (cx, cy) => blocksMove(map, Math.floor(cx), Math.floor(cy)),
     clearLine: (ax, ay, bx, by) => lineOfSight(map, roundHalfEven(ax), roundHalfEven(ay), roundHalfEven(bx), roundHalfEven(by)),
     dist: (ax, ay, bx, by) => Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by)),
     angleTo: (ax, ay, bx, by) => iatan2(roundHalfEven(by - ay), roundHalfEven(bx - ax)),

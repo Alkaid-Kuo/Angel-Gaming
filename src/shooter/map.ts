@@ -1,5 +1,6 @@
 // CS 射擊地圖：以「在實心裡挖矩形」描述，再轉成格子。
-// 第一張圖「沙城」參照 Dust2：北為 CT、南為 T，中路南北直線，A 長在東、B 通道在西。
+// 第一張圖「沙城」參照 Dust2：北為 CT、南為 T，中路南北直線，A 長在東、B 通道在西（v0.5 起只供引擎測試）。
+// 第二張圖「赤岩鎮」（v0.5 預設）只借三路骨架，格局原創；用多邊形做斜牆、加矮牆。
 // 座標：格為單位的整數矩形，含 x0/y0、不含 x1/y1。1 格 = 1 公尺 = UNIT 座標單位。
 import type { MapInfo, MapRegion } from './api.ts';
 import { TEAM_SIZE, UNIT, type Team } from './config.ts';
@@ -26,6 +27,10 @@ export interface MapLayout {
   readonly areas: readonly (Rect & { readonly id: string; readonly name: string })[];
   /** 挖開之後再填回去的實心（箱子、柱子） */
   readonly blocks: readonly Rect[];
+  /** 多邊形（格座標頂點，格中心落在多邊形內的格）：open = 挖開、wall = 填回牆；在矩形之後依序處理（v0.5） */
+  readonly polys?: readonly { readonly mode: 'open' | 'wall'; readonly pts: readonly (readonly [number, number])[] }[];
+  /** 矮牆（v0.5）：擋移動；只有蹲著的人貼近時才擋視線與子彈（VISION.lowCoverRange），道具飛得過去 */
+  readonly low?: readonly Rect[];
   readonly sites: readonly (Rect & { readonly id: 'A' | 'B' })[];
   readonly spawnZones: Readonly<Record<Team, Rect>>;
   readonly spawns: Readonly<Record<Team, readonly MapSpawn[]>>;
@@ -36,7 +41,7 @@ export interface ShooterMap {
   readonly name: string;
   readonly width: number;
   readonly height: number;
-  /** 列優先；1 = 牆 */
+  /** 列優先；0 = 可走、1 = 牆、2 = 矮牆（v0.5） */
   readonly solid: Uint8Array;
   readonly sites: readonly (Rect & { readonly id: 'A' | 'B' })[];
   readonly spawnZones: Readonly<Record<Team, Rect>>;
@@ -132,6 +137,126 @@ export const DUST_LAYOUT: MapLayout = {
   },
 };
 
+/**
+ * 赤岩鎮（v0.5，原創格局）。120×120 格，北為 CT、南為 T，A 在東、B 在西。
+ * 借用的只有這類地圖的通用骨架：三條路線（東長廊、中央大道、西側地窖）、兩個包點、長距離對線、出生區之間沒有直線視線。
+ *
+ *   B 包點 ─ B 西門 ─ 北街 ─ CT 坡道 ─ CT 營地 ─ CT 後巷 ─ A 包點
+ *    │  │              │                                  │   │
+ *   地窖口（兩個）     拱門                             石階  東長廊
+ *    │  │              │                                  │   │
+ *   地窖大廳         中央大道 ─────── 鐘樓步道 ────────────┘  藏兵角
+ *    │                 │                                      │
+ *   地窖 ─── 側巷 ─────┤                                    東門
+ *    │                南街                                    │
+ *   西市集 ───────── T 廣場 ─────────── 東巷 ─────────────────┘
+ *
+ * 中央大道是南北直線，北端的北街北緣是牆，CT 營地只經東側的 CT 坡道通北街：T 廣場與 CT 營地之間沒有直線視線。
+ * 矮牆（=）：站著的人越過去看得到也打得到，蹲在後面就看不見、打不到。
+ */
+export const REDROCK_LAYOUT: MapLayout = {
+  id: 'redrock',
+  name: '赤岩鎮',
+  width: 120,
+  height: 120,
+  areas: [
+    // T 側
+    A('tSpawn', 'T 廣場', 38, 98, 82, 114),
+    A('market', '西市集', 12, 94, 40, 112),
+    A('eastLane', '東巷', 80, 100, 112, 110),
+    // 西路：地窖
+    A('cellar', '地窖', 20, 62, 28, 96),
+    A('sideAlley', '側巷', 28, 62, 52, 68),
+    A('cellarHall', '地窖大廳', 8, 44, 32, 62),
+    A('cellarWest', '地窖西口', 10, 36, 18, 46),
+    A('cellarEast', '地窖東口', 24, 36, 32, 46),
+    // 中路
+    A('tMid', '南街', 54, 76, 66, 100),
+    A('mid', '中央大道', 52, 40, 68, 76),
+    A('arch', '拱門', 55, 34, 65, 40),
+    A('belfry', '鐘樓步道', 68, 46, 90, 54),
+    A('steps', '石階', 84, 28, 94, 54),
+    // 東路
+    A('eastGate', '東門', 100, 76, 112, 104),
+    A('longHall', '東長廊', 98, 34, 114, 76),
+    A('nook', '藏兵角', 92, 56, 98, 64),
+    // 包點與 CT 側
+    A('aSite', 'A 包點', 86, 6, 114, 36),
+    A('ctAlley', 'CT 後巷', 76, 6, 86, 14),
+    A('ctSpawn', 'CT 營地', 50, 4, 76, 18),
+    A('ctRamp', 'CT 坡道', 72, 14, 80, 22),
+    A('northSt', '北街', 44, 22, 80, 34),
+    A('bGate', 'B 西門', 36, 24, 46, 32),
+    A('bSite', 'B 包點', 6, 6, 38, 38),
+  ],
+  blocks: [
+    // 拱門中柱：分成左右兩個門洞
+    R(59, 34, 61, 38),
+    // 東門門柱：中間留 6 格
+    R(100, 80, 103, 84),
+    R(109, 80, 112, 84),
+    // 北街北緣：封住北街與 CT 營地之間（只留 CT 坡道）
+    R(50, 18, 72, 22),
+    // A 包點的石柱與 B 包點的井
+    R(104, 14, 107, 17),
+    R(16, 18, 19, 21),
+    // 中央大道的石墩
+    R(63, 58, 66, 61),
+  ],
+  polys: [
+    // T 廣場四角削斜
+    { mode: 'wall', pts: [[38, 98], [46, 98], [38, 104]] },
+    { mode: 'wall', pts: [[82, 98], [74, 98], [82, 104]] },
+    { mode: 'wall', pts: [[38, 114], [44, 114], [38, 109]] },
+    // 西市集斜邊、東巷南側斜邊
+    { mode: 'wall', pts: [[12, 94], [20, 94], [12, 102]] },
+    { mode: 'wall', pts: [[80, 110], [92, 110], [80, 106]] },
+    // 中央大道南口斜坡（往南街收窄）
+    { mode: 'wall', pts: [[52, 70], [54, 70], [54, 76], [52, 76]] },
+    { mode: 'open', pts: [[66, 70], [70, 76], [66, 76]] },
+    // 鐘樓步道斜接石階
+    { mode: 'open', pts: [[84, 54], [90, 54], [94, 50], [94, 46]] },
+    // A 包點：東北角削斜、西南角斜坡
+    { mode: 'wall', pts: [[114, 6], [106, 6], [114, 12]] },
+    { mode: 'wall', pts: [[86, 36], [86, 28], [84, 36]] },
+    // B 包點：西北角削斜、東南角斜邊
+    { mode: 'wall', pts: [[6, 6], [14, 6], [6, 13]] },
+    { mode: 'wall', pts: [[38, 38], [38, 33], [33, 38]] },
+    // 地窖大廳的斜牆
+    { mode: 'wall', pts: [[8, 62], [8, 54], [14, 62]] },
+    // 東長廊西側凹位
+    { mode: 'wall', pts: [[98, 40], [98, 48], [100, 48], [100, 40]] },
+  ],
+  low: [
+    // A 包點的箱子
+    R(92, 16, 95, 18),
+    R(96, 24, 98, 27),
+    R(108, 26, 111, 28),
+    // B 包點的箱子
+    R(24, 14, 27, 16),
+    R(12, 28, 14, 31),
+    R(28, 28, 31, 30),
+    // 中央大道、東長廊、北街的掩體
+    R(56, 50, 59, 52),
+    R(104, 60, 107, 62),
+    R(66, 26, 69, 28),
+    // 地窖大廳
+    R(18, 52, 21, 54),
+  ],
+  sites: [
+    { id: 'A', x0: 90, y0: 10, x1: 110, y1: 30 },
+    { id: 'B', x0: 10, y0: 10, x1: 32, y1: 32 },
+  ],
+  spawnZones: {
+    T: R(44, 100, 76, 112),
+    CT: R(52, 5, 74, 17),
+  },
+  spawns: {
+    T: spawnRow([48, 54, 60, 66, 72], 106, 270),
+    CT: spawnRow([54, 58, 63, 67, 71], 10, 90),
+  },
+};
+
 export function buildMap(layout: MapLayout): ShooterMap {
   const { width, height } = layout;
   const solid = new Uint8Array(width * height).fill(1);
@@ -142,6 +267,22 @@ export function buildMap(layout: MapLayout): ShooterMap {
   };
   for (const a of layout.areas) carve(a, 0);
   for (const b of layout.blocks) carve(b, 1);
+  for (const p of layout.polys ?? []) {
+    let x0 = width;
+    let y0 = height;
+    let x1 = 0;
+    let y1 = 0;
+    for (const [px, py] of p.pts) {
+      x0 = Math.min(x0, Math.floor(px));
+      y0 = Math.min(y0, Math.floor(py));
+      x1 = Math.max(x1, Math.ceil(px));
+      y1 = Math.max(y1, Math.ceil(py));
+    }
+    for (let y = Math.max(0, y0); y < Math.min(height, y1); y++) {
+      for (let x = Math.max(0, x0); x < Math.min(width, x1); x++) if (inPolygon(p.pts, x + 0.5, y + 0.5)) solid[y * width + x] = p.mode === 'open' ? 0 : 1;
+    }
+  }
+  for (const r of layout.low ?? []) carve(r, 2);
   // 外框永遠是牆
   for (let x = 0; x < width; x++) {
     solid[x] = 1;
@@ -169,14 +310,39 @@ export function buildMap(layout: MapLayout): ShooterMap {
 
 export const MAPS: Readonly<Record<string, () => ShooterMap>> = {
   dust: () => buildMap(DUST_LAYOUT),
+  redrock: () => buildMap(REDROCK_LAYOUT),
 };
 
-export const DEFAULT_MAP_ID = 'dust';
+/** 預設地圖（v0.5 起為赤岩鎮；沙城保留給引擎測試與驗收情境） */
+export const DEFAULT_MAP_ID = 'redrock';
 
-/** 格座標是否為牆；出界視為牆 */
+/** 點是否在多邊形內（偶奇規則；地圖建構用，頂點為格座標小數） */
+function inPolygon(pts: readonly (readonly [number, number])[], x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i];
+    const [xj, yj] = pts[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** 格座標是否為牆（擋視線、子彈、道具；不含矮牆）；出界視為牆 */
 export function isSolidCell(map: ShooterMap, cx: number, cy: number): boolean {
   if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return true;
   return map.solid[cy * map.width + cx] === 1;
+}
+
+/** 格座標是否為矮牆（v0.5） */
+export function isLowCell(map: ShooterMap, cx: number, cy: number): boolean {
+  if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return false;
+  return map.solid[cy * map.width + cx] === 2;
+}
+
+/** 格座標是否擋移動（牆或矮牆）；出界視為擋 */
+export function blocksMove(map: ShooterMap, cx: number, cy: number): boolean {
+  if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return true;
+  return map.solid[cy * map.width + cx] !== 0;
 }
 
 /** 座標單位 → 格座標（向下取整；負數也正確） */
@@ -213,7 +379,7 @@ export function mapInfo(map: ShooterMap): MapInfo {
   };
 }
 
-/** 文字圖（除錯、審圖用）：# 牆、. 可走、A／B 炸彈點、t／c 出生區、T／C 出生點 */
+/** 文字圖（除錯、審圖用）：# 牆、= 矮牆、. 可走、A／B 炸彈點、t／c 出生區、T／C 出生點 */
 export function dumpAscii(map: ShooterMap): string {
   const rows: string[] = [];
   for (let y = 0; y < map.height; y++) {
@@ -221,6 +387,10 @@ export function dumpAscii(map: ShooterMap): string {
     for (let x = 0; x < map.width; x++) {
       if (map.solid[y * map.width + x] === 1) {
         line += '#';
+        continue;
+      }
+      if (map.solid[y * map.width + x] === 2) {
+        line += '=';
         continue;
       }
       let ch = '.';
@@ -240,7 +410,7 @@ export function dumpAscii(map: ShooterMap): string {
 /** 從一格出發（四方向）能到達的格；供地圖驗證與尋路測試 */
 export function reachable(map: ShooterMap, cx: number, cy: number): Uint8Array {
   const seen = new Uint8Array(map.width * map.height);
-  if (isSolidCell(map, cx, cy)) return seen;
+  if (blocksMove(map, cx, cy)) return seen;
   const queue: number[] = [cy * map.width + cx];
   seen[queue[0]] = 1;
   for (let head = 0; head < queue.length; head++) {
@@ -254,7 +424,7 @@ export function reachable(map: ShooterMap, cx: number, cy: number): Uint8Array {
       [x, y - 1],
     ];
     for (const [nx, ny] of next) {
-      if (isSolidCell(map, nx, ny)) continue;
+      if (blocksMove(map, nx, ny)) continue;
       const j = ny * map.width + nx;
       if (seen[j] === 1) continue;
       seen[j] = 1;

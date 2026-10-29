@@ -23,7 +23,7 @@ function practiceControllers(seed: number): ShooterController[] {
 
 /** 跳過凍結時間 */
 function live(opts: Partial<ShooterMatchOptions> = {}): ShooterMatch {
-  const m = new ShooterMatch({ seed: 3, ...opts });
+  const m = new ShooterMatch({ mapId: 'dust', seed: 3, ...opts });
   while (m.phase === 'freeze') m.step();
   return m;
 }
@@ -184,7 +184,7 @@ describe('視野公平（引擎強制）', () => {
   });
 
   it('死亡與凍結時也有觀察資料', () => {
-    const m = new ShooterMatch({ seed: 1 });
+    const m = new ShooterMatch({ mapId: 'dust', seed: 1 });
     expect(m.observe(0).round.phase).toBe('freeze');
     expect(m.observe(0).round.canBuy).toBe(true);
     while (m.phase === 'freeze') m.step();
@@ -403,7 +403,7 @@ describe('回合勝利條件與回合流程（驗收情境）', () => {
 
 describe('購買', () => {
   /** 凍結時間、人在出生區、每人 16000 */
-  const rich = (opts: Partial<ShooterMatchOptions> = {}): ShooterMatch => new ShooterMatch({ seed: 3, startMoney: 16000, ...opts });
+  const rich = (opts: Partial<ShooterMatchOptions> = {}): ShooterMatch => new ShooterMatch({ mapId: 'dust', seed: 3, startMoney: 16000, ...opts });
   const T0 = 0;
   const CT0 = TEAM_SIZE;
 
@@ -423,7 +423,7 @@ describe('購買', () => {
   });
 
   it('錢不夠的項目跳過，其餘照買', () => {
-    const m = new ShooterMatch({ seed: 3 });
+    const m = new ShooterMatch({ mapId: 'dust', seed: 3 });
     const p = m.players[T0];
     m.applyCommands(T0, [{ type: 'buy', items: ['ak', 'armor', 'flash'] }]);
     expect(p.primary).toBeNull();
@@ -625,7 +625,7 @@ describe('選手驅動', () => {
       return [{ type: 'moveDir', deg: 270 }];
     });
     const controllers: ShooterController[] = Array.from({ length: PLAYER_COUNT }, (_, i) => (i === 0 ? thrower : i === 1 ? slow : new ScriptController(`idle-${i}`, () => [])));
-    const d = new ShooterDriver({ seed: 1, controllers, record: false });
+    const d = new ShooterDriver({ mapId: 'dust', seed: 1, controllers, record: false });
     for (let i = 0; i < 90; i++) d.step();
     expect(d.runtime[0].exceptions).toBeGreaterThan(0);
     expect(d.runtime[1].timeouts).toBe(10);
@@ -643,7 +643,7 @@ describe('選手驅動', () => {
         return [];
       }),
     );
-    const d = new ShooterDriver({ seed: 1, controllers, record: false });
+    const d = new ShooterDriver({ mapId: 'dust', seed: 1, controllers, record: false });
     for (let i = 0; i < 30; i++) d.step();
     expect(freezeCalls).toBe(10 * PLAYER_COUNT);
   });
@@ -676,12 +676,13 @@ describe('確定性與效能', () => {
     expect(run.result.stats.reduce((a, s) => a + s.kills, 0)).toBeGreaterThan(0);
   });
 
-  it('陪練 Bot v3 會丟道具：全買局 T 丟煙霧、CT 丟閃光（10 個種子短賽制）', () => {
+  // 沙城：陪練 Bot 的閃光只丟 10～20 格的敵人，赤岩鎮開闊、交火距離遠，很少丟（見步驟 4 後續修正報告）
+  it('陪練 Bot v3 會丟道具：全買局 T 丟煙霧、CT 丟閃光（沙城，10 個種子短賽制）', () => {
     let tThrows = 0;
     let ctThrows = 0;
     let enemyBlind = 0;
     for (let seed = 1; seed <= 10; seed++) {
-      const run = runShooterMatch({ seed, ...short, controllers: practiceControllers(seed), record: false });
+      const run = runShooterMatch({ seed, mapId: 'dust', ...short, controllers: practiceControllers(seed), record: false });
       expect(run.runtime.every((rt) => rt.exceptions === 0 && rt.timeouts === 0)).toBe(true);
       for (const r of run.result.rounds) {
         tThrows += r.throws[r.tGroup];
@@ -713,7 +714,7 @@ describe('確定性與效能', () => {
   });
 
   it('隊伍人數與地圖：每隊 5 人、出生點不在牆裡', () => {
-    const m = new ShooterMatch({ seed: 1 });
+    const m = new ShooterMatch({ mapId: 'dust', seed: 1 });
     expect(m.players.filter((p) => p.team === 'T').length).toBe(TEAM_SIZE);
     for (const p of m.players) expect(isSolidCell(map, cellOf(p.x), cellOf(p.y))).toBe(false);
   });
@@ -824,7 +825,7 @@ describe('投擲', () => {
     expect(m.players[0].grenades).toEqual(['flash']);
     expect(m.observe(0).me.loadout.grenades).toEqual(['flash']);
     // 凍結時間
-    const f = new ShooterMatch({ seed: 3 });
+    const f = new ShooterMatch({ mapId: 'dust', seed: 3 });
     f.players[0].grenades = ['smoke'];
     f.applyCommands(0, [{ type: 'throw', grenade: 'smoke', deg: 270, power: 50 }]);
     expect(f.projectiles.length).toBe(0);
@@ -1298,7 +1299,7 @@ describe('人類控制器（v0.4）', () => {
     const human = new ShooterHumanController();
     const controllers = practiceControllers(seed);
     controllers[2] = human;
-    const d = new ShooterDriver({ seed, controllers, record: true, roundsPerHalf: 2, winRounds: 3 });
+    const d = new ShooterDriver({ mapId: 'dust', seed, controllers, record: true, roundsPerHalf: 2, winRounds: 3 });
     const applied: number[] = [];
     let n = 0;
     while (!d.match.over && n < 40000) {
@@ -1337,5 +1338,140 @@ describe('人類控制器（v0.4）', () => {
     expect(h.decide({} as ShooterObservation).value).toEqual([]);
     expect(h.takeRealtime()).toEqual([{ type: 'reload' }]);
     expect(h.takeRealtime()).toEqual([]);
+  });
+});
+
+describe('視野距離與矮牆（v0.5）', () => {
+  it('不開鏡 30 格外看不見；開鏡看得到 40 格外，但視角只有 30°', () => {
+    const m = live({ defaultLoadout: { T: 'awp' } });
+    const [x, y] = at(106, 100);
+    m.teleport(0, x, y, 270);
+    m.teleport(5, x, y - 29 * UNIT, 90);
+    m.teleport(6, x + 2 * UNIT, y - 40 * UNIT, 90);
+    m.teleport(7, x - 4 * UNIT, y - 5 * UNIT, 90); // 正前方偏左 39°：視錐 100° 內、30° 外
+    parkOthers(m, [0, 5, 6, 7]);
+    expect(VISION.viewRange).toBe(30);
+    expect(m.observe(0).enemies.map((e) => e.id).sort()).toEqual([5, 7]);
+    m.applyCommands(0, [{ type: 'scope', on: true }]);
+    m.step();
+    expect(m.observe(0).enemies.map((e) => e.id).sort()).toEqual([5, 6]);
+    // 開鏡的人被看見的距離不變：40 格外沒開鏡的人看不到他
+    expect(m.canSee(6, 0)).toBe(false);
+    expect(m.canSee(5, 0)).toBe(true);
+  });
+
+  /** A 長：0 在南面北、5 在北 10 格面南，5 的南邊 1 格有一排矮牆 */
+  function coverSetup(): ShooterMatch {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(5, x, y - 10 * UNIT, 90);
+    parkOthers(m, [0, 5]);
+    for (let cx = 100; cx < 112; cx++) m.map.solid[71 * m.map.width + cx] = 2;
+    return m;
+  }
+
+  it('兩邊都站著：矮牆不擋視線也不擋子彈', () => {
+    const m = coverSetup();
+    expect(m.canSee(0, 5)).toBe(true);
+    expect(m.canSee(5, 0)).toBe(true);
+    m.applyCommands(0, [{ type: 'aim', x: m.players[5].x, y: m.players[5].y }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.players[5].hp).toBeLessThan(100);
+  });
+
+  it('蹲在矮牆後：雙方互相看不見，子彈打不到他，他開槍會打在矮牆上', () => {
+    const m = coverSetup();
+    m.applyCommands(5, [{ type: 'crouch', on: true }]);
+    m.step();
+    expect(m.canSee(0, 5)).toBe(false);
+    expect(m.canSee(5, 0)).toBe(false);
+    m.applyCommands(0, [{ type: 'aim', x: m.players[5].x, y: m.players[5].y }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.players[5].hp).toBe(100);
+    m.applyCommands(5, [{ type: 'aim', x: m.players[0].x, y: m.players[0].y }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.players[0].hp).toBe(100);
+  });
+
+  it('蹲著但離矮牆遠：矮牆不擋', () => {
+    const m = coverSetup();
+    m.applyCommands(0, [{ type: 'crouch', on: true }]);
+    m.step();
+    expect(m.canSee(0, 5)).toBe(true);
+    expect(m.canSee(5, 0)).toBe(true);
+  });
+
+  it('矮牆擋移動，道具飛得過去', () => {
+    const m = coverSetup();
+    m.applyCommands(0, [{ type: 'moveDir', deg: 270 }]);
+    for (let i = 0; i < 120; i++) m.step();
+    expect(m.players[0].y).toBeGreaterThan(72 * UNIT);
+    const n = new ShooterMatch({ mapId: 'dust', seed: 3 });
+    while (n.phase === 'freeze') n.step();
+    for (let cx = 100; cx < 112; cx++) n.map.solid[71 * n.map.width + cx] = 2;
+    const [x, y] = at(106, 80);
+    n.teleport(0, x, y, 270);
+    n.players[0].grenades = ['smoke'];
+    n.applyCommands(0, [{ type: 'throw', grenade: 'smoke', deg: 270, power: 100 }]);
+    for (let i = 0; i < 20; i++) n.step();
+    expect(n.projectiles[0].y).toBeLessThan(71 * UNIT);
+  });
+});
+
+describe('命中回饋（v0.5）', () => {
+  function duel(): { m: ShooterMatch; x: number; y: number } {
+    const m = live();
+    const [x, y] = at(106, 80);
+    m.teleport(0, x, y, 270);
+    m.teleport(5, x, y - 5 * UNIT, 90);
+    parkOthers(m, [0, 5]);
+    return { m, x, y };
+  }
+
+  it('打中看得見的敵人：子彈終點是他、hit = enemy；他收到受傷方向，也看得到槍口火光', () => {
+    const { m, x, y } = duel();
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 5 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    const shots = m.observe(0).me.shots;
+    expect(shots.length).toBe(1);
+    expect(shots[0]).toMatchObject({ x: m.players[5].x, y: m.players[5].y, hit: 'enemy', kill: false });
+    const o5 = m.observe(5);
+    expect(o5.me.hurt.map((h) => h.dirDeg)).toEqual([90]);
+    expect(o5.enemies.find((e) => e.id === 0)?.firing).toBe(true);
+    for (let i = 0; i < 6; i++) m.step();
+    expect(m.observe(0).me.shots).toEqual([]);
+    expect(m.observe(5).enemies.find((e) => e.id === 0)?.firing).toBe(false);
+  });
+
+  it('打空：終點在牆上、hit = null', () => {
+    const { m, x, y } = duel();
+    m.applyCommands(0, [{ type: 'aim', x: x + 10 * UNIT, y }, { type: 'fire', on: true }]);
+    for (let i = 0; i < 6; i++) m.step();
+    m.applyCommands(0, [{ type: 'fire', on: true }]);
+    m.step();
+    const s = m.observe(0).me.shots.at(-1)!;
+    expect(s.hit).toBeNull();
+    // A 長東牆在 x = 112
+    expect(Math.abs(s.x - 112 * UNIT)).toBeLessThan(400);
+  });
+
+  it('打中看不見的人（致盲中）：只說有打中，終點給撞牆處不給位置', () => {
+    const { m, x, y } = duel();
+    m.players[0].blindTicks = 200;
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 5 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    const s = m.observe(0).me.shots[0];
+    expect(s.hit).toBe('enemy');
+    expect(s.y).toBeLessThan(m.players[5].y - 5 * UNIT);
+  });
+
+  it('擊殺那一發 kill = true', () => {
+    const { m, x, y } = duel();
+    m.players[5].hp = 1;
+    m.applyCommands(0, [{ type: 'aim', x, y: y - 5 * UNIT }, { type: 'fire', on: true }]);
+    m.step();
+    expect(m.observe(0).me.shots[0].kill).toBe(true);
+    expect(m.players[5].alive).toBe(false);
   });
 });

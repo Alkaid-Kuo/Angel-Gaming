@@ -16,6 +16,8 @@ import type {
   DroppedItem,
   AreaEffect,
   EnemyInfo,
+  HurtEvent,
+  ShotTrace,
   KnobValues,
   ProjectileInfo,
   RadarContact,
@@ -53,9 +55,9 @@ import {
   type WeaponId,
   type WeaponSlot,
 } from './config.ts';
-import { DEFAULT_MAP_ID, MAPS, cellOf, inRect, mapInfo, type Rect, type ShooterMap } from './map.ts';
+import { DEFAULT_MAP_ID, MAPS, blocksMove, cellOf, inRect, isSolidCell, mapInfo, type Rect, type ShooterMap } from './map.ts';
 import { circleHitsWall, findPath } from './path.ts';
-import { distance, inCone, lineOfSight, quantizeDir, rayWallDistance, soundRange, type SightBlocker } from './vision.ts';
+import { distance, inCone, lineOfSight, lowCoverBlocks, quantizeDir, rayWallDistance, soundRange, type SightBlocker } from './vision.ts';
 
 export const PLAYER_COUNT = TEAM_SIZE * 2;
 /** 回放雜湊間隔（tick；沿用 RTS／軍團戰） */
@@ -141,6 +143,8 @@ export interface Player {
   vx: number;
   vy: number;
   hasBomb: boolean;
+  /** 最後一次開火的 tick（v0.5；觀察資料的 firing） */
+  lastShotTick: number;
   plantTicks: number;
   defuseTicks: number;
   blindTicks: number;
@@ -271,6 +275,30 @@ export interface ShooterMatchOptions {
   readonly winRounds?: number;
 }
 
+/** 子彈紀錄（每顆一筆，v0.5）：給開槍的人畫彈道與命中提示 */
+interface ShotRec {
+  readonly tick: number;
+  readonly shooter: number;
+  /** 子彈停下的位置：打中人為該人位置，否則撞牆處 */
+  readonly ex: number;
+  readonly ey: number;
+  /** 撞牆處（打中看不見的人時，觀察資料改給這個，不洩漏位置） */
+  readonly wx: number;
+  readonly wy: number;
+  readonly victim: number;
+  /** 開槍當下看得見中彈的人（隊友一律算看得見） */
+  readonly seen: boolean;
+  kill: boolean;
+}
+
+/** 受傷紀錄（v0.5）：給被打的人畫受傷方向 */
+interface HurtRec {
+  readonly tick: number;
+  readonly victim: number;
+  readonly fx: number;
+  readonly fy: number;
+}
+
 interface PendingHit {
   readonly attacker: number;
   readonly victim: number;
@@ -352,10 +380,11 @@ export function moveSpeed(p: Player): number {
   return base;
 }
 
-/** 沿單一軸移動，碰牆時退到最遠不重疊的位置（二分） */
-function slideAxis(map: ShooterMap, x: number, y: number, d: number, axis: 0 | 1, r: number): number {
+/** 沿單一軸移動，碰牆時退到最遠不重疊的位置（二分）；overLow = 飛越矮牆（道具） */
+function slideAxis(map: ShooterMap, x: number, y: number, d: number, axis: 0 | 1, r: number, overLow = false): number {
   if (d === 0) return 0;
-  const at = (k: number): boolean => (axis === 0 ? circleHitsWall(map, x + k, y, r) : circleHitsWall(map, x, y + k, r));
+  const blocks = overLow ? isSolidCell : blocksMove;
+  const at = (k: number): boolean => (axis === 0 ? circleHitsWall(map, x + k, y, r, blocks) : circleHitsWall(map, x, y + k, r, blocks));
   if (!at(d)) return d;
   // 起點就卡在牆裡（不應發生）：放行讓它脫困
   if (at(0)) return d;
@@ -409,6 +438,7 @@ function newPlayer(id: number): Player {
     vx: 0,
     vy: 0,
     hasBomb: false,
+    lastShotTick: -1000,
     plantTicks: 0,
     defuseTicks: 0,
     blindTicks: 0,
@@ -444,6 +474,9 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       teamSize: TEAM_SIZE,
       fovDeg: VISION.fovDeg,
       scopedFovDeg: VISION.scopedFovDeg,
+      viewRange: VISION.viewRange,
+      scopedViewRange: VISION.scopedViewRange,
+      lowCoverRange: VISION.lowCoverRange,
       turnDegPerSec: VISION.turnDegPerSec,
       bodyRadius: VISION.bodyRadius,
       footstepRange: SOUND.footstepRange,
@@ -565,6 +598,8 @@ export class ShooterMatch {
   winner: 0 | 1 | null = null;
   private readonly prng: Prng;
   private sounds: Sound[] = [];
+  private shotLog: ShotRec[] = [];
+  private hurtLog: HurtRec[] = [];
   private chat: Chat[] = [];
   private visTick = -1;
   private vis = new Uint8Array(PLAYER_COUNT * PLAYER_COUNT);
@@ -658,6 +693,8 @@ export class ShooterMatch {
     this.roundFlashEnemy = [0, 0];
     this.roundFlashTeam = [0, 0];
     this.sounds = [];
+    this.shotLog = [];
+    this.hurtLog = [];
     this.chat = [];
     this.roundMoneyAvg = [this.groupMoneyAvg(0), this.groupMoneyAvg(1)];
     this.fullBuy = null;
@@ -1082,6 +1119,8 @@ export class ShooterMatch {
     const keep = this.tick - 2 * DECISION_INTERVAL;
     if (this.sounds.length > 0 && this.sounds[0].tick < keep) this.sounds = this.sounds.filter((s) => s.tick >= keep);
     if (this.chat.length > 0 && this.chat[0].tick < keep) this.chat = this.chat.filter((s) => s.tick >= keep);
+    if (this.shotLog.length > 0 && this.shotLog[0].tick < keep) this.shotLog = this.shotLog.filter((s) => s.tick >= keep);
+    if (this.hurtLog.length > 0 && this.hurtLog[0].tick < keep) this.hurtLog = this.hurtLog.filter((s) => s.tick >= keep);
     for (const p of this.players) if (p.alive) this.turn(p);
     for (const p of this.players) if (p.alive) this.move(p);
     for (const p of this.players) {
@@ -1191,13 +1230,22 @@ export class ShooterMatch {
       }
       p.firePending = false;
       p.cooldown = def.fireTicks;
+      p.lastShotTick = this.tick;
       fired[p.id] = 1;
       const spread = spreadOf(p);
       const maxLen = wid === 'knife' ? def.range * UNIT + VISION.bodyRadius : MAX_RAY;
       for (let k = 0; k < def.pellets; k++) {
         const off = spread > 0 ? this.prng.range(-spread, spread) : 0;
         const ang = normCdeg(p.facing + off);
-        const hit = this.trace(p, icosC(ang), isinC(ang), maxLen);
+        const dx = icosC(ang);
+        const dy = isinC(ang);
+        const tr = this.trace(p, dx, dy, maxLen);
+        const wx = p.x + tdiv(dx * tr.wall, 10000);
+        const wy = p.y + tdiv(dy * tr.wall, 10000);
+        const hit = tr.victim < 0 ? null : tr;
+        const vq = hit === null ? null : this.players[hit.victim];
+        const seen = vq !== null && (vq.team === p.team || (p.blindTicks === 0 && this.sees(p, p.scoped ? VISION.scopedFovDeg : VISION.fovDeg, vq.x, vq.y, this.smokeBlockers(), vq.crouching)));
+        this.shotLog.push({ tick: this.tick, shooter: p.id, ex: vq?.x ?? wx, ey: vq?.y ?? wy, wx, wy, victim: hit?.victim ?? -1, seen, kill: false });
         if (hit === null) continue;
         const dmg = damageAt(def, hit.dist);
         const friendly = this.players[hit.victim].team === p.team;
@@ -1213,6 +1261,8 @@ export class ShooterMatch {
     const killWeapon: (WeaponId | null)[] = new Array<WeaponId | null>(PLAYER_COUNT).fill(null);
     for (const h of hits) {
       const v = this.players[h.victim];
+      const a = this.players[h.attacker];
+      this.hurtLog.push({ tick: this.tick, victim: v.id, fx: a.x, fy: a.y });
       const { hpLoss, armorLoss } = armorSplit(h.damage, v.armor, h.pen);
       v.armor -= armorLoss;
       const wasAlive = v.hp > 0;
@@ -1222,12 +1272,17 @@ export class ShooterMatch {
         killWeapon[v.id] = h.weapon;
       }
     }
+    for (const s of this.shotLog) if (s.tick === this.tick && s.victim >= 0 && killedBy[s.victim] === s.shooter) s.kill = true;
     for (const p of this.players) if (p.alive && p.hp <= 0) this.die(p, killedBy[p.id], killWeapon[p.id] ?? 'knife');
   }
 
-  /** 子彈射線：牆前第一個人，不分敵我（隊友會擋子彈；傷害打 FRIENDLY_FIRE_PCT 折扣由呼叫端處理） */
-  private trace(p: Player, cx: number, cy: number, maxLen: number): { victim: number; dist: number } | null {
-    const wall = rayWallDistance(this.map, p.x, p.y, cx, cy, maxLen);
+  /**
+   * 子彈射線：牆前第一個人，不分敵我（隊友會擋子彈；傷害打 FRIENDLY_FIRE_PCT 折扣由呼叫端處理）。
+   * 矮牆（v0.5）：開槍的人蹲著時貼近他的矮牆擋子彈；蹲在矮牆後的人打不到，子彈繼續往後飛。
+   * 回傳 victim = -1 表示沒打中人；wall = 撞牆距離
+   */
+  private trace(p: Player, cx: number, cy: number, maxLen: number): { victim: number; dist: number; wall: number } {
+    const wall = rayWallDistance(this.map, p.x, p.y, cx, cy, maxLen, p.crouching ? VISION.lowCoverRange * UNIT : 0);
     let best = -1;
     let bestT = wall;
     for (const q of this.players) {
@@ -1238,10 +1293,11 @@ export class ShooterMatch {
       if (t <= 0 || t >= bestT) continue;
       const perp = tdiv(rx * cy - ry * cx, 10000);
       if (Math.abs(perp) >= VISION.bodyRadius) continue;
+      if (q.crouching && lowCoverBlocks(this.map, p.x, p.y, q.x, q.y, false, true)) continue;
       best = q.id;
       bestT = t;
     }
-    return best < 0 ? null : { victim: best, dist: distance(p.x, p.y, this.players[best].x, this.players[best].y) };
+    return { victim: best, dist: best < 0 ? 0 : distance(p.x, p.y, this.players[best].x, this.players[best].y), wall };
   }
 
   private weaponTick(p: Player): void {
@@ -1336,9 +1392,9 @@ export class ShooterMatch {
     const r = GRENADE_RULES.projectileRadius;
     const wx = tdiv(g.dx * step, 10000);
     const wy = tdiv(g.dy * step, 10000);
-    const mx = slideAxis(this.map, g.x, g.y, wx, 0, r);
+    const mx = slideAxis(this.map, g.x, g.y, wx, 0, r, true);
     g.x += mx;
-    const my = slideAxis(this.map, g.x, g.y, wy, 1, r);
+    const my = slideAxis(this.map, g.x, g.y, wy, 1, r, true);
     g.y += my;
     const hitX = mx !== wx;
     const hitY = my !== wy;
@@ -1411,6 +1467,7 @@ export class ShooterMatch {
       if (!p.alive) continue;
       const raw = heDamageAt(distance(p.x, p.y, g.x, g.y));
       if (raw <= 0 || !lineOfSight(this.map, g.x, g.y, p.x, p.y, smokes)) continue;
+      this.hurtLog.push({ tick: this.tick, victim: p.id, fx: g.x, fy: g.y });
       const { hpLoss, armorLoss } = armorSplit(applyPercent(raw, this.grenadeDamagePct(owner, p)), p.armor, 100 - GRENADE_RULES.heArmorPct);
       p.armor -= armorLoss;
       p.hp -= hpLoss;
@@ -1480,15 +1537,23 @@ export class ShooterMatch {
       const fov = a.scoped ? VISION.scopedFovDeg : VISION.fovDeg;
       for (const b of this.players) {
         if (!b.alive || b.team === a.team) continue;
-        if (this.sees(a, fov, b.x, b.y, smokes)) this.vis[a.id * PLAYER_COUNT + b.id] = 1;
+        if (this.sees(a, fov, b.x, b.y, smokes, b.crouching)) this.vis[a.id * PLAYER_COUNT + b.id] = 1;
       }
     }
     return this.vis;
   }
 
-  /** 視錐內且有視線（牆與煙霧都擋） */
-  private sees(a: Player, fov: number, x: number, y: number, smokes: readonly SightBlocker[]): boolean {
-    return inCone(a.facing, fov, a.x, a.y, x, y) && lineOfSight(this.map, a.x, a.y, x, y, smokes);
+  /**
+   * 視錐內、視野距離內（開鏡另計，v0.5）且有視線（牆與煙霧都擋；任一方蹲著時貼近他的矮牆也擋）。
+   * targetLow = 目標是蹲著的人
+   */
+  private sees(a: Player, fov: number, x: number, y: number, smokes: readonly SightBlocker[], targetLow = false): boolean {
+    const range = a.scoped ? VISION.scopedViewRange : VISION.viewRange;
+    if (range !== null) {
+      const r = range * UNIT;
+      if ((x - a.x) * (x - a.x) + (y - a.y) * (y - a.y) > r * r) return false;
+    }
+    return inCone(a.facing, fov, a.x, a.y, x, y) && lineOfSight(this.map, a.x, a.y, x, y, smokes, a.crouching, targetLow);
   }
 
   /** 選手 pid 是否看得見敵人 eid（測試用） */
@@ -1508,7 +1573,7 @@ export class ShooterMatch {
       for (const e of foes) {
         if (!e.alive) continue;
         if (me.alive && vis[pid * PLAYER_COUNT + e.id] === 1) {
-          enemies.push({ id: e.id, x: e.x, y: e.y, facing: this.deg(e.facing), weapon: activeWeaponId(e), crouching: e.crouching, planting: e.plantTicks > 0, defusing: e.defuseTicks > 0, hasBomb: e.hasBomb });
+          enemies.push({ id: e.id, x: e.x, y: e.y, facing: this.deg(e.facing), weapon: activeWeaponId(e), crouching: e.crouching, planting: e.plantTicks > 0, defusing: e.defuseTicks > 0, hasBomb: e.hasBomb, firing: this.tick - e.lastShotTick <= DECISION_INTERVAL });
         } else if (mates.some((m) => m.alive && vis[m.id * PLAYER_COUNT + e.id] === 1)) {
           radar.push({ id: e.id, x: e.x, y: e.y });
         }
@@ -1569,6 +1634,19 @@ export class ShooterMatch {
         if (distance(me.x, me.y, g.x, g.y) <= GRENADE_RULES.nearProjectile || this.sees(me, fov, g.x, g.y, smokes)) projectiles.push({ kind: g.kind, x: g.x, y: g.y });
       }
     }
+    // 自己的子彈與受傷（v0.5）：上一次決策以來；打中看不見的人時終點改給撞牆處，不洩漏位置
+    const from = this.tick - DECISION_INTERVAL;
+    const shots: ShotTrace[] = [];
+    for (const s of this.shotLog) {
+      if (s.tick < from || s.tick >= this.tick || s.shooter !== pid) continue;
+      const v = s.victim < 0 ? null : this.players[s.victim];
+      shots.push({ tick: s.tick, x: s.seen ? s.ex : s.wx, y: s.seen ? s.ey : s.wy, hit: v === null ? null : v.team === me.team ? 'teammate' : 'enemy', kill: s.kill });
+    }
+    const hurt: HurtEvent[] = [];
+    for (const r of this.hurtLog) {
+      if (r.tick < from || r.tick >= this.tick || r.victim !== pid) continue;
+      hurt.push({ tick: r.tick, dirDeg: r.fx === me.x && r.fy === me.y ? 0 : quantizeDir(me.x, me.y, r.fx, r.fy) });
+    }
     const w = activeState(me);
     return {
       tick: this.tick,
@@ -1606,6 +1684,8 @@ export class ShooterMatch {
         defuseTicks: me.defuseTicks,
         vx: me.vx,
         vy: me.vy,
+        shots,
+        hurt,
       },
       teammates,
       enemies,
@@ -1684,7 +1764,7 @@ export class ShooterMatch {
       ws(p.primary);
       ws(p.secondary);
       h.int(SLOT_CODE[p.active]).int(p.cooldown).int(p.reloadLeft).int(p.recoil).bool(p.fireHeld).bool(p.firePending);
-      h.bool(p.walking).bool(p.crouching).bool(p.scoped).str(p.moveKind).int(p.path.length).int(p.pathIdx).int(p.goalX).int(p.goalY).int(p.moveDeg).int(p.stuck);
+      h.bool(p.walking).bool(p.crouching).bool(p.scoped).int(p.lastShotTick).str(p.moveKind).int(p.path.length).int(p.pathIdx).int(p.goalX).int(p.goalY).int(p.moveDeg).int(p.stuck);
       h.int(p.aimX ?? -1).int(p.aimY ?? -1).int(p.vx).int(p.vy).bool(p.hasBomb).int(p.plantTicks).int(p.defuseTicks).int(p.blindTicks).int(p.throwCd).int(p.kills).int(p.deaths);
     }
     const b = this.bomb;
@@ -1700,7 +1780,7 @@ export class ShooterMatch {
     for (const sm of this.smokes) h.int(sm.x).int(sm.y).int(sm.owner).int(sm.startTick).int(sm.endTick);
     h.int(this.fires.length);
     for (const f of this.fires) h.int(f.x).int(f.y).int(f.owner).int(GRENADE_IDS.indexOf(f.kind)).int(f.startTick).int(f.endTick);
-    h.int(this.sounds.length).int(this.chat.length);
+    h.int(this.sounds.length).int(this.chat.length).int(this.shotLog.length).int(this.hurtLog.length);
     for (const v of this.prng.getState()) h.int(v);
     return h.digest();
   }

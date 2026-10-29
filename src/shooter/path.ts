@@ -2,7 +2,7 @@
 // 角色半徑 0.3 格、走廊最窄 2 格，不膨脹地圖；路徑點取格中心，平滑時檢查掃過的圓，因此不會貼著格角走。
 import { idiv, pointRectDistSq } from '../shared/intmath.ts';
 import { UNIT, VISION } from './config.ts';
-import { cellOf, isSolidCell, type ShooterMap } from './map.ts';
+import { blocksMove, cellOf, type ShooterMap } from './map.ts';
 
 const STRAIGHT = 100;
 const DIAG = 141;
@@ -32,9 +32,9 @@ function gridOf(map: ShooterMap): Grid {
   const edge = new Uint8Array(n);
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
-      if (isSolidCell(map, x, y)) continue;
+      if (blocksMove(map, x, y)) continue;
       let near = 0;
-      for (let dy = -1; dy <= 1 && near === 0; dy++) for (let dx = -1; dx <= 1; dx++) if (isSolidCell(map, x + dx, y + dy)) near = 1;
+      for (let dy = -1; dy <= 1 && near === 0; dy++) for (let dx = -1; dx <= 1; dx++) if (blocksMove(map, x + dx, y + dy)) near = 1;
       edge[y * map.width + x] = near;
     }
   }
@@ -91,8 +91,8 @@ function pop(s: Grid): number {
   return top;
 }
 
-/** 半徑 r 的圓（中心座標單位）是否與任何牆格重疊 */
-export function circleHitsWall(map: ShooterMap, x: number, y: number, r: number): boolean {
+/** 半徑 r 的圓（中心座標單位）是否與任何擋路的格重疊（預設牆與矮牆；道具飛行只看牆） */
+export function circleHitsWall(map: ShooterMap, x: number, y: number, r: number, blocks: (map: ShooterMap, cx: number, cy: number) => boolean = blocksMove): boolean {
   const x0 = cellOf(x - r);
   const x1 = cellOf(x + r);
   const y0 = cellOf(y - r);
@@ -100,7 +100,7 @@ export function circleHitsWall(map: ShooterMap, x: number, y: number, r: number)
   const r2 = r * r;
   for (let cy = y0; cy <= y1; cy++) {
     for (let cx = x0; cx <= x1; cx++) {
-      if (!isSolidCell(map, cx, cy)) continue;
+      if (!blocks(map, cx, cy)) continue;
       if (pointRectDistSq(x, y, cx * UNIT, cy * UNIT, (cx + 1) * UNIT, (cy + 1) * UNIT) < r2) return true;
     }
   }
@@ -126,12 +126,12 @@ function centerOf(map: ShooterMap, i: number): [number, number] {
 
 /** 最近的可走格（環狀往外找；同距離取列優先較小者） */
 export function nearestOpenCell(map: ShooterMap, cx: number, cy: number): number {
-  if (!isSolidCell(map, cx, cy)) return cy * map.width + cx;
+  if (!blocksMove(map, cx, cy)) return cy * map.width + cx;
   for (let r = 1; r < Math.max(map.width, map.height); r++) {
     for (let y = cy - r; y <= cy + r; y++) {
       for (let x = cx - r; x <= cx + r; x++) {
         if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) !== r) continue;
-        if (!isSolidCell(map, x, y)) return y * map.width + x;
+        if (!blocksMove(map, x, y)) return y * map.width + x;
       }
     }
   }
@@ -186,12 +186,12 @@ export function findPath(map: ShooterMap, sx: number, sy: number, gx: number, gy
         if (dx === 0 && dy === 0) continue;
         const nx = cx + dx;
         const ny = cy + dy;
-        if (isSolidCell(map, nx, ny)) continue;
+        if (blocksMove(map, nx, ny)) continue;
         const ni = ny * w + nx;
         if (s.closed[ni] === gen) continue;
         const diag = dx !== 0 && dy !== 0;
         // 不可切角：斜走時兩側都要可走
-        if (diag && (isSolidCell(map, nx, cy) || isSolidCell(map, cx, ny))) continue;
+        if (diag && (blocksMove(map, nx, cy) || blocksMove(map, cx, ny))) continue;
         const g = s.g[cur] + (diag ? DIAG : STRAIGHT) + (s.edge[ni] === 1 ? EDGE_COST : 0);
         if (s.stamp[ni] === gen && s.g[ni] <= g) continue;
         s.stamp[ni] = gen;

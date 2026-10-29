@@ -2,8 +2,8 @@
 // 角度一律百分度（0.01°）；座標為座標單位（1 格 = UNIT）。
 import { cdegDiff, iatan2C } from '../shared/geom.ts';
 import { idiv, isqrt } from '../shared/intmath.ts';
-import { SOUND, UNIT } from './config.ts';
-import { cellOf, isSolidCell, type ShooterMap } from './map.ts';
+import { SOUND, UNIT, VISION } from './config.ts';
+import { cellOf, isLowCell, isSolidCell, type ShooterMap } from './map.ts';
 import type { SoundRange } from './api.ts';
 
 /** 擋視線的圓（煙霧；步驟 3 接上）。座標單位 */
@@ -99,10 +99,34 @@ function segmentHitsCircle(ax: number, ay: number, bx: number, by: number, c: Si
 }
 
 /**
- * 視線：兩點之間沒有牆（穿過格角時兩側都是牆才算擋），也沒有穿過煙霧。
+ * 矮牆掩護（v0.5）：線段經過的矮牆格裡，有沒有一格離「蹲著的那一端」在 VISION.lowCoverRange 格以內。
+ * aLow／bLow = 起點／終點的人蹲著。兩端都站著時矮牆不擋。距離沿線段量：對起點取進入該格的點，對終點保守多算一格
+ */
+export function lowCoverBlocks(map: ShooterMap, ax: number, ay: number, bx: number, by: number, aLow: boolean, bLow: boolean): boolean {
+  if (!aLow && !bLow) return false;
+  const len = isqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+  const range = VISION.lowCoverRange * UNIT;
+  const near = (tNum: number, tDen: number): boolean => {
+    const d = tDen === 0 ? 0 : idiv(tNum * len, tDen);
+    return (aLow && d <= range) || (bLow && len - d - UNIT <= range);
+  };
+  return traverse(
+    ax,
+    ay,
+    bx,
+    by,
+    (cx, cy, tNum, tDen) => isLowCell(map, cx, cy) && near(tNum, tDen),
+    (sx, sy, tx, ty, tNum, tDen) => (isLowCell(map, sx, sy) || isLowCell(map, tx, ty)) && near(tNum, tDen),
+  );
+}
+
+/**
+ * 視線：兩點之間沒有牆（穿過格角時兩側都是牆才算擋），也沒有穿過煙霧；
+ * 任一端蹲著時，貼近他的矮牆也擋（aLow／bLow，v0.5）。
  * 起點、終點所在的格子不檢查（角色本身不會在牆裡）。
  */
-export function lineOfSight(map: ShooterMap, ax: number, ay: number, bx: number, by: number, smokes: readonly SightBlocker[] = []): boolean {
+export function lineOfSight(map: ShooterMap, ax: number, ay: number, bx: number, by: number, smokes: readonly SightBlocker[] = [], aLow = false, bLow = false): boolean {
+  if (lowCoverBlocks(map, ax, ay, bx, by, aLow, bLow)) return false;
   const blocked = traverse(
     ax,
     ay,
@@ -118,9 +142,9 @@ export function lineOfSight(map: ShooterMap, ax: number, ay: number, bx: number,
 
 /**
  * 子彈射線：從 (x, y) 沿方向 (cx, cy)（×10000）走最多 maxLen，回傳撞到第一面牆的距離（沒撞到回傳 maxLen）。
- * 子彈不可穿過格角（任一側是牆就擋）。
+ * 子彈不可穿過格角（任一側是牆就擋）。lowRange > 0（開槍的人蹲著）時，這個距離內的矮牆也擋（v0.5）
  */
-export function rayWallDistance(map: ShooterMap, x: number, y: number, cx: number, cy: number, maxLen: number): number {
+export function rayWallDistance(map: ShooterMap, x: number, y: number, cx: number, cy: number, maxLen: number, lowRange = 0): number {
   const bx = x + idiv(cx * maxLen, 10000);
   const by = y + idiv(cy * maxLen, 10000);
   let hit = maxLen;
@@ -130,13 +154,16 @@ export function rayWallDistance(map: ShooterMap, x: number, y: number, cx: numbe
     bx,
     by,
     (gx, gy, tNum, tDen) => {
-      if (!isSolidCell(map, gx, gy)) return false;
-      hit = tDen === 0 ? 0 : idiv(tNum * maxLen, tDen);
+      const d = tDen === 0 ? 0 : idiv(tNum * maxLen, tDen);
+      if (!isSolidCell(map, gx, gy) && !(lowRange > 0 && d <= lowRange && isLowCell(map, gx, gy))) return false;
+      hit = d;
       return true;
     },
     (sx, sy, tx, ty, tNum, tDen) => {
-      if (!isSolidCell(map, sx, sy) && !isSolidCell(map, tx, ty)) return false;
-      hit = tDen === 0 ? 0 : idiv(tNum * maxLen, tDen);
+      const d = tDen === 0 ? 0 : idiv(tNum * maxLen, tDen);
+      const low = lowRange > 0 && d <= lowRange && (isLowCell(map, sx, sy) || isLowCell(map, tx, ty));
+      if (!isSolidCell(map, sx, sy) && !isSolidCell(map, tx, ty) && !low) return false;
+      hit = d;
       return true;
     },
   );

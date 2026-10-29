@@ -6,7 +6,7 @@
 //   角度　整數度；0 = +x（東）、90 = +y（畫面下＝南）。
 //   速度　座標單位／tick（已由 CS 的 units／秒換算：1 格 ≈ 52.5 units）。
 
-export const SHOOTER_ENGINE_VERSION = '0.4.0';
+export const SHOOTER_ENGINE_VERSION = '0.5.0';
 
 export const TPS = 30;
 export const UNIT = 1000;
@@ -33,6 +33,12 @@ export const VISION = {
   fovDeg: 100,
   /** 開鏡時的視角 */
   scopedFovDeg: 30,
+  /** 視野距離（格，v0.5，待審）：不開鏡超過這個距離一律看不見 */
+  viewRange: 30,
+  /** 開鏡的視野距離（格）；null = 不設上限（由牆與煙霧決定） */
+  scopedViewRange: null as number | null,
+  /** 矮牆掩護（格，v0.5）：蹲著的人與矮牆距離在此以內，矮牆就擋住他和對方之間的視線與子彈 */
+  lowCoverRange: 2,
   /** 轉身速度上限（度／秒，待審）。玩家與 Bot 都受限 */
   turnDegPerSec: 720,
   /** 角色碰撞半徑（座標單位）＝ 0.3 格 */
