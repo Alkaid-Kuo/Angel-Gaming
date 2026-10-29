@@ -7,7 +7,7 @@
 // 角度：內部朝向用百分度（0.01°），給選手的觀察資料是整數度。
 import { Hasher } from '../shared/hash.ts';
 import { cdegDiff, iatan2C, icosC, isinC, normCdeg, stepToward } from '../shared/geom.ts';
-import { applyPercent, clamp, idiv, roundHalfEven, tdiv } from '../shared/intmath.ts';
+import { applyPercent, clamp, idiv, isqrt, roundHalfEven, tdiv } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
 import type {
   Attributes,
@@ -442,6 +442,47 @@ function slideAxis(map: ShooterMap, x: number, y: number, d: number, axis: 0 | 1
     else lo = mid;
   }
   return sign * lo;
+}
+
+/** 角色碰撞（v1.0）：兩個活人圓心距離的下限（2 × bodyRadius）的平方 */
+const BODY_GAP_SQ = 4 * VISION.bodyRadius * VISION.bodyRadius;
+
+/**
+ * 移動處理順序（v1.0）：起點 tick % 10 輪轉；每 10 tick 順逆向交替。
+ * 20 tick 一個週期內，任兩人誰先走恰好各半（只輪轉起點的話，相鄰 id 仍有 9 成是低 id 先走）
+ */
+export function moveOrder(tick: number): readonly number[] {
+  return MOVE_ORDERS[tick % MOVE_ORDERS.length];
+}
+const MOVE_ORDERS: readonly (readonly number[])[] = Array.from({ length: PLAYER_COUNT * 2 }, (_, t) => {
+  const start = t % PLAYER_COUNT;
+  const reverse = t >= PLAYER_COUNT;
+  return Array.from({ length: PLAYER_COUNT }, (_, i) => (reverse ? (start - i + PLAYER_COUNT) % PLAYER_COUNT : (start + i) % PLAYER_COUNT));
+});
+
+/**
+ * 沿單一軸移動 d 時，不和其他活人重疊（圓心距 ≥ 2r）的最遠位移：對每個人解出擋住的區間，取最近的邊界（不推人、不彈開）。
+ * 起點已經和某人重疊（瞬移、情境測試）：朝他靠近的那個方向不能動，遠離照走，讓人能分開
+ */
+function slideBodies(players: readonly Player[], self: Player, x: number, y: number, d: number, axis: 0 | 1): number {
+  if (d === 0) return 0;
+  let limit = Math.abs(d);
+  for (const q of players) {
+    if (q === self || !q.alive) continue;
+    const across = axis === 0 ? y - q.y : x - q.x;
+    const c = BODY_GAP_SQ - across * across;
+    if (c <= 0) continue;
+    // 沿軸距離 < w 就重疊（w = ⌈√c⌉）
+    let w = isqrt(c);
+    if (w * w < c) w += 1;
+    const rel = axis === 0 ? x - q.x : y - q.y;
+    if (Math.abs(rel) < w) {
+      if (rel !== 0 && (rel > 0) !== (d > 0)) limit = 0;
+    } else if (d > 0 && rel < 0) limit = Math.min(limit, -w - rel);
+    else if (d < 0 && rel > 0) limit = Math.min(limit, rel - w);
+    if (limit === 0) return 0;
+  }
+  return d > 0 ? limit : -limit;
 }
 
 function newPlayer(id: number): Player {
@@ -1231,7 +1272,8 @@ export class ShooterMatch {
     if (this.shotLog.length > 0 && this.shotLog[0].tick < keep) this.shotLog = this.shotLog.filter((s) => s.tick >= keep);
     if (this.hurtLog.length > 0 && this.hurtLog[0].tick < keep) this.hurtLog = this.hurtLog.filter((s) => s.tick >= keep);
     for (const p of this.players) if (p.alive) this.turn(p);
-    for (const p of this.players) if (p.alive) this.move(p);
+    // 角色碰撞讓移動有先後之分：處理順序輪轉，不偏袒低 id
+    for (const i of moveOrder(this.tick)) if (this.players[i].alive) this.move(this.players[i]);
     for (const p of this.players) {
       if (p.blindTicks > 0) p.blindTicks -= 1;
       if (p.throwCd > 0) p.throwCd -= 1;
@@ -1290,12 +1332,18 @@ export class ShooterMatch {
       dy = tdiv(isinC(p.moveDeg) * speed, 10000);
     }
     const r = VISION.bodyRadius;
-    p.x += slideAxis(this.map, p.x, p.y, dx, 0, r);
-    p.y += slideAxis(this.map, p.x, p.y, dy, 1, r);
+    // 先對牆滑動，再對其他活人：會重疊的那一軸退到最遠不重疊的位置（v1.0）
+    p.x += slideBodies(this.players, p, p.x, p.y, slideAxis(this.map, p.x, p.y, dx, 0, r), 0);
+    p.y += slideBodies(this.players, p, p.x, p.y, slideAxis(this.map, p.x, p.y, dy, 1, r), 1);
     if (this.phase === 'freeze') {
       const z: Rect = this.map.spawnZones[p.team];
       p.x = clamp(p.x, z.x0 * UNIT + r, z.x1 * UNIT - r);
       p.y = clamp(p.y, z.y0 * UNIT + r, z.y1 * UNIT - r);
+      // 夾回出生區後若和人重疊，退回這個 tick 的原位
+      if ((p.x !== ox || p.y !== oy) && this.overlapsBody(p)) {
+        p.x = ox;
+        p.y = oy;
+      }
     }
     p.vx = p.x - ox;
     p.vy = p.y - oy;
@@ -1312,6 +1360,17 @@ export class ShooterMatch {
         }
       } else p.stuck = 0;
     }
+  }
+
+  /** 是否和任一活人重疊（圓心距 < 2 × bodyRadius） */
+  private overlapsBody(p: Player): boolean {
+    for (const q of this.players) {
+      if (q === p || !q.alive) continue;
+      const dx = p.x - q.x;
+      const dy = p.y - q.y;
+      if (dx * dx + dy * dy < BODY_GAP_SQ) return true;
+    }
+    return false;
   }
 
   /** 所有人同時開火：先算出全部命中，再一起扣血（處理順序不影響結果） */

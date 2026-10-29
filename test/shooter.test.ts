@@ -9,8 +9,8 @@ import { applyPercent } from '../src/shared/intmath.ts';
 import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
 import { ShooterHumanController } from '../src/shooter/human.ts';
-import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterController } from '../src/shooter/runner.ts';
-import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, shooterInitData, burnCells, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
+import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, shooterHelpers, type ShooterController } from '../src/shooter/runner.ts';
+import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, moveOrder, shooterInitData, burnCells, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
 import { lineOfSight, quantizeDir, rayWallDistance, soundRange } from '../src/shooter/vision.ts';
 import type { ShooterObservation, SoundEvent } from '../src/shooter/api.ts';
 
@@ -300,7 +300,8 @@ describe('武器', () => {
   it('死亡掉落主武器與炸彈，T 走過去撿起炸彈', () => {
     const m = live({ defaultLoadout: { T: 'ak' } });
     const carrier = m.players.find((p) => p.hasBomb)!;
-    const mate = m.players.find((p) => p.team === 'T' && p.id !== carrier.id)!;
+    // 挑隔壁的隊友：出生點排成一列，中間有人會擋路（v1.0 角色碰撞）
+    const mate = m.players.find((p) => p.team === 'T' && Math.abs(p.slot - carrier.slot) === 1)!;
     m.kill(carrier.id);
     expect(m.bomb.state).toBe('dropped');
     expect(m.items.some((i) => i.kind === 'weapon' && i.weapon?.id === 'ak')).toBe(true);
@@ -549,6 +550,171 @@ describe('MR3 加時（v1.0）', () => {
       expect(r.result.overtimes).toBe(a.result.overtimes);
     }
     expect(found).toBe(true);
+  });
+});
+
+describe('角色碰撞（v1.0）', () => {
+  const GAP = 2 * VISION.bodyRadius;
+  const dist2 = (m: ShooterMatch, a: number, b: number): number => (m.players[a].x - m.players[b].x) ** 2 + (m.players[a].y - m.players[b].y) ** 2;
+  /** 活人兩兩之間的最小圓心距平方 */
+  function minGap2(m: ShooterMatch): number {
+    let best = Infinity;
+    for (let i = 0; i < PLAYER_COUNT; i++) {
+      for (let j = i + 1; j < PLAYER_COUNT; j++) if (m.players[i].alive && m.players[j].alive) best = Math.min(best, dist2(m, i, j));
+    }
+    return best;
+  }
+
+  it('面對面走：停在圓心距 2r，任何 tick 都不重疊', () => {
+    const m = live();
+    parkOthers(m, [0, 1]);
+    m.teleport(0, ...at(50, 24), 0);
+    m.teleport(1, ...at(60, 24), 180);
+    m.applyCommands(0, [{ type: 'moveDir', deg: 0 }]);
+    m.applyCommands(1, [{ type: 'moveDir', deg: 180 }]);
+    for (let i = 0; i < 90; i++) {
+      m.step();
+      expect(dist2(m, 0, 1)).toBeGreaterThanOrEqual(GAP * GAP);
+    }
+    expect(m.players[1].x - m.players[0].x).toBe(GAP);
+    expect(m.players[0].y).toBe(m.players[1].y);
+  });
+
+  it('側向相遇：被擋的那一軸停下，另一軸照走，滑過去', () => {
+    const m = live();
+    parkOthers(m, [0, 1]);
+    m.teleport(0, ...at(48, 25), 0);
+    m.teleport(1, ...at(52, 25), 180);
+    m.applyCommands(0, [{ type: 'moveDir', deg: 5 }]);
+    // x 前進量少於沒擋時的 tick 數（貼著對方的圓周滑開，不是整個停住）
+    let blockedTicks = 0;
+    let full = 0;
+    for (let i = 0; i < 120; i++) {
+      const x = m.players[0].x;
+      m.step();
+      const adv = m.players[0].x - x;
+      if (i === 0) full = adv;
+      else if (adv < full) blockedTicks += 1;
+      expect(dist2(m, 0, 1)).toBeGreaterThanOrEqual(GAP * GAP);
+    }
+    expect(blockedTicks).toBeGreaterThan(0);
+    expect(m.players[0].x).toBeGreaterThan(m.players[1].x + GAP);
+  });
+
+  it('死人不擋；下包中的人擋', () => {
+    const m = live();
+    parkOthers(m, [0, 1]);
+    m.teleport(0, ...at(50, 24), 0);
+    m.teleport(1, ...at(55, 24), 180);
+    m.kill(1);
+    m.applyCommands(0, [{ type: 'moveDir', deg: 0 }]);
+    for (let i = 0; i < 60; i++) m.step();
+    expect(m.players[0].x).toBeGreaterThan(m.players[1].x + GAP);
+
+    const n = live();
+    const carrier = n.players.find((p) => p.hasBomb)!;
+    const mate = n.players.find((p) => p.team === 'T' && p.id !== carrier.id)!;
+    parkOthers(n, [carrier.id, mate.id]);
+    n.teleport(carrier.id, ...at(22, 36), 270);
+    n.teleport(mate.id, ...at(17, 36), 0);
+    n.applyCommands(carrier.id, [{ type: 'plant' }]);
+    n.applyCommands(mate.id, [{ type: 'moveDir', deg: 0 }]);
+    for (let i = 0; i < 60; i++) n.step();
+    expect(carrier.plantTicks).toBeGreaterThan(0);
+    expect(carrier.x - mate.x).toBe(GAP);
+  });
+
+  it('10 個人用 move 往同一點走：任何 tick 都不重疊，10 秒後每個人距離目標 ≤ 5 格', () => {
+    const m = live();
+    const [gx, gy] = at(56, 25);
+    for (let i = 0; i < PLAYER_COUNT; i++) {
+      const a = (i * 36 * Math.PI) / 180;
+      const x = gx + Math.round(Math.cos(a) * 6000);
+      const y = gy + Math.round(Math.sin(a) * 6000);
+      expect(isSolidCell(map, cellOf(x), cellOf(y))).toBe(false);
+      m.teleport(i, x, y, 0);
+      m.applyCommands(i, [{ type: 'move', x: gx, y: gy }]);
+    }
+    for (let t = 0; t < ticks(10); t++) {
+      m.step();
+      expect(minGap2(m)).toBeGreaterThanOrEqual(GAP * GAP);
+    }
+    for (const p of m.players) expect(Math.hypot(p.x - gx, p.y - gy)).toBeLessThanOrEqual(5 * UNIT);
+  });
+
+  it('處理順序：起點每 tick 輪轉、每 10 tick 順逆交替；20 tick 內任兩人先走的次數各半', () => {
+    expect(moveOrder(0)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(moveOrder(3)).toEqual([3, 4, 5, 6, 7, 8, 9, 0, 1, 2]);
+    expect(moveOrder(13)).toEqual([3, 2, 1, 0, 9, 8, 7, 6, 5, 4]);
+    expect(moveOrder(23)).toEqual(moveOrder(3));
+    for (let i = 0; i < PLAYER_COUNT; i++) {
+      for (let j = i + 1; j < PLAYER_COUNT; j++) {
+        let first = 0;
+        for (let t = 0; t < 2 * PLAYER_COUNT; t++) {
+          const o = moveOrder(t);
+          if (o.indexOf(i) < o.indexOf(j)) first += 1;
+        }
+        expect(first).toBe(PLAYER_COUNT);
+      }
+    }
+  });
+
+  it('處理順序不偏袒 id：面對面相撞從 20 個起始 tick 各跑一次，兩人總位移相同；兩人 id 對調結果對稱', () => {
+    function headOn(left: number, right: number): [number, number] {
+      let sumLeft = 0;
+      let sumRight = 0;
+      for (let k = 0; k < 2 * PLAYER_COUNT; k++) {
+        const m = live();
+        for (let i = 0; i < k; i++) m.step();
+        parkOthers(m, [left, right]);
+        m.teleport(left, ...at(50, 24), 0);
+        m.teleport(right, ...at(60, 24), 180);
+        m.applyCommands(left, [{ type: 'moveDir', deg: 0 }]);
+        m.applyCommands(right, [{ type: 'moveDir', deg: 180 }]);
+        const lx = m.players[left].x;
+        const rx = m.players[right].x;
+        for (let i = 0; i < 60; i++) m.step();
+        expect(m.players[right].x - m.players[left].x).toBe(GAP);
+        sumLeft += m.players[left].x - lx;
+        sumRight += rx - m.players[right].x;
+      }
+      return [sumLeft, sumRight];
+    }
+    const a = headOn(0, 1);
+    const b = headOn(1, 0);
+    expect(a[0]).toBe(a[1]);
+    expect(b).toEqual(a);
+  });
+
+  it('凍結時間：被人擋住不動；夾回出生區後和人重疊就退回原位', () => {
+    const m = new ShooterMatch({ mapId: 'dust', seed: 3 });
+    const z = m.map.spawnZones.T;
+    // 玩家 0 站在出生區西緣，玩家 1 貼著他的東邊：往東走被人擋，往西走被夾回原位
+    const x0 = z.x0 * UNIT + VISION.bodyRadius;
+    const y0 = (z.y0 + 3) * UNIT;
+    m.teleport(0, x0, y0, 0);
+    m.teleport(1, x0 + GAP, y0, 0);
+    m.applyCommands(0, [{ type: 'moveDir', deg: 0 }]);
+    for (let i = 0; i < 10; i++) m.step();
+    expect(m.players[0].x).toBe(x0);
+    m.applyCommands(0, [{ type: 'moveDir', deg: 180 }]);
+    for (let i = 0; i < 10; i++) m.step();
+    expect(m.players[0].x).toBe(x0);
+    expect(m.phase).toBe('freeze');
+  });
+
+  it('碰撞計入確定性：同種子兩次雜湊相同', () => {
+    const run = (): string => {
+      const m = live();
+      const [gx, gy] = at(56, 25);
+      for (let i = 0; i < PLAYER_COUNT; i++) {
+        m.teleport(i, gx + (i - 5) * 900, gy + ((i % 3) - 1) * 2500, 0);
+        m.applyCommands(i, [{ type: 'move', x: gx, y: gy }]);
+      }
+      for (let t = 0; t < 200; t++) m.step();
+      return m.hash();
+    };
+    expect(run()).toBe(run());
   });
 });
 
@@ -1736,7 +1902,7 @@ describe('傷害數字與手雷掩護（v0.5）', () => {
   });
 });
 
-describe('陪練 Bot v4（v0.5）', () => {
+describe('陪練 Bot v4／v5', () => {
   it('錢夠時隊內 4 號買狙擊槍，架點時開鏡', () => {
     const map = MAPS.redrock();
     const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(practice, 'shooter-practice.js', 3, pid, map));
@@ -1751,6 +1917,26 @@ describe('陪練 Bot v4（v0.5）', () => {
     }
     expect(awp).toBe(true);
     expect(scoped).toBe(true);
+  });
+
+  it('v5 被擋就繞：離目標還遠卻連續 3 次決策沒動，改走旁邊 1～2 格的空地 0.5 秒，之後回原目標', () => {
+    const Bot = practice.createClass();
+    const bot = new Bot() as unknown as { init(d: unknown, h: unknown): void; moveTo(o: unknown, g: { x: number; y: number }): { type: string; x: number; y: number } };
+    bot.init(shooterInitData(map, 0, {}), shooterHelpers(map, 1, 0));
+    const [x, y] = at(56, 25);
+    const goal = { x: x + 10 * UNIT, y };
+    const obs = { me: { x, y, vx: 0, vy: 0 }, round: { phase: 'live' } };
+    const cmds = Array.from({ length: 8 }, () => bot.moveTo(obs, goal));
+    expect(cmds.slice(0, 2).every((c) => c.x === goal.x && c.y === goal.y)).toBe(true);
+    const detour = cmds[2];
+    const d = Math.hypot(detour.x - x, detour.y - y);
+    expect(d).toBeGreaterThanOrEqual(UNIT - 1);
+    expect(d).toBeLessThanOrEqual(2 * UNIT + 1);
+    expect(cmds.slice(3, 7).every((c) => c.x === detour.x && c.y === detour.y)).toBe(true);
+    expect(cmds[7]).toEqual({ type: 'move', x: goal.x, y: goal.y });
+    // 有在動、或已經到目標附近就不繞
+    const moving = { me: { x, y, vx: 150, vy: 0 }, round: { phase: 'live' } };
+    for (let i = 0; i < 5; i++) expect(bot.moveTo(moving, goal)).toEqual({ type: 'move', x: goal.x, y: goal.y });
   });
 });
 

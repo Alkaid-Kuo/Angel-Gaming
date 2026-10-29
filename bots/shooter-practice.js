@@ -7,6 +7,7 @@
 // 錢 ≥ 衝鋒槍＋護甲就半買；否則 eco（只在手槍局買護甲）。
 // 道具（v3，只有兩條、不是戰術）：T 下包前離目標炸彈點中心 15 格內且看得到中心，朝中心丟煙霧；
 // CT 雷達或視野出現 10～20 格的敵人，朝它的方向全力丟閃光。每回合各一次。
+// v5（規格 v1.0 角色碰撞）：被人擋住就繞——離目標還遠卻連續 3 次決策幾乎沒動，就往隨機方向偏 1～2 格走 0.5 秒。不是戰術。
 
 /** @typedef {import('../src/shooter/api.ts').ShooterInitData} InitData */
 /** @typedef {import('../src/shooter/api.ts').ShooterHelpers} Helpers */
@@ -35,12 +36,17 @@ export default class ShooterPractice {
     this.target = -1;
     /** 本回合是否已經丟過道具 */
     this.thrown = false;
+    /** 被擋住的連續決策次數；繞路的臨時目標與剩餘決策次數（v5） */
+    this.stuck = 0;
+    /** @type {{ x: number, y: number } | null} */
+    this.detour = null;
+    this.detourLeft = 0;
   }
 
   declare() {
     return {
       name: 'shooter-practice',
-      version: '4',
+      version: '5',
       style: '陪練',
       knobs: [
         { key: 'reaction', name: '反應', description: '看到敵人後等幾次決策（每次 0.1 秒）才開火', min: 0, max: 5, default: 1, integer: true },
@@ -112,6 +118,9 @@ export default class ShooterPractice {
       this.seen = 0;
       this.target = -1;
       this.thrown = false;
+      this.stuck = 0;
+      this.detour = null;
+      this.detourLeft = 0;
     }
     /** @type {Command[]} */
     const out = [];
@@ -144,7 +153,7 @@ export default class ShooterPractice {
         return out;
       }
       const goal = me.team === 'T' ? this.tGoal(obs, []) : this.ctGoal(obs, []);
-      if (goal !== null) out.push({ type: 'move', x: goal.x, y: goal.y });
+      if (goal !== null) out.push(this.moveTo(obs, goal));
       return out;
     }
     this.target = -1;
@@ -155,7 +164,7 @@ export default class ShooterPractice {
 
     if (me.plantTicks > 0 || me.defuseTicks > 0) return out;
     const goal = me.team === 'T' ? this.tGoal(obs, out) : this.ctGoal(obs, out);
-    if (goal !== null) out.push({ type: 'move', x: goal.x, y: goal.y });
+    if (goal !== null) out.push(this.moveTo(obs, goal));
     // 狙擊槍：站定（快到目標點）就開鏡架點，要跑遠路就收鏡（開鏡移動慢一半）
     if (me.weapon === 'awp') {
       const holding = goal === null || this.h.dist(me.x, me.y, goal.x, goal.y) < 2 * UNIT;
@@ -163,6 +172,36 @@ export default class ShooterPractice {
     }
     this.look(obs, out);
     return out;
+  }
+
+  /**
+   * 走向目標；被人擋住就繞（v5）：離目標超過 1.5 格卻連續 3 次決策幾乎沒動，往隨機方向偏 1～2 格（直線可達的空地）走 5 次決策
+   * @param {Observation} obs
+   * @param {{ x: number, y: number }} goal
+   * @returns {Command}
+   */
+  moveTo(obs, goal) {
+    const me = obs.me;
+    if (this.detour !== null && this.detourLeft > 0) {
+      this.detourLeft -= 1;
+      return { type: 'move', x: this.detour.x, y: this.detour.y };
+    }
+    this.detour = null;
+    const far = this.h.dist(me.x, me.y, goal.x, goal.y) > 1500;
+    const still = Math.abs(me.vx) + Math.abs(me.vy) < 40;
+    this.stuck = obs.round.phase !== 'freeze' && far && still ? this.stuck + 1 : 0;
+    if (this.stuck >= 3) {
+      this.stuck = 0;
+      for (let i = 0; i < 8; i++) {
+        const [x, y] = this.h.offset(me.x, me.y, Math.floor(this.h.random() * 360), 1000 + Math.floor(this.h.random() * 1000));
+        if (!this.h.isSolid(Math.floor(x / UNIT), Math.floor(y / UNIT)) && this.h.clearLine(me.x, me.y, x, y)) {
+          this.detour = { x: Math.round(x), y: Math.round(y) };
+          this.detourLeft = 4;
+          return { type: 'move', x: this.detour.x, y: this.detour.y };
+        }
+      }
+    }
+    return { type: 'move', x: goal.x, y: goal.y };
   }
 
   /** @param {string} id */

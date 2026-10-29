@@ -16,9 +16,9 @@ import { loadBotFile, type BotFile } from '../sandbox/node-loader.ts';
 import { OfficialController } from '../sandbox/official.ts';
 import { runMatch } from '../sandbox/runner.ts';
 import { TPS as SHOOTER_TPS, WEAPONS, WEAPON_IDS, type Team, type WeaponId } from '../shooter/config.ts';
-import { DEFAULT_MAP_ID, MAPS as SHOOTER_MAPS, dumpAscii } from '../shooter/map.ts';
-import { ShooterBatchController, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOutput } from '../shooter/runner.ts';
-import { PLAYER_COUNT } from '../shooter/sim.ts';
+import { DEFAULT_MAP_ID, MAPS as SHOOTER_MAPS, cellOf as shooterCellOf, dumpAscii, inRect as shooterInRect } from '../shooter/map.ts';
+import { ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOutput } from '../shooter/runner.ts';
+import { PLAYER_COUNT, type ShooterMatch } from '../shooter/sim.ts';
 import { renderPng } from './png.ts';
 import { eloFromWins, gameOutput, summarize, type BotInfo, type GameOutput } from './stats.ts';
 
@@ -401,12 +401,52 @@ interface ShooterPlayOptions {
   readonly roundMoney?: readonly [number | null, number | null];
 }
 
-function playShooter(files: readonly BotFile[], seed: number, mapId: string, opts: ShooterPlayOptions, record: boolean): ShooterRunOutput {
+function playShooter(files: readonly BotFile[], seed: number, mapId: string, opts: ShooterPlayOptions, record: boolean, probe?: (m: ShooterMatch) => void): ShooterRunOutput {
   const map = SHOOTER_MAPS[mapId]();
   const pick = (pid: number): BotFile => files[pid < PLAYER_COUNT / 2 ? 0 : files.length - 1];
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(pick(pid).compiled, pick(pid).label, seed, pid, map));
   const knobs = controllers.map((c) => resolveKnobs(c.declaration, undefined, c.label));
-  return runShooterMatch({ seed, mapId, defaultLoadout: opts.loadout, roundMoney: opts.roundMoney, controllers, knobs, record });
+  const runOpts = { seed, mapId, defaultLoadout: opts.loadout, roundMoney: opts.roundMoney, controllers, knobs, record };
+  if (probe === undefined) return runShooterMatch(runOpts);
+  const t0 = performance.now();
+  const d = new ShooterDriver(runOpts);
+  while (!d.match.over) {
+    d.step();
+    probe(d.match);
+  }
+  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match };
+}
+
+/** 炸彈點到達時間：每回合從開打到第一個 T 踏進 A／B 點的秒數（v1.0，量走位與碰撞的影響） */
+function siteArrivalProbe(): { probe: (m: ShooterMatch) => void; summary: () => Record<string, unknown> } {
+  const sum = { A: 0, B: 0 };
+  const hits = { A: 0, B: 0 };
+  let liveRounds = 0;
+  let round = -1;
+  let seen = { A: false, B: false };
+  return {
+    probe: (m) => {
+      if (m.phase === 'freeze') return;
+      if (m.roundNumber !== round) {
+        round = m.roundNumber;
+        seen = { A: false, B: false };
+        liveRounds += 1;
+      }
+      if (m.phase !== 'live' && m.phase !== 'planted') return;
+      for (const site of m.map.sites) {
+        if (seen[site.id]) continue;
+        if (m.players.some((p) => p.alive && p.team === 'T' && shooterInRect(site, shooterCellOf(p.x), shooterCellOf(p.y)))) {
+          seen[site.id] = true;
+          hits[site.id] += 1;
+          sum[site.id] += m.tick - m.liveStartTick;
+        }
+      }
+    },
+    summary: () =>
+      Object.fromEntries(
+        (['A', 'B'] as const).map((k) => [k, { reachedRate: liveRounds === 0 ? 0 : Math.round((hits[k] / liveRounds) * 1000) / 1000, avgSec: hits[k] === 0 ? null : Math.round((sum[k] / hits[k] / SHOOTER_TPS) * 10) / 10 }]),
+      ),
+  };
 }
 
 function shooterSummary(run: ShooterRunOutput): Record<string, unknown> {
@@ -458,6 +498,7 @@ function cmdShooterBatch(args: Args): void {
   const nades = { T: nade(), CT: nade(), g0: nade(), g1: nade() };
   let draws = 0;
   let overtimeGames = 0;
+  const arrival = siteArrivalProbe();
   const roundWins: Record<Team, number> = { T: 0, CT: 0 };
   const reasons: Record<string, number> = {};
   let rounds = 0;
@@ -466,7 +507,7 @@ function cmdShooterBatch(args: Args): void {
   let maxWall = 0;
   const list: Record<string, unknown>[] = [];
   for (let i = 0; i < games; i++) {
-    const run = playShooter(files, seed + i, mapId, opts, false);
+    const run = playShooter(files, seed + i, mapId, opts, false, arrival.probe);
     const r = run.result;
     if (r.winner === null) draws += 1;
     else wins[r.winner] += 1;
@@ -519,6 +560,7 @@ function cmdShooterBatch(args: Args): void {
         ]),
       ),
       roundReasons: reasons,
+      siteArrival: arrival.summary(),
       avgRounds: Math.round((rounds / games) * 10) / 10,
       avgTicks: Math.round(ticks / games),
       avgGameWallMs: Math.round(wall / games),

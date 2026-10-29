@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MAP_ID, MAPS, blocksMove, cellOf, dumpAscii, inRect, isSolidCell, reachable, regionsAt, type ShooterMap } from '../src/shooter/map.ts';
-import { TEAM_SIZE, UNIT } from '../src/shooter/config.ts';
+import { TEAM_SIZE, UNIT, VISION } from '../src/shooter/config.ts';
 import { lineOfSight } from '../src/shooter/vision.ts';
 
 for (const id of Object.keys(MAPS)) describe(`地圖 ${id}`, () => mapChecks(MAPS[id]()));
@@ -25,6 +25,21 @@ function mapChecks(map: ShooterMap): void {
         const cy = cellOf(s.y);
         expect(blocksMove(map, cx, cy)).toBe(false);
         expect(inRect(map.spawnZones[t], cx, cy)).toBe(true);
+      }
+    }
+  });
+
+  it('出生點任兩點（含不同陣營）圓心距離 ≥ 2 × bodyRadius（v1.0 角色碰撞），且離牆 ≥ bodyRadius', () => {
+    const all = [...map.spawns.T.slice(0, TEAM_SIZE), ...map.spawns.CT.slice(0, TEAM_SIZE)];
+    const gap = 2 * VISION.bodyRadius;
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const dx = all[i].x - all[j].x;
+        const dy = all[i].y - all[j].y;
+        expect(dx * dx + dy * dy).toBeGreaterThanOrEqual(gap * gap);
+      }
+      for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        expect(blocksMove(map, cellOf(all[i].x + ox * VISION.bodyRadius), cellOf(all[i].y + oy * VISION.bodyRadius))).toBe(false);
       }
     }
   });
