@@ -66,9 +66,14 @@ export const SOUND = {
 // ───────── 回合與賽制 ─────────
 
 export const ROUND = {
-  /** MR12：先到 13 勝；12 回合後換邊；12:12 平手（加時待審） */
+  /** MR12：先到 13 勝；12 回合後換邊；12:12 進加時 */
   roundsPerHalf: 12,
   winRounds: 13,
+  /**
+   * MR3 加時（v1.0）：每段 6 回合、3 回合換邊；段內先拿 4 勝（以該段開始時的比分為基準）贏下整場；
+   * 3:3 再開下一段；最多 maxBlocks 段，仍平手則平手。每段開始不換邊（延續上一個半場的陣營）
+   */
+  overtime: { roundsPerHalf: 3, winRounds: 4, maxBlocks: 4 },
   freezeTicks: ticks(15),
   /** 購買時間：從凍結開始（回合開始）算 20 秒＝凍結 15 秒＋開打後 5 秒（CS 的 mp_buytime）；且人在出生區 */
   buyTicks: ticks(20),
@@ -164,6 +169,8 @@ export const AMMO = { price: 100 } as const;
 
 export const ECONOMY = {
   startMoney: 800,
+  /** 加時每個半場開始時的金錢（v1.0） */
+  overtimeMoney: 10000,
   maxMoney: 16000,
   /** 殲滅／時間到 */
   winElimination: 3250,

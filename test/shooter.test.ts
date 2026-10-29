@@ -10,7 +10,7 @@ import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
 import { ShooterHumanController } from '../src/shooter/human.ts';
 import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterController } from '../src/shooter/runner.ts';
-import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, burnCells, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
+import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, shooterInitData, burnCells, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
 import { lineOfSight, quantizeDir, rayWallDistance, soundRange } from '../src/shooter/vision.ts';
 import type { ShooterObservation, SoundEvent } from '../src/shooter/api.ts';
 
@@ -401,6 +401,157 @@ describe('回合勝利條件與回合流程（驗收情境）', () => {
   }
 });
 
+describe('MR3 加時（v1.0）', () => {
+  // 短賽制：每半場 2 回合、先到 3 勝；2:2 進加時（加時照預設 MR3：3 回合換邊、段內 4 勝）
+  const short = { mapId: 'dust', seed: 3, roundsPerHalf: 2, winRounds: 3 } as const;
+
+  /** 一開打就殲滅 loser 組，跑到下一回合開始（或比賽結束） */
+  function playRound(m: ShooterMatch, loser: 0 | 1): void {
+    const n = m.roundNumber;
+    while (m.phase === 'freeze') m.step();
+    for (const p of m.players) if (p.group === loser) m.kill(p.id);
+    while (!m.over && m.roundNumber === n) m.step();
+  }
+  /** 依序打完：winners[i] 是第 i 回合的勝方組別 */
+  function play(m: ShooterMatch, winners: readonly (0 | 1)[]): void {
+    for (const w of winners) if (!m.over) playRound(m, w === 0 ? 1 : 0);
+  }
+  const tie = [0, 0, 1, 1] as const;
+
+  it('正規平手進加時：half 3、overtime 1；陣營延續下半場；金錢 10000、連敗歸零、裝備重發', () => {
+    const m = new ShooterMatch(short);
+    play(m, [0, 0, 1]);
+    // 第 4 回合：勝方玩家 5 帶著步槍、甲與道具活下來（平常存活者保留裝備），加時首回合照樣重發
+    while (m.phase === 'freeze') m.step();
+    const p0 = m.players[0];
+    m.players[5].primary = { id: 'ak', mag: 30, reserve: 90 };
+    m.players[5].armor = 100;
+    m.players[5].grenades = ['flash'];
+    for (const p of m.players) if (p.group === 0) m.kill(p.id);
+    while (!m.over && m.roundNumber === 4) m.step();
+    expect(m.over).toBe(false);
+    expect(m.score).toEqual([2, 2]);
+    expect(m.roundNumber).toBe(5);
+    expect(m.half).toBe(3);
+    expect(m.overtime).toBe(1);
+    const o = m.observe(0);
+    expect(o.round.half).toBe(3);
+    expect(o.round.overtime).toBe(1);
+    // 下半場組 0 是 CT，加時第一個半場不換邊
+    expect(p0.team).toBe('CT');
+    expect(m.players[5].team).toBe('T');
+    expect(m.lossLevel).toEqual([0, 0]);
+    for (const p of m.players) {
+      expect(p.money).toBe(ECONOMY.overtimeMoney);
+      expect(p.primary).toBeNull();
+      expect(p.secondary?.id).toBe('pistol');
+      expect(p.armor).toBe(0);
+      expect(p.grenades).toEqual([]);
+      expect(p.kit).toBe(false);
+    }
+  });
+
+  it('加時 3 回合後換邊、金錢再設 10000；每段開始不換邊', () => {
+    const m = new ShooterMatch(short);
+    play(m, [...tie, 0, 1, 0]);
+    expect(m.roundNumber).toBe(8);
+    expect(m.half).toBe(4);
+    expect(m.overtime).toBe(1);
+    expect(m.players[0].team).toBe('T');
+    expect(m.lossLevel).toEqual([0, 0]);
+    expect(m.players.every((p) => p.money === ECONOMY.overtimeMoney)).toBe(true);
+    // 3:3 進第二段：half 5，延續 half 4 的陣營
+    play(m, [1, 0, 1]);
+    expect(m.over).toBe(false);
+    expect(m.score).toEqual([5, 5]);
+    expect(m.half).toBe(5);
+    expect(m.overtime).toBe(2);
+    expect(m.overtimeBase).toBe(5);
+    expect(m.players[0].team).toBe('T');
+    expect(m.players.every((p) => p.money === ECONOMY.overtimeMoney)).toBe(true);
+    expect(m.observe(7).round.overtime).toBe(2);
+  });
+
+  it('段內先拿 4 勝結束（16:14 型）；段內連 4 勝在第 4 回合就結束', () => {
+    const a = new ShooterMatch(short);
+    play(a, [...tie, 0, 1, 0, 1, 0, 0]);
+    expect(a.over).toBe(true);
+    expect(a.winner).toBe(0);
+    expect(a.score).toEqual([6, 4]);
+    expect(a.result().overtimes).toBe(1);
+    expect(a.rounds.length).toBe(10);
+    const b = new ShooterMatch(short);
+    play(b, [...tie, 1, 1, 1, 1]);
+    expect(b.over).toBe(true);
+    expect(b.winner).toBe(1);
+    expect(b.score).toEqual([2, 6]);
+    expect(b.rounds.map((r) => r.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('第二段以該段開始的比分為基準：5:5 後再拿 4 勝才贏', () => {
+    const m = new ShooterMatch(short);
+    play(m, [...tie, 0, 1, 0, 1, 0, 1, 0, 0, 0]);
+    expect(m.over).toBe(false);
+    expect(m.score).toEqual([8, 5]);
+    play(m, [0]);
+    expect(m.over).toBe(true);
+    expect(m.winner).toBe(0);
+    expect(m.score).toEqual([9, 5]);
+    expect(m.result().overtimes).toBe(2);
+  });
+
+  it(`打滿 ${ROUND.overtime.maxBlocks} 段仍平手：winner = null`, () => {
+    const m = new ShooterMatch(short);
+    const block = [0, 1, 0, 1, 0, 1] as const;
+    play(m, tie);
+    for (let i = 0; i < ROUND.overtime.maxBlocks; i++) play(m, block);
+    expect(m.over).toBe(true);
+    expect(m.winner).toBeNull();
+    expect(m.score).toEqual([14, 14]);
+    expect(m.result().overtimes).toBe(ROUND.overtime.maxBlocks);
+    expect(m.rounds.length).toBe(4 + 6 * ROUND.overtime.maxBlocks);
+  });
+
+  it('overtime: false 維持舊行為：正規平手直接平手；正規先到勝場數不受加時影響', () => {
+    const a = new ShooterMatch({ ...short, overtime: false });
+    play(a, tie);
+    expect(a.over).toBe(true);
+    expect(a.winner).toBeNull();
+    expect(a.result().overtimes).toBe(0);
+    const b = new ShooterMatch(short);
+    play(b, [0, 1, 0, 0]);
+    expect(b.over).toBe(true);
+    expect(b.winner).toBe(0);
+    expect(b.score).toEqual([3, 1]);
+    expect(b.result().overtimes).toBe(0);
+  });
+
+  it('開局資料帶加時規則與加時金錢；overtime: false 時為 false', () => {
+    const d = new ShooterDriver({ ...short, controllers: Array.from({ length: PLAYER_COUNT }, (_, i) => new ScriptController(`s${i}`, () => [])), record: false });
+    expect(d.match.overtimeRule).toEqual(ROUND.overtime);
+    const init = shooterInitData(map, 0, {});
+    expect(init.rules.overtime).toEqual(ROUND.overtime);
+    expect(init.rules.economy.overtimeMoney).toBe(ECONOMY.overtimeMoney);
+    expect(shooterInitData(map, 0, {}, { overtime: false }).rules.overtime).toBe(false);
+  });
+
+  it('加時狀態計入雜湊；含加時的陪練對打回放重播雜湊相同', () => {
+    // 每半場 1 回合、先到 2 勝：1:1 就進加時。找一個真的打進加時的種子
+    let found = false;
+    for (let seed = 1; seed <= 12 && !found; seed++) {
+      const a = runShooterMatch({ seed, mapId: 'dust', roundsPerHalf: 1, winRounds: 2, controllers: practiceControllers(seed), record: true });
+      if (a.result.overtimes === 0) continue;
+      found = true;
+      expect(a.replay!.header.overtime).toBeUndefined();
+      const r = runShooterReplay(JSON.parse(JSON.stringify(a.replay)));
+      expect(r.desyncTick).toBeNull();
+      expect(r.finalHash).toBe(a.finalHash);
+      expect(r.result.overtimes).toBe(a.result.overtimes);
+    }
+    expect(found).toBe(true);
+  });
+});
+
 describe('購買', () => {
   /** 凍結時間、人在出生區、每人 16000 */
   const rich = (opts: Partial<ShooterMatchOptions> = {}): ShooterMatch => new ShooterMatch({ mapId: 'dust', seed: 3, startMoney: 16000, ...opts });
@@ -651,7 +802,8 @@ describe('選手驅動', () => {
 });
 
 describe('確定性與效能', () => {
-  const short = { roundsPerHalf: 3, winRounds: 4 };
+  // 短賽制維持舊行為（不加時），回合數與耗時上限才固定
+  const short = { roundsPerHalf: 3, winRounds: 4, overtime: false } as const;
 
   it('同種子兩次雜湊相同；不同種子不同；回放重播雜湊相同', () => {
     const a = runShooterMatch({ seed: 11, ...short, controllers: practiceControllers(11), record: true });

@@ -206,13 +206,28 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     id: 'R4',
-    name: '12:12 平手',
-    expect: '上半場玩家 0～4 全勝、下半場玩家 5～9 全勝，24 回合後 12:12 平手',
+    name: '12:12 平手（不加時）',
+    expect: '關掉加時（overtime: false）：上半場玩家 0～4 全勝、下半場玩家 5～9 全勝，24 回合後 12:12 平手',
+    run: () => {
+      const d = driver({}, { overtime: false });
+      const m = d.match;
+      playRounds(d, 30, (n) => (n <= ROUND.roundsPerHalf ? 1 : 0));
+      return { pass: m.over && m.winner === null && m.score[0] === 12 && m.score[1] === 12 && m.rounds.length === 24 && m.result().overtimes === 0, detail: `結束 ${m.over}、勝方 ${m.winner}、比分 ${m.score.join(':')}、${m.rounds.length} 回合` };
+    },
+  },
+  {
+    id: 'R5',
+    name: '12:12 進 MR3 加時',
+    expect: '12:12 後第 25 回合為加時第一段上半場（half 3、overtime 1）、陣營延續下半場、全員金錢 10000；玩家 0～4 在加時連拿 4 勝，16:12 結束',
     run: () => {
       const d = driver({});
       const m = d.match;
-      playRounds(d, 30, (n) => (n <= ROUND.roundsPerHalf ? 1 : 0));
-      return { pass: m.over && m.winner === null && m.score[0] === 12 && m.score[1] === 12 && m.rounds.length === 24, detail: `結束 ${m.over}、勝方 ${m.winner}、比分 ${m.score.join(':')}、${m.rounds.length} 回合` };
+      playRounds(d, 24, (n) => (n <= ROUND.roundsPerHalf ? 1 : 0));
+      const o = m.observe(0);
+      const entered = !m.over && m.roundNumber === 25 && o.round.half === 3 && o.round.overtime === 1 && m.players[0].team === 'CT' && m.players.every((p) => p.money === ECONOMY.overtimeMoney);
+      playRounds(d, 30, () => 1);
+      const pass = entered && m.over && m.winner === 0 && m.score[0] === 16 && m.score[1] === 12 && m.rounds.length === 28 && m.result().overtimes === 1;
+      return { pass, detail: `進加時 ${entered}；結束 ${m.over}、勝方 ${m.winner}、比分 ${m.score.join(':')}、${m.rounds.length} 回合、加時 ${m.result().overtimes} 段` };
     },
   },
 ];

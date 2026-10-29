@@ -153,7 +153,7 @@ export class ShooterHud {
     setHtml(
       this.top,
       `<div class="tm t"><b style="color:${TEAM_COLOR.T}">T</b><span class="sc">${r.scoreT}</span><span class="pips">${pips('T', aliveT)}</span></div>` +
-        `<div class="mid${r.phase === 'planted' ? ' planted' : ''}"><span class="clock">${time}</span><span class="ph">${phase}</span><span class="rd">第 ${r.number} 回合・${r.half === 1 ? '上' : '下'}半場</span></div>` +
+        `<div class="mid${r.phase === 'planted' ? ' planted' : ''}"><span class="clock">${time}</span><span class="ph">${phase}</span><span class="rd">第 ${r.number} 回合・${halfLabel(r.half, r.overtime)}</span></div>` +
         `<div class="tm ct"><span class="pips">${pips('CT', aliveCT)}</span><span class="sc">${r.scoreCT}</span><b style="color:${TEAM_COLOR.CT}">CT</b></div>`,
     );
     // 擊殺訊息
@@ -272,19 +272,33 @@ export class ShooterHud {
     else title = `${summary.winnerGroup === myGroup ? '勝利' : '落敗'} ${summary.score[myGroup]}：${summary.score[1 - myGroup]}`;
     // 結束時陣營是下半場的，換回依組別顯示
     const finalRows = rows.map((r) => ({ ...r, alive: true }));
-    this.end.innerHTML = `<div class="box"><h2>${title}</h2><p class="muted small">種子 ${this.meta.seed}・共 ${summary.rounds.length} 回合・終局雜湊 ${summary.finalHash}</p><div class="sg-board-body"></div><div class="row"><button type="button" class="primary" data-act="again">再來一場</button><button type="button" data-act="home">回開局畫面</button></div></div>`;
+    this.end.innerHTML = `<div class="box"><h2>${title}</h2><p class="muted small">種子 ${this.meta.seed}・共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・終局雜湊 ${summary.finalHash}</p><div class="sg-board-body"></div><div class="row"><button type="button" class="primary" data-act="again">再來一場</button><button type="button" data-act="home">回開局畫面</button></div></div>`;
     this.renderBoard(this.end.querySelector('.sg-board-body')!, finalRows, summary);
     this.end.classList.remove('hidden');
   }
 }
 
+/** 半場名稱：正規「上／下半場」；加時「加時 N・上／下半場」（v1.0） */
+export function halfLabel(half: number, overtime: number): string {
+  if (overtime === 0) return `${half === 1 ? '上' : '下'}半場`;
+  return `加時 ${overtime}・${(half - 3) % 2 === 0 ? '上' : '下'}半場`;
+}
+
 /** 回合轉換的提示字：回傳要顯示的 HTML（沒有就 null） */
 export function roundBanner(prev: ShooterObservation | null, cur: ShooterObservation, meta: ShooterMeta): string | null {
   if (prev === null || prev.round.number !== cur.round.number) {
-    const halfSwitch = cur.round.number === meta.rules.roundsPerHalf + 1;
     const team = cur.me.team;
     const sub = meta.spectate ? '' : `<small>你是 <b style="color:${TEAM_COLOR[team]}">${team}</b>${team === 'T' ? '：帶炸彈攻 A／B 點' : '：守住 A／B 點'}</small>`;
-    return halfSwitch ? `<span>半場換邊・第 ${cur.round.number} 回合</span>${sub}` : `<span>第 ${cur.round.number} 回合</span>${sub}`;
+    const n = cur.round.number;
+    const rs = meta.rules;
+    // 半場首回合：正規下半場換邊；加時每段開始不換邊、段內換邊
+    const reg = rs.roundsPerHalf * 2;
+    const ot = rs.overtime;
+    const k = n - reg;
+    if (ot !== false && k > 0 && (k - 1) % (ot.roundsPerHalf * 2) === 0) return `<span>進入加時 ${cur.round.overtime}（不換邊）・第 ${n} 回合</span>${sub}`;
+    const halfSwitch = n === rs.roundsPerHalf + 1 || (ot !== false && k > 0 && (k - 1) % ot.roundsPerHalf === 0);
+    if (halfSwitch) return `<span>${cur.round.overtime > 0 ? `加時 ${cur.round.overtime}・` : ''}半場換邊・第 ${n} 回合</span>${sub}`;
+    return `<span>第 ${n} 回合</span>${sub}`;
   }
   if (prev.round.ended === null && cur.round.ended !== null) {
     const w = cur.round.ended.winner;

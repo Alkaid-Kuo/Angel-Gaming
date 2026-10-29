@@ -87,6 +87,13 @@ export interface GrenadeInfo {
   readonly damage: number;
 }
 
+/** MR3 加時規則（v1.0）：每段 2 × roundsPerHalf 回合，段內先拿 winRounds 勝者贏；打滿平手開下一段，最多 maxBlocks 段 */
+export interface OvertimeRules {
+  readonly roundsPerHalf: number;
+  readonly winRounds: number;
+  readonly maxBlocks: number;
+}
+
 export interface RulesInfo {
   readonly ticksPerSecond: number;
   readonly decisionInterval: number;
@@ -107,6 +114,8 @@ export interface RulesInfo {
   readonly friendlyFirePct: number;
   readonly roundsPerHalf: number;
   readonly winRounds: number;
+  /** 正規打成平手時的加時規則（v1.0）；false = 不加時、平手結束（只用於測試短賽制） */
+  readonly overtime: OvertimeRules | false;
   readonly freezeTicks: number;
   /** 購買時間：從回合開始（凍結開始）算起，含凍結時間 */
   readonly buyTicks: number;
@@ -144,6 +153,8 @@ export interface RulesInfo {
   };
   readonly economy: {
     readonly startMoney: number;
+    /** 加時每個半場開始時的金錢（v1.0） */
+    readonly overtimeMoney: number;
     readonly maxMoney: number;
     readonly winElimination: number;
     readonly winTimeout: number;
@@ -162,7 +173,7 @@ export interface RulesInfo {
 export interface ShooterInitData {
   /** 0～9；0～4 為先攻的 T、5～9 為先守的 CT。換邊後 team 會變，playerId 不變 */
   readonly playerId: number;
-  /** 上半場的陣營；下半場相反。每回合的實際陣營看觀察資料 me.team */
+  /** 上半場的陣營；下半場相反（加時每段開始不換邊、段內半場換邊）。每回合的實際陣營看觀察資料 me.team */
   readonly startTeam: Team;
   /** 隊內序號 0～4 */
   readonly slot: number;
@@ -203,9 +214,12 @@ export type BombState = 'unknown' | 'carried' | 'dropped' | 'planting' | 'plante
 export type RoundEndReason = 'elimination' | 'bomb' | 'defuse' | 'timeout';
 
 export interface RoundInfo {
-  /** 1 起算 */
+  /** 1 起算；加時接續編號（第 25 回合起） */
   readonly number: number;
-  readonly half: 1 | 2;
+  /** 半場：正規 1、2；加時每個半場遞增（第一段加時 3、4，第二段 5、6…） */
+  readonly half: number;
+  /** 0 = 正規；1 起 = 第幾段加時 */
+  readonly overtime: number;
   readonly phase: RoundPhase;
   /** 目前階段剩餘 tick（live 為回合時間、planted 為炸彈倒數） */
   readonly phaseTicksLeft: number;

@@ -103,6 +103,8 @@ export interface ShooterSummary {
   readonly score: readonly [number, number];
   readonly rounds: readonly { readonly number: number; readonly winner: Team; readonly winnerGroup: 0 | 1; readonly reason: string }[];
   readonly players: readonly { readonly id: number; readonly kills: number; readonly deaths: number; readonly money: number }[];
+  /** 打了幾段加時（v1.0） */
+  readonly overtimes: number;
   readonly finalHash: string;
 }
 

@@ -135,6 +135,7 @@ function sendOver(): void {
       score: [r.score[0], r.score[1]],
       rounds: r.rounds.map((x) => ({ number: x.number, winner: x.winner, winnerGroup: x.winnerGroup, reason: x.reason })),
       players: m.players.map((p) => ({ id: p.id, kills: p.kills, deaths: p.deaths, money: p.money })),
+      overtimes: r.overtimes,
       finalHash: m.hash(),
     },
   });

@@ -20,6 +20,7 @@ import type {
   ShotTrace,
   TracerInfo,
   KnobValues,
+  OvertimeRules,
   ProjectileInfo,
   RadarContact,
   RoundEndReason,
@@ -261,6 +262,8 @@ export interface ShooterResult {
   readonly rounds: readonly RoundRecord[];
   readonly ticks: number;
   readonly stats: readonly { readonly kills: number; readonly deaths: number }[];
+  /** 打了幾段加時（0 = 正規結束） */
+  readonly overtimes: number;
 }
 
 export interface ShooterMatchOptions {
@@ -277,6 +280,13 @@ export interface ShooterMatchOptions {
   /** 測試用短賽制 */
   readonly roundsPerHalf?: number;
   readonly winRounds?: number;
+  /** 加時規則（預設 ROUND.overtime）；false = 不加時，正規平手就平手結束（短賽制測試用） */
+  readonly overtime?: false | OvertimeRules;
+}
+
+/** 該半場玩家 0～4（組 0）是否為 T：上半場 T、下半場 CT；每段加時開始不換邊、段內換邊（半場 1 T、2 CT、3 CT、4 T、5 T、6 CT…） */
+export function firstGroupIsT(half: number): boolean {
+  return idiv(half, 2) % 2 === 0;
 }
 
 /** 子彈紀錄（每顆一筆，v0.5）：給開槍的人畫彈道與命中提示 */
@@ -491,7 +501,7 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 export const DEFAULT_ATTRIBUTES: Attributes = Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, 50])) as unknown as Attributes;
 
 /** 開局資料（JSON 安全） */
-export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney'> = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
+export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney' | 'overtime'> = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
   const group = playerId < TEAM_SIZE ? 0 : 1;
   const ids = Array.from({ length: PLAYER_COUNT }, (_, i) => i);
   return {
@@ -518,6 +528,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       friendlyFirePct: FRIENDLY_FIRE_PCT,
       roundsPerHalf: opts.roundsPerHalf ?? ROUND.roundsPerHalf,
       winRounds: opts.winRounds ?? ROUND.winRounds,
+      overtime: opts.overtime === false ? false : { ...(opts.overtime ?? ROUND.overtime) },
       freezeTicks: ROUND.freezeTicks,
       buyTicks: ROUND.buyTicks,
       roundTicks: ROUND.roundTicks,
@@ -547,6 +558,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       },
       economy: {
         startMoney: opts.startMoney ?? ECONOMY.startMoney,
+        overtimeMoney: ECONOMY.overtimeMoney,
         maxMoney: ECONOMY.maxMoney,
         winElimination: ECONOMY.winElimination,
         winTimeout: ECONOMY.winTimeout,
@@ -599,6 +611,8 @@ export class ShooterMatch {
   readonly seed: number;
   readonly roundsPerHalf: number;
   readonly winRounds: number;
+  /** 加時規則；null = 不加時 */
+  readonly overtimeRule: OvertimeRules | null;
   readonly defaultLoadout: Partial<Record<Team, WeaponId>>;
   readonly defaultArmor: number;
   readonly startMoney: number;
@@ -621,6 +635,8 @@ export class ShooterMatch {
   ended: { winner: Team; reason: RoundEndReason } | null = null;
   /** 依組別的勝回合數 */
   readonly score: [number, number] = [0, 0];
+  /** 目前這段加時開始時的比分（雙方相同；段內勝場以此為基準）；正規為 0 */
+  overtimeBase = 0;
   /** 依組別的連敗補償階梯（0 = 沒有連敗；輸一場 +1、贏一場 −1；半場歸零） */
   readonly lossLevel: [number, number] = [0, 0];
   /** 本回合開始時各組平均金錢、購買時間結束時是否全買（寫進 RoundRecord） */
@@ -648,6 +664,7 @@ export class ShooterMatch {
     this.seed = opts.seed;
     this.roundsPerHalf = opts.roundsPerHalf ?? ROUND.roundsPerHalf;
     this.winRounds = opts.winRounds ?? ROUND.winRounds;
+    this.overtimeRule = opts.overtime === false ? null : (opts.overtime ?? ROUND.overtime);
     this.defaultLoadout = opts.defaultLoadout ?? {};
     this.defaultArmor = opts.defaultArmor ?? 0;
     this.startMoney = opts.startMoney ?? ECONOMY.startMoney;
@@ -657,13 +674,39 @@ export class ShooterMatch {
     this.startRound();
   }
 
-  get half(): 1 | 2 {
-    return this.roundNumber <= this.roundsPerHalf ? 1 : 2;
+  /** 正規回合數（兩個半場） */
+  get regulationRounds(): number {
+    return this.roundsPerHalf * 2;
+  }
+
+  /** 半場：正規 1、2；加時每個半場遞增（第一段 3、4，第二段 5、6…） */
+  get half(): number {
+    const ot = this.overtimeRule;
+    const n = this.roundNumber - this.regulationRounds;
+    if (ot === null || n <= 0) return this.roundNumber <= this.roundsPerHalf ? 1 : 2;
+    return 3 + idiv(n - 1, ot.roundsPerHalf);
+  }
+
+  /** 0 = 正規；1 起 = 第幾段加時 */
+  get overtime(): number {
+    const ot = this.overtimeRule;
+    const n = this.roundNumber - this.regulationRounds;
+    if (ot === null || n <= 0) return 0;
+    return idiv(n - 1, ot.roundsPerHalf * 2) + 1;
   }
 
   /** 該陣營目前是哪一組 */
   groupOf(team: Team): 0 | 1 {
-    return (team === 'T') === (this.half === 1) ? 0 : 1;
+    return (team === 'T') === firstGroupIsT(this.half) ? 0 : 1;
+  }
+
+  /** 本回合是不是半場首回合（正規兩個半場與每個加時半場） */
+  private isFirstOfHalf(): boolean {
+    const n = this.roundNumber;
+    if (n === 1 || n === this.roundsPerHalf + 1) return true;
+    const ot = this.overtimeRule;
+    const k = n - this.regulationRounds;
+    return ot !== null && k > 0 && (k - 1) % ot.roundsPerHalf === 0;
   }
 
   isDecisionTick(): boolean {
@@ -674,14 +717,16 @@ export class ShooterMatch {
 
   private startRound(): void {
     this.roundNumber += 1;
-    const firstOfHalf = this.roundNumber === 1 || this.roundNumber === this.roundsPerHalf + 1;
+    const firstOfHalf = this.isFirstOfHalf();
     if (firstOfHalf) this.lossLevel.fill(0);
+    const halfMoney = this.overtime > 0 ? ECONOMY.overtimeMoney : this.startMoney;
+    const g0T = firstGroupIsT(this.half);
     for (const p of this.players) {
-      p.team = (p.group === 0) === (this.half === 1) ? 'T' : 'CT';
-      if (firstOfHalf) p.money = clamp(this.startMoney, 0, ECONOMY.maxMoney);
+      p.team = (p.group === 0) === g0T ? 'T' : 'CT';
+      if (firstOfHalf) p.money = clamp(halfMoney, 0, ECONOMY.maxMoney);
       const fixed = this.roundMoney[p.group];
       if (fixed !== null) p.money = clamp(fixed, 0, ECONOMY.maxMoney);
-      // 存活者保留武器、彈藥（不自動補，要買）、甲值、道具、拆彈器；死亡者（與半場首回合）重發手槍＋刀
+      // 存活者保留武器、彈藥（不自動補，要買）、甲值、道具、拆彈器；死亡者（與半場首回合，含加時半場）重發手槍＋刀
       if (firstOfHalf || !p.alive) {
         const prim = this.defaultLoadout[p.team];
         p.primary = prim !== undefined && WEAPONS[prim].slot === 'primary' ? weaponState(prim) : null;
@@ -762,13 +807,34 @@ export class ShooterMatch {
       p.plantTicks = 0;
       p.defuseTicks = 0;
     }
-    if (this.score[g] >= this.winRounds) {
-      this.over = true;
-      this.winner = g;
-    } else if (this.roundNumber >= this.roundsPerHalf * 2) {
-      this.over = true;
-      this.winner = this.score[0] === this.score[1] ? null : this.score[0] > this.score[1] ? 0 : 1;
+    this.judgeMatch(g);
+  }
+
+  /** 比賽結束判定：正規先到 winRounds 或打滿分勝負；平手進加時（段內以 overtimeBase 為基準）；加時打滿 maxBlocks 段仍平手則平手 */
+  private judgeMatch(g: 0 | 1): void {
+    const ot = this.overtimeRule;
+    const block = this.overtime;
+    const leader = this.score[0] === this.score[1] ? null : this.score[0] > this.score[1] ? 0 : 1;
+    if (block === 0) {
+      if (this.score[g] >= this.winRounds) this.finish(g);
+      else if (this.roundNumber >= this.regulationRounds) {
+        if (leader !== null || ot === null) this.finish(leader);
+        else this.overtimeBase = this.score[0];
+      }
+      return;
     }
+    if (ot === null) return;
+    if (this.score[g] - this.overtimeBase >= ot.winRounds) this.finish(g);
+    else if (this.roundNumber - this.regulationRounds >= block * ot.roundsPerHalf * 2) {
+      // 這段打滿：標準 MR3 必為 3:3；自訂規則若分出高下就以比分定勝負
+      if (leader !== null || block >= ot.maxBlocks) this.finish(leader);
+      else this.overtimeBase = this.score[0];
+    }
+  }
+
+  private finish(winner: 0 | 1 | null): void {
+    this.over = true;
+    this.winner = winner;
   }
 
   private addMoney(p: Player, amount: number): void {
@@ -1723,6 +1789,7 @@ export class ShooterMatch {
       round: {
         number: this.roundNumber,
         half: this.half,
+        overtime: this.overtime,
         phase: this.phase,
         phaseTicksLeft: Math.max(0, this.phaseEnd - this.tick),
         scoreT: this.score[this.groupOf('T')],
@@ -1819,12 +1886,14 @@ export class ShooterMatch {
       rounds: this.rounds.slice(),
       ticks: this.tick,
       stats: this.players.map((p) => ({ kills: p.kills, deaths: p.deaths })),
+      overtimes: this.overtime,
     };
   }
 
   hash(): string {
     const h = new Hasher();
     h.int(this.tick).int(this.roundNumber).int(PHASE_CODE[this.phase]).int(this.phaseEnd).int(this.score[0]).int(this.score[1]).bool(this.over).int(this.lossLevel[0]).int(this.lossLevel[1]);
+    h.int(this.half).int(this.overtime).int(this.overtimeBase);
     const ws = (w: WeaponState | null): void => {
       if (w === null) h.int(-1);
       else h.int(WEAPON_IDS.indexOf(w.id)).int(w.mag).int(w.reserve);

@@ -415,6 +415,7 @@ function shooterSummary(run: ShooterRunOutput): Record<string, unknown> {
     winner: r.winner === null ? 'draw' : r.winner === 0 ? 'players0-4' : 'players5-9',
     score: r.score,
     rounds: r.rounds.length,
+    overtimes: r.overtimes,
     ticks: r.ticks,
     wallMs: Math.round(run.wallMs),
     finalHash: run.finalHash,
@@ -456,6 +457,7 @@ function cmdShooterBatch(args: Args): void {
   const nade = (): NadeStat => ({ throws: 0, flashEnemyTicks: 0, flashTeamTicks: 0 });
   const nades = { T: nade(), CT: nade(), g0: nade(), g1: nade() };
   let draws = 0;
+  let overtimeGames = 0;
   const roundWins: Record<Team, number> = { T: 0, CT: 0 };
   const reasons: Record<string, number> = {};
   let rounds = 0;
@@ -468,6 +470,7 @@ function cmdShooterBatch(args: Args): void {
     const r = run.result;
     if (r.winner === null) draws += 1;
     else wins[r.winner] += 1;
+    if (r.overtimes > 0) overtimeGames += 1;
     for (const x of r.rounds) {
       roundWins[x.winner] += 1;
       groupRoundWins[x.winnerGroup] += 1;
@@ -491,7 +494,7 @@ function cmdShooterBatch(args: Args): void {
     ticks += r.ticks;
     wall += run.wallMs;
     if (run.wallMs > maxWall) maxWall = run.wallMs;
-    list.push({ seed: seed + i, score: r.score, rounds: r.rounds.length, ticks: r.ticks, wallMs: Math.round(run.wallMs), finalHash: run.finalHash });
+    list.push({ seed: seed + i, score: r.score, rounds: r.rounds.length, overtimes: r.overtimes, ticks: r.ticks, wallMs: Math.round(run.wallMs), finalHash: run.finalHash });
   }
   emit(
     {
@@ -500,6 +503,7 @@ function cmdShooterBatch(args: Args): void {
       map: mapId,
       bots: files.map((f) => f.path),
       matchWins: { 'players0-4': wins[0], 'players5-9': wins[1], draws },
+      overtimeGames,
       roundWins,
       groupRoundWins: { 'players0-4': groupRoundWins[0], 'players5-9': groupRoundWins[1] },
       economy: Object.fromEntries(

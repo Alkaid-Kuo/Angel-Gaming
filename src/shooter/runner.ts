@@ -26,6 +26,8 @@ export interface ShooterReplay {
     readonly roundMoney?: readonly [number | null, number | null];
     readonly roundsPerHalf?: number;
     readonly winRounds?: number;
+    /** 加時規則（v1.0）；沒寫＝預設 MR3 */
+    readonly overtime?: ShooterMatchOptions['overtime'];
     readonly players: readonly { readonly playerId: number; readonly bot: string; readonly version: string; readonly knobs: KnobValues }[];
   };
   readonly decisions: { readonly tick: number; readonly playerId: number; readonly commands: unknown }[];
@@ -216,6 +218,7 @@ export class ShooterDriver {
             ...(opts.roundMoney !== undefined ? { roundMoney: opts.roundMoney } : {}),
             ...(opts.roundsPerHalf !== undefined ? { roundsPerHalf: opts.roundsPerHalf } : {}),
             ...(opts.winRounds !== undefined ? { winRounds: opts.winRounds } : {}),
+            ...(opts.overtime !== undefined ? { overtime: opts.overtime } : {}),
             players: opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: knobs[i] })),
           },
           decisions: [],
@@ -312,7 +315,7 @@ export class ShooterReplayCursor {
     if (replay.kind !== 'shooter') throw new Error(`不是射擊回放：${String(replay.kind)}`);
     this.replay = replay;
     const h = replay.header;
-    this.match = new ShooterMatch({ seed: h.seed, mapId: h.mapId, defaultLoadout: h.defaultLoadout, defaultArmor: h.defaultArmor, startMoney: h.startMoney, roundMoney: h.roundMoney, roundsPerHalf: h.roundsPerHalf, winRounds: h.winRounds });
+    this.match = new ShooterMatch({ seed: h.seed, mapId: h.mapId, defaultLoadout: h.defaultLoadout, defaultArmor: h.defaultArmor, startMoney: h.startMoney, roundMoney: h.roundMoney, roundsPerHalf: h.roundsPerHalf, winRounds: h.winRounds, overtime: h.overtime });
   }
 
   step(): void {
