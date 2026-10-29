@@ -3,12 +3,14 @@
 //   感知 memory.js（每次決策）：敵情記憶、已清空格、危險格成本（每秒）
 //   導航 analysis.js（init 一次：可走格、距離場、區域交界與窄口、掩體點、守點位、下包位、路線集）＋ nav.js（A*、路徑點、被擋重算、探頭）
 //   戰鬥 combat.js（每次決策）：目標、預判瞄準、點放、停步、蹲、換彈、狙擊、撤退、被閃、道具自保、沒事時看哪裡
-//   戰術 tactics.js（回合開始＋每次決策）：隊內計畫（say）、T 進點／下包、CT 分守／回防、購買（6-1 最簡版，6-2 擴充）
+//   戰術 tactics.js（回合開始＋每次決策）：隊內計畫與事件（say）、T 五種計畫與守包、CT 配置／輪轉／回防／保槍、殘局、換血
+//        economy.js（指揮統一買法 B:）、utility.js（道具彈道與投擲）
 // 公平：只讀 init 資料與觀察資料；不寫死任何地圖座標、區域代號或地圖 id。
 // 屬性包（attributes，0～100）接到行為：aim 瞄準誤差與收斂；reaction 開火前額外等待與對聲音的反應；awareness 記憶衰減、
 // 已清空維持時間、守位掃描頻率、雷達與聲音採信；aggression 探頭等待與方式、撤退門檻、架槍時間；
-// discipline 隊友擋線的安全距離、守位中不追出射程外的目標；
-// movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、角色）。
+// 已清空維持時間、守位掃描頻率、雷達與聲音採信、隊內事件的反應延遲；aggression 另接 T 計畫（rush 比例、default 執行時機）；
+// discipline 隊友擋線的安全距離、守位中不追出射程外的目標、經濟服從（eco 不偷買）、不追殘血、殘局保槍；
+// movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步、佈置時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、T 計畫、角色）。
 import { Grid, P, clamp, dist, initTrig } from './base.js';
 import { MapIntel } from './analysis.js';
 import { Perception } from './memory.js';
@@ -43,14 +45,15 @@ export default class ShooterBaseline {
   declare() {
     return {
       name: 'shooter-baseline',
-      version: '1.0',
+      version: '2.0',
       style: '基準',
       knobs: [
         { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
         { key: 'economy', name: '經濟風格', description: '0 標準、1 保守（不半買）、2 積極（差一點也全買、半買門檻低）', min: 0, max: 2, default: 0, integer: true },
         { key: 'awpSlot', name: '狙擊手', description: '隊內序號幾號在錢夠時買狙擊槍（5 = 沒有狙擊手）', min: 0, max: 5, default: 4, integer: true },
-        { key: 'ctSplitA', name: 'CT 守 A 人數', description: 'CT 開局守 A 點的人數（依隊內序號，其餘守 B）', min: 0, max: 5, default: P.ctSplitA, integer: true },
-        { key: 'role', name: '角色覆寫', description: '0 自動；4 狙擊（錢夠就買狙擊槍）；1～3、5 保留給 6-2（突破、支援、錨點、游擊）', min: 0, max: 5, default: 0, integer: true },
+        { key: 'ctSplitA', name: 'CT 守 A 人數', description: 'CT 開局守 A 點的人數（B 固定 2 人，其餘守中路）', min: 0, max: 5, default: P.ctSplitA, integer: true },
+        { key: 'plan', name: 'T 計畫', description: '0 自動（依經濟與侵略抽）；1 default、2 rush、3 split、4 fake（指揮才有作用）', min: 0, max: 4, default: 0, integer: true },
+        { key: 'role', name: '角色覆寫', description: '0 自動；4 狙擊（錢夠就買狙擊槍）', min: 0, max: 5, default: 0, integer: true },
       ],
     };
   }
@@ -81,7 +84,9 @@ export default class ShooterBaseline {
     this.nav = new Navigator(this.g, this.intel, this.perc, attrs, data);
     this.combat = new Combat(this.g, this.intel, this.perc, this.nav, attrs, data, helpers);
     const awpSlot = (k.role ?? 0) === 4 ? data.slot : (k.awpSlot ?? 4);
-    this.tactics = new Tactics(this.g, this.intel, this.perc, data, helpers, { awpSlot, economy: k.economy ?? 0, ctSplitA: k.ctSplitA ?? P.ctSplitA });
+    this.tactics = new Tactics(this.g, this.intel, this.perc, data, helpers, { awpSlot, economy: k.economy ?? 0, ctSplitA: k.ctSplitA ?? P.ctSplitA, plan: k.plan ?? 0 }, attrs);
+    this.tactics.combat = this.combat;
+    this.tactics.nav = this.nav;
   }
 
   /** @param {import('./base.js').Observation} obs */
@@ -90,7 +95,7 @@ export default class ShooterBaseline {
     this.perc.reset();
     this.nav.reset();
     this.combat.reset();
-    this.tactics.reset();
+    this.tactics.reset(obs);
   }
 
   /**
@@ -128,7 +133,7 @@ export default class ShooterBaseline {
       else if (fight.move !== null) {
         out.push({ type: 'move', x: Math.round(fight.move.x), y: Math.round(fight.move.y) });
         moving = true;
-      } else if (fight.holdNav) out.push({ type: 'stop' });
+      } else if (fight.holdNav || (tac.stop && !fight.engaged)) out.push({ type: 'stop' });
       else {
         out.push(...nav.cmds);
         moving = nav.moving;
@@ -136,16 +141,16 @@ export default class ShooterBaseline {
     }
     // ── 瞄準 ──
     const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
-    const aim = fight.aim ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
+    const aim = (tac.urgent && !fight.engaged ? tac.look : null) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
     if (aim !== null && (Math.abs(aim.x - me.x) > 50 || Math.abs(aim.y - me.y) > 50)) out.push({ type: 'aim', x: Math.round(aim.x), y: Math.round(aim.y) });
     // ── 開火與武器 ──
-    out.push({ type: 'fire', on: fight.fire && !tac.objective });
+    out.push({ type: 'fire', on: (fight.fire || (tac.noise && !fight.engaged)) && !tac.objective });
     out.push(...fight.cmds);
     if (!fight.engaged) out.push(...this.combat.upkeep(obs, holding && !moving));
     // ── 姿勢：移動時不蹲 ──
     const crouch = moving ? false : ev !== null ? ev.crouch : (fight.crouch ?? false);
     if (crouch !== me.crouching) out.push({ type: 'crouch', on: crouch });
-    const walk = nav.walk && !fight.engaged && ev === null;
+    const walk = (tac.walk ?? nav.walk) && !fight.engaged && ev === null;
     if (walk !== me.walking) out.push({ type: 'walk', on: walk });
     out.push(...late);
     this.why = `${tac.role}｜${ev !== null ? ev.why : fight.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;

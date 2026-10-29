@@ -15,6 +15,7 @@
 /** @typedef {import('../../src/shooter/api.ts').BuyItem} BuyItem */
 /** @typedef {import('../../src/shooter/api.ts').WeaponId} WeaponId */
 /** @typedef {import('../../src/shooter/api.ts').AttributeKey} AttributeKey */
+/** @typedef {import('../../src/shooter/api.ts').GrenadeId} GrenadeId */
 /** @typedef {{ x: number, y: number }} Pt */
 /** @typedef {{ x0: number, y0: number, x1: number, y1: number }} Rect */
 
@@ -146,11 +147,53 @@ export const P = {
   /** 道具自保：手雷／燃燒落點離自己幾格內要離開 */
   nadeAvoid: 4,
 
-  // ── 戰術（6-1 最簡版） ──
-  /** CT 守 A 的人數（隊內序號 < 這個值守 A） */
-  ctSplitA: 3,
+  // ── 戰術（6-2 團隊） ──
+  /** CT 開局守 A 的人數（旋鈕 ctSplitA）；B 固定 ctB 人，其餘守中路 */
+  ctSplitA: 2,
+  ctB: 2,
   /** 下包時：看得到敵人就不下 */
   plantRequireClear: true,
+  /** T 待命點：在包點入口外面這麼多格（距離場差） */
+  stageBack: 9,
+  /** 待命點附近每人分到的格彼此至少隔幾格 */
+  stageGap: 1.6,
+  /** split：等第二組到待命點最多幾秒（從開打算）；fake：佯攻組製造聲音後幾秒主力執行 */
+  splitWait: 32,
+  fakeDelay: 4,
+  /** default：開打後幾秒執行（侵略 0 → 100），期間蒐集情報 */
+  defaultExec0: 48,
+  defaultExec100: 30,
+  /** 剩這麼多秒還沒下包就強行執行最近的點 */
+  forceExecLeft: 35,
+  /** 事件廣播：同一區域的接觸最少隔幾秒再喊；收到的接觸記多久（秒） */
+  contactEvery: 1.5,
+  contactTtl: 12,
+  /** 收到事件後幾次決策才反應（警覺 0 → 100） */
+  eventDelay0: 4,
+  eventDelay100: 0,
+  /** CT 輪轉：某點估計敵人數達到這個值就輪轉（另一點只留錨點） */
+  rotateHeat: 2,
+  /** 回防：在待命點幾格內算到齊；距包點區域多遠算「在點裡」 */
+  retakeGather: 3.5,
+  /** 回防／保槍：時間不夠的裕度（秒）；保槍要離炸彈幾格 */
+  saveMargin: 2,
+  saveDist: 22,
+  /** 換血：隊友在這麼近（格）陣亡就朝他死的方向架槍幾秒 */
+  tradeRange: 8,
+  tradeHold: 1.5,
+  /** 不追殘血：估計血量 ≤ 這個值、消失點在這麼近（格）內，紀律低的人會追幾秒 */
+  chaseHp: 40,
+  chaseRange: 15,
+  chaseTime: 3,
+  /** 閃光：爆點在入口內側幾格；隊友離爆點太近（格）就不丟 */
+  flashDepth: 4,
+  flashMateClear: 4,
+  /** 煙霧：放在入口往架點方向幾格 */
+  smokeOff: 4.5,
+  /** 手雷：兩個以上記得的敵人彼此在這麼近（格）內算聚集 */
+  nadeCluster: 3.5,
+  /** CT 燃燒：敵人離入口這麼近（格）時封入口外側 */
+  molotovNear: 16,
 };
 
 // ───────── 三角表與角度 ─────────

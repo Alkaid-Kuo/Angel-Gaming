@@ -12,7 +12,8 @@ import { ShooterBatchController, runShooterMatch, shooterHelpers } from '../src/
 import { PLAYER_COUNT, shooterInitData } from '../src/shooter/sim.ts';
 import { Grid, initTrig } from '../bots/shooter-src/base.js';
 import { MapIntel } from '../bots/shooter-src/analysis.js';
-import { parsePlan, planText } from '../bots/shooter-src/tactics.js';
+import { parseEvent, parsePlan, planText } from '../bots/shooter-src/tactics.js';
+import { parseBuy } from '../bots/shooter-src/economy.js';
 
 const source = readFileSync('bots/shooter-baseline.js', 'utf8');
 const baseline = compileBot(source, 'shooter-baseline.js');
@@ -27,15 +28,20 @@ describe('射擊基準 Bot：檔案與宣告', () => {
     expect(baseline.sizeBytes).toBeLessThanOrEqual(200 * 1024);
     const c = new ShooterBatchController(baseline, 'baseline', 1, 0, MAPS.redrock());
     expect(c.declaration.name).toBe('shooter-baseline');
-    expect(c.declaration.version).toBe('1.0');
+    expect(c.declaration.version).toBe('2.0');
     expect(c.declaration.style).toBe('基準');
     expect(c.declaration.knobs.length).toBeGreaterThanOrEqual(3);
     expect(c.declaration.knobs.length).toBeLessThanOrEqual(6);
   });
 
-  it('計畫字串可以來回轉換', () => {
-    for (const t of ['P:go A 0', 'P:go B 2', 'P:hold A=3 B=2']) expect(planText(parsePlan(t)!)).toBe(t);
-    expect(parsePlan('E:planted')).toBeNull();
+  it('計畫、事件、買法字串可以來回轉換', () => {
+    const plans = ['P:go A 0', 'P:go B 2', 'P:hold A=3 B=2', 'P:rushA 1', 'P:splitB 0 2', 'P:splitB 0 2 go', 'P:default A 0 1', 'P:default A 0 1 >B', 'P:fake B 0 1 >B', 'P:hold A=2 M=1 B=2', 'P:hold A=2 M=1 B=2 rot=B go'];
+    for (const t of plans) expect(planText(parsePlan(t)!)).toBe(t);
+    expect(parsePlan('E:planted B')).toBeNull();
+    expect(parseEvent('E:contact bSite 3')).toEqual({ kind: 'contact', region: 'bSite', n: 3 });
+    expect(parseEvent('E:planted B')).toEqual({ kind: 'planted', site: 'B' });
+    expect(parseBuy('B:eco')).toBe('eco');
+    expect(parseBuy('P:rushA 0')).toBeNull();
   });
 });
 
