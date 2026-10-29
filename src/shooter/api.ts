@@ -366,6 +366,8 @@ export interface AreaEffect {
   readonly y: number;
   readonly radius: number;
   readonly ticksLeft: number;
+  /** 火：燒得到的格子（列優先索引；v0.5 牆擋火）。煙霧沒有這個欄位 */
+  readonly cells?: readonly number[];
 }
 
 /** 看得見的還沒生效的道具（飛行中或已落地等引信）：視錐內有視線，或在 2 格內 */

@@ -100,7 +100,7 @@ function fullState(m: ShooterMatch): FullState {
   return {
     players: m.players.map((p) => ({ id: p.id, team: p.team, alive: p.alive, x: p.x, y: p.y, facing: Math.round(p.facing / 100) % 360, hp: p.hp, weapon: activeWeaponId(p), hasBomb: p.hasBomb, blind: p.blindTicks > 0, scoped: p.scoped, firing: m.tick - p.lastShotTick <= 3 })),
     smokes: m.smokes.filter((s) => m.tick < s.endTick).map((s) => ({ x: s.x, y: s.y, radius: smokeRadius(s, m.tick) })),
-    fires: m.fires.map((f) => ({ x: f.x, y: f.y, radius: GRENADES[f.kind].radius })),
+    fires: m.fires.map((f) => ({ x: f.x, y: f.y, radius: GRENADES[f.kind].radius, cells: f.cells })),
     projectiles: m.projectiles.map((g) => ({ kind: g.kind, x: g.x, y: g.y })),
     items: m.items.map((it) => ({ kind: it.kind, weapon: it.weapon?.id ?? null, x: it.x, y: it.y })),
     bomb: { state: m.bomb.state, x: m.bomb.state === 'carried' && m.bomb.carrier >= 0 ? m.players[m.bomb.carrier].x : m.bomb.x, y: m.bomb.state === 'carried' && m.bomb.carrier >= 0 ? m.players[m.bomb.carrier].y : m.bomb.y, ticksLeft: m.bomb.state === 'planted' ? Math.max(0, m.bomb.explodeTick - m.tick) : null },

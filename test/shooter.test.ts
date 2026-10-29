@@ -10,7 +10,7 @@ import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
 import { ShooterHumanController } from '../src/shooter/human.ts';
 import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterController } from '../src/shooter/runner.ts';
-import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
+import { FIRE_TICK_DAMAGE, PLAYER_COUNT, ShooterMatch, burnCells, TURN_STEP_C, armorSplit, damageAt, flashTicks, heDamageAt, smokeRadius, type Projectile, type ShooterMatchOptions } from '../src/shooter/sim.ts';
 import { lineOfSight, quantizeDir, rayWallDistance, soundRange } from '../src/shooter/vision.ts';
 import type { ShooterObservation, SoundEvent } from '../src/shooter/api.ts';
 
@@ -737,7 +737,7 @@ function fullSmoke(m: ShooterMatch, x: number, y: number, owner = 5): void {
 
 /** 放一團剛點著（上一 tick 點火）的火 */
 function litFire(m: ShooterMatch, x: number, y: number, owner: number): void {
-  m.fires.push({ x, y, owner, kind: 'molotov', startTick: m.tick - 1, endTick: m.tick - 1 + GRENADES.molotov.durationTicks });
+  m.fires.push({ x, y, owner, kind: 'molotov', startTick: m.tick - 1, endTick: m.tick - 1 + GRENADES.molotov.durationTicks, cells: burnCells(m.map, x, y, GRENADES.molotov.radius) });
 }
 
 /** 玩家 0 在 A 長 (106, 90) 朝 deg 丟 kind，跑到停下；回傳那顆道具 */
@@ -1599,5 +1599,27 @@ describe('陪練 Bot v4（v0.5）', () => {
     }
     expect(awp).toBe(true);
     expect(scoped).toBe(true);
+  });
+});
+
+describe('火圈被牆擋（v0.5）', () => {
+  it('隔牆 2 格不會被燒；同一側照燒；燒到的格子都跟中心之間沒有牆', () => {
+    const m = live();
+    const [px, py] = at(67, 63);
+    const [fx, fy] = at(65, 63);
+    m.teleport(0, px, py, 180);
+    m.teleport(1, fx, fy + UNIT, 180);
+    parkOthers(m, [0, 1]);
+    litFire(m, fx, fy, 5);
+    for (let i = 0; i < GRENADE_RULES.fireTickInterval * 3; i++) m.step();
+    expect(m.players[0].hp).toBe(100);
+    expect(m.players[1].hp).toBeLessThan(100);
+    const cells = m.fires[0].cells;
+    expect(cells).not.toContain(63 * m.map.width + 67);
+    for (const i of cells) {
+      const cx = i % m.map.width;
+      const cy = (i - cx) / m.map.width;
+      expect(lineOfSight(m.map, fx, fy, cx * UNIT + 500, cy * UNIT + 500)).toBe(true);
+    }
   });
 });

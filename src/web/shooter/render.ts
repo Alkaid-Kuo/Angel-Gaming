@@ -367,7 +367,7 @@ export class ShooterRenderer {
     ctx.drawImage(this.mapCanvas, mx, my, this.meta.map.width * UNIT * scale, this.meta.map.height * UNIT * scale);
     this.drawRegionLabels(cam);
 
-    const effects: readonly AreaEffect[] = full !== null && d.xray ? [...full.fires.map((f) => ({ kind: 'fire' as const, x: f.x, y: f.y, radius: f.radius, ticksLeft: 0 })), ...full.smokes.map((s) => ({ kind: 'smoke' as const, x: s.x, y: s.y, radius: s.radius, ticksLeft: 0 }))] : view.effects;
+    const effects: readonly AreaEffect[] = full !== null && d.xray ? [...full.fires.map((f) => ({ kind: 'fire' as const, x: f.x, y: f.y, radius: f.radius, ticksLeft: 0, cells: f.cells })), ...full.smokes.map((s) => ({ kind: 'smoke' as const, x: s.x, y: s.y, radius: s.radius, ticksLeft: 0 }))] : view.effects;
     for (const e of effects) if (e.kind === 'fire') this.drawFire(cam, e, d.now);
     this.drawItems(cam, full !== null && d.xray ? full.items : view.items);
     this.drawBomb(cam, view, full, d.xray, d.now);
@@ -551,6 +551,25 @@ export class ShooterRenderer {
     const [sx, sy] = toScreen(cam, e.x, e.y);
     const r = e.radius * cam.scale;
     const flick = 0.85 + 0.15 * Math.sin(now / 70 + e.x);
+    if (e.cells !== undefined) {
+      // 只畫燒得到的格子（牆擋火）：離中心越近越亮
+      const w = this.meta.map.width;
+      const s = UNIT * cam.scale;
+      for (const i of e.cells) {
+        const cx = i % w;
+        const cy = (i - cx) / w;
+        const [px, py] = toScreen(cam, cx * UNIT, cy * UNIT);
+        const k = 1 - Math.min(1, Math.hypot(cx * UNIT + UNIT / 2 - e.x, cy * UNIT + UNIT / 2 - e.y) / e.radius);
+        const f2 = flick * (0.85 + 0.15 * Math.sin(now / 90 + i));
+        ctx.fillStyle = `rgba(234, 88, 12, ${(0.25 + 0.45 * k) * f2})`;
+        ctx.fillRect(px, py, s + 0.5, s + 0.5);
+      }
+      ctx.fillStyle = `rgba(253, 186, 116, ${0.7 * flick})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, Math.max(3, s * 0.6), 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
     const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
     g.addColorStop(0, `rgba(253, 186, 116, ${0.75 * flick})`);
     g.addColorStop(0.7, `rgba(234, 88, 12, ${0.55 * flick})`);

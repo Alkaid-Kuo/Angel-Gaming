@@ -74,7 +74,7 @@ export interface FullPlayer {
 export interface FullState {
   readonly players: readonly FullPlayer[];
   readonly smokes: readonly { readonly x: number; readonly y: number; readonly radius: number }[];
-  readonly fires: readonly { readonly x: number; readonly y: number; readonly radius: number }[];
+  readonly fires: readonly { readonly x: number; readonly y: number; readonly radius: number; readonly cells: readonly number[] }[];
   readonly projectiles: readonly { readonly kind: GrenadeId; readonly x: number; readonly y: number }[];
   readonly items: readonly { readonly kind: 'weapon' | 'bomb' | 'kit'; readonly weapon: WeaponId | null; readonly x: number; readonly y: number }[];
   readonly bomb: { readonly state: string; readonly x: number; readonly y: number; readonly ticksLeft: number | null };

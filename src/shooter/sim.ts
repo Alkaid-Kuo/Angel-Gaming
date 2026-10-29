@@ -204,6 +204,8 @@ export interface Fire {
   readonly kind: GrenadeId;
   readonly startTick: number;
   readonly endTick: number;
+  /** 燒得到的格子（列優先索引，由小到大；v0.5：半徑內、跟火焰中心之間沒有牆的格子，見 burnCells） */
+  readonly cells: readonly number[];
 }
 
 interface Sound {
@@ -321,6 +323,29 @@ const weaponState = (id: WeaponId): WeaponState => ({ id, mag: WEAPONS[id].magaz
 const isGrenade = (v: unknown): v is GrenadeId => typeof v === 'string' && (GRENADE_IDS as readonly string[]).includes(v);
 
 /** 煙霧在 tick 時的實際半徑：生效後 smokeBloomTicks 內從 0 線性長到 radius */
+/**
+ * 火圈燒得到的格子（v0.5）：格中心在半徑內、不是牆／矮牆，而且跟火焰中心之間沒有牆（矮牆不擋火）。
+ * 回傳列優先索引，由小到大
+ */
+export function burnCells(map: ShooterMap, x: number, y: number, radius: number): number[] {
+  const out: number[] = [];
+  const c0 = cellOf(x - radius);
+  const c1 = cellOf(x + radius);
+  const r0 = cellOf(y - radius);
+  const r1 = cellOf(y + radius);
+  for (let cy = Math.max(0, r0); cy <= Math.min(map.height - 1, r1); cy++) {
+    for (let cx = Math.max(0, c0); cx <= Math.min(map.width - 1, c1); cx++) {
+      if (map.solid[cy * map.width + cx] !== 0) continue;
+      const px = cx * UNIT + UNIT / 2;
+      const py = cy * UNIT + UNIT / 2;
+      if ((px - x) * (px - x) + (py - y) * (py - y) >= radius * radius) continue;
+      if (!lineOfSight(map, x, y, px, py)) continue;
+      out.push(cy * map.width + cx);
+    }
+  }
+  return out;
+}
+
 export function smokeRadius(s: Smoke, tick: number): number {
   const t = clamp(tick - s.startTick, 0, GRENADE_RULES.smokeBloomTicks);
   return idiv(GRENADES.smoke.radius * t, GRENADE_RULES.smokeBloomTicks);
@@ -1504,7 +1529,7 @@ export class ShooterMatch {
     if (g.moving) this.emit('grenadeLand', g.x, g.y, g.owner, null, SOUND.actionRange * UNIT);
     const R = GRENADES[g.kind].radius;
     for (const s of this.smokes) if (distance(s.x, s.y, g.x, g.y) < smokeRadius(s, this.tick) + R) return;
-    this.fires.push({ x: g.x, y: g.y, owner: g.owner, kind: g.kind, startTick: this.tick, endTick: this.tick + GRENADES[g.kind].durationTicks });
+    this.fires.push({ x: g.x, y: g.y, owner: g.owner, kind: g.kind, startTick: this.tick, endTick: this.tick + GRENADES[g.kind].durationTicks, cells: burnCells(this.map, g.x, g.y, R) });
   }
 
   /** 煙霧到時消失；生效中（含擴散中）與火圈重疊（圓心距 < 兩半徑和）就撲滅該火 */
@@ -1514,7 +1539,7 @@ export class ShooterMatch {
     this.fires = this.fires.filter((f) => !this.smokes.some((sm) => distance(sm.x, sm.y, f.x, f.y) < smokeRadius(sm, this.tick) + GRENADES[f.kind].radius));
   }
 
-  /** 火焰結算：點火後每 fireTickInterval 對圈內活著的人扣 FIRE_TICK_DAMAGE（不吃護甲；隊友 30%）；到時熄滅 */
+  /** 火焰結算：點火後每 fireTickInterval 對站在燒得到的格子（burnCells，牆擋火）上活著的人扣 FIRE_TICK_DAMAGE（不吃護甲；隊友 30%）；到時熄滅 */
   private fireTick(): void {
     const interval = GRENADE_RULES.fireTickInterval;
     const killedBy = new Int32Array(PLAYER_COUNT).fill(-1);
@@ -1523,9 +1548,8 @@ export class ShooterMatch {
       const el = this.tick - f.startTick;
       if (el <= 0 || el % interval !== 0) continue;
       const owner = this.players[f.owner];
-      const R = GRENADES[f.kind].radius;
       for (const p of this.players) {
-        if (!p.alive || p.hp <= 0 || distance(p.x, p.y, f.x, f.y) >= R) continue;
+        if (!p.alive || p.hp <= 0 || !f.cells.includes(cellOf(p.y) * this.map.width + cellOf(p.x))) continue;
         p.hp -= applyPercent(FIRE_TICK_DAMAGE, this.grenadeDamagePct(owner, p));
         if (p.hp <= 0) {
           killedBy[p.id] = f.owner;
@@ -1663,7 +1687,7 @@ export class ShooterMatch {
       }
       for (const f of this.fires) {
         const radius = GRENADES[f.kind].radius;
-        if (distance(me.x, me.y, f.x, f.y) <= radius + NEAR_ITEM || this.sees(me, fov, f.x, f.y, smokes)) effects.push({ kind: 'fire', x: f.x, y: f.y, radius, ticksLeft: f.endTick - this.tick });
+        if (distance(me.x, me.y, f.x, f.y) <= radius + NEAR_ITEM || this.sees(me, fov, f.x, f.y, smokes)) effects.push({ kind: 'fire', x: f.x, y: f.y, radius, ticksLeft: f.endTick - this.tick, cells: f.cells });
       }
       for (const g of this.projectiles) {
         if (distance(me.x, me.y, g.x, g.y) <= GRENADE_RULES.nearProjectile || this.sees(me, fov, g.x, g.y, smokes)) projectiles.push({ kind: g.kind, x: g.x, y: g.y });
