@@ -246,15 +246,13 @@ export class Legion3DView implements BattleView {
         this.prevY[s[i]] = s[i + 2];
         this.hasPrev[s[i]] = 1;
       }
-      // 陣亡：上一格在、這一格不在（潰散撤離出地圖的不算）
+      // 陣亡：上一格在、這一格不在
       const alive = new Uint8Array(this.meta.soldierCount);
       for (let i = 0; i < f.soldiers.length; i += 4) alive[f.soldiers[i]] = 1;
       for (let i = 0; i < s.length; i += 4) {
         if (alive[s[i]] === 1) continue;
         const reg = s[i + 3] & REG_MASK;
-        const x = s[i + 1];
-        if (x < 1200 || x > this.meta.width * TILE - 1200) continue;
-        this.corpses.push({ x, y: s[i + 2], owner: this.ownerOf[reg], kind: this.kindOf[reg], layer: (s[i + 3] >> LAYER_SHIFT) & 3 });
+        this.corpses.push({ x: s[i + 1], y: s[i + 2], owner: this.ownerOf[reg], kind: this.kindOf[reg], layer: (s[i + 3] >> LAYER_SHIFT) & 3 });
       }
       if (this.corpses.length > 2500) this.corpses.splice(0, this.corpses.length - 2500);
     }
@@ -306,9 +304,6 @@ export class Legion3DView implements BattleView {
         text(ev.reg, '#fde047', '伏兵！', 2200);
         return;
       }
-      case 'routed':
-        text(ev.reg, '#cbd5e1', '潰散', 2000);
-        return;
       case 'levelUp':
         text(ev.reg, '#fbbf24', `★ 老兵 ${ev.level}`, 2000);
         return;
@@ -692,22 +687,21 @@ export class Legion3DView implements BattleView {
       lc[layer] += 1;
       layerCount.set(reg, lc);
       const kind = this.kindOf[reg];
-      const routed = r.status === 'routed';
       const pose: Pose = kind === 'spear' && (r.status === 'braced' || r.status === 'bracing') ? 'brace' : kind === 'shield' && (r.status === 'walled' || r.status === 'walling') ? 'wall' : 'stand';
       const pu = push.get(id);
       const wx = pu?.x ?? x / TILE;
       const wz = pu?.z ?? y / TILE;
       let wy = this.heightAt(wx, wz, layer);
-      const moving = r.status === 'moving' || r.status === 'attacking' || r.status === 'charging' || r.dashing !== null || routed;
+      const moving = r.status === 'moving' || r.status === 'attacking' || r.status === 'charging' || r.dashing !== null;
       if (moving) wy += Math.abs(Math.sin(now * 0.012 + id * 1.7)) * 0.03;
       top.set(reg, Math.max(top.get(reg) ?? -Infinity, wy + (kind === 'lightCav' || kind === 'heavyCav' ? 0.95 : 0.65)));
-      sol.add(kind, pose, { x: wx, y: wy, z: wz, rot: pu?.rot ?? -(fa + (routed ? 180 : 0)) * DEG, down: (flags & DOWN_BIT) !== 0, shade: routed ? 0.72 : 1, team: routed ? null : this.team[this.ownerOf[reg]] });
+      sol.add(kind, pose, { x: wx, y: wy, z: wz, rot: pu?.rot ?? -fa * DEG, down: (flags & DOWN_BIT) !== 0, shade: 1, team: this.team[this.ownerOf[reg]] });
     }
     sol.end();
     // 樹林裡的軍團：附近的樹冠變淡（v2：隱蔽處樹冠透明度 .4；沒隱蔽的淡一點，看得到人就好）
     const fades: { x: number; z: number; r: number; amount: number }[] = [];
     for (const r of this.field) {
-      if (!this.shown(r.id, opt.viewer) || r.status === 'routed') continue;
+      if (!this.shown(r.id, opt.viewer)) continue;
       const tx = Math.floor(r.x / TILE);
       const ty = Math.floor(r.y / TILE);
       if (tx < 0 || ty < 0 || tx >= this.meta.width || ty >= this.meta.height) continue;
@@ -911,8 +905,7 @@ export class Legion3DView implements BattleView {
       const x = p.x / TILE;
       const z = p.y / TILE;
       const fa = p.facing * DEG;
-      const routed = r.status === 'routed';
-      if (!routed) this.rectAt(x, z, fa, r.halfD / TILE + 0.3, r.halfW / TILE + 0.3, this.team[owner], r.concealed ? 0.08 : 0.2, r.concealed ? 0.4 : 0.85, layer, 0.09);
+      this.rectAt(x, z, fa, r.halfD / TILE + 0.3, r.halfW / TILE + 0.3, this.team[owner], r.concealed ? 0.08 : 0.2, r.concealed ? 0.4 : 0.85, layer, 0.09);
       const sel = opt.selection && opt.selection.size > 0 ? opt.selection.has(r.id) : opt.selected === r.id;
       if (sel || opt.hovered === r.id) this.rectAt(x, z, fa, r.halfD / TILE + 0.6, r.halfW / TILE + 0.6, white, 0, sel ? 0.95 : 0.5, layer, 0.07);
       if (sel && (opt.selection === undefined || opt.selection.size <= 1)) {
@@ -922,7 +915,6 @@ export class Legion3DView implements BattleView {
         const tp = tgt >= 0 ? this.regAt(tgt, alpha) : null;
         if (tp !== null) this.lineAt(x, z, tp.x / TILE, tp.y / TILE, 0.12, this.team[owner], 0.8, 0, 1);
       }
-      if (routed) continue;
       const kind = this.kindOf[r.id];
       if (r.volley !== null) {
         const vx = r.volley.x / TILE;
@@ -1178,7 +1170,7 @@ export class Legion3DView implements BattleView {
     const ih = 12 * k;
     const zoomed = opt.showIntent && this.cam.scale >= this.fitScale * 1.6;
     const intentOf = (r: RegFrame): string =>
-      r.intent !== '' && r.status !== 'routed' && (opt.viewer < 0 || this.ownerOf[r.id] === opt.viewer) && (zoomed || opt.hovered === r.id || opt.selected === r.id) ? r.intent : '';
+      r.intent !== '' && (opt.viewer < 0 || this.ownerOf[r.id] === opt.viewer) && (zoomed || opt.hovered === r.id || opt.selected === r.id) ? r.intent : '';
     const order = [...this.field].sort((a, b) => (b.id === opt.selected ? 1 : 0) - (a.id === opt.selected ? 1 : 0) || b.y - a.y);
     const placed: [number, number, number][] = [];
     const spot = new Map<number, [number, number, number]>();
@@ -1215,15 +1207,14 @@ export class Legion3DView implements BattleView {
         ctx.stroke();
       }
       const hover = opt.hovered === r.id || opt.selected === r.id;
-      ctx.globalAlpha = r.status === 'routed' ? 0.6 : 1;
       ctx.fillStyle = hover ? '#0f172a' : 'rgba(8,12,20,0.82)';
-      ctx.strokeStyle = r.status === 'routed' ? '#64748b' : TEAM[owner];
+      ctx.strokeStyle = TEAM[owner];
       ctx.lineWidth = hover ? 2 : 1.2;
       ctx.beginPath();
       ctx.roundRect(x - w / 2, y - h / 2, w, h, 4 * k);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = r.status === 'routed' ? '#475569' : TEAM[owner];
+      ctx.fillStyle = TEAM[owner];
       ctx.beginPath();
       ctx.roundRect(x - w / 2, y - h / 2, h, h, [4 * k, 0, 0, 4 * k]);
       ctx.fill();
