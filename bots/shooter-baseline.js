@@ -6,8 +6,9 @@
 //   戰術 tactics.js（回合開始＋每次決策）：隊內計畫（say）、T 進點／下包、CT 分守／回防、購買（6-1 最簡版，6-2 擴充）
 // 公平：只讀 init 資料與觀察資料；不寫死任何地圖座標、區域代號或地圖 id。
 // 屬性包（attributes，0～100）接到行為：aim 瞄準誤差與收斂；reaction 開火前額外等待與對聲音的反應；awareness 記憶衰減、
-// 掃描頻率、雷達與聲音採信；aggression 探頭方式與等待、撤退門檻、架槍時間；discipline 守位不追（丟失目標時停下架槍）；
-// movement 停步乾淨度。旋鈕是外部粗調。
+// 已清空維持時間、守位掃描頻率、雷達與聲音採信；aggression 探頭等待與方式、撤退門檻、架槍時間；
+// discipline 隊友擋線的安全距離、守位中不追出射程外的目標；
+// movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、角色）。
 // 本檔由 scripts/build-shooter-bots.ts 從 bots/shooter-src/ 產生：請修改原始碼後重新產生，不要直接改這個檔案。
 
 /** @typedef {import('../src/shooter/api.ts').ShooterInitData} InitData */
@@ -73,13 +74,12 @@ const P = {
   /** 隊友視錐掃描（已清空）每幾次決策做一次 */
   mateScanEvery: 2,
 
-  // ── 導航 ──
-  /** A* 基本成本：直走 10、斜走 14 */
-  /** 危險格成本 = 信心 × 係數（敵人看得到的格） */
+  // ── 導航（A* 基本成本：直走 10、斜走 14） ──
+  /** 危險格成本 = 信心 × 係數（敵人看得到的格；距離衰減：dangerRange 格處剩一半） */
   dangerCoef: 0.6,
   /** 聲音扇形內的格 */
   sectorCoef: 0.3,
-  /** 視線危險的距離衰減上限（格）：超過就不計 */
+  /** 危險射線的最遠距離（格） */
   dangerRange: 30,
   /** 貼牆加成（避免卡角）與矮牆旁優惠 */
   wallHug: 4,
@@ -100,8 +100,11 @@ const P = {
   peekStop: 2,
   peekHold0: 6,
   peekHold100: 2,
-  /** 侵略低於這個值用肩探（露一半再退），否則直接寬探過去 */
+  /** 侵略低於這個值、而且走位不低於 shoulderMove 才用肩探（露一半再退），否則直接寬探過去 */
   shoulderBelow: 60,
+  shoulderMove: 40,
+  /** 走位高於這個值：附近（20 格）有記得的敵人時靜步移動 */
+  silentMove: 60,
   /** 敵人最快的移動速度（格／秒，含裕度）：用來判斷某格敵人「可能已經到了」 */
   enemySpeed: 4.6,
 
@@ -127,13 +130,16 @@ const P = {
   pistolSwitch: 12,
   /** 換彈：沒看到敵人且彈匣低於這個比例 */
   reloadBelow: 0.4,
-  /** 隊友擋線：隊友離彈道小於這個距離（座標單位）就不開火 */
-  friendClear: 1000,
-  /** 撤退：血量門檻（侵略 0 → 100）；1 對多：看得到 ≥ N 個敵人且 10 格內沒有隊友 */
+  /** 隊友擋線：隊友離彈道小於這個距離（座標單位）就不開火：discipline 0 → 100 */
+  friendClear0: 700,
+  friendClear100: 1200,
+  /** 紀律高於這個值：守位中目標跑出射程不追 */
+  holdFirm: 50,
+  /** 撤退：血量門檻（侵略 0 → 100）；1 對多：看得到 ≥ N 個敵人（侵略 0 → 100，取整數部分）且 mateNear 格內沒有隊友 */
   retreatHp0: 40,
   retreatHp100: 20,
   outnumber0: 2,
-  outnumber100: 3,
+  outnumber100: 4,
   mateNear: 10,
   /** 掩體搜尋半徑（格） */
   coverRadius: 8,
@@ -386,33 +392,33 @@ class Grid {
 
 // ───────── 二元堆積與 Dijkstra ─────────
 
-/** 最小堆積（允許重複推入，取出時由呼叫端略過過期的項目） */
+/** 最小堆積（允許重複推入，取出時由呼叫端略過過期的項目）；型別陣列重複使用，不足時加倍 */
 class Heap {
-  constructor() {
-    /** @type {number[]} */
-    this.node = [];
-    /** @type {number[]} */
-    this.key = [];
+  constructor(cap = 4096) {
+    this.node = new Int32Array(cap);
+    this.key = new Float64Array(cap);
+    this.size = 0;
     /** 上一次 pop 取出的鍵值 */
     this.lastKey = 0;
   }
 
   clear() {
-    this.node.length = 0;
-    this.key.length = 0;
-  }
-
-  get size() {
-    return this.node.length;
+    this.size = 0;
   }
 
   /** @param {number} n @param {number} k */
   push(n, k) {
+    if (this.size === this.node.length) {
+      const node = new Int32Array(this.size * 2);
+      const key = new Float64Array(this.size * 2);
+      node.set(this.node);
+      key.set(this.key);
+      this.node = node;
+      this.key = key;
+    }
     const node = this.node;
     const key = this.key;
-    let i = node.length;
-    node.push(n);
-    key.push(k);
+    let i = this.size++;
     while (i > 0) {
       const p = (i - 1) >> 1;
       if (key[p] <= k) break;
@@ -430,10 +436,10 @@ class Heap {
     const key = this.key;
     const top = node[0];
     this.lastKey = key[0];
-    const n = /** @type {number} */ (node.pop());
-    const k = /** @type {number} */ (key.pop());
-    const len = node.length;
+    const len = --this.size;
     if (len > 0) {
+      const n = node[len];
+      const k = key[len];
       let i = 0;
       for (;;) {
         const l = 2 * i + 1;
@@ -823,7 +829,7 @@ class MapIntel {
       const second = ranked.find((s) => s.score >= first.score - 15 && dist(s.x, s.y, first.x, first.y) >= 5 * UNIT);
       if (second !== undefined) out.push(second);
     });
-    // 依入口的 T 距離（已排序）與分數排；同一點只留一次
+    // 入口已依 T 的距離排序，每個入口的兩個點排在一起：分配守位時 T 最可能來的入口先有兩個人（實測比每個入口各一人好，見 6-1 報告）；同一點只留一次
     /** @type {Spot[]} */
     const uniq = [];
     for (const s of out) if (!uniq.some((u) => u.cell === s.cell)) uniq.push(s);
@@ -1168,10 +1174,17 @@ class Perception {
   scan(x, y, facing, fov, range, t) {
     const half = fov / 2;
     const seen = this.seenTick;
+    const g = this.g;
+    const wall = g.wall;
+    // 同 Grid.ray（每半格一步、碰牆停），寫成迴圈避免每條射線配置閉包
     for (let a = -half; a <= half; a += 4) {
-      this.g.ray(x, y, facing + a, range, (i) => {
+      const c = cosd(facing + a) * (UNIT / 2);
+      const s = sind(facing + a) * (UNIT / 2);
+      for (let k = 1; k <= range * 2; k++) {
+        const i = g.cellOf(x + c * k, y + s * k);
+        if (i < 0 || wall[i] === 1) break;
         seen[i] = t;
-      });
+      }
     }
   }
 
@@ -1299,7 +1312,7 @@ class Navigator {
    * @param {Grid} g
    * @param {MapIntel} intel
    * @param {Perception} perc
-   * @param {{ aggression: number, movement: number }} attrs 0～1
+   * @param {{ aggression: number, movement: number }} attrs 0～1（侵略：探頭等待與方式；走位：肩探與靜步）
    * @param {InitData} data
    */
   constructor(g, intel, perc, attrs, data) {
@@ -1608,7 +1621,7 @@ class Navigator {
           if (pk.phase === 'hold') {
             target = pk.hold;
             if (--pk.left <= 0) {
-              if (this.attrs.aggression * 100 < P.shoulderBelow) {
+              if (this.attrs.aggression * 100 < P.shoulderBelow && this.attrs.movement * 100 >= P.shoulderMove) {
                 pk.phase = 'shoulder';
                 pk.left = 3;
               } else {
@@ -1641,6 +1654,11 @@ class Navigator {
     out.cmds.push({ type: 'move', x: Math.round(target.x), y: Math.round(target.y) });
     this.moveStreak++;
     out.moving = true;
+    // 走位好的人：附近記得有敵人就靜步
+    if (!out.walk && this.attrs.movement * 100 > P.silentMove && obs.round.phase === 'live') {
+      const th = this.perc.nearestThreat(me.x, me.y);
+      if (th !== null && dist(th.x, th.y, me.x, me.y) < 20 * UNIT) out.walk = true;
+    }
     return out;
   }
 
@@ -1841,10 +1859,12 @@ class Combat {
     this.soundReact = Math.round(lerp(3, 0, attrs.reaction));
     this.lead = data.rules.reactionTicks + P.leadExtra;
     this.retreatHp = lerp(P.retreatHp0, P.retreatHp100, attrs.aggression);
-    this.outnumber = Math.round(lerp(P.outnumber0, P.outnumber100, attrs.aggression));
+    this.outnumber = Math.floor(lerp(P.outnumber0, P.outnumber100, attrs.aggression) + 1e-9);
     this.holdAngle = Math.round(lerp(P.holdAngle0, P.holdAngle100, attrs.aggression) * this.tps);
     this.sloppy = lerp(P.sloppyStop0, P.sloppyStop100, attrs.movement);
     this.scanEvery = Math.round(lerp(14, 5, attrs.awareness));
+    this.friendClear = lerp(P.friendClear0, P.friendClear100, attrs.discipline);
+    this.firm = attrs.discipline * 100 >= P.holdFirm;
     this.targetId = -1;
     this.seen = 0;
     this.errX = 0;
@@ -2076,6 +2096,11 @@ class Combat {
     // ── 能不能開火 ──
     const inRange = wid === 'knife' ? dc <= 1.4 : dc <= w.range;
     if (!inRange) {
+      // 守位中而且紀律高：不離開守位去追
+      if (ctx.holding && this.firm) {
+        out.why = '射程外・守位不追';
+        return out;
+      }
       out.why = '射程外・接近';
       out.move = { x: e.x, y: e.y };
       return out;
@@ -2085,7 +2110,7 @@ class Combat {
     for (const m of obs.teammates) {
       if (!m.alive) continue;
       const s = segDist(m.x, m.y, me.x, me.y, aim.x, aim.y);
-      if (s.t > 0 && s.t < 1 && s.d < P.friendClear) block = true;
+      if (s.t > 0 && s.t < 1 && s.d < this.friendClear) block = true;
     }
     if (block) {
       this.blocked++;

@@ -66,13 +66,12 @@ export const P = {
   /** 隊友視錐掃描（已清空）每幾次決策做一次 */
   mateScanEvery: 2,
 
-  // ── 導航 ──
-  /** A* 基本成本：直走 10、斜走 14 */
-  /** 危險格成本 = 信心 × 係數（敵人看得到的格） */
+  // ── 導航（A* 基本成本：直走 10、斜走 14） ──
+  /** 危險格成本 = 信心 × 係數（敵人看得到的格；距離衰減：dangerRange 格處剩一半） */
   dangerCoef: 0.6,
   /** 聲音扇形內的格 */
   sectorCoef: 0.3,
-  /** 視線危險的距離衰減上限（格）：超過就不計 */
+  /** 危險射線的最遠距離（格） */
   dangerRange: 30,
   /** 貼牆加成（避免卡角）與矮牆旁優惠 */
   wallHug: 4,
@@ -93,8 +92,11 @@ export const P = {
   peekStop: 2,
   peekHold0: 6,
   peekHold100: 2,
-  /** 侵略低於這個值用肩探（露一半再退），否則直接寬探過去 */
+  /** 侵略低於這個值、而且走位不低於 shoulderMove 才用肩探（露一半再退），否則直接寬探過去 */
   shoulderBelow: 60,
+  shoulderMove: 40,
+  /** 走位高於這個值：附近（20 格）有記得的敵人時靜步移動 */
+  silentMove: 60,
   /** 敵人最快的移動速度（格／秒，含裕度）：用來判斷某格敵人「可能已經到了」 */
   enemySpeed: 4.6,
 
@@ -120,13 +122,16 @@ export const P = {
   pistolSwitch: 12,
   /** 換彈：沒看到敵人且彈匣低於這個比例 */
   reloadBelow: 0.4,
-  /** 隊友擋線：隊友離彈道小於這個距離（座標單位）就不開火 */
-  friendClear: 1000,
-  /** 撤退：血量門檻（侵略 0 → 100）；1 對多：看得到 ≥ N 個敵人且 10 格內沒有隊友 */
+  /** 隊友擋線：隊友離彈道小於這個距離（座標單位）就不開火：discipline 0 → 100 */
+  friendClear0: 700,
+  friendClear100: 1200,
+  /** 紀律高於這個值：守位中目標跑出射程不追 */
+  holdFirm: 50,
+  /** 撤退：血量門檻（侵略 0 → 100）；1 對多：看得到 ≥ N 個敵人（侵略 0 → 100，取整數部分）且 mateNear 格內沒有隊友 */
   retreatHp0: 40,
   retreatHp100: 20,
   outnumber0: 2,
-  outnumber100: 3,
+  outnumber100: 4,
   mateNear: 10,
   /** 掩體搜尋半徑（格） */
   coverRadius: 8,
@@ -379,33 +384,33 @@ export class Grid {
 
 // ───────── 二元堆積與 Dijkstra ─────────
 
-/** 最小堆積（允許重複推入，取出時由呼叫端略過過期的項目） */
+/** 最小堆積（允許重複推入，取出時由呼叫端略過過期的項目）；型別陣列重複使用，不足時加倍 */
 export class Heap {
-  constructor() {
-    /** @type {number[]} */
-    this.node = [];
-    /** @type {number[]} */
-    this.key = [];
+  constructor(cap = 4096) {
+    this.node = new Int32Array(cap);
+    this.key = new Float64Array(cap);
+    this.size = 0;
     /** 上一次 pop 取出的鍵值 */
     this.lastKey = 0;
   }
 
   clear() {
-    this.node.length = 0;
-    this.key.length = 0;
-  }
-
-  get size() {
-    return this.node.length;
+    this.size = 0;
   }
 
   /** @param {number} n @param {number} k */
   push(n, k) {
+    if (this.size === this.node.length) {
+      const node = new Int32Array(this.size * 2);
+      const key = new Float64Array(this.size * 2);
+      node.set(this.node);
+      key.set(this.key);
+      this.node = node;
+      this.key = key;
+    }
     const node = this.node;
     const key = this.key;
-    let i = node.length;
-    node.push(n);
-    key.push(k);
+    let i = this.size++;
     while (i > 0) {
       const p = (i - 1) >> 1;
       if (key[p] <= k) break;
@@ -423,10 +428,10 @@ export class Heap {
     const key = this.key;
     const top = node[0];
     this.lastKey = key[0];
-    const n = /** @type {number} */ (node.pop());
-    const k = /** @type {number} */ (key.pop());
-    const len = node.length;
+    const len = --this.size;
     if (len > 0) {
+      const n = node[len];
+      const k = key[len];
       let i = 0;
       for (;;) {
         const l = 2 * i + 1;

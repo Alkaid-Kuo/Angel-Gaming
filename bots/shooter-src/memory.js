@@ -226,10 +226,17 @@ export class Perception {
   scan(x, y, facing, fov, range, t) {
     const half = fov / 2;
     const seen = this.seenTick;
+    const g = this.g;
+    const wall = g.wall;
+    // 同 Grid.ray（每半格一步、碰牆停），寫成迴圈避免每條射線配置閉包
     for (let a = -half; a <= half; a += 4) {
-      this.g.ray(x, y, facing + a, range, (i) => {
+      const c = cosd(facing + a) * (UNIT / 2);
+      const s = sind(facing + a) * (UNIT / 2);
+      for (let k = 1; k <= range * 2; k++) {
+        const i = g.cellOf(x + c * k, y + s * k);
+        if (i < 0 || wall[i] === 1) break;
         seen[i] = t;
-      });
+      }
     }
   }
 

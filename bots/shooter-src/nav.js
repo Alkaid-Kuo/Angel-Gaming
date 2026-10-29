@@ -13,7 +13,7 @@ export class Navigator {
    * @param {import('./base.js').Grid} g
    * @param {import('./analysis.js').MapIntel} intel
    * @param {import('./memory.js').Perception} perc
-   * @param {{ aggression: number, movement: number }} attrs 0～1
+   * @param {{ aggression: number, movement: number }} attrs 0～1（侵略：探頭等待與方式；走位：肩探與靜步）
    * @param {import('./base.js').InitData} data
    */
   constructor(g, intel, perc, attrs, data) {
@@ -322,7 +322,7 @@ export class Navigator {
           if (pk.phase === 'hold') {
             target = pk.hold;
             if (--pk.left <= 0) {
-              if (this.attrs.aggression * 100 < P.shoulderBelow) {
+              if (this.attrs.aggression * 100 < P.shoulderBelow && this.attrs.movement * 100 >= P.shoulderMove) {
                 pk.phase = 'shoulder';
                 pk.left = 3;
               } else {
@@ -355,6 +355,11 @@ export class Navigator {
     out.cmds.push({ type: 'move', x: Math.round(target.x), y: Math.round(target.y) });
     this.moveStreak++;
     out.moving = true;
+    // 走位好的人：附近記得有敵人就靜步
+    if (!out.walk && this.attrs.movement * 100 > P.silentMove && obs.round.phase === 'live') {
+      const th = this.perc.nearestThreat(me.x, me.y);
+      if (th !== null && dist(th.x, th.y, me.x, me.y) < 20 * UNIT) out.walk = true;
+    }
     return out;
   }
 

@@ -34,10 +34,12 @@ export class Combat {
     this.soundReact = Math.round(lerp(3, 0, attrs.reaction));
     this.lead = data.rules.reactionTicks + P.leadExtra;
     this.retreatHp = lerp(P.retreatHp0, P.retreatHp100, attrs.aggression);
-    this.outnumber = Math.round(lerp(P.outnumber0, P.outnumber100, attrs.aggression));
+    this.outnumber = Math.floor(lerp(P.outnumber0, P.outnumber100, attrs.aggression) + 1e-9);
     this.holdAngle = Math.round(lerp(P.holdAngle0, P.holdAngle100, attrs.aggression) * this.tps);
     this.sloppy = lerp(P.sloppyStop0, P.sloppyStop100, attrs.movement);
     this.scanEvery = Math.round(lerp(14, 5, attrs.awareness));
+    this.friendClear = lerp(P.friendClear0, P.friendClear100, attrs.discipline);
+    this.firm = attrs.discipline * 100 >= P.holdFirm;
     this.targetId = -1;
     this.seen = 0;
     this.errX = 0;
@@ -269,6 +271,11 @@ export class Combat {
     // ── 能不能開火 ──
     const inRange = wid === 'knife' ? dc <= 1.4 : dc <= w.range;
     if (!inRange) {
+      // 守位中而且紀律高：不離開守位去追
+      if (ctx.holding && this.firm) {
+        out.why = '射程外・守位不追';
+        return out;
+      }
       out.why = '射程外・接近';
       out.move = { x: e.x, y: e.y };
       return out;
@@ -278,7 +285,7 @@ export class Combat {
     for (const m of obs.teammates) {
       if (!m.alive) continue;
       const s = segDist(m.x, m.y, me.x, me.y, aim.x, aim.y);
-      if (s.t > 0 && s.t < 1 && s.d < P.friendClear) block = true;
+      if (s.t > 0 && s.t < 1 && s.d < this.friendClear) block = true;
     }
     if (block) {
       this.blocked++;

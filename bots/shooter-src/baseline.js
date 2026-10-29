@@ -6,8 +6,9 @@
 //   戰術 tactics.js（回合開始＋每次決策）：隊內計畫（say）、T 進點／下包、CT 分守／回防、購買（6-1 最簡版，6-2 擴充）
 // 公平：只讀 init 資料與觀察資料；不寫死任何地圖座標、區域代號或地圖 id。
 // 屬性包（attributes，0～100）接到行為：aim 瞄準誤差與收斂；reaction 開火前額外等待與對聲音的反應；awareness 記憶衰減、
-// 掃描頻率、雷達與聲音採信；aggression 探頭方式與等待、撤退門檻、架槍時間；discipline 守位不追（丟失目標時停下架槍）；
-// movement 停步乾淨度。旋鈕是外部粗調。
+// 已清空維持時間、守位掃描頻率、雷達與聲音採信；aggression 探頭等待與方式、撤退門檻、架槍時間；
+// discipline 隊友擋線的安全距離、守位中不追出射程外的目標；
+// movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、角色）。
 import { Grid, P, clamp, dist, initTrig } from './base.js';
 import { MapIntel } from './analysis.js';
 import { Perception } from './memory.js';

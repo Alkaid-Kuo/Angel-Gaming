@@ -326,7 +326,7 @@ export class MapIntel {
       const second = ranked.find((s) => s.score >= first.score - 15 && dist(s.x, s.y, first.x, first.y) >= 5 * UNIT);
       if (second !== undefined) out.push(second);
     });
-    // 依入口的 T 距離（已排序）與分數排；同一點只留一次
+    // 入口已依 T 的距離排序，每個入口的兩個點排在一起：分配守位時 T 最可能來的入口先有兩個人（實測比每個入口各一人好，見 6-1 報告）；同一點只留一次
     /** @type {Spot[]} */
     const uniq = [];
     for (const s of out) if (!uniq.some((u) => u.cell === s.cell)) uniq.push(s);
