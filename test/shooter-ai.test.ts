@@ -1,4 +1,4 @@
-// CS 射擊基準 Bot（步驟 6）：產生檔與原始碼一致、選手模組限制、情境測試 P0～P13（每個 5 個種子）、
+// CS 射擊基準 Bot（步驟 6）：產生檔與原始碼一致、選手模組限制、計畫／事件／買法字串、情境測試 P0～P13 與 T1～T15（每個 5 個種子；T 兩張圖都跑）、
 // 地圖分析（不寫死座標：兩張圖都算得出入口、守點位、下包位、至少 2 條路線）、短賽制對陪練零例外零超時。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -72,14 +72,14 @@ describe('射擊基準 Bot：地圖分析', () => {
   }
 });
 
-describe('射擊基準 Bot：情境測試 P0～P13（每個情境 5 個種子）', () => {
+describe('射擊基準 Bot：情境測試 P0～P13、T1～T15（每個情境 5 個種子）', () => {
   for (const s of AI_SCENARIOS) {
     it(`${s.id} ${s.name}：${s.expect}`, () => {
       for (const seed of AI_SCENARIO_SEEDS) {
-        const r = s.run(baseline, seed);
+        const r = s.run(baseline, seed, practice);
         expect(r.pass, `種子 ${seed}：${r.detail}`).toBe(true);
       }
-    });
+    }, 400000);
   }
 });
 
