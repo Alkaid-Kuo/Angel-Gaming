@@ -163,7 +163,7 @@ export class LegionScreen {
     if (this.control) this.control.r = next;
     next.clamp();
     this.el.view3d.textContent = on ? '2D' : '3D';
-    this.el.view3d.title = on ? '切回 2D 俯視（M）' : '切到 3D 沙盤（M）；右鍵拖曳或 [ ] 轉鏡頭';
+    this.el.view3d.title = on ? '切回 2D 俯視（M）' : '切到 3D 沙盤（M）；Alt＋拖曳、右鍵拖曳或 [ ] 轉鏡頭';
     try {
       localStorage.setItem('legion.view', on ? '3d' : '2d');
     } catch {
@@ -224,7 +224,7 @@ export class LegionScreen {
       <button data-act="director" data-el="director" class="${player ? '' : 'active'}" title="自動導播：鏡頭跟著主要戰場${player ? '' : '（F）'}">導播</button>
       <button data-act="intent" data-el="intent" class="active" title="放大時在軍團旗標下顯示 AI 意圖（I）；滑鼠指著或選中的軍團一律顯示">意圖</button>
       <button data-act="fit" title="看全圖（Home）">全圖</button>
-      <button data-act="view3d" data-el="view3d" title="切到 3D 沙盤（M）；右鍵拖曳或 [ ] 轉鏡頭">3D</button>
+      <button data-act="view3d" data-el="view3d" title="切到 3D 沙盤（M）；Alt＋拖曳、右鍵拖曳或 [ ] 轉鏡頭">3D</button>
       <span class="sep"></span>
       <button data-act="help" title="規則說明（H）">說明</button>
       <button data-act="replay" title="下載這場比賽的回放檔">回放</button>
@@ -275,6 +275,8 @@ export class LegionScreen {
     });
     on(canvas, 'mousedown', (e) => {
       const me = e as MouseEvent;
+      // Alt＋左鍵是 3D 轉鏡頭（view3d 自己處理），不框選也不平移
+      if (me.altKey && me.button === 0) return;
       if (this.control) {
         const rect = canvas.getBoundingClientRect();
         const px = me.clientX - rect.left;
@@ -634,7 +636,7 @@ export class LegionScreen {
       <table class="lg-table"><tr><th>兵種</th><th>點數</th><th>人數</th><th>血量</th><th>攻擊</th><th>射程</th><th>速度（格／秒）</th><th>減免（近／遠）</th><th>招牌技能</th><th>剋制</th></tr>${rows}</table>
       <table class="lg-table">${TERRAIN_NAMES.map((n, i) => (TERRAIN_TIP[i] ? `<tr><td>${n}</td><td>${TERRAIN_TIP[i]}</td></tr>` : '')).join('')}</table>
       <h3>操作</h3>
-      <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>I</kbd> AI 意圖・<kbd>Home</kbd> 全圖・<kbd>M</kbd> 切換 2D／3D・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）・3D 時右鍵拖曳或 <kbd>[</kbd> <kbd>]</kbd> 轉鏡頭（拉近才轉得動，全圖固定北朝上）</p>
+      <p class="small"><kbd>空白</kbd> 播放／暫停・<kbd>1</kbd>～<kbd>4</kbd> 速度・<kbd>N</kbd> 下一場交戰・<kbd>F</kbd> 自動導播・<kbd>I</kbd> AI 意圖・<kbd>Home</kbd> 全圖・<kbd>M</kbd> 切換 2D／3D・滾輪縮放、拖曳平移、點軍團看詳情（雙擊跟過去）・3D 時 <kbd>Alt</kbd>＋拖曳（指揮時也可）、右鍵拖曳或 <kbd>[</kbd> <kbd>]</kbd> 轉鏡頭，任何縮放都能自由轉</p>
     </div>`;
     h.classList.remove('hidden');
   }

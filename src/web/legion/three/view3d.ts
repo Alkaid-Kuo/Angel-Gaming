@@ -353,7 +353,7 @@ export class Legion3DView implements BattleView {
     const t = this.zoomT();
     const ease = t * t * (3 - 2 * t);
     const pitch = Math.max(20 * DEG, Math.min(80 * DEG, PITCH_FAR + (PITCH_NEAR - PITCH_FAR) * ease + this.tilt));
-    const yaw = wrapYaw(this.yaw) * Math.min(1, t * 2.2);
+    const yaw = wrapYaw(this.yaw);
     const fov = 34 - 4 * ease;
     const gy = this.ground.heightAt(this.cam.x, this.cam.y);
     this.targetY += (gy - this.targetY) * 0.15;
@@ -425,20 +425,22 @@ export class Legion3DView implements BattleView {
     sc.updateProjectionMatrix();
   }
 
-  /** 右鍵拖曳（純觀戰）或 [ ] 鍵：水平轉、上下壓 */
+  /** 轉鏡頭：Alt＋左鍵拖曳（觀戰與指揮都可）、右鍵拖曳（純觀戰）或 [ ] 鍵。任何縮放都能轉一整圈、不會自動回正；上下壓到俯仰角的上下限為止 */
   private bindRotate(): void {
-    let drag: { x: number; y: number; yaw: number; tilt: number } | null = null;
+    let drag: { x: number; y: number; yaw: number; tilt: number; mask: number } | null = null;
     const down = (e: MouseEvent): void => {
-      if (e.button !== 2 || this.meta.playerSide >= 0) return;
-      drag = { x: e.clientX, y: e.clientY, yaw: this.yaw, tilt: this.tilt };
+      const alt = e.button === 0 && e.altKey;
+      if (!alt && (e.button !== 2 || this.meta.playerSide >= 0)) return;
+      e.preventDefault();
+      drag = { x: e.clientX, y: e.clientY, yaw: this.yaw, tilt: this.tilt, mask: alt ? 1 : 2 };
     };
     const move = (e: MouseEvent): void => {
-      if (drag === null || (e.buttons & 2) === 0) {
+      if (drag === null || (e.buttons & drag.mask) === 0) {
         drag = null;
         return;
       }
       this.yaw = wrapYaw(drag.yaw - (e.clientX - drag.x) * 0.006);
-      this.tilt = Math.max(-14 * DEG, Math.min(14 * DEG, drag.tilt + (e.clientY - drag.y) * 0.004));
+      this.tilt = Math.max(-46 * DEG, Math.min(46 * DEG, drag.tilt + (e.clientY - drag.y) * 0.004));
     };
     const ctx = (e: Event): void => {
       if (this.meta.playerSide < 0) e.preventDefault();
