@@ -1,6 +1,5 @@
 // 3D 沙盤的士兵：每種兵 × 姿勢一個「人物」InstancedMesh（中性色）與一個「隊伍色」InstancedMesh（上衣、盾面、馬衣、鞍墊），
-// 兩者共用同一組矩陣；造型在 unitModels.ts。槍林（長槍放平）、盾牆（蹲低、盾頂在身前）各有一個姿勢；倒地的人側躺；
-// 潰散整團調灰，隊伍色換成中性布色（上衣還在，只是看不出是哪一隊）。
+// 兩者共用同一組矩陣；造型在 unitModels.ts。槍林（長槍放平）、盾牆（蹲低、盾頂在身前）各有一個姿勢；倒地的人側躺。
 import * as THREE from 'three';
 import type { UnitKind } from '../../../legion/config.ts';
 import { Builder } from './builder.ts';
@@ -9,8 +8,8 @@ import { figureGeometry, teamGeometry, type Pose } from './unitModels.ts';
 
 export type { Pose } from './unitModels.ts';
 
-/** 潰散時隊伍色那層改用的中性布色 */
-const ROUTED = col(0x857a66);
+/** 沒給隊伍色（team ＝ null）時隊伍色那層改用的中性布色：上衣也在這層，不能整層不畫 */
+const NEUTRAL = col(0x857a66);
 
 interface Layer {
   readonly fig: THREE.InstancedMesh;
@@ -26,7 +25,7 @@ export interface SoldierDraw {
   rot: number;
   /** 倒地：側躺 */
   down: boolean;
-  /** 人物顏色倍率（潰散調灰、陣亡調暗） */
+  /** 人物顏色倍率（陣亡調暗） */
   shade: number;
   team: THREE.Color | null;
 }
@@ -79,7 +78,7 @@ export class Soldiers {
     l.fig.setMatrixAt(l.n, this.m);
     l.fig.setColorAt(l.n, this.c.setScalar(s.shade));
     l.team.setMatrixAt(l.n, this.m);
-    l.team.setColorAt(l.n, s.team ?? this.c.copy(ROUTED).multiplyScalar(s.shade));
+    l.team.setColorAt(l.n, s.team ?? this.c.copy(NEUTRAL).multiplyScalar(s.shade));
     l.n++;
   }
 
