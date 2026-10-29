@@ -4,7 +4,7 @@ import { cdegDiff, iatan2, iatan2C, icosC, isinC } from '../src/shared/geom.ts';
 import { iatan2 as legionIatan2 } from '../src/legion/geom.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
 import { ECONOMY_SCENARIOS, GRENADE_SCENARIOS, SCENARIOS } from '../src/shooter/acceptance.ts';
-import { AMMO, ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, GRENADE_RULES, MIN_REACTION_TICKS, ROUND, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS, ticks, type GrenadeId } from '../src/shooter/config.ts';
+import { AMMO, ARMOR, DEFUSE_KIT, ECONOMY, FRIENDLY_FIRE_PCT, GRENADES, GRENADE_RULES, MIN_REACTION_TICKS, ROUND, SHOOTER_API_VERSION, SHOOTER_ENGINE_VERSION, SOUND, TEAM_SIZE, UNIT, VISION, WEAPONS, ticks, type GrenadeId } from '../src/shooter/config.ts';
 import { applyPercent } from '../src/shared/intmath.ts';
 import { MAPS, cellOf, isSolidCell } from '../src/shooter/map.ts';
 import { circleHitsWall, findPath, sweptClear } from '../src/shooter/path.ts';
@@ -534,6 +534,9 @@ describe('MR3 加時（v1.0）', () => {
     expect(init.rules.overtime).toEqual(ROUND.overtime);
     expect(init.rules.economy.overtimeMoney).toBe(ECONOMY.overtimeMoney);
     expect(shooterInitData(map, 0, {}, { overtime: false }).rules.overtime).toBe(false);
+    expect(init.rules.apiVersion).toBe(SHOOTER_API_VERSION);
+    expect(SHOOTER_API_VERSION).toBe('1.0');
+    expect(SHOOTER_ENGINE_VERSION).toBe('1.0.0');
   });
 
   it('加時狀態計入雜湊；含加時的陪練對打回放重播雜湊相同', () => {
@@ -995,7 +998,7 @@ describe('確定性與效能', () => {
     expect(run.result.stats.reduce((a, s) => a + s.kills, 0)).toBeGreaterThan(0);
   });
 
-  // 沙城：陪練 Bot 的閃光只丟 10～20 格的敵人，赤岩鎮開闊、交火距離遠，很少丟（規格 v0.5 第十四節待審）
+  // 沙城：陪練 Bot 的閃光只丟 10～20 格的敵人，赤岩鎮開闊、交火距離遠，很少丟（規格 v1.0 第十四節：陪練 Bot 的已知行為）
   it('陪練 Bot v3 會丟道具：全買局 T 丟煙霧、CT 丟閃光（沙城，10 個種子短賽制）', () => {
     let tThrows = 0;
     let ctThrows = 0;

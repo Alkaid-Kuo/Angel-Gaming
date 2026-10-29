@@ -270,7 +270,7 @@ export class ShooterHud {
     if (summary.winnerGroup === null) title = `平手 ${g0}：${g1}`;
     else if (this.meta.spectate) title = `${summary.winnerGroup === 0 ? '先攻組（上半場 T）' : '先守組（上半場 CT）'}獲勝 ${Math.max(g0, g1)}：${Math.min(g0, g1)}`;
     else title = `${summary.winnerGroup === myGroup ? '勝利' : '落敗'} ${summary.score[myGroup]}：${summary.score[1 - myGroup]}`;
-    // 結束時陣營是下半場的，換回依組別顯示
+    // 結束時的陣營是最後一個半場的（可能是加時），換回依組別顯示
     const finalRows = rows.map((r) => ({ ...r, alive: true }));
     this.end.innerHTML = `<div class="box"><h2>${title}</h2><p class="muted small">種子 ${this.meta.seed}・共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・終局雜湊 ${summary.finalHash}</p><div class="sg-board-body"></div><div class="row"><button type="button" class="primary" data-act="again">再來一場</button><button type="button" data-act="home">回開局畫面</button></div></div>`;
     this.renderBoard(this.end.querySelector('.sg-board-body')!, finalRows, summary);

@@ -1,12 +1,14 @@
 // CS 射擊：規則常數、武器表、經濟表、道具表。
-// 全部數值參照 CS2，標「待審」者在步驟 5 試玩後凍結。
+// 全部數值參照 CS2；v1.0（步驟 5）定案凍結，凍結後要改照規格第九節「凍結後變更流程」。
 // 單位約定：
 //   長度　1 格 = 1 公尺 = UNIT（1000）個座標單位；所有位置、半徑、距離都是座標單位的整數。
 //   時間　tick；TPS = 30。秒數換 tick 一律 ticks(sec)。
 //   角度　整數度；0 = +x（東）、90 = +y（畫面下＝南）。
 //   速度　座標單位／tick（已由 CS 的 units／秒換算：1 格 ≈ 52.5 units）。
 
-export const SHOOTER_ENGINE_VERSION = '0.5.0';
+export const SHOOTER_ENGINE_VERSION = '1.0.0';
+/** 選手 API 版本（v1.0 凍結）：觀察、指令、開局資料的欄位或語意變動都要升這個版本 */
+export const SHOOTER_API_VERSION = '1.0';
 
 export const TPS = 30;
 export const UNIT = 1000;
@@ -29,26 +31,26 @@ export function speedFromUnits(unitsPerSec: number): number {
 // ───────── 視野、聲音、轉身（公平規則，引擎強制） ─────────
 
 export const VISION = {
-  /** 水平視角（度，待審）。視錐外一律看不見 */
+  /** 水平視角（度，定案 v1.0）。視錐外一律看不見 */
   fovDeg: 100,
   /** 開鏡時的視角 */
   scopedFovDeg: 30,
-  /** 視野距離（格，v0.5，待審）：不開鏡超過這個距離一律看不見 */
+  /** 視野距離（格，v0.5，定案 v1.0）：不開鏡超過這個距離一律看不見 */
   viewRange: 30,
-  /** 開鏡的視野距離（格，待審）；null = 不設上限。v0.5 第四輪：無限距離太強，設 60 格 */
+  /** 開鏡的視野距離（格，定案 v1.0）；null = 不設上限。v0.5 第四輪：無限距離太強，設 60 格 */
   scopedViewRange: 60 as number | null,
   /** 矮牆掩護（格，v0.5）：蹲著的人與矮牆距離在此以內，矮牆就擋住他和對方之間的視線與子彈 */
   lowCoverRange: 2,
-  /** 轉身速度上限（度／秒，待審）。玩家與 Bot 都受限 */
+  /** 轉身速度上限（度／秒，定案 v1.0）。玩家與 Bot 都受限 */
   turnDegPerSec: 720,
-  /** 角色碰撞半徑（座標單位）＝ 0.3 格 */
+  /** 角色碰撞半徑（座標單位）＝ 0.3 格；v1.0 起活人之間也碰撞（圓心距 ≥ 2 × bodyRadius，不分敵我，死人不擋） */
   bodyRadius: 300,
   /** 隊友雷達：隊友此刻看見的敵人只給座標點 */
   radarSharesFacing: false,
 } as const;
 
 export const SOUND = {
-  /** 跑步腳步可聽見的距離（格，待審）；靜步無聲 */
+  /** 跑步腳步可聽見的距離（格，定案 v1.0）；靜步無聲 */
   footstepRange: 20,
   /** 手槍、衝鋒槍、霰彈槍聲可聽見的距離（格）；步槍、狙擊全圖 */
   lightGunRange: 60,
@@ -59,7 +61,7 @@ export const SOUND = {
   midRange: 30,
   /** 換彈、下包、拆包、丟雷落地可聽見的距離（格） */
   actionRange: 15,
-  /** 手雷、閃光爆炸可聽見的距離（格，待審） */
+  /** 手雷、閃光爆炸可聽見的距離（格，定案 v1.0） */
   explosionRange: 60,
 } as const;
 
@@ -159,10 +161,10 @@ export const MOVE = {
 } as const;
 
 export const ARMOR = { price: 650, points: 100 } as const;
-/** 友軍傷害（%，待審）：子彈打到隊友只造成這個比例的傷害；隊友會擋子彈（子彈打到第一個人就停） */
+/** 友軍傷害（%，定案 v1.0）：子彈打到隊友只造成這個比例的傷害；隊友會擋子彈（子彈打到第一個人就停） */
 export const FRIENDLY_FIRE_PCT = 30;
 export const DEFUSE_KIT = { price: 400, team: 'CT' as Team } as const;
-/** 彈藥（v0.5，待審）：補滿身上主武器與手槍的備彈；兩把都是滿的就不扣錢。子彈不會在回合間自動補充 */
+/** 彈藥（v0.5，定案 v1.0）：補滿身上主武器與手槍的備彈；兩把都是滿的就不扣錢。子彈不會在回合間自動補充 */
 export const AMMO = { price: 100 } as const;
 
 // ───────── 經濟 ─────────
@@ -222,36 +224,36 @@ export const GRENADES: Readonly<Record<GrenadeId, GrenadeDef>> = {
 export const GRENADE_RULES = {
   /** 道具總格數 */
   totalSlots: 4,
-  /** 投擲最遠距離（格）；力道 0～100 線性（待審） */
+  /** 投擲最遠距離（格）；力道 0～100 線性（定案 v1.0） */
   maxThrowRange: 25,
-  /** 飛行速度（座標單位／tick；900 units／秒 ≈ 17 格／秒，待審） */
+  /** 飛行速度（座標單位／tick；900 units／秒 ≈ 17 格／秒，定案 v1.0） */
   flySpeed: speedFromUnits(900),
   /** 飛行中的道具的碰撞半徑（座標單位；碰牆反彈用，不碰人） */
   projectileRadius: 100,
-  /** 投擲冷卻（tick，待審）：投擲後這段時間內不能再投、也不能開火 */
+  /** 投擲冷卻（tick，定案 v1.0）：投擲後這段時間內不能再投、也不能開火 */
   throwCooldownTicks: ticks(0.5),
   /** 碰牆反彈次數上限：反彈一次後再碰牆就停 */
   maxBounces: 1,
-  /** 煙霧擴散時間：半徑從 0 線性長到 radius（待審） */
+  /** 煙霧擴散時間：半徑從 0 線性長到 radius（定案 v1.0） */
   smokeBloomTicks: ticks(1),
-  /** 閃光：正對／側向／背對的最長致盲時間（tick，待審），再乘距離係數 */
+  /** 閃光：正對／側向／背對的最長致盲時間（tick，定案 v1.0），再乘距離係數 */
   flashFrontTicks: ticks(2.0),
   flashSideTicks: ticks(1.0),
   flashBackTicks: ticks(0.3),
-  /** 閃光朝向分界（度）：爆點方向與朝向夾角 ≤ 60° 為正對、≤ 120° 為側向、其餘背對（待審） */
+  /** 閃光朝向分界（度）：爆點方向與朝向夾角 ≤ 60° 為正對、≤ 120° 為側向、其餘背對（定案 v1.0） */
   flashFrontDeg: 60,
   flashSideDeg: 120,
-  /** 閃光距離係數：1 − d／(2R)，即爆點貼臉 100%、半徑外緣剩這個百分比（待審） */
+  /** 閃光距離係數：1 − d／(2R)，即爆點貼臉 100%、半徑外緣剩這個百分比（定案 v1.0） */
   flashEdgePct: 50,
   /** 閃光的視線檢查：牆與煙霧都擋 */
   flashBlockedBySmoke: true,
-  /** HE 傷害線性衰減：中心 damage、半徑外緣 0；有視線才算（牆擋、煙霧不擋，待審） */
+  /** HE 傷害線性衰減：中心 damage、半徑外緣 0；有視線才算（牆擋、煙霧不擋，定案 v1.0） */
   heBlockedBySmoke: false,
-  /** HE 對護甲：護甲吸收這個比例的傷害（以剩餘甲值為上限）並扣同量甲值（待審） */
+  /** HE 對護甲：護甲吸收這個比例的傷害（以剩餘甲值為上限）並扣同量甲值（定案 v1.0） */
   heArmorPct: 50,
-  /** 燃燒每幾 tick 結算一次；每次傷害 = damage × interval ÷ TPS（40／秒 → 8），不吃護甲（待審） */
+  /** 燃燒每幾 tick 結算一次；每次傷害 = damage × interval ÷ TPS（40／秒 → 8），不吃護甲（定案 v1.0） */
   fireTickInterval: ticks(0.2),
-  /** 道具傷害（HE、燃燒）打到自己的比例（%）：自己不是隊友，照全額（待審）；隊友照 FRIENDLY_FIRE_PCT */
+  /** 道具傷害（HE、燃燒）打到自己的比例（%）：自己不是隊友，照全額（定案 v1.0）；隊友照 FRIENDLY_FIRE_PCT */
   selfDamagePct: 100,
   /** 看得見的飛行中道具：視錐內有視線，或在自己這個距離內（座標單位） */
   nearProjectile: 2 * UNIT,

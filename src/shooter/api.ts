@@ -1,6 +1,9 @@
 // CS 射擊選手 API 的公開型別：開局資料、觀察資料、指令、事件。
 // 選手程式只依賴本檔；引擎內部型別不對外。
 //
+// 【API 1.0 已凍結（2026-10-30，規格 v1.0、引擎 1.0.0）】版本見 config.ts 的 SHOOTER_API_VERSION（開局資料 rules.apiVersion）。
+// 基準 Bot 階段（步驟 6～7）不得改；真要改：升 SHOOTER_API_VERSION、寫規格修訂紀錄、重跑全部驗收與強度表。
+//
 // 公平原則（規格書第二節）：觀察資料裡**沒有**視野外敵人的任何欄位。
 // 敵人只會出現在 enemies（自己視錐內且有視線）、radar（隊友此刻看見的座標點）、sounds（粗略方向與距離等級）。
 import type { KnobDef, KnobValues } from '../api/types.ts';
@@ -95,6 +98,8 @@ export interface OvertimeRules {
 }
 
 export interface RulesInfo {
+  /** 選手 API 版本（v1.0 起；凍結後欄位或語意變動才會升） */
+  readonly apiVersion: string;
   readonly ticksPerSecond: number;
   readonly decisionInterval: number;
   readonly unit: number;

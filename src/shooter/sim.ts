@@ -1,7 +1,8 @@
-// CS 射擊模擬核心（規格書 v0.4；確定性、全整數）。步驟 1：移動碰撞、視錐視線、槍械、炸彈、回合流程、換邊、雜湊。
+// CS 射擊模擬核心（規格書 v1.0；確定性、全整數）。步驟 1：移動碰撞、視錐視線、槍械、炸彈、回合流程、換邊、雜湊。
 // 步驟 2：友軍傷害、經濟（金錢、購買、回合結算）。步驟 3：道具（投擲、煙霧、閃光、手雷、燃燒）。
+// 步驟 5（v1.0）：MR3 加時、角色之間碰撞（處理順序輪轉）。Bot 反應延遲在驅動層（runner.ts）。
 //
-// 每 tick：（決策 tick 先由驅動層套用指令）→ 轉身（上限）→ 移動（圓對格碰撞、沿牆滑動）→ 致盲與投擲冷卻倒數
+// 每 tick：（驅動層先套用到期的指令）→ 轉身（上限）→ 移動（圓對格碰撞、沿牆滑動、再對活人）→ 致盲與投擲冷卻倒數
 // → 投射物飛行與生效（閃光、煙霧、手雷、燃燒點火）→ 煙霧撲滅火 → 開火（hitscan；傷害同時結算）
 // → 換彈、冷卻、後座力回復 → 火焰結算 → 下包、拆包 → 撿炸彈 → 腳步聲 → 炸彈倒數 → 回合判定。
 // 角度：內部朝向用百分度（0.01°），給選手的觀察資料是整數度。
@@ -46,6 +47,7 @@ import {
   GRENADE_RULES,
   MOVE,
   ROUND,
+  SHOOTER_API_VERSION,
   SOUND,
   TEAM_SIZE,
   TPS,
@@ -555,6 +557,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
     knobs,
     attributes,
     rules: {
+      apiVersion: SHOOTER_API_VERSION,
       ticksPerSecond: TPS,
       decisionInterval: DECISION_INTERVAL,
       unit: UNIT,
