@@ -1,6 +1,6 @@
 // 3D 沙盤士兵的微縮模型造型（v2 第五節）：每種兵 × 姿勢拼出「人物」（中性色）與「隊伍色」（白色，實際顏色由 instanceColor 給）兩組幾何。
-// 正面朝 +x、右手在 +z；1 格 ＝ 1 單位，人站在底座頂面（y ＝ BASE）。中景要一眼分出兵種：長槍伸出身體、方盾、弓與箭袋、短劍小圓盾、
-// 最瘦的輕步兵拿兩支投槍、騎兵有馬。隊伍色只放底座、盾面、馬衣（含頸甲、鞍墊）與長槍兵的肩甲。
+// 正面朝 +x、右手在 +z；1 格 ＝ 1 單位，腳踩在 y ＝ 0。中景要一眼分出兵種：長槍伸出身體、弧面大盾、弓與箭袋、劍與圓盾、
+// 最瘦的輕步兵拿單刃彎刀、騎兵有馬。不放底座：隊伍色是上衣（上身與下擺），另外每種兵最多一個固定部位（盾面、馬衣與頸甲、鞍墊）。
 // 每個人物（人物＋隊伍色）壓在 150 個三角形以內：看不到的面（底面、被身體蓋住的頂面）不畫。
 import * as THREE from 'three';
 import type { UnitKind } from '../../../legion/config.ts';
@@ -9,17 +9,17 @@ import { PAL, col } from './palette.ts';
 
 export type Pose = 'stand' | 'brace' | 'wall';
 
-/** 省略的面（位元）：-x 1、-y 4、+y 8（+x 2、-z 16、+z 32 這裡沒用到） */
+/** 省略的面（位元）：-x 1、-y 4、+y 8、-z 16、+z 32（+x 2 這裡沒用到） */
 const NX = 1;
 const NY = 4;
 const PY = 8;
+const NZ = 16;
+const PZ = 32;
 
-/** 底座頂面高度（人物的腳踩在這裡） */
-const BASE = 0.035;
-
+/** 袖子與騎手手臂的布色（上衣是隊伍色） */
 const CLOTH: Record<UnitKind, number> = {
   spear: 0x8a7a5c,
-  sword: 0x8f9398,
+  sword: 0x7a6448,
   shield: 0x7d6b52,
   archer: 0x6f5d40,
   light: 0x8c7a58,
@@ -45,7 +45,7 @@ const C = {
 } as const;
 
 const WHITE = new THREE.Color(1, 1, 1);
-/** 隊伍色的暗鑲邊（底座側面、盾緣、馬衣下緣） */
+/** 隊伍色的暗鑲邊（盾緣與盾背、馬衣下緣） */
 const RIM = new THREE.Color(0.45, 0.45, 0.45);
 
 /** 拼幾何的小工具：八頂點的六面體、桿子（任意方向）、尖錐、圓盤，都透過 Builder 收成同一份幾何 */
@@ -94,11 +94,6 @@ class Kit {
     this.hexa(p, [color, f, color, color, color, color], skip);
   }
 
-  /** 朝上的水平四邊形（底座頂面） */
-  plate(x0: number, z0: number, x1: number, z1: number, y: number, color: THREE.Color): void {
-    this.b.quad([x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], color, [0, 1, 0]);
-  }
-
   /** 從 a 到 b 的四方桿：寬 w（水平方向）、厚 h；cap 給了就封住 b 端（顏色可不同） */
   rod(a: V3, b: V3, w: number, h: number, color: THREE.Color, cap?: THREE.Color): void {
     const d = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]).normalize();
@@ -119,8 +114,8 @@ class Kit {
     if (cap !== undefined) this.b.quad(rb[0], rb[1], rb[2], rb[3], cap, [b[0] - mid[0], b[1] - mid[1], b[2] - mid[2]]);
   }
 
-  /** 尖錐（槍頭、箭頭）：底在 a、尖在 b，四面 */
-  spike(a: V3, b: V3, r: number, color: THREE.Color): void {
+  /** 尖錐（槍頭、劍尖）：底在 a、尖在 b，四面；r 是水平方向的半寬，r2 是另一方向的半厚（預設同 r） */
+  spike(a: V3, b: V3, r: number, color: THREE.Color, r2 = r): void {
     const d = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]).normalize();
     const u = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0));
     if (u.lengthSq() < 1e-6) u.set(0, 0, 1);
@@ -133,7 +128,7 @@ class Kit {
       [1, 0],
       [0, 1],
     ])
-      ring.push([a[0] + (u.x * su + v.x * sv) * r, a[1] + (u.y * su + v.y * sv) * r, a[2] + (u.z * su + v.z * sv) * r]);
+      ring.push([a[0] + (u.x * su * r + v.x * sv * r2), a[1] + (u.y * su * r + v.y * sv * r2), a[2] + (u.z * su * r + v.z * sv * r2)]);
     for (let i = 0; i < 4; i++) {
       const j = (i + 1) % 4;
       const out: V3 = [(ring[i][0] + ring[j][0]) / 2 - a[0], (ring[i][1] + ring[j][1]) / 2 - a[1], (ring[i][2] + ring[j][2]) / 2 - a[2]];
@@ -141,7 +136,7 @@ class Kit {
     }
   }
 
-  /** 朝 +x 的圓盤（小圓盾）：圓心 c、半徑 r、厚 t；正面 face、側面與背面 rim */
+  /** 朝 +x 的圓盤（圓盾）：圓心 c、半徑 r、厚 t；正面 face、側面與背面 rim */
   disc(c: V3, r: number, t: number, n: number, face: THREE.Color, rim: THREE.Color): void {
     const p = (a: number, x: number): V3 => [x, c[1] + Math.sin(a) * r, c[2] + Math.cos(a) * r];
     const x0 = c[0] - t / 2;
@@ -156,21 +151,15 @@ class Kit {
     }
   }
 
-  /** 水平圓底（弓兵、輕步兵）：側面鑲邊、頂面主色 */
-  roundBase(r: number, n: number): void {
-    for (let i = 0; i < n; i++) {
-      const a0 = (i / n) * Math.PI * 2;
-      const a1 = ((i + 1) / n) * Math.PI * 2;
-      const m = (a0 + a1) / 2;
-      const p = (a: number, y: number): V3 => [Math.cos(a) * r, y, Math.sin(a) * r];
-      this.b.quad(p(a0, 0), p(a1, 0), p(a1, BASE), p(a0, BASE), RIM, [Math.cos(m), 0, Math.sin(m)]);
-      this.b.tri(p(a0, BASE), p(a1, BASE), [0, BASE, 0], WHITE, [0, 1, 0]);
-    }
-  }
-
   geometry(): THREE.BufferGeometry {
     return this.b.geometry();
   }
+}
+
+/** 一個人物的兩組幾何：fig 中性色、team 隊伍色 */
+interface Parts {
+  fig: THREE.BufferGeometry;
+  team: THREE.BufferGeometry;
 }
 
 /** 步兵身形參數 */
@@ -191,31 +180,35 @@ const SHOULDER = 0.45;
 const NECK = 0.47;
 const HEAD_TOP = 0.565;
 
+/** 盾兵的大盾：高約身高七成，兩種姿勢同一面 */
+const SHIELD_H = 0.42;
+const SHIELD_HW = 0.14;
+
 /** 肩膀位置（arm 用）：side ＝ -1 左、1 右 */
 function shoulder(b: Body, side: number): V3 {
   return [b.lean, SHOULDER - b.crouch - 0.02, side * (b.sw - 0.015)];
 }
 
-/** 步兵的腿、下擺、上身、頭（頭盔與手臂另外畫） */
-function torso(k: Kit, b: Body): void {
+/** 步兵的腿、頭（畫在 k）與上衣（下擺、上身，畫在隊伍色 t）；頭盔與手臂另外畫 */
+function torso(k: Kit, t: Kit, b: Body): void {
   const hip = 0.25 - b.crouch;
   // 腿：上端在胯下，下端可以前後錯開
   for (const side of [-1, 1]) {
     const z0 = side < 0 ? -0.072 : 0.014;
     const z1 = side < 0 ? -0.014 : 0.072;
     const off = side < 0 ? b.stride : -b.stride;
-    k.taper(BASE, hip, [off - 0.034, z0, off + 0.034, z1], [-0.03, z0, 0.03, z1], C.trousers, NY | PY);
+    k.taper(0, hip, [off - 0.034, z0, off + 0.034, z1], [-0.03, z0, 0.03, z1], C.trousers, NY | PY);
   }
   // 下擺（往下張開）與上身（往上變寬）：中間的腰比較細
   const waist = 0.33 - b.crouch;
   const lx = b.lean * 0.4;
-  k.taper(0.2 - b.crouch, waist, [-0.064, -b.sd - 0.012, 0.064, b.sd + 0.012], [lx - 0.05, -b.sd + 0.008, lx + 0.05, b.sd - 0.008], b.cloth, NY | PY);
-  k.taper(waist, SHOULDER - b.crouch, [lx - 0.05, -b.sd + 0.008, lx + 0.05, b.sd - 0.008], [b.lean - 0.06, -b.sw, b.lean + 0.06, b.sw], b.cloth, NY);
+  t.taper(0.2 - b.crouch, waist, [-0.064, -b.sd - 0.012, 0.064, b.sd + 0.012], [lx - 0.05, -b.sd + 0.008, lx + 0.05, b.sd - 0.008], WHITE, NY | PY);
+  t.taper(waist, SHOULDER - b.crouch, [lx - 0.05, -b.sd + 0.008, lx + 0.05, b.sd - 0.008], [b.lean - 0.06, -b.sw, b.lean + 0.06, b.sw], WHITE, NY);
   const hx = b.lean * 1.1;
   k.box(hx - 0.043, NECK - b.crouch, -0.042, hx + 0.043, HEAD_TOP - b.crouch, 0.042, C.skin, NY | PY);
 }
 
-/** 手臂：肩到手，手是皮膚色的端面 */
+/** 手臂：肩到手，袖子是布色、手是皮膚色的端面 */
 function arm(k: Kit, b: Body, side: number, hand: V3): void {
   k.rod(shoulder(b, side), hand, 0.022, 0.022, b.cloth, C.skin);
 }
@@ -262,9 +255,31 @@ function helm(k: Kit, kind: Helm, hx: number, top: number): void {
   }
 }
 
-/** 步兵（不含隊伍色） */
-function infantry(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
+/**
+ * 盾兵的弧面大盾（畫在隊伍色 t）：三片直立的板，中間朝前、兩邊往後折 bend；正面隊伍色、背面與邊暗。
+ * x 是中間那片的正面、y0 是下緣、zc 是左右中心；tilt 是上緣往後仰多少。
+ */
+function bigShield(t: Kit, x: number, y0: number, zc: number, tilt: number): void {
+  const bend = 0.04;
+  const thick = 0.02;
+  const y1 = y0 + SHIELD_H;
+  const edges = [-SHIELD_HW, -SHIELD_HW / 3, SHIELD_HW / 3, SHIELD_HW];
+  const front = (e: number): number => (Math.abs(e) > SHIELD_HW / 2 ? x - bend : x);
+  for (let s = 0; s < 3; s++) {
+    const p: V3[] = [];
+    for (let k = 0; k < 2; k++)
+      for (let j = 0; j < 2; j++)
+        for (let i = 0; i < 2; i++) p.push([front(edges[s + k]) - (i === 0 ? thick : 0) - (j === 1 ? tilt : 0), j === 0 ? y0 : y1, zc + edges[s + k]]);
+    // 相接的那幾面不畫：左片留外側的 -z、右片留外側的 +z
+    const skip = NY | (s === 0 ? PZ : s === 2 ? NZ : NZ | PZ);
+    t.hexa(p, [RIM, WHITE, RIM, RIM, RIM, RIM], skip);
+  }
+}
+
+/** 步兵 */
+function infantry(kind: UnitKind, pose: Pose): Parts {
   const k = new Kit();
+  const t = new Kit();
   const cloth = col(CLOTH[kind]);
   const body: Body = { cloth, sw: 0.11, sd: 0.08, crouch: 0, lean: 0, stride: 0 };
   if (kind === 'light') {
@@ -281,13 +296,19 @@ function infantry(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
     body.stride = 0.06;
   }
   if (kind === 'sword') body.stride = 0.04;
-  torso(k, body);
+  torso(k, t, body);
   const hx = body.lean * 1.1;
   const top = HEAD_TOP - body.crouch;
   const S = SHOULDER - body.crouch;
   switch (kind) {
     case 'spear':
       helm(k, 'iron', hx, top);
+      // 鐵肩甲（從上面看得到的兩塊）
+      for (const side of [-1, 1]) {
+        const z0 = side < 0 ? -0.135 : 0.07;
+        const z1 = side < 0 ? -0.07 : 0.135;
+        k.taper(SHOULDER - 0.045, SHOULDER + 0.018, [body.lean - 0.068, z0, body.lean + 0.068, z1], [body.lean - 0.05, z0 + 0.012, body.lean + 0.05, z1 - 0.012], C.metal, NY);
+      }
       if (pose === 'brace') {
         // 架槍：雙手握在腰間，槍放平、略朝上，伸出陣前約 1.4 格
         const a: V3 = [-0.36, 0.33, 0.07];
@@ -300,30 +321,37 @@ function infantry(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
         // 行軍：槍豎在右手邊，總長 1.8
         arm(k, body, 1, [0.06, 0.3, 0.15]);
         arm(k, body, -1, [0.01, 0.24, -0.12]);
-        k.rod([0.065, BASE + 0.01, 0.155], [0.065, 1.7, 0.155], 0.013, 0.013, C.pole);
+        k.rod([0.065, 0.01, 0.155], [0.065, 1.7, 0.155], 0.013, 0.013, C.pole);
         k.spike([0.065, 1.7, 0.155], [0.065, 1.84, 0.155], 0.024, C.metalLight);
       }
       break;
-    case 'sword':
+    case 'sword': {
       helm(k, 'crest', hx, top);
-      // 右手短劍斜舉向前，左手小圓盾（盾在隊伍色那一層）
-      arm(k, body, 1, [0.13, 0.36, 0.15]);
+      // 右手把劍舉在身體右外側、劍尖高過頭（不和身體重疊），劍長約身高一半；左手圓盾直徑約身高四成五（盾面是隊伍色）
+      arm(k, body, 1, [0.12, 0.4, 0.19]);
       arm(k, body, -1, [0.11, 0.32, -0.08]);
-      k.box(0.11, 0.335, 0.115, 0.15, 0.36, 0.185, C.leather, 0);
-      k.rod([0.135, 0.36, 0.15], [0.24, 0.6, 0.15], 0.018, 0.006, C.metalLight, C.metalLight);
+      k.box(0.1, 0.385, 0.15, 0.14, 0.41, 0.23, C.leather, 0);
+      const hilt: V3 = [0.12, 0.4, 0.19];
+      const end: V3 = [0.178, 0.664, 0.19];
+      k.rod(hilt, end, 0.012, 0.02, C.metalLight);
+      k.spike(end, [0.187, 0.703, 0.19], 0.012, C.metalLight, 0.02);
+      t.disc([0.14, 0.33, -0.13], 0.14, 0.022, 8, WHITE, RIM);
       break;
+    }
     case 'shield':
       helm(k, 'kettle', hx, top);
       if (pose === 'wall') {
-        // 盾牆：蹲低，雙手頂在盾後
-        arm(k, body, 1, [0.15, S - 0.08, 0.09]);
-        arm(k, body, -1, [0.15, S - 0.06, -0.08]);
-        k.box(0.215, 0.3, -0.045, 0.235, 0.39, 0.045, C.metal, NY | NX);
+        // 盾牆：蹲低前傾，雙手把盾頂在身前正中，盾上緣略往後仰，只露出頭盔
+        arm(k, body, 1, [0.17, S - 0.1, 0.08]);
+        arm(k, body, -1, [0.17, S - 0.08, -0.08]);
+        bigShield(t, 0.25, 0.06, 0, 0.025);
+        k.box(0.245, 0.23, -0.04, 0.265, 0.31, 0.04, C.metal, NY | NX);
       } else {
-        // 持盾：左手大方盾立在身前左側，右手垂下
-        arm(k, body, -1, [0.12, 0.3, -0.06]);
+        // 持盾：左手把盾立在身前左側，右手垂下
+        arm(k, body, -1, [0.13, 0.3, -0.07]);
         arm(k, body, 1, [0.02, 0.24, 0.13]);
-        k.box(0.175, 0.27, -0.065, 0.195, 0.35, 0.015, C.metal, NY | NX);
+        bigShield(t, 0.21, 0.09, -0.07, 0);
+        k.box(0.21, 0.26, -0.11, 0.23, 0.34, -0.03, C.metal, NY | NX);
       }
       break;
     case 'archer': {
@@ -344,25 +372,25 @@ function infantry(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
       k.rod([-0.12, 0.5, 0.025], [-0.13, 0.57, 0.02], 0.026, 0.024, C.fletch, C.fletch);
       break;
     }
-    case 'light':
+    case 'light': {
       helm(k, 'hood', hx, top);
-      // 最瘦、沒穿甲；右手握兩支投槍，往前斜舉（和弓兵的弓、長槍的直桿分得開）
-      arm(k, body, 1, [0.07, 0.32, 0.135]);
-      arm(k, body, -1, [0.04, 0.26, -0.1]);
-      for (const [dz, dx] of [
-        [0, 0],
-        [0.035, -0.06],
-      ]) {
-        const a: V3 = [-0.16 + dx, 0.13, 0.14 + dz];
-        const t: V3 = [0.3 + dx, 0.8, 0.14 + dz * 2];
-        k.rod(a, t, 0.009, 0.009, C.pole);
-        k.spike(t, [t[0] + 0.046, t[1] + 0.067, t[2]], 0.017, C.metalLight);
-      }
+      // 最瘦、沒穿甲、不拿盾；右手握單刃彎刀垂在身側、刀尖往前上方翹（和劍兵舉過頭的直劍分得開）
+      arm(k, body, 1, [0.09, 0.28, 0.17]);
+      arm(k, body, -1, [0.03, 0.25, -0.1]);
+      k.box(0.075, 0.265, 0.15, 0.095, 0.3, 0.19, C.leather);
+      // 刀身兩段往上彎、越近刀尖越寬，刀尖收成一點
+      const hilt: V3 = [0.09, 0.28, 0.17];
+      const mid: V3 = [0.213, 0.346, 0.17];
+      const end: V3 = [0.297, 0.431, 0.17];
+      k.rod(hilt, mid, 0.006, 0.018, C.metalLight);
+      k.rod(mid, end, 0.006, 0.024, C.metalLight);
+      k.spike(end, [0.317, 0.466, 0.17], 0.006, C.metalLight, 0.024);
       break;
+    }
     default:
       break;
   }
-  return k.geometry();
+  return { fig: k.geometry(), team: t.geometry() };
 }
 
 /** 馬：身、頸、頭、鬃、尾、四腿（腿前後跨開，看起來在跑）；重騎的身與頸被馬衣、頸甲蓋住，不畫 */
@@ -376,7 +404,7 @@ function horse(k: Kit, heavy: boolean): void {
     [-0.2, -0.13, -0.048],
     [-0.2, -0.27, 0.048],
   ])
-    k.rod([hx, 0.33, z], [fx, BASE, z], 0.022, 0.024, hc);
+    k.rod([hx, 0.33, z], [fx, 0, z], 0.022, 0.024, hc);
   // 頸與頭（重騎的頭戴面甲）
   if (!heavy) {
     k.rod([0.17, 0.4, 0], [0.29, 0.62, 0], 0.042, 0.05, hc);
@@ -386,100 +414,60 @@ function horse(k: Kit, heavy: boolean): void {
   k.rod([-0.29, 0.46, 0], [-0.37, 0.24, 0], 0.018, 0.024, C.mane);
 }
 
-/** 騎兵（不含隊伍色）：馬＋騎手＋騎槍 */
-function cavalry(kind: UnitKind): THREE.BufferGeometry {
+/** 騎兵：馬＋騎手＋騎槍；騎手上衣、鞍墊（輕騎）或馬衣與頸甲（重騎）是隊伍色 */
+function cavalry(kind: UnitKind): Parts {
   const k = new Kit();
+  const t = new Kit();
   const heavy = kind === 'heavyCav';
   horse(k, heavy);
   const cloth = col(CLOTH[kind]);
   // 騎手：跨在馬背上（一塊橫跨的腿）、上身、頭
   const seat = 0.49;
   k.box(-0.08, seat - 0.15, -0.115, 0.06, seat + 0.02, 0.115, C.trousers, NY | PY);
-  k.taper(seat, seat + 0.2, [-0.075, -0.075, 0.035, 0.075], [-0.05, -0.105, 0.07, 0.105], cloth, NY);
+  t.taper(seat, seat + 0.2, [-0.075, -0.075, 0.035, 0.075], [-0.05, -0.105, 0.07, 0.105], WHITE, NY);
   const top = seat + 0.31;
   k.box(-0.035, seat + 0.21, -0.042, 0.05, top, 0.042, C.skin, NY | PY);
   helm(k, heavy ? 'great' : 'cone', 0.008, top);
   // 右手夾騎槍（握韁的左手被身體擋住，不畫）
   const len = heavy ? 1.3 : 0.95;
   const a: V3 = [-0.24, seat + 0.13, 0.13];
-  const t: V3 = [-0.24 + len, seat + (heavy ? 0.17 : 0.29), 0.13];
+  const tip: V3 = [-0.24 + len, seat + (heavy ? 0.17 : 0.29), 0.13];
   k.rod([0.0, seat + 0.18, 0.1], [0.05, seat + 0.12, 0.13], 0.022, 0.022, cloth, C.skin);
-  k.rod(a, t, heavy ? 0.016 : 0.013, heavy ? 0.016 : 0.013, C.pole);
-  k.spike(t, [t[0] + 0.12, t[1] + (t[1] - a[1]) * (0.12 / len), t[2]], heavy ? 0.026 : 0.022, C.metalLight);
-  const g = k.geometry();
-  if (heavy) g.scale(1.1, 1.04, 1.1);
-  return g;
+  k.rod(a, tip, heavy ? 0.016 : 0.013, heavy ? 0.016 : 0.013, C.pole);
+  k.spike(tip, [tip[0] + 0.12, tip[1] + (tip[1] - a[1]) * (0.12 / len), tip[2]], heavy ? 0.026 : 0.022, C.metalLight);
+  if (heavy) {
+    // 圓角馬衣：蓋住馬身兩側到腿上半，下緣暗邊；頸甲
+    t.taper(0.21, 0.5, [-0.3, -0.105, 0.25, 0.105], [-0.27, -0.094, 0.22, 0.094], WHITE);
+    t.box(-0.305, 0.2, -0.108, 0.255, 0.235, 0.108, RIM, NY | PY);
+    t.rod([0.17, 0.42, 0], [0.27, 0.6, 0], 0.05, 0.058, WHITE);
+  } else {
+    // 馬鞍墊
+    t.taper(0.42, 0.5, [-0.13, -0.106, 0.07, 0.106], [-0.12, -0.098, 0.06, 0.098], WHITE);
+  }
+  const parts = { fig: k.geometry(), team: t.geometry() };
+  if (heavy) for (const g of [parts.fig, parts.team]) g.scale(1.1, 1.04, 1.1);
+  return parts;
+}
+
+function parts(kind: UnitKind, pose: Pose): Parts {
+  return kind === 'lightCav' || kind === 'heavyCav' ? cavalry(kind) : infantry(kind, pose);
 }
 
 /** 人物（不含隊伍色的部分） */
 export function figureGeometry(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
-  return kind === 'lightCav' || kind === 'heavyCav' ? cavalry(kind) : infantry(kind, pose);
+  const p = parts(kind, pose);
+  p.team.dispose();
+  return p.fig;
 }
 
 /** 隊伍色的部分（白色，實際顏色由 instanceColor 給；RIM 是暗鑲邊） */
 export function teamGeometry(kind: UnitKind, pose: Pose): THREE.BufferGeometry {
-  const k = new Kit();
-  switch (kind) {
-    case 'lightCav':
-    case 'heavyCav': {
-      const heavy = kind === 'heavyCav';
-      k.box(-0.39, 0, -0.22, 0.39, BASE, 0.22, RIM, NY | PY);
-      k.plate(-0.39, -0.22, 0.39, 0.22, BASE, WHITE);
-      if (heavy) {
-        // 圓角馬衣：蓋住馬身兩側到腿上半，下緣暗邊；頸甲
-        k.taper(0.21, 0.5, [-0.3, -0.105, 0.25, 0.105], [-0.27, -0.094, 0.22, 0.094], WHITE);
-        k.box(-0.305, 0.2, -0.108, 0.255, 0.235, 0.108, RIM, NY | PY);
-        k.rod([0.17, 0.42, 0], [0.27, 0.6, 0], 0.05, 0.058, WHITE);
-      } else {
-        // 馬鞍墊
-        k.taper(0.42, 0.5, [-0.13, -0.106, 0.07, 0.106], [-0.12, -0.098, 0.06, 0.098], WHITE);
-      }
-      const g = k.geometry();
-      if (heavy) g.scale(1.1, 1.04, 1.1);
-      return g;
-    }
-    case 'archer':
-      k.roundBase(0.2, 8);
-      break;
-    case 'light':
-      k.roundBase(0.17, 8);
-      break;
-    default:
-      // 方底：側面暗、頂面主色
-      k.box(-0.2, 0, -0.2, 0.2, BASE, 0.2, RIM, NY | PY);
-      k.plate(-0.2, -0.2, 0.2, 0.2, BASE, WHITE);
-      break;
-  }
-  switch (kind) {
-    case 'spear': {
-      // 肩甲（從上面看得到的兩塊）
-      const lx = pose === 'brace' ? 0.04 : 0;
-      for (const side of [-1, 1]) {
-        const z0 = side < 0 ? -0.135 : 0.07;
-        const z1 = side < 0 ? -0.07 : 0.135;
-        k.taper(SHOULDER - 0.045, SHOULDER + 0.018, [lx - 0.068, z0, lx + 0.068, z1], [lx - 0.05, z0 + 0.012, lx + 0.05, z1 - 0.012], WHITE, NY);
-      }
-      break;
-    }
-    case 'sword':
-      k.disc([0.135, 0.33, -0.12], 0.105, 0.022, 8, WHITE, RIM);
-      break;
-    case 'shield':
-      if (pose === 'wall') {
-        // 盾牆：加寬加高、略往後仰，左右幾乎相接
-        k.taper(0.04, 0.7, [0.18, -0.34, 0.215, 0.34], [0.155, -0.33, 0.19, 0.33], RIM, NY, WHITE);
-      } else {
-        k.taper(0.08, 0.6, [0.155, -0.2, 0.185, 0.1], [0.145, -0.2, 0.175, 0.1], RIM, NY, WHITE);
-      }
-      break;
-    default:
-      break;
-  }
-  return k.geometry();
+  const p = parts(kind, pose);
+  p.fig.dispose();
+  return p.team;
 }
 
 /** 一組幾何的三角形數 */
 export function triangles(g: THREE.BufferGeometry): number {
   return g.getAttribute('position').count / 3;
 }
-
