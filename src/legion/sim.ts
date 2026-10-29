@@ -988,7 +988,9 @@ export class LegionMatch {
     if (r !== null && q.dist < q.len) {
       const lag = isqrt((q.x - r.x) * (q.x - r.x) + (q.y - r.y) * (q.y - r.y)) - (r.halfD + RAM.front);
       if (lag <= RAM.slack && !this.ramStopped(q)) {
-        q.dist = Math.min(q.len, q.dist + RAM.speed);
+        // 車速不會快過推車那團在車所在地形的步行速度
+        const crewStep = idiv(this.baseSpeed(r) * terrainSpeed(this.terrainAt(q.x, q.y), r.kind), 100);
+        q.dist = Math.min(q.len, q.dist + Math.min(RAM.speed, crewStep));
         const p = this.trackAt(q, q.dist);
         q.x = p.x;
         q.y = p.y;

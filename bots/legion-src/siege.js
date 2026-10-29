@@ -235,7 +235,9 @@ export default class SiegeSparring extends LegionBase {
     const midY = ((z.y0 + z.y1) / 2) * TILE;
     const backX = (z.x0 + 3) * TILE;
     const frontX = (z.x1 - 3) * TILE;
-    const ram = m.ram || { x: frontX, y: midY };
+    // 衝車起點可能在布陣區外：推車團與護送先排在布陣區內最靠近衝車的位置，man 之後引擎會帶過去
+    const ram0 = m.ram || { x: frontX, y: midY };
+    const ram = { x: Math.max(backX, Math.min(frontX, ram0.x)), y: Math.max((z.y0 + 3) * TILE, Math.min((z.y1 - 3) * TILE, ram0.y)) };
     const fwd = this.attackDir;
     put('sword', 'crew', this.pt(this.go(ram.x, ram.y, (fwd + 180) % 360, 3000)), 0);
     put('shield', 'escort', this.pt(this.go(ram.x, ram.y, (fwd + 90) % 360, 4500)), 0);

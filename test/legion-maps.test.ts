@@ -41,8 +41,11 @@ describe('軍團戰 0.4：石關城', () => {
     expect([m.width, m.height, m.defender, m.symmetric]).toEqual([224, 140, 1, false]);
     expect(m.gates.map((g) => g.kind)).toEqual(['main', 'side']);
     expect(m.bombardFrom).toBe(180);
-    const [rx] = tileXY(m.ram!.x, m.ram!.y, m.width, m.height);
-    expect(rx).toBeLessThan(m.deploy[0].x1);
+    // 衝車起點在攻方布陣區外、營地前方的大道上（推車團下 man 後由引擎帶過去）
+    const [rx, ry] = tileXY(m.ram!.x, m.ram!.y, m.width, m.height);
+    expect(rx).toBeGreaterThanOrEqual(m.deploy[0].x1);
+    expect(tileAt(m, m.ram!.x, m.ram!.y)).toBe(T.Road);
+    expect(ry).toBeGreaterThan(0);
     // 旗：A 在正門內的廣場（旗圈不跨城牆：圈內每一格都在郭城西牆以東）、B 在子城院落
     expect(tileAt(m, m.flags[0].x, m.flags[0].y)).toBe(T.Paved);
     const R = 5000;
