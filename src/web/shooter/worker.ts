@@ -44,7 +44,7 @@ function begin(s: ShooterSetup): void {
   const controllers: ShooterController[] = Array.from({ length: PLAYER_COUNT }, (_, pid) =>
     human !== null && pid === playerId ? human : new ShooterBatchController(practice, 'shooter-practice.js', s.seed, pid, map),
   );
-  driver = new ShooterDriver({ seed: s.seed, mapId: map.id, controllers, record: true });
+  driver = new ShooterDriver({ seed: s.seed, mapId: map.id, controllers, record: true, defaultLoadout: s.loadout !== undefined ? { T: s.loadout, CT: s.loadout } : undefined });
   viewId = playerId;
   paused = false;
   speed = 1;

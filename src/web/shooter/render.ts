@@ -32,6 +32,10 @@ const FOG = 'rgba(30, 34, 42, 0.32)';
 export const TRACER_MS = 140;
 export const HIT_MS = 260;
 export const HURT_MS = 900;
+/** 開鏡鏡頭：縮放倍率、往滑鼠方向的偏移係數（要 < 1 才不會把自己推出畫面）、過渡時間 */
+const SCOPE_ZOOM = 0.55;
+const SCOPE_LEAD = 0.8;
+const SCOPE_BLEND_MS = 180;
 /** 自己身邊一點點不壓暗（只是讓自己的圖示不被蓋住；不代表看得見背後） */
 const SELF_REVEAL = 0.7;
 export const SOUND_MS = 500;
@@ -199,6 +203,9 @@ export class ShooterRenderer {
   private readonly fog: HTMLCanvasElement;
   private readonly fctx: CanvasRenderingContext2D;
   camera: Camera = { cx: 0, cy: 0, scale: 0.02, w: 1, h: 1 };
+  /** 開鏡鏡頭的過渡進度 0～1 */
+  private scopeBlend = 0;
+  private lastDraw = 0;
 
   constructor(canvas: HTMLCanvasElement, meta: ShooterMeta) {
     this.canvas = canvas;
@@ -312,11 +319,18 @@ export class ShooterRenderer {
     const prev = d.prev?.view;
     const meNow = interp(view.me, prev !== undefined && prev.me.id === view.me.id ? [prev.me] : undefined, d.alpha);
     const full = d.cur.full;
-    // 鏡頭：跟隨所看的選手，往滑鼠方向偏（玩家模式；開鏡偏更多，看得到遠處）。
-    // 縮放：倍率 1 時短邊的一半是 24 格，滑鼠往前推一點就看得到整個 30 格視野
-    const scale = ((Math.min(w, h) / 2 / 24) * d.zoom) / UNIT;
+    // 鏡頭：跟隨所看的選手，往滑鼠方向偏（玩家模式）。
+    // 縮放：倍率 1 時短邊的一半是 24 格，滑鼠往前推一點就看得到整個 30 格視野。
+    // 開鏡：拉遠到 0.55 倍、往滑鼠方向多偏一點（偏移係數 < 1，自己永遠留在畫面內），約 0.18 秒平滑過渡，不會一下跳開
     const mine = !this.meta.spectate && view.me.id === this.meta.playerId;
-    const lead = mine ? (view.me.scoped ? 1.6 : 0.5) : 0;
+    const dt = this.lastDraw === 0 ? 0 : Math.min(100, d.now - this.lastDraw);
+    this.lastDraw = d.now;
+    const target = mine && view.me.alive && view.me.scoped ? 1 : 0;
+    const step = dt / SCOPE_BLEND_MS;
+    this.scopeBlend = target > this.scopeBlend ? Math.min(target, this.scopeBlend + step) : Math.max(target, this.scopeBlend - step);
+    const b = this.scopeBlend * this.scopeBlend * (3 - 2 * this.scopeBlend);
+    const scale = ((Math.min(w, h) / 2 / 24) * d.zoom * lerp(1, SCOPE_ZOOM, b)) / UNIT;
+    const lead = mine ? lerp(0.5, SCOPE_LEAD, b) : 0;
     const cx = meNow.x + ((d.mouse.x - w / 2) * lead) / scale;
     const cy = meNow.y + ((d.mouse.y - h / 2) * lead) / scale;
     const cam: Camera = { cx, cy, scale, w, h };
