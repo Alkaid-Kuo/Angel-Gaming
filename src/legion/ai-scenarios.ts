@@ -1239,6 +1239,220 @@ export const AI_SCENARIOS: readonly AiScenario[] = [
       return { pass: left >= 40, detail: `弓兵剩 ${left}%、我方剩 ${groupPct(c.A)}%、敵方剩 ${groupPct(c.B)}%` };
     },
   },
+  {
+    id: 'S38',
+    name: '窄口前先探',
+    skill: 'M1、M6',
+    pending: true,
+    mode: 'siege',
+    abs: true,
+    seats: [0],
+    expect: '石關城攻方：甕城（西橋過去、正門外的轉角）裡藏著守方一團重騎兵與一團劍士（甕城南半部，從城外看不到），甕城北牆頂有一團弓兵。我方要往正門走就得經過甕城口。90 秒內：要有輕單位先進甕城（x 96～110、y 60～78）或看到藏兵，而且在任何主力（劍、槍、盾、弓）進甕城之前；主力不能吃到伏兵的衝鋒。伏兵：有我方軍團進到甕城或它 8 格內就衝',
+    bot: [
+      { type: 'light', x: 86, y: 62.5 },
+      { type: 'sword', x: 82, y: 58 },
+      { type: 'sword', x: 82, y: 67 },
+      { type: 'spear', x: 78, y: 62.5, formation: 'square' },
+    ],
+    foe: [
+      { type: 'heavyCav', x: 104, y: 74, formation: 'wedge', facing: 270 },
+      { type: 'sword', x: 107, y: 73, facing: 270 },
+      { type: 'archer', x: 104, y: 59, layer: 1, facing: 180 },
+    ],
+    ticks: 900,
+    script: (c, t) => {
+      const [cav, sw, ar] = c.B;
+      if (t === 0) return [{ type: 'hold', id: cav.id }, { type: 'hold', id: sw.id }, { type: 'hold', id: ar.id }];
+      if (c.mem.sprung !== undefined || gone(cav)) return [];
+      const inside = (r: Regiment): boolean => {
+        const [x, y] = pos(c, r);
+        return x >= 96 && x <= 110 && y >= 60 && y <= 78;
+      };
+      const prey = c.A.find((r) => !gone(r) && r.layer === 0 && (inside(r) || tilesBetween(r, cav) <= 8));
+      if (prey === undefined) return [];
+      c.mem.sprung = t;
+      return [chargeAt(cav, prey), strike(c, sw, prey)];
+    },
+    watch: (c) => {
+      const inside = (r: Regiment): boolean => {
+        const [x, y] = pos(c, r);
+        return !gone(r) && r.layer === 0 && x >= 96 && x <= 110 && y >= 60 && y <= 78;
+      };
+      once(c, 'scout', c.m.visible[c.me][c.B[0].id] === 1 || c.A.some((r) => !mainBody(r) && inside(r)));
+      once(c, 'main', c.A.some((r) => mainBody(r) && inside(r)));
+    },
+    judge: (c) => {
+      const { scout, main } = c.mem;
+      const hit = impacts(c, 1).filter((e) => e.kind === 'charge' && mainBody(c.m.regiments[e.target])).length;
+      const ok = scout !== undefined && (main === undefined || scout < main) && hit === 0;
+      return { pass: ok, detail: `${scout === undefined ? '沒探甕城' : `${sec(scout)}探到甕城`}、${main === undefined ? '主力沒進甕城' : `${sec(main)}主力進甕城`}、主力吃到衝鋒 ${hit} 次` };
+    },
+  },
+  {
+    id: 'S39',
+    name: '追擊不進未確認窄口',
+    skill: 'M5、M6',
+    pending: true,
+    mapId: 'grand-valley',
+    abs: true,
+    expect: '大河谷殲滅戰：敵方一團輕步兵在北橋西端，開打就往東過橋退進東岸樹林（中心約 152, 16）；樹林裡藏著敵方重騎兵與長槍。我方兩團劍士、一團輕騎在北橋西岸。90 秒內我方不吃到伏兵的衝鋒，而且總損失 ≤ 15%（追擊組停在橋口外）。伏兵：有我方軍團進到重騎兵 10 格內就衝',
+    bot: [
+      { type: 'sword', x: 114, y: 24 },
+      { type: 'sword', x: 114, y: 31 },
+      { type: 'lightCav', x: 109, y: 28, formation: 'wedge' },
+    ],
+    foe: [
+      { type: 'light', x: 121, y: 27.5 },
+      { type: 'heavyCav', x: 150, y: 15, formation: 'wedge' },
+      { type: 'spear', x: 153, y: 19 },
+    ],
+    ticks: 900,
+    script: (c, t) => {
+      const [bait, cav, sp] = c.B;
+      if (t === 0) return [{ type: 'move', id: bait.id, ...c.at(152, 12) }, { type: 'hold', id: cav.id }, { type: 'hold', id: sp.id }];
+      if (c.mem.sprung !== undefined || gone(cav)) return [];
+      const prey = nearest(cav, c.A);
+      if (prey === null || tilesBetween(cav, prey) > 10) return [];
+      c.mem.sprung = t;
+      return [chargeAt(cav, prey), strike(c, sp, prey)];
+    },
+    judge: (c) => {
+      const hit = impacts(c, 1).filter((e) => e.kind === 'charge').length;
+      const lost = 100 - groupPct(c.A);
+      return { pass: hit === 0 && lost <= 15, detail: `${c.mem.sprung === undefined ? '伏兵沒出動' : `${sec(c.mem.sprung)}伏兵出動`}、吃到衝鋒 ${hit} 次、我方損失 ${lost}%、誘餌剩 ${pct(c.B[0])}%` };
+    },
+  },
+  {
+    id: 'S40',
+    name: '留兵防繞後',
+    skill: 'M7',
+    pending: true,
+    expect: '我方兩團劍士在前、兩團弓兵居中、兩團長槍在後；敵方兩團劍士 10 秒後上來纏住我方劍士（引我方前推），敵方一團重騎兵一開始在北側視野外，15 秒起從北邊繞到我方背後、36 秒起追著我方弓兵衝（衝鋒就緒、弓兵在 14 格內就衝，不然繞到弓兵背後 8 格）。要有長槍留在弓兵後方架槍：重騎兵的衝鋒被槍林擋下，或撞擊合計殺不到 6 人，而且 60 秒後弓兵剩 60% 以上（重騎兵還沒衝就被打掉一半以上也算擋下）',
+    bot: [
+      { type: 'archer', x: -8, y: -3 },
+      { type: 'archer', x: -8, y: 3 },
+      { type: 'sword', x: -2, y: -5 },
+      { type: 'sword', x: -2, y: 5 },
+      { type: 'spear', x: -6, y: 0, formation: 'square' },
+      { type: 'spear', x: -12, y: 0, formation: 'square' },
+    ],
+    foe: [
+      { type: 'sword', x: 12, y: -4 },
+      { type: 'sword', x: 12, y: 4 },
+      { type: 'heavyCav', x: 4, y: -22, formation: 'wedge', facing: 180 },
+    ],
+    ticks: 600,
+    script: (c, t) => {
+      const [s1, s2, cav] = c.B;
+      if (t === 0) return [{ type: 'hold', id: s1.id }, { type: 'hold', id: s2.id }, { type: 'hold', id: cav.id }];
+      if (t === 100) return [strike(c, s1, c.A[2]), strike(c, s2, c.A[3])];
+      if (gone(cav)) return [];
+      if (t === 150) return [{ type: 'move', id: cav.id, ...c.at(-22, -16) }];
+      if (t === 280) return [{ type: 'move', id: cav.id, ...c.at(-26, -2) }];
+      // 36 秒起追著我方弓兵：衝鋒就緒、弓兵在 14 格內就衝，否則繞到弓兵背後 8 格
+      if (t < 360 || t % 10 !== 0 || cav.dash !== null) return [];
+      const tgt = nearest(cav, c.A.slice(0, 2));
+      if (tgt === null) return [];
+      if (cav.skillReadyAt <= c.m.tick && tilesBetween(cav, tgt) <= 14) return [chargeAt(cav, tgt)];
+      return t % 30 === 0 ? [{ type: 'move', id: cav.id, ...c.near(tgt, -8, 0) }] : [];
+    },
+    judge: (c) => {
+      const hits = impacts(c, 1).filter((e) => e.reg === c.B[2].id && e.kind === 'charge');
+      const kills = hits.reduce((s, e) => s + e.kills, 0);
+      const stopped = hits.some((e) => e.braced);
+      const arch = groupPct(c.A.slice(0, 2));
+      // 重騎兵沒衝成（還沒衝就被打掉一半以上）也算擋下；沒衝又沒被打 = 情境沒發生
+      const cav = pct(c.B[2]);
+      const happened = hits.length > 0 || cav <= 50;
+      return { pass: happened && (stopped || kills < 6) && arch >= 60, detail: `敵重騎衝鋒 ${hits.length} 次、殺 ${kills} 人${stopped ? '、被槍林擋下' : ''}、敵重騎剩 ${cav}%、弓兵剩 ${arch}%` };
+    },
+  },
+  {
+    id: 'S41',
+    name: '護衛衝車到門',
+    skill: 'M9、M7',
+    pending: true,
+    mode: 'siege',
+    abs: true,
+    seats: [0],
+    expect: '石關城攻方：我方四團（兩劍、盾、槍）在衝車起點（46, 61.5）旁；守方兩團劍士在正門內側，衝車走完四分之三軌道時開門出擊、打推車的團，打 25 秒或剩一半就退回關門；甕城北牆頂一團弓兵。200 秒內衝車至少撞門一下（要有團推車、護衛擋住出擊）',
+    bot: [
+      { type: 'sword', x: 48, y: 58 },
+      { type: 'sword', x: 48, y: 65 },
+      { type: 'shield', x: 42, y: 61.5 },
+      { type: 'spear', x: 40, y: 67, formation: 'square' },
+    ],
+    foe: [
+      { type: 'sword', x: 118, y: 66 },
+      { type: 'sword', x: 118, y: 73 },
+      { type: 'archer', x: 104, y: 59, layer: 1 },
+    ],
+    ticks: 2000,
+    script: (c, t) => {
+      const [s1, s2, ar] = c.B;
+      const ram = c.m.ram;
+      if (t === 0) return [{ type: 'hold', id: s1.id }, { type: 'hold', id: s2.id }, { type: 'hold', id: ar.id }];
+      if (ram === null || t % 10 !== 0) return [];
+      const sally = c.B.slice(0, 2).filter((r) => !gone(r));
+      if (c.mem.sally === undefined) {
+        if (ram.dist < (ram.len * 3) / 4) return [];
+        c.mem.sally = t;
+        return [{ type: 'gate', gate: 0, action: 'open' }];
+      }
+      if (c.mem.back === undefined) {
+        if (t - c.mem.sally >= 250 || groupPct(c.B.slice(0, 2)) <= 50) {
+          c.mem.back = t;
+          return sally.map((r) => ({ type: 'move', id: r.id, ...c.at(118, 69.5) }));
+        }
+        if (t % 20 !== 0) return [];
+        const crew = ram.crew >= 0 ? c.m.regiments[ram.crew] : null;
+        return sally.flatMap((r) => {
+          const tgt = crew !== null && !gone(crew) ? crew : nearest(r, c.A);
+          return tgt !== null && r.target !== tgt.id ? [strike(c, r, tgt)] : [];
+        });
+      }
+      if (c.mem.closed === undefined && sally.every((r) => pos(c, r)[0] >= 114.5)) {
+        c.mem.closed = t;
+        return [{ type: 'gate', gate: 0, action: 'close' }];
+      }
+      return [];
+    },
+    judge: (c) => {
+      const hits = c.events.filter((e) => e.type === 'ramHit').length;
+      const ram = c.m.ram;
+      const prog = ram === null ? 0 : Math.round((ram.dist * 100) / ram.len);
+      return { pass: hits >= 1, detail: `衝車走了 ${prog}%、撞門 ${hits} 下、${c.mem.sally === undefined ? '守方沒出擊' : `${sec(c.mem.sally)}守方出擊`}、我方剩 ${groupPct(c.A)}%` };
+    },
+  },
+  {
+    id: 'S42',
+    name: '砲擊落點散開',
+    skill: 'M10',
+    pending: true,
+    mode: 'siege',
+    abs: true,
+    seats: [1],
+    expect: '石關城守方：我方兩團弓兵在西牆北段牆頂；攻方 5 秒時砲擊第一團弓兵所在處、65 秒時砲擊第二團（落點選牆頂最西一格，避開陰影），落地前 5 秒雙方都看得到落點。兩發都要落地，而且每發打到的人 ≤ 4（5 秒內離開半徑 3 格）',
+    bot: [
+      { type: 'archer', x: 111.5, y: 40, layer: 1 },
+      { type: 'archer', x: 111.5, y: 51, layer: 1 },
+    ],
+    foe: [{ type: 'light', x: 70, y: 62 }],
+    ticks: 750,
+    script: (c, t) => {
+      if (t === 0) return [{ type: 'hold', id: c.B[0].id }];
+      const tgt = t === 50 ? c.A[0] : t === 650 ? c.A[1] : null;
+      if (tgt === null || gone(tgt)) return [];
+      // 牆頂的弓兵：落點在牆頂最西一格（再往西就不是牆，不在陰影裡）
+      let x = tgt.x;
+      while (c.m.bombardShadowed(x, tgt.y) && x > 0) x -= 500;
+      return [{ type: 'bombard', x, y: tgt.y }];
+    },
+    judge: (c) => {
+      const landed = c.events.filter((e): e is Extract<LegionEvent, { type: 'bombard' }> => e.type === 'bombard' && e.state === 'landed');
+      return { pass: landed.length >= 2 && landed.every((e) => e.hit <= 4), detail: landed.length === 0 ? '砲擊沒落地（情境沒發生）' : `落地 ${landed.length} 發、打到 ${landed.map((e) => e.hit).join('／')} 人、弓兵剩 ${groupPct(c.A)}%` };
+    },
+  },
 ];
 
 /** 情境中心（格）：主戰區 24 × 8 格內全是同高度的平地，而且每一團的位置也都是同高度的平地 */
