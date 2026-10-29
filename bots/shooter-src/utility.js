@@ -1,7 +1,7 @@
 // @ts-check
 // 道具（戰術層的一部分）：戰術層每次決策提出「想丟什麼到哪裡」，這裡負責算彈道、轉向、丟出去。
-// 彈道只用地圖資料：道具直線飛、碰牆反彈（只看牆，矮牆飛得過去），力道 = 距離 ／ 最遠投擲距離；
-// 只丟直線碰不到牆的（落點與目標差 1 格內），丟不到就不丟（由戰術層換位置或放棄）。
+// 彈道只用地圖資料與規則：照引擎的飛法模擬（每 tick 走 flySpeed、先 x 後 y、碰牆反彈，只看牆，矮牆飛得過去），力道 = 距離 ／ 最遠投擲距離；
+// 只丟一路碰不到牆的（落點與目標差 1.2 格內），丟不到就不丟（由戰術層換位置或放棄）。
 // 閃光：丟之前檢查隊友（爆點附近 P.flashMateClear 格內有看得到爆點的隊友就不丟），丟了就喊「E:flash x y 爆炸 tick」，
 // 自己轉身背對爆點到爆完；隊友收到後看得到爆點的也轉身（戰術層處理）。
 import { P, UNIT, adiff, angleTo, cosd, dist, sind } from './base.js';
@@ -18,6 +18,7 @@ export class Utility {
     this.rules = data.rules;
     this.tps = data.rules.ticksPerSecond;
     this.range = data.rules.grenadeRules.maxThrowRange * UNIT;
+    this.speed = data.rules.grenadeRules.flySpeed;
     /** @type {Map<string, number>} */
     this.fuse = new Map(data.grenades.map((n) => [n.id, n.fuseTicks]));
     this.flashR = (data.grenades.find((n) => n.id === 'flash')?.radius ?? 15 * UNIT);
@@ -49,7 +50,8 @@ export class Utility {
   }
 
   /**
-   * 直線丟得到：路上沒有牆（道具半徑 0.1 格加裕度），回傳整數方向與力道與落點；丟不到回傳 null
+   * 丟得到：照引擎的飛法（每 tick 走 flySpeed、先 x 後 y、碰牆反彈）模擬，路上完全不碰牆、落點離目標 1.2 格內才算；
+   * 回傳整數方向、力道與落點，丟不到回傳 null
    * @param {number} ax @param {number} ay @param {number} bx @param {number} by
    */
   solve(ax, ay, bx, by) {
@@ -57,30 +59,44 @@ export class Utility {
     if (d < 2 * UNIT || d > this.range) return null;
     const deg = angleTo(ax, ay, bx, by);
     const power = Math.max(1, Math.min(100, Math.round((d / this.range) * 100)));
-    const len = (power * this.range) / 100;
-    const lx = ax + cosd(deg) * len;
-    const ly = ay + sind(deg) * len;
-    if (dist(lx, ly, bx, by) > 1.2 * UNIT || !this.clear(ax, ay, lx, ly)) return null;
-    return { deg, power, x: lx, y: ly };
+    const land = this.fly(ax, ay, deg, power);
+    if (land === null || dist(land.x, land.y, bx, by) > 1.2 * UNIT) return null;
+    return { deg, power, x: land.x, y: land.y };
   }
 
-  /** @param {number} ax @param {number} ay @param {number} bx @param {number} by */
-  clear(ax, ay, bx, by) {
+  /** 模擬飛行；碰到牆回傳 null @param {number} ax @param {number} ay @param {number} deg @param {number} power */
+  fly(ax, ay, deg, power) {
+    const dx = Math.round(cosd(deg) * 10000);
+    const dy = Math.round(sind(deg) * 10000);
+    let x = ax;
+    let y = ay;
+    let left = Math.floor((power * this.range) / 100);
+    for (let k = 0; k < 400 && left > 0; k++) {
+      const step = Math.min(this.speed, left);
+      const wx = Math.trunc((dx * step) / 10000);
+      const wy = Math.trunc((dy * step) / 10000);
+      if (this.hits(x + wx, y)) return null;
+      x += wx;
+      if (this.hits(x, y + wy)) return null;
+      y += wy;
+      left -= step;
+    }
+    return { x, y };
+  }
+
+  /** 半徑 0.12 格的圓碰到牆 @param {number} x @param {number} y */
+  hits(x, y) {
     const g = this.g;
-    const len = dist(ax, ay, bx, by);
-    if (len < 1) return true;
-    const px = (-(by - ay) / len) * 180;
-    const py = ((bx - ax) / len) * 180;
-    const steps = Math.ceil(len / 200);
-    for (let k = 1; k <= steps; k++) {
-      const x = ax + ((bx - ax) * k) / steps;
-      const y = ay + ((by - ay) * k) / steps;
-      for (const o of [0, 1, -1]) {
-        const i = g.cellOf(x + px * o, y + py * o);
-        if (i < 0 || g.wall[i] === 1) return false;
+    const r = 120;
+    for (let cy = Math.floor((y - r) / UNIT); cy <= Math.floor((y + r) / UNIT); cy++) {
+      for (let cx = Math.floor((x - r) / UNIT); cx <= Math.floor((x + r) / UNIT); cx++) {
+        if (!g.isWall(cx, cy)) continue;
+        const nx = Math.max(cx * UNIT, Math.min(x, cx * UNIT + UNIT));
+        const ny = Math.max(cy * UNIT, Math.min(y, cy * UNIT + UNIT));
+        if ((nx - x) * (nx - x) + (ny - y) * (ny - y) <= r * r) return true;
       }
     }
-    return true;
+    return false;
   }
 
   /**
