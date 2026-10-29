@@ -2,6 +2,7 @@
 // 招牌技能與衝刺畫在地面層：槍林扇形、盾兵擋箭範圍與盾牆、齊射落點圈、衝刺的預定路線與走過的弧線。
 import type { RegimentStatus } from '../../legion/api.ts';
 import { DASH, FORMATION_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, UNITS, stopsCavalry, walkable, type DashKind, type UnitKind } from '../../legion/config.ts';
+import type { LadderSpot } from '../../legion/ladderSpots.ts';
 import { hashInts } from '../../shared/hash.ts';
 import { drawUnitIcon } from './icons.ts';
 import { ATTACKED_BIT, DOWN_BIT, LAYER_SHIFT, REG_MASK, type LegionFrame, type LegionMeta, type RegFrame } from './protocol.ts';
@@ -31,6 +32,8 @@ export interface DrawOptions {
   readonly order?: { from: { x: number; y: number }; to: { x: number; y: number } } | null;
   /** 按住技能鍵瞄準中：選取的團與滑鼠位置（世界座標） */
   readonly aim?: { ids: readonly number[]; to: { x: number; y: number } } | null;
+  /** 按住 L 架梯瞄準中：附近牆格能不能架、吸附到的牆格、滑鼠指的那格不能架的原因（2D 只標牆格） */
+  readonly ladder?: { spots: readonly LadderSpot[]; snap: LadderSpot | null; why: string; at: { x: number; y: number } | null } | null;
 }
 
 interface Effect {
@@ -601,6 +604,22 @@ export class LegionRenderer {
     this.drawEffects(now);
     this.drawOrders(opt);
     if (opt.aim) this.drawAim(opt.aim, alpha);
+    if (opt.ladder) this.drawLadderAim(opt.ladder);
+  }
+
+  /** 架梯瞄準（測試用的簡版）：能架的牆格綠框、不能架的紅框，吸附到的那格實心 */
+  private drawLadderAim(l: NonNullable<DrawOptions['ladder']>): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    for (const q of l.spots) {
+      const x = this.sx(q.tx * TILE);
+      const y = this.sy(q.ty * TILE);
+      ctx.fillStyle = q === l.snap ? 'rgba(74,222,128,0.7)' : q.ok ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)';
+      ctx.fillRect(x, y, s, s);
+      ctx.strokeStyle = q.ok ? '#4ade80' : '#f87171';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1);
+    }
   }
 
   /** 拉近時的格線（測試用）：每格一條細線、每 10 格一條粗線並標出格座標 */

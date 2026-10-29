@@ -1,6 +1,8 @@
 // 即時 3D 觀戰：吃和 2D 觀戰同一份 worker 狀態流（LegionFrame），畫成 3D 沙盤；對外介面和 2D 的 LegionRenderer 一樣（BattleView），
 // 觀戰畫面換一個繪製器就能用。世界層（地形、城池、士兵、托盤與地面範圍）用 Three.js；資訊層（軍團旗標、特效文字、倒數）畫在疊在上面的 2D 畫布。
-// 鏡頭沿用 2D 的 cam（中心、每格像素）：拉遠是 66° 的高空俯視、拉近慢慢壓低到 32°；拉近後可以水平轉一整圈（右鍵拖曳或 [ ]），拉遠慢慢轉回北朝上。
+// 鏡頭沿用 2D 的 cam（中心、每格像素）：拉遠是 66° 的高空俯視、拉近慢慢壓低到 32°；任何縮放都能水平轉一整圈（右鍵拖曳、Alt＋左鍵拖曳或 [ ]）。
+// 找得到人：擋在鏡頭與焦點（和選取的團）之間的建物、樹冠抖動挖淡（seeThrough.ts），被擋住的士兵畫透牆輪廓（units.ts）；
+// 人數 ≤ 3 的殘兵團在畫面內加脈動圈、在畫面外由邊緣的箭頭指出來，點旗標或箭頭就把鏡頭帶過去。
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -8,16 +10,18 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { DASH, FORMATION_NAMES, RULES, T, TERRAIN_NAMES, TILE, TPS, UNITS, stopsCavalry, walkable, type UnitKind } from '../../../legion/config.ts';
-import { MAPS, type LegionMap } from '../../../legion/map.ts';
+import { mapFeatures, type LegionMap } from '../../../legion/map.ts';
 import { drawUnitIcon } from '../icons.ts';
 import type { RamInfo } from '../../../legion/api.ts';
 import { DOWN_BIT, LAYER_SHIFT, REG_MASK, type LegionFrame, type LegionMeta, type RegFrame } from '../protocol.ts';
 import { DASH_COLOR, DASH_NAME, TAG, TEAM, TEAM_LIGHT, type Camera, type DrawOptions } from '../render.ts';
+import { mapByName } from '../maps.ts';
 import type { BattleView } from '../view.ts';
 import { City } from './city.ts';
 import { Ground } from './ground.ts';
 import { Nature } from './nature.ts';
 import { PAL } from './palette.ts';
+import { SeeThrough, type Hole } from './seeThrough.ts';
 import { Siege } from './siege.ts';
 import { Arrows, GroundDecals, Soldiers, type Pose } from './units.ts';
 
@@ -70,14 +74,8 @@ const TILT_SHADER = {
   ].join('\n'),
 };
 
-/** 依地圖名稱找回地圖（meta 只有名稱；城門洞、建物外觀要從地圖資料拿） */
-function mapByName(name: string): LegionMap {
-  for (const id of Object.keys(MAPS)) {
-    const m = MAPS[id]();
-    if (m.name === name) return m;
-  }
-  throw new Error(`找不到地圖：${name}`);
-}
+/** 殘兵：人數這麼少以下的團加脈動圈、畫面外的由邊緣箭頭指出 */
+const STRAGGLER_MEN = 3;
 
 export class Legion3DView implements BattleView {
   readonly canvas: HTMLCanvasElement;
@@ -104,6 +102,9 @@ export class Legion3DView implements BattleView {
   private readonly city: City;
   private readonly nature: Nature;
   private readonly siege: Siege;
+  private readonly seeThrough = new SeeThrough();
+  /** 衝車的固定軌道（格；引擎的 mapFeatures 有 ramTrack 才有） */
+  private readonly ramTrack: { x: number; z: number }[];
   private readonly soldiers: Soldiers;
   private readonly fallen: Soldiers;
   private readonly arrows = new Arrows(800);
@@ -123,8 +124,11 @@ export class Legion3DView implements BattleView {
   /** 每團士兵多數所在的層（托盤畫在牆頂還是地面） */
   private regLayer = new Map<number, number>();
   private regTop = new Map<number, number>();
-  /** 瞄準預覽的文字（地面標示畫完後由資訊層畫） */
-  private aimText: { x: number; z: number; text: string; color: string }[] = [];
+  /** 瞄準預覽的文字（地面標示畫完後由資訊層畫）；y 給了就畫在那個高度 */
+  private aimText: { x: number; z: number; y?: number; text: string; color: string }[] = [];
+  /** 上一格畫的旗標與殘兵箭頭的範圍（畫面像素）：點到就選取並把鏡頭帶過去 */
+  private bannerHits: { id: number; x0: number; y0: number; x1: number; y1: number }[] = [];
+  private arrowHits: { id: number; x: number; y: number; r: number }[] = [];
   /** 使用者轉的水平角與俯角微調 */
   private yaw = 0;
   private tilt = 0;
@@ -171,11 +175,16 @@ export class Legion3DView implements BattleView {
     this.city = new City(this.map, this.ground, meta.players.map((p) => p.color));
     this.nature = new Nature(this.map, this.ground);
     this.siege = new Siege(this.city, this.ground, meta.mode === 'capture' || meta.mode === 'siege' ? meta.flags : [], this.map.ram !== undefined);
+    this.city.seeThrough(this.seeThrough);
+    this.nature.seeThrough(this.seeThrough);
+    // 衝車軌道：引擎那邊加了 ramTrack 才有（單位座標折線，起點營地、終點正門外）
+    const track = (mapFeatures(this.map) as { readonly ramTrack?: readonly { readonly x: number; readonly y: number }[] }).ramTrack;
+    this.ramTrack = Array.isArray(track) ? track.map((p) => ({ x: p.x / TILE, z: p.y / TILE })) : [];
     this.scene.add(this.ground.group, this.city.group, this.nature.group, this.siege.group);
     this.buildDeploy();
     const cap: Partial<Record<UnitKind, number>> = {};
     for (const r of meta.regs) cap[r.kind] = (cap[r.kind] ?? 0) + r.men0;
-    this.soldiers = new Soldiers(cap);
+    this.soldiers = new Soldiers(cap, true);
     this.fallen = new Soldiers(cap);
     this.scene.add(this.soldiers.group, this.fallen.group, this.arrows.mesh, this.decals.mesh, this.deploy.mesh);
     // 戰爭迷霧：和地形同一份幾何（UV 一樣），畫布每格 2 像素
@@ -187,7 +196,8 @@ export class Legion3DView implements BattleView {
     this.fog.visible = false;
     this.scene.add(this.fog);
     // 後製：場景 → 環境遮蔽 → 移軸（左右、上下）→ 色調映射
-    this.composer = new EffectComposer(this.renderer);
+    // 畫面緩衝要帶模板（透牆輪廓靠模板避開看得到的士兵）
+    this.composer = new EffectComposer(this.renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, stencilBuffer: true }));
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.ao = new GTAOPass(this.scene, this.camera, 512, 512);
     this.ao.blendIntensity = 0.55;
@@ -321,6 +331,10 @@ export class Legion3DView implements BattleView {
   }
 
   // ───────── 鏡頭 ─────────
+
+  get heading(): number {
+    return wrapYaw(this.yaw);
+  }
 
   get fitScale(): number {
     return Math.min(this.canvas.clientWidth / this.meta.width, this.canvas.clientHeight / (this.meta.height * 0.92)) * 0.88;
@@ -514,6 +528,11 @@ export class Legion3DView implements BattleView {
 
   pick(px: number, py: number, viewer: number, alpha: number): number {
     if (this.cur === null) return -1;
+    // 指著旗標也算（後畫的在上面）
+    for (let i = this.bannerHits.length - 1; i >= 0; i--) {
+      const b = this.bannerHits[i];
+      if (px >= b.x0 && px <= b.x1 && py >= b.y0 && py <= b.y1 && this.shown(b.id, viewer)) return b.id;
+    }
     this.updateCamera();
     let best = -1;
     let bestD = Infinity;
@@ -532,6 +551,15 @@ export class Legion3DView implements BattleView {
       }
     }
     return best;
+  }
+
+  bannerAt(px: number, py: number): number {
+    for (const a of this.arrowHits) if (Math.hypot(px - a.x, py - a.y) <= a.r) return a.id;
+    for (let i = this.bannerHits.length - 1; i >= 0; i--) {
+      const b = this.bannerHits[i];
+      if (px >= b.x0 && px <= b.x1 && py >= b.y0 && py <= b.y1) return b.id;
+    }
+    return -1;
   }
 
   /** 該處的高度：牆頂層站在牆頂、爬梯中沿梯子、地面層在馬道上沿石階 */
@@ -588,6 +616,7 @@ export class Legion3DView implements BattleView {
       this.siege.update(f.structures, f.flags.map((q) => q.owner), this.team, now, f.tick, this.ramAt(alpha));
     }
     this.decals.end();
+    this.updateHoles(alpha, opt);
     this.ground.update(now);
     // 移軸：全圖不模糊，拉近越多帶子外越糊
     const blur = Math.max(0, (this.zoomT() - 0.35) / 0.65) * 2.4;
@@ -606,9 +635,41 @@ export class Legion3DView implements BattleView {
     if (f === null) return;
     this.drawStructureLabels(f);
     this.drawFlagLabels(f, now);
+    this.drawStragglers(alpha, opt, now);
     this.drawBanners(alpha, opt);
     this.drawEffects(now);
     this.drawOrders(opt);
+  }
+
+  /**
+   * 視線挖洞（seeThrough.ts）：鏡頭焦點、選取的團各一個洞——畫面上一圈、比目標離鏡頭近的建物與樹冠挖淡到約三成。
+   * 拉遠（高空俯視、牆不太擋）不挖；焦點落在牆、屋、馬道上、選取的團在牆頂時不挖（不然腳下的牆會被挖掉）。
+   */
+  private updateHoles(alpha: number, opt: DrawOptions): void {
+    const holes: Hole[] = [];
+    const inv = this.camera.matrixWorldInverse;
+    const sc = this.cam.scale;
+    const add = (x: number, y: number, z: number, rWorld: number): void => {
+      const depth = -this.v.set(x, y, z).applyMatrix4(inv).z;
+      const p = this.screenOf(x, z, y);
+      if (p === null) return;
+      holes.push({ x: p[0], y: p[1], r: Math.max(40, Math.min(340, rWorld * sc)), depth: depth - 0.5 });
+    };
+    const t = this.terrainAt(this.cam.x * TILE, this.cam.y * TILE);
+    if (t !== T.Wall && t !== T.Gatehouse && t !== T.Stair && t !== T.Building) add(this.cam.x, this.targetY + 0.4, this.cam.y, 3.2);
+    const ids = opt.selection && opt.selection.size > 0 ? [...opt.selection] : opt.selected >= 0 ? [opt.selected] : [];
+    for (const id of ids) {
+      const r = this.regById.get(id);
+      const p = this.regAt(id, alpha);
+      const layer = this.regLayer.get(id) ?? 0;
+      if (r === undefined || p === null || layer === 1 || !this.shown(id, opt.viewer)) continue;
+      const x = p.x / TILE;
+      const z = p.y / TILE;
+      add(x, this.heightAt(x, z, layer) + 0.5, z, r.rad / TILE + 1.4);
+    }
+    const fade = 0.7 * Math.max(0, Math.min(1, (this.zoomT() - 0.12) / 0.2));
+    const pr = this.renderer.getPixelRatio();
+    this.seeThrough.set(holes, pr, Math.floor(this.canvas.clientHeight * pr), fade);
   }
 
   /** 兩幀之間插值的衝車位置與朝向（引擎每 tick 才動一次，不插值會一頓一頓的） */
@@ -882,6 +943,16 @@ export class Legion3DView implements BattleView {
     const white = new THREE.Color(0xe2e8f0);
     const gold = new THREE.Color(0xfbbf24);
     const red = new THREE.Color(0xf87171);
+    this.aimText = [];
+    // 衝車軌道：攻方顏色偏淡的虛線，貼地（被建物擋住）
+    if (this.ramTrack.length > 1) {
+      const c = new THREE.Color(TEAM_LIGHT[this.meta.defender >= 0 ? 1 - this.meta.defender : 0]);
+      for (let i = 1; i < this.ramTrack.length; i++) {
+        const a = this.ramTrack[i - 1];
+        const b = this.ramTrack[i];
+        this.lineAt(a.x, a.z, b.x, b.z, 0.28, c, 0.7, 0, 1);
+      }
+    }
     // 旗圈：佔領者的顏色，爭奪中閃黃；佔領進度是外圈的一段弧
     const R = RULES.capture.radius / TILE;
     if (this.meta.mode === 'capture' || this.meta.mode === 'siege') {
@@ -950,6 +1021,7 @@ export class Legion3DView implements BattleView {
       }
     }
     if (opt.aim) this.aimMarks(opt.aim, alpha);
+    this.ladderMarks(opt.ladder ?? null);
     if (opt.order) {
       const c = new THREE.Color(0xbfdbfe);
       const a = opt.order.from;
@@ -984,7 +1056,6 @@ export class Legion3DView implements BattleView {
    * 齊射畫射程圈與落點圈（超出射程變紅）；槍林畫正面扇形。冷卻中畫成灰色。文字由資訊層畫（aimText）
    */
   private aimMarks(aim: { ids: readonly number[]; to: { x: number; y: number } }, alpha: number): void {
-    this.aimText = [];
     for (const id of aim.ids) {
       const p = this.regAt(id, alpha);
       const r = this.regById.get(id);
@@ -1057,6 +1128,44 @@ export class Legion3DView implements BattleView {
         this.aimText.push({ x, z, text: r.status === 'walled' || r.status === 'walling' ? '收盾牆' : '盾牆', color: css });
       }
     }
+  }
+
+  /**
+   * 架梯瞄準：附近的城牆格整格亮綠（能架）或亮紅（不能架：門樓、太遠、已有雲梯、牆下沒地可站……），能架的再把梯腳那一面牆面
+   * 整面染綠、梯腳格畫一圈；吸附到的那格更亮，並立一把半透明的預覽梯子。判斷同引擎（ladderSpots.ts）
+   */
+  private ladderMarks(l: DrawOptions['ladder'] | null): void {
+    this.siege.previewLadder(l?.snap ?? null);
+    if (!l) return;
+    const green = new THREE.Color(0x4ade80);
+    const red = new THREE.Color(0xf87171);
+    const d = this.decals;
+    for (const q of l.spots) {
+      const c = q.ok ? green : red;
+      const snap = l.snap === q;
+      const top = this.city.wallTop(q.tx, q.ty) + 0.05;
+      const P = (x: number, z: number, y = top): THREE.Vector3 => new THREE.Vector3(x, y, z);
+      // 牆下根本沒地可站的（厚牆的內側格）淡一點，近的、能架的比較跳得出來
+      const a = snap ? 0.8 : q.ok ? 0.45 : q.foot < 0 ? 0.16 : 0.4;
+      d.tri(P(q.tx, q.ty), P(q.tx + 1, q.ty), P(q.tx + 1, q.ty + 1), c, a);
+      d.tri(P(q.tx, q.ty), P(q.tx + 1, q.ty + 1), P(q.tx, q.ty + 1), c, a);
+      if (!q.ok) continue;
+      const fx = Math.floor(q.footX / TILE);
+      const fz = Math.floor(q.footY / TILE);
+      const bottom = this.city.surfaceAt(fx + 0.5, fz + 0.5) - 0.1;
+      // 梯腳那一面牆面（往外推一點，不和牆面打架）
+      const o = 0.04;
+      const [a0, a1] =
+        fx !== q.tx
+          ? [new THREE.Vector2(fx > q.tx ? q.tx + 1 + o : q.tx - o, q.ty), new THREE.Vector2(fx > q.tx ? q.tx + 1 + o : q.tx - o, q.ty + 1)]
+          : [new THREE.Vector2(q.tx, fz > q.ty ? q.ty + 1 + o : q.ty - o), new THREE.Vector2(q.tx + 1, fz > q.ty ? q.ty + 1 + o : q.ty - o)];
+      const fa = snap ? 0.6 : 0.32;
+      d.tri(P(a0.x, a0.y, bottom), P(a1.x, a1.y, bottom), P(a1.x, a1.y), green, fa);
+      d.tri(P(a0.x, a0.y, bottom), P(a1.x, a1.y), P(a0.x, a0.y), green, fa);
+      this.ringAt(fx + 0.5, fz + 0.5, 0.38, 0.08, green, snap ? 0.95 : 0.6);
+    }
+    if (l.snap !== null) this.aimText.push({ x: l.snap.tx + 0.5, z: l.snap.ty + 0.5, y: this.city.wallTop(l.snap.tx, l.snap.ty) + 1.2, text: '左鍵架雲梯', color: '#86efac' });
+    else if (l.why !== '' && l.at !== null) this.aimText.push({ x: l.at.x / TILE, z: l.at.y / TILE, text: `不能架：${l.why}`, color: '#fca5a5' });
   }
 
   /** 開戰前的布陣區（藍攻紅守）：一次做好，開戰後藏起來 */
@@ -1176,6 +1285,7 @@ export class Legion3DView implements BattleView {
     const order = [...this.field].sort((a, b) => (b.id === opt.selected ? 1 : 0) - (a.id === opt.selected ? 1 : 0) || b.y - a.y);
     const placed: [number, number, number][] = [];
     const spot = new Map<number, [number, number, number]>();
+    this.bannerHits = [];
     for (const r of order) {
       if (!this.shown(r.id, opt.viewer)) continue;
       const p = this.regAt(r.id, alpha);
@@ -1208,6 +1318,7 @@ export class Legion3DView implements BattleView {
         ctx.lineTo(x, y0 + h / 2);
         ctx.stroke();
       }
+      this.bannerHits.push({ id: r.id, x0: x - w / 2 - 2, y0: y - h / 2 - 2, x1: x + w / 2 + 2, y1: y + h / 2 + 5 });
       const hover = opt.hovered === r.id || opt.selected === r.id;
       ctx.fillStyle = hover ? '#0f172a' : 'rgba(8,12,20,0.82)';
       ctx.strokeStyle = TEAM[owner];
@@ -1268,6 +1379,114 @@ export class Legion3DView implements BattleView {
     }
   }
 
+  /**
+   * 殘兵（人數 ≤ STRAGGLER_MEN 的團）：在畫面內的，人的位置加兩圈往外擴的脈動圈；在畫面外的，畫面邊緣畫一個指向它的箭頭
+   * （隊伍色圓章、裡面是人數），點箭頭就把鏡頭帶過去。觀眾視角雙方都有，玩家視角只有看得到的
+   */
+  private drawStragglers(alpha: number, opt: DrawOptions, now: number): void {
+    this.arrowHits = [];
+    const ctx = this.ctx;
+    const cw = this.canvas.clientWidth;
+    const ch = this.canvas.clientHeight;
+    const font = getComputedStyle(document.body).fontFamily;
+    const inv = this.camera.matrixWorldInverse;
+    const phase = (now % 1400) / 1400;
+    const inset = 30;
+    // 疊在畫面上的介面（計分條、解說、詳情、操作列）：箭頭不要躲在它們底下
+    const base = this.canvas.getBoundingClientRect();
+    const hud: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    for (const e of this.canvas.parentElement?.children ?? []) {
+      if (e instanceof HTMLCanvasElement || e.classList.contains('hidden') || e.classList.contains('lg-overlay')) continue;
+      const b = e.getBoundingClientRect();
+      if (b.width > 0 && b.height > 0) hud.push({ x0: b.left - base.left - 20, y0: b.top - base.top - 20, x1: b.right - base.left + 20, y1: b.bottom - base.top + 20 });
+    }
+    for (const r of this.field) {
+      if (r.men <= 0 || r.men > STRAGGLER_MEN || !this.shown(r.id, opt.viewer)) continue;
+      const p = this.regAt(r.id, alpha);
+      if (p === null) continue;
+      const x = p.x / TILE;
+      const z = p.y / TILE;
+      const y = (this.regTop.get(r.id) ?? this.heightAt(x, z, 0) + 0.7) - 0.3;
+      const color = TEAM[this.ownerOf[r.id]];
+      const cz = this.v.set(x, y, z).applyMatrix4(inv).z;
+      const front = cz < -this.camera.near;
+      let sx = 0;
+      let sy = 0;
+      if (front) [sx, sy] = this.project(x, y, z);
+      if (front && sx >= 0 && sx <= cw && sy >= 0 && sy <= ch) {
+        ctx.globalAlpha = 0.22;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 16, 0, Math.PI * 2);
+        ctx.fill();
+        for (const k of [0, 0.5]) {
+          const ph = (phase + k) % 1;
+          ctx.globalAlpha = (1 - ph) * 0.95;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 16 + ph * 44, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#f8fafc';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 16, 0, Math.PI * 2);
+        ctx.stroke();
+        continue;
+      }
+      // 畫面外：從畫面中心往它的方向，碰到內縮的邊框就是箭頭的位置
+      let dx: number;
+      let dy: number;
+      if (front) {
+        dx = sx - cw / 2;
+        dy = sy - ch / 2;
+      } else {
+        this.v.set(x, y, z).applyMatrix4(inv);
+        dx = this.v.x;
+        dy = -this.v.y;
+      }
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      const k = Math.min((cw / 2 - inset) / Math.max(1e-6, Math.abs(ux)), (ch / 2 - inset) / Math.max(1e-6, Math.abs(uy)));
+      let ax = cw / 2 + ux * k;
+      let ay = ch / 2 + uy * k;
+      // 躲在介面底下：沿著邊挪到介面外（往近的那頭）；和已經畫的箭頭疊在一起：沿著邊挪開
+      const vertical = Math.abs(Math.abs(ax - cw / 2) - (cw / 2 - inset)) < 1;
+      for (const b of hud) {
+        if (ax < b.x0 || ax > b.x1 || ay < b.y0 || ay > b.y1) continue;
+        if (vertical) ay = ay - b.y0 < b.y1 - ay && b.y0 > inset ? b.y0 : b.y1 < ch - inset ? b.y1 : b.y0;
+        else ax = ax - b.x0 < b.x1 - ax && b.x0 > inset ? b.x0 : b.x1 < cw - inset ? b.x1 : b.x0;
+      }
+      for (let tries = 0; tries < 8 && this.arrowHits.some((a) => Math.hypot(a.x - ax, a.y - ay) < 30); tries++) {
+        if (vertical) ay = Math.max(inset, ay - 30);
+        else ax = Math.min(cw - inset, ax + 30);
+      }
+      const R = 13;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(ax + ux * (R + 11), ay + uy * (R + 11));
+      ctx.lineTo(ax + ux * (R - 2) - uy * 8, ay + uy * (R - 2) + ux * 8);
+      ctx.lineTo(ax + ux * (R - 2) + uy * 8, ay + uy * (R - 2) - ux * 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(ax, ay, R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(248,250,252,0.9)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.font = `800 13px ${font}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(String(r.men), ax, ay + 0.5);
+      this.arrowHits.push({ id: r.id, x: ax, y: ay, r: R + 6 });
+    }
+  }
+
   private drawEffects(now: number): void {
     const ctx = this.ctx;
     const font = getComputedStyle(document.body).fontFamily;
@@ -1304,12 +1523,12 @@ export class Legion3DView implements BattleView {
       ctx.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
       ctx.strokeRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
     }
-    if (opt.aim) {
+    if (this.aimText.length > 0) {
       ctx.font = `600 12px ${getComputedStyle(document.body).fontFamily}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       for (const a of this.aimText) {
-        const sp = this.screenOf(a.x, a.z, this.city.surfaceAt(a.x, a.z) + 0.6);
+        const sp = this.screenOf(a.x, a.z, a.y ?? this.city.surfaceAt(a.x, a.z) + 0.6);
         if (sp === null) continue;
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillText(a.text, sp[0] + 1, sp[1] - 7);

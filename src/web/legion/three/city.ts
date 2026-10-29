@@ -7,6 +7,7 @@ import { Builder, type V3 } from './builder.ts';
 import { Ground, WALL_H, WATER_Y } from './ground.ts';
 import { PAL, col, rand, vary } from './palette.ts';
 import { brickTexture, roof, roofTexture } from './roofs.ts';
+import type { SeeThrough } from './seeThrough.ts';
 
 type Rect = { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number };
 
@@ -84,6 +85,11 @@ export class City {
       const mesh = b.build(m);
       if (mesh !== null) this.group.add(mesh);
     }
+  }
+
+  /** 擋住視線時淡掉（城牆、門樓、塔、屋頂、民房都在這三種材質裡） */
+  seeThrough(st: SeeThrough): void {
+    for (const m of this.materials) st.patch(m);
   }
 
   dispose(): void {

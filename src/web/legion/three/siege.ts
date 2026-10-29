@@ -71,6 +71,8 @@ export class Siege {
   private readonly ladderGeo = ladderGeometry();
   private readonly ladderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
   private readonly ladders: THREE.Mesh[] = [];
+  /** 架梯瞄準：吸附到的牆格上預覽的半透明梯子 */
+  private readonly ghostLadder = new THREE.Mesh(this.ladderGeo, new THREE.MeshBasicMaterial({ color: 0x86efac, transparent: true, opacity: 0.6, depthWrite: false }));
   private readonly ram: { group: THREE.Group; log: THREE.Mesh } | null;
   private readonly stones: THREE.Mesh[] = [];
   private readonly stoneGeo = new THREE.IcosahedronGeometry(0.35, 0);
@@ -104,6 +106,9 @@ export class Siege {
       });
       this.doors.push({ gate: p.r, leaves, portal: p });
     }
+    this.ghostLadder.visible = false;
+    this.ghostLadder.renderOrder = 2;
+    this.group.add(this.ghostLadder);
     this.ram = hasRam ? ramGroup() : null;
     if (this.ram !== null) {
       this.ram.group.traverse((o) => {
@@ -204,26 +209,37 @@ export class Siege {
       const l = list[i];
       m.visible = l !== undefined;
       if (l === undefined) return;
-      const fx = l.footX / TILE;
-      const fz = l.footY / TILE;
-      const tx = l.x / TILE;
-      const tz = l.y / TILE;
-      const fy = this.city.surfaceAt(fx, fz);
-      const ty = this.city.wallTop(Math.floor(tx), Math.floor(tz)) + 0.35;
-      // 梯腳在地面格中心、梯頂靠在牆的外緣（牆格中心往外半格）
-      const hor = Math.hypot(tx - fx, tz - fz);
-      const run = Math.max(0.3, hor - 0.5);
-      const full = Math.atan2(ty - fy, run);
-      const len = Math.hypot(run, ty - fy) + 0.25;
-      // 角度從「朝牆的水平方向」量起：架設中從 π（平放在地上、梯頂朝外）往上立到 full（靠在牆上）；被推倒往外倒回 π
-      let pitch = full;
-      if (!l.built) pitch = Math.PI - (Math.PI - full) * Math.min(1, l.progress / l.buildTicks);
-      else if (l.topple >= 0) pitch = full + (Math.PI - full) * Math.min(1, l.topple / RULES.ladder.toppleTicks);
-      const yaw = Math.atan2(-(tz - fz), tx - fx);
-      m.position.set(fx, fy, fz);
-      m.rotation.set(0, yaw, pitch, 'YXZ');
-      m.scale.set(len, 1, 1);
+      this.poseLadder(m, l.footX, l.footY, l.x, l.y, (full) => {
+        // 角度從「朝牆的水平方向」量起：架設中從 π（平放在地上、梯頂朝外）往上立到 full（靠在牆上）；被推倒往外倒回 π
+        if (!l.built) return Math.PI - (Math.PI - full) * Math.min(1, l.progress / l.buildTicks);
+        if (l.topple >= 0) return full + (Math.PI - full) * Math.min(1, l.topple / RULES.ladder.toppleTicks);
+        return full;
+      });
     });
+  }
+
+  /** 架梯瞄準的預覽梯子（null ＝ 藏起來）：梯腳、牆格中心（單位） */
+  previewLadder(spot: { readonly footX: number; readonly footY: number; readonly x: number; readonly y: number } | null): void {
+    this.ghostLadder.visible = spot !== null;
+    if (spot !== null) this.poseLadder(this.ghostLadder, spot.footX, spot.footY, spot.x, spot.y, (full) => full);
+  }
+
+  /** 梯腳在地面格中心、梯頂靠在牆的外緣（牆格中心往外半格）；pitch 由靠牆的角度算出實際角度 */
+  private poseLadder(m: THREE.Mesh, footX: number, footY: number, x: number, y: number, pitchOf: (full: number) => number): void {
+    const fx = footX / TILE;
+    const fz = footY / TILE;
+    const tx = x / TILE;
+    const tz = y / TILE;
+    const fy = this.city.surfaceAt(fx, fz);
+    const ty = this.city.wallTop(Math.floor(tx), Math.floor(tz)) + 0.35;
+    const hor = Math.hypot(tx - fx, tz - fz);
+    const run = Math.max(0.3, hor - 0.5);
+    const full = Math.atan2(ty - fy, run);
+    const len = Math.hypot(run, ty - fy) + 0.25;
+    const yaw = Math.atan2(-(tz - fz), tx - fx);
+    m.position.set(fx, fy, fz);
+    m.rotation.set(0, yaw, pitchOf(full), 'YXZ');
+    m.scale.set(len, 1, 1);
   }
 
   private placeRam(q: RamInfo | null, now: number): void {
