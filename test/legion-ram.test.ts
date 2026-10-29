@@ -1,10 +1,10 @@
 // 引擎 0.4：衝車沿地圖的軌道走（下 man 由引擎帶過去附上、沿軌道前進不倒退、前方有敵兵就停、卸下後別團接手、到終點撞門）、正面擋箭。
 // 測試圖見 legion-castle-map.ts：軌道從藍方 (6.5, 5.5) 斜向東南到 (12.5, 11.5)，再往東到正門外的撞擊點 (18.5, 11.5)（離正門 1.5 格）。
 import { describe, expect, it } from 'vitest';
-import { RAM, RULES } from '../src/legion/config.ts';
-import { mapFeatures, MAPS } from '../src/legion/map.ts';
+import { RAM, RULES, T, terrainSpeed } from '../src/legion/config.ts';
+import { finishMap, mapFeatures, MAPS, registerMap } from '../src/legion/map.ts';
 import { legionInitData, type LegionMatch } from '../src/legion/sim.ts';
-import { castleMap, castleMatch, hpOf, rejected, run, teleport } from './legion-castle-map.ts';
+import { castleMap, castleMatch, castleSpec, CW, hpOf, rejected, run, teleport } from './legion-castle-map.ts';
 
 const TRACK = [
   { x: 6500, y: 5500 },
@@ -18,6 +18,12 @@ castleMap('test-ram-side', { ramTrack: [{ x: 8500, y: 18500 }, { x: 18500, y: 18
 castleMap('test-ram-west', { ramTrack: [{ x: 16500, y: 11500 }, { x: 4500, y: 11500 }] });
 // 只有起點沒有軌道：沒有衝車
 castleMap('test-ram-notrack', { ram: { x: 12500, y: 11500, facing: 0 } });
+// 整條軌道都在樹林裡（x 6～17、y 3～14）：推車團在樹林走得慢，車速要跟著慢
+{
+  const spec = castleSpec('test-ram-forest', { ramTrack: TRACK });
+  for (let y = 3; y <= 14; y++) for (let x = 6; x <= 17; x++) if (spec.terrain[y * CW + x] === T.Plain) spec.terrain[y * CW + x] = T.Forest;
+  registerMap(finishMap(spec));
+}
 const M = 'test-ram';
 // 藍方劍士在軌道起點後方、朝東南
 const crew = { type: 'sword', x: 4500, y: 3500, facing: 45 };
@@ -269,6 +275,35 @@ describe('軍團戰 0.4：衝車（軌道）', () => {
     run(m2, 100);
     expect(hpOf(m2, 0)).toBeLessThan(24 * 1200);
   });
-});
 
+  it('車速不會快過推車那團的步行速度：樹林裡盾兵持盾推車走樹林持盾速度，舉盾（更慢）就跟著慢；平地照衝車自己的速度', () => {
+    const { m, events } = castleMatch('test-ram-forest', [{ type: 'shield', x: 4500, y: 3500, facing: 45 }], [farRed]);
+    m.applyCommands(0, [{ type: 'man', id: 0, target: 0 }]);
+    for (let i = 0; i < 300 && !m.ram!.attached; i++) m.step();
+    expect(m.ram!.attached).toBe(true);
+    push(m, 40);
+    expect(m.map.terrain[Math.floor(m.ram!.y / 1000) * CW + Math.floor(m.ram!.x / 1000)]).toBe(T.Forest);
+    const carryStep = Math.floor((RULES.shield.carry.speed * terrainSpeed(T.Forest, 'shield')) / 100);
+    expect(carryStep).toBeLessThan(RAM.speed);
+    const d0 = m.ram!.dist;
+    push(m, 20);
+    expect(m.ram!.dist - d0).toBe(20 * carryStep);
+    m.applyCommands(0, [{ type: 'shield', id: 0, mode: 'raise' }]);
+    expect(rejected(events)).toEqual([]);
+    push(m, 60);
+    expect(m.regiments[0].stance).toBe('raise');
+    const d1 = m.ram!.dist;
+    push(m, 20);
+    expect(m.ram!.dist - d1).toBe(20 * Math.floor((RULES.shield.raise.speed * terrainSpeed(T.Forest, 'shield')) / 100));
+    // 平地（原測試圖）：盾兵走得比車快，照衝車自己的速度
+    const { m: m2 } = castleMatch(M, [{ type: 'shield', x: 4500, y: 3500, facing: 45 }], [farRed]);
+    m2.applyCommands(0, [{ type: 'man', id: 0, target: 0 }]);
+    for (let i = 0; i < 300 && !m2.ram!.attached; i++) m2.step();
+    push(m2, 40);
+    const d2 = m2.ram!.dist;
+    push(m2, 20);
+    expect(m2.ram!.dist - d2).toBe(20 * RAM.speed);
+  });
+});
+// 沒有衝車的城池（給「有軌道才有衝車」那個測試用）
 castleMap('test-castle-noram');

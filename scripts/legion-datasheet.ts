@@ -158,7 +158,7 @@ p('| --- | --- |');
 p(`| 城門 | 正門 ${G.mainHp} 血、側門 ${G.sideHp} 血；開門 ${sec(G.openTicks)}、關門 ${sec(G.closeTicks)}；只有衝車扣得了血 |`);
 p(`| 雲梯 | ${names(LADDER_KINDS)}可以架；軍團中心離梯腳 ${tiles(Ld.reach)} 格內下令；架設 ${sec(Ld.buildTicks)}；每 ${sec(Ld.entryTicks)}上一人、爬到頂 ${sec(Ld.climbTicks)} |`);
 p(`| 推倒雲梯 | 守方士兵在梯口 ${tiles(Ld.mouth)} 格內、梯口 ${tiles(Ld.clear)} 格內沒有攻方士兵；讀條 ${sec(Ld.toppleTicks)}；梯上的人摔落，傷害 ＝ 單兵血量上限 × ${pct(Ld.fallPct)} × 爬升高度比例 |`);
-p(`| 衝車 | 一台、不計點、不可摧毀，只沿地圖的軌道往前走、不能倒退；步兵團下令後走過去，${tiles(RAM.attach)} 格內附上；推車時速度 ${specSpeed(RAM.speed)}、車頭每 tick 最多轉 ${RAM.turn}°；推車那團排在車後（半厚 ＋ ${tiles(RAM.front)} 格），落後超過 ${tiles(RAM.slack)} 格車就等；車頭正面 ±${RAM.blockHalf}°、${tiles(RAM.block)} 格內有敵兵就推不動；離城門 ${tiles(RAM.contact)} 格內每 ${sec(RAM.hitTicks)}撞一下、每下 ${RAM.hit}；正面 ±${RAM.blockHalf}° 射來的箭對推車的團無效 |`);
+p(`| 衝車 | 一台、不計點、不可摧毀，只沿地圖的軌道往前走、不能倒退；步兵團下令後走過去，${tiles(RAM.attach)} 格內附上；推車時速度 ${specSpeed(RAM.speed)}（不快過推車那團在車所在地形的步行速度）、車頭每 tick 最多轉 ${RAM.turn}°；推車那團排在車後（半厚 ＋ ${tiles(RAM.front)} 格），落後超過 ${tiles(RAM.slack)} 格車就等；車頭正面 ±${RAM.blockHalf}°、${tiles(RAM.block)} 格內有敵兵就推不動；離城門 ${tiles(RAM.contact)} 格內每 ${sec(RAM.hitTicks)}撞一下、每下 ${RAM.hit}；正面 ±${RAM.blockHalf}° 射來的箭對推車的團無效 |`);
 p(`| 砲擊 | 每場 ${BOMBARD.shells} 發、冷卻 ${sec(BOMBARD.cooldown)}；下令後 ${sec(BOMBARD.delay)}落地；半徑 ${tiles(BOMBARD.radius)} 格內敵我不分每人 −${BOMBARD.damage / 10}；不打城門與牆；落點往砲擊來向 ${tiles(BOMBARD.shadow)} 格內有城牆或門樓就打不到 |`);
 p();
 writeFileSync(OUT, L.join('\n'));
