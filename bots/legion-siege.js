@@ -1046,10 +1046,9 @@ export default class SiegeSparring extends LegionBase {
     this.slots = [];
     /** 攻方：要架雲梯的城牆格中心與梯腳（世界座標） @type {{ wall: Pt, foot: Pt }[]} */
     this.ladderSpots = [];
-    /** 攻方：主力等待破門的集結點、弓兵陣地、推衝車要停的位置 */
+    /** 攻方：主力等待破門的集結點、弓兵陣地 */
     this.stage = { x: 0, y: 0 };
     this.archerPost = { x: 0, y: 0 };
-    this.ramStop = { x: 0, y: 0 };
     /** 進攻方向（世界角度：從攻方往城門） */
     this.attackDir = 0;
     /** 主力已經開始推進 */
@@ -1267,7 +1266,7 @@ export default class SiegeSparring extends LegionBase {
     this.planAttack();
   }
 
-  /** 攻方的路線：雲梯位置（地面走得到、離門樓遠的牆）、主力集結點、弓兵陣地、衝車停在城門外的位置 */
+  /** 攻方的路線：雲梯位置（地面走得到、離門樓遠的牆）、主力集結點、弓兵陣地 */
   planAttack() {
     const m = this.data.map;
     const w = m.width;
@@ -1331,12 +1330,10 @@ export default class SiegeSparring extends LegionBase {
       if (this.ladderSpots.some((s) => this.dist(s.wall, c.wall) < 6 * TILE)) continue;
       this.ladderSpots.push({ wall: c.wall, foot: c.foot });
     }
-    // 衝車停在正門外側（門洞外緣往外 3.5 格）
+    // 正門前的隘口（橋；沒有橋就是正門外 3.5 格）：弓兵在它外側、主力在更外側等
     const out = (this.attackDir + 180) % 360;
     const half = Math.max(g.x1 - g.x0, g.y1 - g.y0) * TILE;
-    this.ramStop = this.go(g.x, g.y, out, half / 2 + 3500);
-    // 正門前的隘口（橋或門洞）：弓兵在它外側、主力在更外側等
-    const choke = m.features.chokes.filter((c) => c.kind === 'bridge').sort((a, b) => this.dist(a, g) - this.dist(b, g))[0] || { x: this.ramStop.x, y: this.ramStop.y };
+    const choke = m.features.chokes.filter((c) => c.kind === 'bridge').sort((a, b) => this.dist(a, g) - this.dist(b, g))[0] || this.go(g.x, g.y, out, half / 2 + 3500);
     this.archerPost = this.go(choke.x, choke.y, out, 6000);
     this.stage = this.go(choke.x, choke.y, out, 14000);
   }
@@ -1510,6 +1507,12 @@ export default class SiegeSparring extends LegionBase {
     if (!this.pushing && (gateState === 'broken' || ownA || obs.tick > (this.k.pushSec ?? 300) * 10)) this.pushing = true;
     const goal = ownA || (obs.flags[1] && obs.flags[1].open) ? B : A;
     this.bombard(out);
+    // 推衝車的團沒了、門還沒破：最近的護送團接手推車
+    const ram = s.ram;
+    if (!this.pushing && ram && !obs.regiments.some((q) => this.role.get(q.id) === 'crew' && !q.routed)) {
+      const next = obs.regiments.filter((q) => this.role.get(q.id) === 'escort' && !q.routed).sort((a, b) => this.dist(a, ram) - this.dist(b, ram))[0];
+      if (next) this.role.set(next.id, 'crew');
+    }
     for (const r of obs.regiments) {
       if (r.routed) continue;
       const role = this.role.get(r.id) || 'main';
@@ -1519,7 +1522,7 @@ export default class SiegeSparring extends LegionBase {
       }
       if (role === 'escort') {
         const crew = obs.regiments.find((q) => this.role.get(q.id) === 'crew' && !q.routed);
-        if (crew && !this.pushing && s.ram && s.ram.crew === crew.id) {
+        if (crew && !this.pushing && crew.order === 'man') {
           if (r.stance !== 'raise' && r.status !== 'walled') this.send(out, 4, /** @type {any} */ ({ type: 'shield', id: r.id, mode: 'raise' }), '舉盾護送衝車', 100);
           const sideIdx = obs.regiments.filter((q) => this.role.get(q.id) === 'escort').indexOf(r);
           this.send(out, 3, /** @type {any} */ ({ type: 'follow', id: r.id, target: crew.id, forward: -1000, right: sideIdx === 0 ? -2600 : 2600 }), '護送衝車', 200);
@@ -1542,23 +1545,17 @@ export default class SiegeSparring extends LegionBase {
   }
 
   /**
-   * 推衝車：附上、推到正門外撞門；破門後卸下衝車，跟著主力推進
+   * 推衝車：下 man 之後引擎會帶這一團走到車邊附上、沿軌道推到正門外撞門，不再對它下別的指令；破門後卸下衝車，跟著主力推進
    * @param {Pending[]} out @param {Own} r @param {string | undefined} gateState
    */
   crew(out, r, gateState) {
     const ram = this.obs.structures.ram;
     if (!ram || gateState === 'broken' || gateState === 'open' || gateState === undefined) {
-      if (ram && ram.crew === r.id) this.send(out, 6, /** @type {any} */ ({ type: 'unman', id: r.id }), '門破了，放下衝車', 50);
+      if (r.order === 'man') this.send(out, 6, /** @type {any} */ ({ type: 'unman', id: r.id }), '門破了，放下衝車', 50);
       else this.advance(out, r, this.data.map.flags[0]);
       return;
     }
-    if (ram.crew !== r.id) {
-      if (this.dist(r, ram) > 4500) this.send(out, 5, { type: 'move', id: r.id, x: ram.x, y: ram.y }, '走到衝車旁', 30);
-      else this.send(out, 6, /** @type {any} */ ({ type: 'man', id: r.id, target: ram.id }), '推衝車', 50);
-      return;
-    }
-    if (ram.gate !== null) return;
-    this.send(out, 5, { type: 'move', id: r.id, x: this.ramStop.x, y: this.ramStop.y, facing: this.attackDir }, '推衝車撞正門', 60);
+    if (r.order !== 'man') this.send(out, 6, /** @type {any} */ ({ type: 'man', id: r.id, target: ram.id }), '推衝車', 50);
   }
 
   /**

@@ -3,7 +3,7 @@
 import { hashInts } from '../shared/hash.ts';
 import { idiv, isqrt } from '../shared/intmath.ts';
 import { SIEGE, T, TILE, WALL_LAYER, WALL_LEVELS, walkable, walkableTop, RULES } from './config.ts';
-import { isin } from './geom.ts';
+import { iatan2, isin } from './geom.ts';
 
 export interface DeployZone {
   /** 格座標，含 x0、y0，不含 x1、y1 */
@@ -121,8 +121,10 @@ export interface LegionMap {
   readonly gates: readonly MapGate[];
   /** 守方座位（城內布陣區的 playerId）：城門歸它開關；-1 = 沒有城。攻守互換靠交換座位，不改地圖 */
   readonly defender: number;
-  /** 衝車的起點與朝向（單位座標；在攻方布陣區）；沒有就沒有衝車 */
+  /** 衝車的起點與朝向（單位座標；在攻方布陣區）：有 ramTrack 時由 finishMap 從軌道起點與第一段的方向算出 */
   readonly ram?: { readonly x: number; readonly y: number; readonly facing: number };
+  /** 衝車軌道（單位座標的折線）：起點是衝車開局的位置、終點是城門外的撞擊點；衝車只沿這條線往前走。沒有軌道就沒有衝車 */
+  readonly ramTrack?: readonly { readonly x: number; readonly y: number }[];
   /** 砲擊來向（度）：從落點指向攻方地圖邊緣的方向（攻方在西邊就是 180）；沒有就沒有砲擊支援 */
   readonly bombardFrom?: number;
   /** 攻城戰攻方後備（開關打開時）在 A 旗佔下後的入場點：A 外側 */
@@ -155,7 +157,10 @@ export function finishMap(spec: LegionMapSpec): LegionMap {
   for (const g of spec.gates) {
     for (let y = g.y0; y < g.y1; y++) for (let x = g.x0; x < g.x1; x++) if (terrain[y * w + x] !== T.Gatehouse) throw new Error(`${spec.id}：城門 (${x}, ${y}) 不在門樓格上`);
   }
-  return { ...spec, snap: buildSnap(terrain, w, h), snapTop: buildSnapTop(terrain, w, h), edge: buildEdge(terrain, w, h), symmetric: isSymmetric(terrain, heights) };
+  const t = spec.ramTrack;
+  if (t !== undefined && t.length < 2) throw new Error(`${spec.id}：衝車軌道至少要兩個點`);
+  const ram = t === undefined ? spec.ram : { x: t[0].x, y: t[0].y, facing: iatan2(t[1].y - t[0].y, t[1].x - t[0].x) };
+  return { ...spec, ram, snap: buildSnap(terrain, w, h), snapTop: buildSnapTop(terrain, w, h), edge: buildEdge(terrain, w, h), symmetric: isSymmetric(terrain, heights) };
 }
 
 function isSymmetric(terrain: Uint8Array, heights: Uint8Array): boolean {
@@ -930,7 +935,17 @@ export function stonePass(): LegionMap {
     breaches: [breach],
     archways: [archBarbican, archInW, archInN, archInS, archCitadel],
     defender: 1,
-    ram: { x: 16000, y: 62500, facing: 0 },
+    // 衝車軌道：營地的衝車起點 → 中路大道 → 西橋 → 甕城門洞 → 甕城裡轉向正門 → 正門外的撞擊點（離門 1.5 格）
+    ramTrack: [
+      { x: 16000, y: 62500 },
+      { x: 28500, y: 62500 },
+      { x: 52500, y: 61500 },
+      { x: 72500, y: 63500 },
+      { x: 88000, y: 63000 },
+      { x: 101000, y: 63000 },
+      { x: 104500, y: 69500 },
+      { x: (WX0 - 1) * TILE - TILE / 2, y: CY * TILE + TILE / 2 },
+    ],
     bombardFrom: 180,
     siegeEntry: { x: 86500, y: 62500 },
     decor,
@@ -1114,6 +1129,8 @@ export interface MapFeatures {
   readonly highs: readonly { readonly x: number; readonly y: number; readonly radius: number; readonly height: number }[];
   /** 樹林：中心、半徑（單位） */
   readonly covers: readonly { readonly x: number; readonly y: number; readonly radius: number }[];
+  /** 衝車軌道（單位座標的折線，起點 ＝ 衝車開局位置、終點 ＝ 正門外的撞擊點）；沒有衝車的地圖是空陣列 */
+  readonly ramTrack: readonly { readonly x: number; readonly y: number }[];
 }
 
 /** 連通塊（四方向）：回傳每一塊的格索引（依第一格的索引排序） */
@@ -1249,7 +1266,8 @@ export function mapFeatures(m: LegionMap): MapFeatures {
     const b = blob(w, comp);
     return { x: b.x, y: b.y, radius: b.radius };
   });
-  const f: MapFeatures = { walls, gates, stairs, chokes, highs, covers };
+  const ramTrack = (m.ramTrack ?? []).map((q) => ({ x: q.x, y: q.y }));
+  const f: MapFeatures = { walls, gates, stairs, chokes, highs, covers, ramTrack };
   featureCache.set(m, f);
   return f;
 }

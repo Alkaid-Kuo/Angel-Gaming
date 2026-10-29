@@ -317,17 +317,22 @@ export const RULES = {
 } as const;
 
 /**
- * 衝車（引擎 0.4）：攻方免費一台、不計點、不可摧毀。任一步兵團附上（man）才會動，附上的兵團速度降到 speed（待審）；
- * 衝車在兵團正前方 front；貼著關閉的城門（contact 以內）每 hitTicks 撞一下、每下扣 hit（正門 6 下、側門 3 下破門，已定先測）。
+ * 衝車（引擎 0.4）：攻方免費一台、不計點、不可摧毀，只沿地圖的軌道（map.ramTrack）往前走、不能倒退。
+ * 步兵團下 man 就由引擎帶到車尾的推車位置（車中心往後「半厚 ＋ front」），中心離衝車 attach 以內就附上；
+ * 附上後衝車每 tick 沿軌道前進 speed（待審），車頭每 tick 最多轉 turn 度；推車那團由引擎排在車後跟著走，落後推車位置超過 slack 衝車就等；
+ * 車頭正面 ±blockHalf 度、block 以內有敵方地面士兵就推不動。貼著關閉的城門（contact 以內）每 hitTicks 撞一下、每下扣 hit（正門 6 下、側門 3 下破門，已定先測）。
  * 正面 blockHalf×2 度內射來的箭對附上的兵團無效。
  */
 export const RAM = {
   speed: spd(0.7),
+  turn: 6,
   hit: 667,
   hitTicks: 3 * TPS,
   contact: 1500,
   attach: 5000,
   front: 1500,
+  slack: 1000,
+  block: 2000,
   blockHalf: 90,
 } as const;
 

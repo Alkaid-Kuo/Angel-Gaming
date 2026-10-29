@@ -41,7 +41,7 @@ import { MAPS, defaultMapId, defaultTimeLimit, heightAt, mapFeatures, sightBlock
 import { clearLine, findPath, snapPoint, type PathEnv } from './path.ts';
 
 export type { Flank };
-export type OrderType = 'idle' | 'move' | 'attackMove' | 'attack' | 'hold' | 'follow';
+export type OrderType = 'idle' | 'move' | 'attackMove' | 'attack' | 'hold' | 'follow' | 'man';
 
 /** 架陣、盾牆的狀態：0 無、1 架起中、2 已架好、3 收起中 */
 export type SetState = 0 | 1 | 2 | 3;
@@ -294,10 +294,18 @@ export interface LadderRuntime {
 export interface RamRuntime {
   readonly id: number;
   readonly owner: number;
+  /** 軌道的點、每個點離起點的距離（沿線）與全長（單位） */
+  readonly track: readonly { readonly x: number; readonly y: number }[];
+  readonly cum: readonly number[];
+  readonly len: number;
+  /** 沿軌道走了多遠（0～len） */
+  dist: number;
   x: number;
   y: number;
   facing: number;
+  /** 下了 man 的兵團（-1 = 沒有）；attached ＝ 已經走到車邊附上（還在走過來就是 false） */
   crew: number;
+  attached: boolean;
   /** 貼著哪座城門（-1 = 沒有）與開始貼著的 tick */
   gate: number;
   contactSince: number;
@@ -476,8 +484,12 @@ export class LegionMatch {
       this.bombardsLeft = BOMBARD.shells;
       this.bombardReadyAt = 0;
     }
-    if (this.map.ram !== undefined && this.map.defender >= 0 && setup.deployments.length === 2) {
-      this.ram = { id: 0, owner: 1 - this.map.defender, x: this.map.ram.x, y: this.map.ram.y, facing: normDeg(this.map.ram.facing), crew: -1, gate: -1, contactSince: -1 };
+    const track = this.map.ramTrack;
+    if (track !== undefined && track.length >= 2 && this.map.defender >= 0 && setup.deployments.length === 2) {
+      const cum = [0];
+      for (let i = 1; i < track.length; i++) cum.push(cum[i - 1] + isqrt((track[i].x - track[i - 1].x) * (track[i].x - track[i - 1].x) + (track[i].y - track[i - 1].y) * (track[i].y - track[i - 1].y)));
+      const facing = iatan2(track[1].y - track[0].y, track[1].x - track[0].x);
+      this.ram = { id: 0, owner: 1 - this.map.defender, track, cum, len: cum[cum.length - 1], dist: 0, x: track[0].x, y: track[0].y, facing, crew: -1, attached: false, gate: -1, contactSince: -1 };
     }
     const n = setup.deployments.length;
     for (let p = 0; p < n; p++) this.inbox.push([]);
@@ -873,11 +885,11 @@ export class LegionMatch {
   ramInfo(): RamInfo | null {
     const q = this.ram;
     if (q === null) return null;
-    const nextHit = q.gate >= 0 && q.crew >= 0 ? RAM.hitTicks - ((this.tick - q.contactSince) % RAM.hitTicks) : 0;
-    return { id: q.id, owner: q.owner, x: q.x, y: q.y, facing: q.facing, crew: q.crew >= 0 ? q.crew : null, gate: q.gate >= 0 ? q.gate : null, nextHit };
+    const nextHit = q.gate >= 0 && q.attached ? RAM.hitTicks - ((this.tick - q.contactSince) % RAM.hitTicks) : 0;
+    return { id: q.id, owner: q.owner, x: q.x, y: q.y, facing: q.facing, crew: q.attached ? q.crew : null, t: q.dist / q.len, gate: q.gate >= 0 ? q.gate : null, nextHit };
   }
 
-  /** r 正在推衝車 */
+  /** r 下了 man（正在走向衝車或已經附上） */
   private manning(r: Regiment): boolean {
     return this.ram !== null && this.ram.crew === r.id;
   }
@@ -890,22 +902,94 @@ export class LegionMatch {
     if (r.layer !== 0) return this.rejectCmd(p, 'man', '要在地面才能推衝車');
     if (q.crew === r.id) return undefined;
     if (q.crew >= 0 && this.alive(q.crew) !== null) return this.rejectCmd(p, 'man', '衝車已經有人推');
-    if ((q.x - r.x) * (q.x - r.x) + (q.y - r.y) * (q.y - r.y) > RAM.attach * RAM.attach) return this.rejectCmd(p, 'man', '離衝車太遠');
     if (r.formation === 'circle') return this.rejectCmd(p, 'man', '圓陣不能推衝車');
     q.crew = r.id;
+    q.attached = false;
     q.contactSince = -1;
+    r.order = 'man';
+    r.target = -1;
+    r.fireTarget = -1;
+    r.volley = null;
+    r.path = [];
   }
 
-  /** 衝車跟著附上的兵團走（在兵團正前方），貼著關閉的城門就定時撞門 */
+  private unman(r: Regiment): void {
+    const q = this.ram!;
+    q.crew = -1;
+    q.attached = false;
+    r.order = 'idle';
+    r.path = [];
+  }
+
+  /** 軌道上離起點 d（單位；負的 ＝ 從起點沿第一段往後延伸）的點與那一段的方向 */
+  private trackAt(q: RamRuntime, d: number): { x: number; y: number; dir: number } {
+    const t = q.track;
+    let k = 0;
+    while (k < t.length - 2 && d > q.cum[k + 1]) k += 1;
+    const a = t[k];
+    const b = t[k + 1];
+    const seg = q.cum[k + 1] - q.cum[k];
+    const u = d - q.cum[k];
+    return { x: a.x + tdiv((b.x - a.x) * u, seg), y: a.y + tdiv((b.y - a.y) * u, seg), dir: iatan2(b.y - a.y, b.x - a.x) };
+  }
+
+  /**
+   * 推衝車的團（order 'man'）：還沒附上就尋路走到車尾的推車位置（軌道上車中心往後「半厚 ＋ front」），中心離衝車 attach 以內
+   * （縱隊太長時：離衝車「半厚 ＋ front ＋ slack」以內）就附上。附上之後由引擎帶著跟車走：朝車頭方向、往推車位置直走；
+   * 已經在推車位置與車之間、離車不到「半厚 ＋ front」（例如過窄處縮成縱隊、推車位置往後退）就停著等車往前。
+   */
+  private thinkCrew(r: Regiment, speed: number): void {
+    const q = this.ram!;
+    const back = r.halfD + RAM.front;
+    const slot = this.trackAt(q, q.dist - back);
+    const dRam = isqrt((q.x - r.x) * (q.x - r.x) + (q.y - r.y) * (q.y - r.y));
+    if (!q.attached) {
+      r.tFacing = q.facing;
+      if (dRam > Math.max(RAM.attach, back + RAM.slack)) {
+        this.moveTo(r, slot.x, slot.y, 0, speed, false);
+        return;
+      }
+      q.attached = true;
+    }
+    this.turnTo(r, q.facing);
+    const along = tdiv((r.x - slot.x) * icos(q.facing) + (r.y - slot.y) * isin(q.facing), 10000);
+    if (along > 0 && along <= back && dRam <= back) return;
+    const step = idiv(speed * terrainSpeed(this.terrainAt(r.x, r.y), r.kind), 100);
+    const [nx, ny] = stepToward(r.x, r.y, slot.x, slot.y, step);
+    if (nx === r.x && ny === r.y) return;
+    this.moveCenter(r, nx, ny);
+    r.moved = true;
+  }
+
+  /** 車頭正面 ±blockHalf 度、block 以內有敵方的地面士兵：推不動 */
+  private ramStopped(q: RamRuntime): boolean {
+    for (const s of this.soldiers) {
+      if (!s.alive || s.layer !== 0 || this.regiments[s.reg].owner === q.owner) continue;
+      const dx = s.x - q.x;
+      const dy = s.y - q.y;
+      if (dx * dx + dy * dy > RAM.block * RAM.block) continue;
+      if (Math.abs(angleDiff(iatan2(dy, dx), q.facing)) <= RAM.blockHalf) return true;
+    }
+    return false;
+  }
+
+  /** 衝車沿軌道前進（附上的團跟上了、前面沒有敵兵擋著、還沒到終點），貼著關閉的城門就定時撞門 */
   private stepRam(): void {
     const q = this.ram!;
-    if (q.crew >= 0 && this.alive(q.crew) === null) q.crew = -1;
-    const r = q.crew >= 0 ? this.regiments[q.crew] : null;
-    if (r !== null) {
-      q.facing = r.facing;
-      const [ox, oy] = offset(r.facing, r.halfD + RAM.front);
-      const [nx, ny] = stepToward(q.x, q.y, r.x + ox, r.y + oy, RAM.speed * 2);
-      [q.x, q.y] = this.slide(q.x, q.y, nx, ny, 0, false);
+    if (q.crew >= 0 && this.alive(q.crew) === null) {
+      q.crew = -1;
+      q.attached = false;
+    }
+    const r = q.attached ? this.regiments[q.crew] : null;
+    if (r !== null && q.dist < q.len) {
+      const lag = isqrt((q.x - r.x) * (q.x - r.x) + (q.y - r.y) * (q.y - r.y)) - (r.halfD + RAM.front);
+      if (lag <= RAM.slack && !this.ramStopped(q)) {
+        q.dist = Math.min(q.len, q.dist + RAM.speed);
+        const p = this.trackAt(q, q.dist);
+        q.x = p.x;
+        q.y = p.y;
+        q.facing = turnToward(q.facing, p.dir, RAM.turn);
+      }
     }
     // 貼著哪座擋路的城門（關著或開門中）
     let gate = -1;
@@ -939,7 +1023,7 @@ export class LegionMatch {
   /** 箭從 (x0, y0) 射向推衝車的兵團：從衝車正面 ±blockHalf 度射來的被擋下 */
   private ramBlocks(e: Soldier, x0: number, y0: number): boolean {
     const q = this.ram;
-    if (q === null || q.crew !== e.reg || (x0 === q.x && y0 === q.y)) return false;
+    if (q === null || !q.attached || q.crew !== e.reg || (x0 === q.x && y0 === q.y)) return false;
     return Math.abs(angleDiff(iatan2(y0 - q.y, x0 - q.x), q.facing)) <= RAM.blockHalf;
   }
 
@@ -1562,6 +1646,11 @@ export class LegionMatch {
     }
     if (type === 'summon' || type === 'swap' || type === 'withdraw') return this.reserveCommand(p, r, type, c);
     if (r.reserve) return this.rejectCmd(p, type, '在後備，要先入場');
+    // 推衝車：附上之後只接受卸下、換陣形（圓陣除外）、盾兵持盾或舉盾；還在走向衝車時下了別的指令就不推了、照常執行那個指令
+    if (this.manning(r) && type !== 'man' && type !== 'unman' && !(type === 'formation' && c.formation !== 'circle') && !(type === 'shield' && c.mode !== 'wall')) {
+      if (this.ram!.attached) return this.rejectCmd(p, type, '推衝車中不能這樣做，先卸下（unman）');
+      this.unman(r);
+    }
     const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? roundHalfEven(v) : null);
     // 衝刺中：只接受微調方向，其他指令等衝完再執行
     if (r.dash !== null) {
@@ -1605,9 +1694,6 @@ export class LegionMatch {
     }
     const moving = type === 'move' || type === 'attackMove' || type === 'attack' || type === 'follow';
     if (moving && r.formation === 'circle') return this.rejectCmd(p, type, '圓陣不能移動，先換陣形');
-    if (this.manning(r) && (type === 'brace' || (type === 'shield' && c.mode === 'wall') || type === 'ladder' || (type === 'formation' && c.formation === 'circle'))) {
-      return this.rejectCmd(p, type, '推衝車中不能這樣做，先卸下（unman）');
-    }
     switch (type) {
       case 'move':
       case 'attackMove': {
@@ -1781,7 +1867,7 @@ export class LegionMatch {
       case 'man':
         return this.manCommand(p, r, c);
       case 'unman':
-        if (this.manning(r)) this.ram!.crew = -1;
+        if (this.manning(r)) this.unman(r);
         return undefined;
       case 'ladder':
         return this.ladderCommand(p, r, c);
@@ -1929,9 +2015,8 @@ export class LegionMatch {
     return r === undefined || this.gone(r) ? null : r;
   }
 
-  /** 平常的移動速度（盾兵依姿態；推衝車的兵團跟衝車同速） */
+  /** 平常的移動速度（盾兵依姿態） */
   private baseSpeed(r: Regiment): number {
-    if (this.ram !== null && this.ram.crew === r.id) return Math.min(RAM.speed, r.stance === 'raise' ? RULES.shield.raise.speed : r.def.speed);
     if (r.stance === 'raise') return RULES.shield.raise.speed;
     if (r.stance === 'carry') return RULES.shield.carry.speed;
     return r.def.speed;
@@ -1972,6 +2057,10 @@ export class LegionMatch {
     }
     if (r.def.range > 0 && this.tick % 5 === 0 && r.order !== 'attack' && r.order !== 'move' && r.order !== 'follow') this.setFire(r, this.acquire(r, r.def.range));
     const speed = this.baseSpeed(r);
+    if (r.order === 'man') {
+      if (this.manning(r)) return this.thinkCrew(r, speed);
+      r.order = 'idle';
+    }
     switch (r.order) {
       case 'idle':
       case 'hold':
@@ -3361,7 +3450,7 @@ export class LegionMatch {
     for (const f of this.flags) h.int(f.owner).int(f.capturer).int(f.progress).int(f.contested ? 1 : 0);
     for (const g of this.gates) h.int(g.hp).str(g.state).int(g.timer);
     for (const l of this.ladders) h.int(l.id).int(l.top).int(l.foot).int(l.progress).bool(l.built).int(l.nextEntry);
-    if (this.ram !== null) h.int(this.ram.x).int(this.ram.y).int(this.ram.facing).int(this.ram.crew).int(this.ram.gate).int(this.ram.contactSince);
+    if (this.ram !== null) h.int(this.ram.dist).int(this.ram.x).int(this.ram.y).int(this.ram.facing).int(this.ram.crew).bool(this.ram.attached).int(this.ram.gate).int(this.ram.contactSince);
     if (this.bombardReadyAt >= 0) {
       h.int(this.bombardsLeft).int(this.bombardReadyAt);
       for (const s of this.shells) h.int(s.x).int(s.y).int(s.landAt);
@@ -3422,7 +3511,7 @@ export function legionInitData(m: LegionMap, mode: LegionMode, p: number, knobs:
       supplies: m.supplies.map((q, i) => ({ id: i, x: q.x, y: q.y, flag: q.flag })),
       features: mapFeatures(m),
       defender: m.defender,
-      ram: m.ram === undefined ? null : { x: m.ram.x, y: m.ram.y, facing: m.ram.facing },
+      ram: m.ram === undefined || m.ramTrack === undefined ? null : { x: m.ram.x, y: m.ram.y, facing: m.ram.facing },
       bombardFrom: m.bombardFrom ?? -1,
     },
     capture: {
