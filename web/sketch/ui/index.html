@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天使戰隊 完整 UI</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,600;0,800;1,800&family=Share+Tech+Mono&display=swap">
+<style>
+body { margin: 0; padding: 32px 36px 60px; background: #0b0e14; color: #eef2f6; font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+h1 { margin: 0; font-size: 34px; font-weight: 900; letter-spacing: 0.1em; }
+h1 em { font-style: italic; font-family: "Barlow Condensed", sans-serif; font-weight: 800; color: #f0b54a; margin-right: 12px; letter-spacing: 0.02em; }
+.lead { margin: 8px 0 26px; color: #8b95a4; line-height: 1.7; max-width: 1200px; }
+.lead b { color: #eef2f6; }
+h2 { display: flex; align-items: center; gap: 12px; margin: 34px 0 14px; font-size: 20px; letter-spacing: 0.14em; }
+h2::before { content: ""; width: 28px; height: 3px; background: #f0b54a; transform: skewX(-30deg); }
+h2 small { font-family: "Share Tech Mono", monospace; font-size: 12px; letter-spacing: 0.24em; color: #5b6574; font-weight: 400; }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 14px; color: #8b95a4; }
+.flow b { color: #eef2f6; padding: 2px 10px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2); }
+.flow i { font-style: normal; color: #f0b54a; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 18px; }
+a.card { display: block; text-decoration: none; color: inherit; background: #131823; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%); }
+a.card:hover { box-shadow: inset 0 0 0 2px #f0b54a; }
+.thumb { position: relative; width: 100%; aspect-ratio: 1920 / 1080; overflow: hidden; background: #000; }
+.thumb iframe { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; pointer-events: none; }
+.info { padding: 10px 14px 14px; }
+.info b { font-size: 17px; letter-spacing: 0.08em; }
+.info b em { font-style: normal; font-family: "Share Tech Mono", monospace; font-size: 12px; color: #5b6574; margin-left: 8px; letter-spacing: 0.2em; }
+.info span { display: block; margin-top: 4px; font-size: 13px; color: #8b95a4; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h1><em>ANGEL GAMING</em>完整 UI 設計稿</h1>
+<p class="lead">E＋A 統一規格（<b>墨黑</b>中性色、<b>天使金</b>給我方與主要行動、<b>紅</b>給對手與警示）畫出的 M4 經營層全部畫面，共 15 張，資料前後一致（第 4 週、對手暗影工作室）。縮圖是截圖模式；點進去看動態，畫面之間的按鈕、導覽列、基地的建築標籤都能點。說明見 docs/2026-10-27_M4完整UI設計稿.md。</p>
+
+<h2>開場 <small>TITLE</small></h2>
+<div class="flow"><b>標題</b><i>→</i><b>創立戰隊</b><i>→</i><b>基地</b>　（已有存檔時：標題 → 繼續 → 基地）</div>
+<div class="grid">
+  <a class="card" href="title.html"><div class="thumb"><iframe src="title.html?still" loading="lazy"></iframe></div><div class="info"><b>標題<em>title</em></b><span>隊徽在刻度環中央；繼續遊戲是唯一的金色按鈕，旁邊顯示存檔進度。</span></div></a>
+  <a class="card" href="create.html"><div class="thumb"><iframe src="create.html?still" loading="lazy"></iframe></div><div class="info"><b>創立戰隊<em>create</em></b><span>左邊即時預覽；隊徽外形 4 種、配色 6 組（只在金白墨之間配）、圖騰 10 種。</span></div></a>
+</div>
+
+<h2>基地與經營 <small>HUB & MANAGEMENT</small></h2>
+<div class="flow"><b>基地（A）</b><i>⇄</i><b>戰隊</b><b>市場</b><b>訓練</b><b>聯賽</b><b>賭盤</b><b>財務</b><b>信件</b>　左側導覽列隨時切換；左下金色「比賽日」進入當週比賽</div>
+<div class="grid">
+  <a class="card" href="../cyber.html"><div class="thumb"><iframe src="../cyber.html?still" loading="lazy"></iframe></div><div class="info"><b>基地<em>hub · A</em></b><span>從頂樓俯看整座城；建築上的 AR 標籤就是選單，點了進對應畫面。</span></div></a>
+  <a class="card" href="squad.html"><div class="thumb"><iframe src="squad.html?still" loading="lazy"></iframe></div><div class="info"><b>戰隊<em>squad</em></b><span>先鋒、中堅、大將三張卡排成弧形；右邊陣容表與本週對手。</span></div></a>
+  <a class="card" href="player.html"><div class="thumb"><iframe src="player.html?still" loading="lazy"></iframe></div><div class="info"><b>選手詳情<em>player</em></b><span>E 的王牌鏡頭＋名牌；版本線與升版試算、評分走勢、戰術預設、合約。</span></div></a>
+  <a class="card" href="market.html"><div class="thumb"><iframe src="market.html?still" loading="lazy"></iframe></div><div class="info"><b>轉會市場<em>market</em></b><span>自由球員卡（球探便條貼在卡上）、跟替補比、簽下之後的財務試算。</span></div></a>
+  <a class="card" href="training.html"><div class="thumb"><iframe src="training.html?still" loading="lazy"></iframe></div><div class="info"><b>訓練基地<em>training</em></b><span>本週場數環、排程、新增排程（選手、項目、流派、場數）、三欄報告。</span></div></a>
+  <a class="card" href="league.html"><div class="thumb"><iframe src="league.html?still" loading="lazy"></iframe></div><div class="info"><b>聯賽<em>league</em></b><span>賽段時間軸、積分榜（季後賽線）、本週賽程、季後賽樹狀圖。</span></div></a>
+  <a class="card" href="betting.html"><div class="thumb"><iframe src="betting.html?still" loading="lazy"></iframe></div><div class="info"><b>賭盤<em>betting</em></b><span>四場注單、情報提示、下注單（金額晶片、上限、可得）、已下的注。</span></div></a>
+  <a class="card" href="finance.html"><div class="thumb"><iframe src="finance.html?still" loading="lazy"></iframe></div><div class="info"><b>財務<em>finance</em></b><span>現金與資金跑道環、資金曲線與推估、每週固定收支、累計、帳本。</span></div></a>
+  <a class="card" href="inbox.html"><div class="thumb"><iframe src="inbox.html?still" loading="lazy"></iframe></div><div class="info"><b>信件<em>inbox</em></b><span>依類型分圖示的收件匣；打開的信附選手卡與「去市場簽約」。</span></div></a>
+</div>
+
+<h2>比賽日與結算 <small>MATCH DAY</small></h2>
+<div class="flow"><b>比賽日（逐場揭曉）</b><i>→</i><b>比賽結果</b><i>→</i><b>週結算</b><i>→</i><b>下一週的戰隊</b></div>
+<div class="grid">
+  <a class="card" href="match.html"><div class="thumb"><iframe src="match.html?still" loading="lazy"></iframe></div><div class="info"><b>比賽日<em>match</em></b><span>比分板、兩個鏡頭對望、勝率推估；下方三條對位，大將最後才揭曉。</span></div></a>
+  <a class="card" href="result.html"><div class="thumb"><iframe src="result.html?still" loading="lazy"></iframe></div><div class="info"><b>比賽結果<em>result</em></b><span>超大 WIN、2:1、對位結果章、這場帶來的收入、名氣、積分、評分。</span></div></a>
+  <a class="card" href="week.html"><div class="thumb"><iframe src="week.html?still" loading="lazy"></iframe></div><div class="info"><b>週結算<em>week</em></b><span>現金逐筆滾動、名次 7 → 5、新報告、其他賽場戰果。</span></div></a>
+</div>
+
+<h2>賽段結束 <small>SEASON END</small></h2>
+<div class="flow"><b>第 9 週後</b><i>→</i><b>頒獎典禮</b><i>→</i><b>休賽期</b>　（任一週結算現金 &lt; 0 → <b>破產</b>）</div>
+<div class="grid">
+  <a class="card" href="season.html"><div class="thumb"><iframe src="season.html?still" loading="lazy"></iframe></div><div class="info"><b>頒獎典禮<em>season</em></b><span>透視頒獎台、聚光燈與金白紙花；兩側是本季數字與 MVP。</span></div></a>
+  <a class="card" href="bankrupt.html"><div class="thumb"><iframe src="bankrupt.html?still" loading="lazy"></iframe></div><div class="info"><b>破產<em>bankrupt</em></b><span>畫面去飽和、隊徽變灰蓋紅章；右邊拆解錢去哪裡了，附平衡測試的提醒。</span></div></a>
+</div>
+<script>
+  const fit = () => document.querySelectorAll('.thumb').forEach((t) => { t.querySelector('iframe').style.transform = `scale(${t.clientWidth / 1920})`; });
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>

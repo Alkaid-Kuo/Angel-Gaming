@@ -19,6 +19,7 @@
     "web": "vite",
     "build:web": "vite build",
     "pack:build": "node scripts/build-pack.ts",
+    "m4:balance": "node scripts/m4-balance.ts",
     "serve": "node src/cli/main.ts viewer",
     "serve:lan": "node src/cli/main.ts viewer --host 0.0.0.0"
   },

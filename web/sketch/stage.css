@@ -1,0 +1,10 @@
+/* 設計稿共用：1920×1080 舞台等比縮放；.in 是進場動畫元素，截圖模式（.still）直接顯示完成狀態 */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #04060b; overflow: hidden; }
+#vp { position: fixed; inset: 0; overflow: hidden; }
+#stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; overflow: hidden; transform-origin: center; transform: translate(-50%, -50%); --mx: 0; --my: 0; }
+.still .in, .still .in * { animation-delay: 0s !important; animation-duration: 0s !important; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spinr { to { transform: rotate(-360deg); } }
+@keyframes blink { 50% { opacity: 0.25; } }
+.design-note { position: absolute; z-index: 90; font: 12px/1 "Share Tech Mono", monospace; letter-spacing: 0.2em; color: rgba(255, 255, 255, 0.32); }

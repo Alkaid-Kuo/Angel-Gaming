@@ -1,0 +1,113 @@
+# 軍團戰 選手開發包
+
+## 任務
+
+寫出最強的**軍團戰 AI 選手**（bot）。
+
+- 交付物是**單一 JavaScript 檔**（例如 `my-bot.js`），必須通過沙盒檢查（`node match.ts --check my-bot.js` 顯示「通過」）。
+- **兩種模式**（殲滅戰 `annihilation`、佔點 `capture`）都要能贏包裡的三隻陪練對手：`bots/legion-push.js`、`bots/legion-ambush.js`、`bots/legion-ranged.js`。
+- 最終評測還會加入**你沒看過的對手**。陪練只是練習對象，你的選手要能應付各種兵力組成與打法，不能只針對這三隻。
+- 衡量強度時請看雙方交換起點（藍方／紅方）、多個種子的對戰結果，不要只看單場。
+
+規則的唯一依據是 `spec.md`（選手規格書）。這個包只提供規則、引擎與工具，怎麼打由你自己研究、實驗。
+
+## 環境
+
+- Node.js **22.18 以上**（直接執行 `.ts`，不需要編譯，也不需要 `npm install`；需要的套件 `acorn` 已放在 `node_modules/`）。
+- 所有指令都在包的根目錄執行。
+
+## 內容
+
+| 路徑 | 說明 |
+| --- | --- |
+| `spec.md` | 選手規格書：完整規則與選手 API（唯一依據） |
+| `datasheet.md` | 數值總表（由引擎數值產生的速查表；與 `spec.md` 不一致時以 `spec.md` 為準） |
+| `bots/template.js` | 空白範本：最小的合法選手，示範介面，不含戰術。從這裡開始 |
+| `bots/legion-push.js`、`bots/legion-ambush.js`、`bots/legion-ranged.js` | 三隻陪練對手 |
+| `match.ts` | 對戰工具：兩隻選手對打多場，印出勝負與基本統計；`--check` 檢查選手是否合法 |
+| `trace.ts` | 文字追蹤工具：跑一場，定時印出每一團的狀態與事件（除錯用） |
+| `src/` | 引擎原始碼（模擬、地圖、沙盒），只含軍團戰執行需要的檔案（少數檔案的型別引用了沒附上的舊引擎檔案，不影響執行）。評測使用原版引擎，**請不要修改** |
+| `versions/` | 請把每個版本的快照存成 `versions/v1.js`、`versions/v2.js`… |
+| `CHANGELOG.md` | 每個版本一行（格式見下） |
+| `BUGS.md` | 發現的引擎漏洞或規格不清之處 |
+
+## 開始
+
+```bash
+cp bots/template.js my-bot.js
+node match.ts --check my-bot.js
+node match.ts my-bot.js bots/legion-push.js --games 4
+```
+
+## 常用指令
+
+**檢查選手**（載入、`declare()`、兩種模式兩個座位的布陣、自己打自己 30 秒的 `decide`）：
+
+```bash
+node match.ts --check my-bot.js
+```
+
+**對戰**（`--games` 是總場數；同一個種子雙方交換起點各打一場，所以建議用偶數）：
+
+```bash
+node match.ts my-bot.js bots/legion-push.js --mode annihilation --games 10 --seed 1
+node match.ts my-bot.js bots/legion-ranged.js --mode capture --games 10
+node match.ts my-bot.js bots/legion-ambush.js            # 預設兩種模式各 2 場
+```
+
+| 參數 | 說明 |
+| --- | --- |
+| `--mode annihilation\|capture\|both` | 模式（預設 both） |
+| `--games N` | 每個模式的總場數（預設 2） |
+| `--seed S` | 起始種子（預設 1）；第 1、2 場用 S，第 3、4 場用 S＋1，依此類推 |
+| `--knobs-a '{"key":值}'`、`--knobs-b …` | 指定 A、B 的旋鈕值（沒指定的用 default） |
+| `--quiet` | 只印每個模式的小計 |
+| `--json` | 改輸出 JSON（每場的明細與小計） |
+
+輸出：每場一行（種子、A 坐哪一方、勝負、結束原因、時間、雙方戰果、佔點分數），以及每個模式的小計（勝敗平、勝率、結束原因、平均時間、平均戰果與分數、雙方 `decide` 耗時、例外、逾時、被拒絕的布陣與指令數）。
+
+結束碼：0 成功、1 參數錯誤、2 選手載入失敗（`--check` 不通過也是 2）。
+
+**追蹤一場**（上帝視角；預設 A 坐藍方，每 10 秒印一次，事件只印重要的）：
+
+```bash
+node trace.ts my-bot.js bots/legion-push.js --mode annihilation --seed 1 --every 10
+node trace.ts my-bot.js bots/legion-push.js --mode capture --swap --side 1 --events all --until 120
+```
+
+| 參數 | 說明 |
+| --- | --- |
+| `--mode`、`--seed` | 同 match.ts |
+| `--swap` | A 改坐紅方（東側） |
+| `--every 秒` | 每幾秒印一次各團狀態（預設 10） |
+| `--until 秒` | 只跑到第幾秒 |
+| `--side 0\|1` | 只顯示一方的軍團與事件 |
+| `--events none\|key\|all` | 事件：不印／重要事件（被拒絕的布陣與指令、衝刺撞擊、覆滅、升級、旗點、入場撤回、埋伏）／全部（另加接戰、技能） |
+| `--knobs-a`、`--knobs-b` | 同 match.ts |
+
+每團一行：方、id、兵種、位置（格）、朝向、人數、血量百分比、陣形、姿態、狀態、指令、目標、老兵等級、技能冷卻（秒）、對手是否看得到、選手設的意圖（`intent`）與幾秒前設的。
+
+## 選手的要點（詳見 `spec.md`）
+
+- 單一檔案、ES2020 模組、不可 `import`、≤ 200 KB；`export default` 一個 class，提供 `declare()`、`init()`（選填）、`deploy()`、`decide()`。
+- 不能用 class 欄位語法、`??=`、數字分隔符號等 ES2021 以後的語法；亂數只能用 `helpers.random()`。
+- `init`、`deploy` 上限各 1000 ms；`decide` 每 0.5 秒（5 tick）呼叫一次，上限 50 ms，**超過一次就整場不再呼叫**。
+- 每次 `decide` 最多 10 個指令；指令可以附 `intent`（20 字內），用 `trace.ts` 看得到，方便除錯。
+- 只看得到己方視野內的敵軍。
+
+## 版本管理
+
+- 每個要保留的版本存一份快照：`versions/v1.js`、`versions/v2.js`…（`declare()` 的 `version` 也跟著改）。
+- `CHANGELOG.md` 每個版本一行，格式：
+
+```text
+v3 | 殲滅戰 push 70% / ambush 60% / ranged 80% | 佔點 push 65% / ambush 55% / ranged 75% | 變更：……
+```
+
+  勝率請寫明場數與種子範圍（例如「各 20 場、種子 1～10」），讓不同版本可以比較。
+- 新版本可以和舊版本對打（`node match.ts my-bot.js versions/v2.js`），確認沒有退步。
+
+## 回報問題
+
+- 發現引擎漏洞、規格與引擎行為不一致、或規格寫得不清楚的地方，記在 `BUGS.md`（重現方式：指令、種子、第幾秒）。
+- 評測時這些漏洞可能已經修正；依賴漏洞的打法可能失效。

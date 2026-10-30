@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設計稿 A：夜城天台</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="./stage.css">
+<link rel="stylesheet" href="./angel.css">
+<style>
+/* 配色、字型、頂列與標籤元件見 angel.css（E、A 共用規格）。這一稿的金只給：我方名單、選中的標籤、競技場、開戰；紅只給對手 */
+
+/* ── 城市（畫布比舞台大一圈，整組隨滑鼠與懸停飄移） ── */
+#stage { background: var(--ink); }
+.cam { position: absolute; inset: 0; transform: translate(calc(var(--mx) * -26px), calc(var(--my) * -14px)); }
+.world { position: absolute; left: -64px; top: -36px; width: 2048px; height: 1152px; animation: drone 9s ease-in-out infinite; }
+@keyframes drone { 50% { translate: 0 -7px; } }
+.world canvas { position: absolute; inset: 0; }
+.mist { position: absolute; left: 0; right: 0; height: 260px; pointer-events: none; background: radial-gradient(closest-side, rgba(var(--white-rgb), 0.045), transparent) 0 0 / 640px 220px repeat-x; animation: mist 70s linear infinite; }
+@keyframes mist { to { background-position: 640px 0; } }
+.sweep { position: absolute; left: 0; right: 0; height: 160px; pointer-events: none; background: linear-gradient(180deg, transparent, rgba(var(--gold-rgb), 0.04) 80%, rgba(var(--gold-rgb), 0.16) 99%, transparent); animation: sweep 7s cubic-bezier(.5, 0, .5, 1) infinite; }
+@keyframes sweep { 0% { top: 240px; opacity: 0; } 10% { opacity: 1; } 75% { top: 900px; opacity: 1; } 80%, 100% { top: 900px; opacity: 0; } }
+
+/* ── AR 標籤：菱形釘點＋細桿＋卡片（E 的深色選單磚縮小版）；平時白色半亮，滑鼠移上去變金 ── */
+.tag { position: absolute; width: 0; height: 0; --tc: rgba(var(--white-rgb), 0.42); --L: 96px; transform: scale(var(--k, 1)); transform-origin: 0 0; cursor: pointer; }
+.tag .pin { position: absolute; left: -8px; top: -8px; width: 16px; height: 16px; border: 2px solid var(--tc); background: rgba(var(--ink-rgb), 0.7); transform: rotate(45deg); }
+.tag .pin::after { content: ""; position: absolute; inset: -9px; border: 1px solid var(--tc); animation: ping 2.6s ease-out infinite; animation-delay: var(--d, 0s); }
+@keyframes ping { from { opacity: 0.9; scale: 0.4; } to { opacity: 0; scale: 1.6; } }
+.tag .stem { position: absolute; left: -1px; bottom: 8px; width: 2px; height: var(--L); background: linear-gradient(0deg, var(--tc), rgba(var(--white-rgb), 0.04)); transform-origin: 50% 100%; }
+.tag .card { position: absolute; left: -2px; bottom: calc(var(--L) + 8px); min-width: 236px; padding: 12px 24px 14px 26px; background: var(--panel); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); white-space: nowrap; transition: box-shadow 0.25s;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%); }
+.tag .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--tc); transition: background 0.25s; }
+.tag.R .card { left: auto; right: -2px; text-align: right; padding: 12px 26px 14px 24px; clip-path: polygon(0 0, 100% 0, 100% 100%, 14px 100%, 0 calc(100% - 14px)); }
+.tag.R .card::before { left: auto; right: 0; }
+.tag .no { display: block; font-family: var(--mono); font-size: 14px; letter-spacing: 0.24em; color: var(--grey); }
+.tag b { display: block; margin-top: 4px; font-size: 38px; font-weight: 900; line-height: 1.05; letter-spacing: 0.08em; color: rgba(var(--white-rgb), 0.82); transform: skewX(-7deg); transition: color 0.25s, text-shadow 0.25s; }
+.tag .en { font-family: var(--en); font-weight: 600; font-size: 18px; letter-spacing: 0.3em; color: var(--grey2); }
+.tag .st { display: block; margin-top: 8px; font-size: 16px; letter-spacing: 0.06em; color: var(--grey); }
+.tag .st i { font-style: italic; font-family: var(--en); font-weight: 800; font-size: 24px; color: var(--white); margin-right: 4px; }
+.tag .new { display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--gold); box-shadow: 0 0 10px var(--gold); animation: blink 1.2s infinite; }
+.tag:hover { --tc: var(--gold); z-index: 5; }
+.tag:hover .card { box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.55), 0 0 40px rgba(var(--gold-rgb), 0.18); }
+.tag:hover b { color: #fff; text-shadow: 0 0 18px rgba(var(--gold-rgb), 0.6); }
+.tag:hover .st i { color: var(--gold2); }
+.tag.op { --tc: rgba(var(--red-rgb), 0.9); }
+.tag.op b { color: var(--red2); }
+.tag.op .st i { color: var(--red); }
+.tag.in .stem { animation: grow 0.5s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
+.tag.in .card { animation: cardin 0.6s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--d, 0s) + 0.25s); }
+.tag.in .pin { animation: pop 0.4s cubic-bezier(.2, .8, .2, 1.4) both; animation-delay: var(--d, 0s); }
+@keyframes grow { from { scale: 1 0; } }
+@keyframes cardin { from { opacity: 0; translate: -30px 0; } }
+@keyframes pop { from { opacity: 0; scale: 0.2; } }
+
+/* ── 競技場上空的比賽卡（E 比賽日面板的同款材質） ── */
+.mcard { position: absolute; width: 0; height: 0; }
+.mcard .bx { position: absolute; left: 0; bottom: 30px; transform: translateX(-50%); padding: 14px 40px 16px 44px; text-align: center; white-space: nowrap;
+  background: linear-gradient(115deg, rgba(var(--gold-rgb), 0.2), rgba(var(--gold-rgb), 0) 40%), var(--panel); border: 1px solid rgba(var(--gold-rgb), 0.5); box-shadow: 0 30px 60px rgba(0, 0, 0, 0.55); }
+.mcard .bx::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--gold); }
+.mcard .lb { font-family: var(--mono); font-size: 15px; letter-spacing: 0.3em; color: var(--gold2); }
+.mcard h1 { margin: 2px 0 0; font-size: 76px; line-height: 1.05; font-weight: 900; letter-spacing: 0.12em; color: #fff; transform: skewX(-7deg); text-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 0 34px rgba(var(--gold-rgb), 0.35); }
+.mcard .vs { margin-top: 4px; font-size: 20px; font-weight: 700; letter-spacing: 0.12em; color: var(--white); }
+.mcard .vs i { font-style: italic; font-family: var(--en); font-weight: 800; font-size: 26px; color: var(--gold); margin: 0 14px; }
+.mcard .vs em { font-style: normal; color: var(--red2); }
+.mcard .ln { position: absolute; left: -1px; bottom: 0; width: 2px; height: 30px; background: linear-gradient(0deg, transparent, var(--gold)); }
+
+/* ── HUD：四角框、方位帶、掃描線、暗角 ── */
+.corner { position: absolute; width: 46px; height: 46px; border-color: rgba(255, 255, 255, 0.28); border-style: solid; border-width: 0; pointer-events: none; }
+.tape { position: absolute; left: 660px; top: 118px; width: 600px; height: 34px; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 25%, #000 75%, transparent); }
+.tape .tk { position: absolute; left: -300px; top: 0; width: 1200px; height: 34px; display: flex; transform: translateX(calc(var(--mx) * -60px));
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.35) 0 1px, transparent 1px 20px) 0 0 / 100% 8px no-repeat, repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.6) 0 2px, transparent 2px 100px) 0 0 / 100% 14px no-repeat; }
+.tape .tk span { flex: none; width: 100px; padding-top: 16px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.1em; color: var(--grey); }
+.tape .tk span.n { color: var(--gold); }
+.tape .mk { position: absolute; left: 50%; top: 0; width: 0; height: 0; margin-left: -7px; border: 7px solid transparent; border-top-color: var(--gold); }
+#rain { position: absolute; inset: 0; pointer-events: none; }
+.scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px); }
+.vig { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(1500px 940px at 50% 46%, transparent 58%, rgba(0, 0, 0, 0.72)); }
+
+/* ── 屋頂：左我方名單（選中＝金）、中開戰、右對手情報（紅） ── */
+.panel { position: absolute; top: 852px; width: 640px; padding: 18px 28px 20px 34px; background: var(--panel); border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%); }
+.panel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--bar, rgba(255, 255, 255, 0.3)); }
+.panel .hd { display: flex; align-items: baseline; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.panel .hd .no { font-family: var(--mono); font-size: 14px; letter-spacing: 0.28em; color: var(--grey); }
+.panel .hd b { font-size: 36px; font-weight: 900; letter-spacing: 0.1em; line-height: 1; transform: skewX(-7deg); }
+.panel .hd .en { font-family: var(--en); font-weight: 600; font-size: 19px; letter-spacing: 0.3em; color: var(--grey); }
+.panel .hd .st { margin-left: auto; font-size: 16px; color: var(--grey); letter-spacing: 0.06em; }
+.squad { left: 56px; --bar: var(--gold); transform: translate(calc(var(--mx) * -40px), calc(var(--my) * -10px));
+  background: linear-gradient(115deg, rgba(var(--gold-rgb), 0.16), rgba(var(--gold-rgb), 0) 40%), var(--panel); border-color: rgba(var(--gold-rgb), 0.5); }
+.squad .hd b { color: #fff; text-shadow: 0 0 18px rgba(var(--gold-rgb), 0.45); }
+.squad .hd .no, .squad .hd .st { color: var(--gold2); }
+.units { display: flex; gap: 16px; margin-top: 16px; }
+.u { flex: 1; display: flex; align-items: center; gap: 12px; }
+.pic { flex: none; width: 74px; height: 74px; border-radius: 50%; background: var(--ink3); box-shadow: 0 0 0 2px var(--white), 0 0 0 6px rgba(var(--gold-rgb), 0.4); }
+.pic .avatar { display: block; width: 74px; height: 74px; }
+.u .rl { display: block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.24em; color: var(--gold2); }
+.u b { display: block; font-size: 25px; font-weight: 900; letter-spacing: 0.06em; line-height: 1.2; color: #fff; transform: skewX(-7deg); }
+.u .rt { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 28px; line-height: 1; color: var(--white); }
+.u .rt small { font-family: var(--zh); font-style: normal; font-weight: 500; font-size: 13px; color: var(--grey); margin-left: 6px; }
+
+.target { right: 56px; --bar: var(--red); transform: translate(calc(var(--mx) * -40px), calc(var(--my) * -10px)); }
+.target .hd .no { color: var(--red); }
+.target .hd .st b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 26px; color: var(--white); }
+.target .body { display: flex; align-items: center; gap: 20px; margin-top: 14px; }
+.target .cr { flex: none; width: 90px; height: 90px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, #2a3346, #10141c); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5), 0 0 0 8px rgba(var(--red-rgb), 0.16), 0 20px 40px rgba(0, 0, 0, 0.5); }
+.target .nm { font-size: 32px; font-weight: 900; letter-spacing: 0.08em; color: #fff; line-height: 1.1; transform: skewX(-7deg); }
+.target .meta { margin-top: 4px; font-size: 15px; color: var(--grey); letter-spacing: 0.06em; }
+.target .meta b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 22px; color: var(--white); }
+.slots { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.slots i { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 1.5px dashed rgba(var(--red-rgb), 0.7); font-style: normal; font-family: var(--en); font-weight: 800; font-size: 18px; color: var(--red); }
+.slots em { font-style: normal; margin-left: 6px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.16em; color: var(--red); animation: blink 1.6s infinite; }
+
+/* 開戰：E 圓鈕的同款金色材質 */
+.deploy { position: absolute; left: 960px; top: 866px; width: 520px; transform: translateX(-50%) translate(calc(var(--mx) * -34px), calc(var(--my) * -10px)); display: flex; flex-direction: column; align-items: center; }
+.deploy .cd { display: flex; align-items: baseline; gap: 14px; font-size: 15px; letter-spacing: 0.14em; color: var(--grey); }
+.deploy .cd b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 40px; letter-spacing: 0.04em; color: #fff; }
+.go { position: relative; margin-top: 8px; width: 400px; height: 96px; display: flex; align-items: center; justify-content: center; gap: 18px; color: var(--ink); cursor: pointer;
+  background: radial-gradient(120% 160% at 40% 20%, var(--gold2), var(--gold) 45%, var(--gold3)); clip-path: polygon(26px 0, calc(100% - 26px) 0, 100% 50%, calc(100% - 26px) 100%, 26px 100%, 0 50%); animation: gopulse 2.4s ease-in-out infinite; }
+@keyframes gopulse { 50% { filter: brightness(1.1) drop-shadow(0 0 22px rgba(var(--gold-rgb), 0.9)); } }
+.go b { font-size: 46px; font-weight: 900; letter-spacing: 0.28em; line-height: 1; margin-right: -0.28em; transform: skewX(-7deg); }
+.go span { font-family: var(--en); font-weight: 700; font-size: 19px; letter-spacing: 0.4em; }
+.go .chev { display: flex; gap: 2px; }
+.go .chev i { width: 12px; height: 22px; background: var(--ink); clip-path: polygon(0 0, 45% 0, 100% 50%, 45% 100%, 0 100%, 55% 50%); animation: chev 1.2s infinite; }
+.go .chev i:nth-child(2) { animation-delay: 0.15s; } .go .chev i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes chev { 0%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+.deploy .lock { margin-top: 10px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.2em; color: var(--grey); }
+.glowline { position: absolute; left: 960px; top: 940px; width: 860px; height: 2px; margin-left: -430px; background: linear-gradient(90deg, transparent, rgba(var(--gold-rgb), 0.55), transparent); filter: blur(1px); }
+
+/* ── 進場 ── */
+.in { animation: fin 0.9s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
+@keyframes fin { from { opacity: 0; translate: 0 30px; } }
+.tag.in, .mcard.in { animation: none; }
+.mcard.in .bx { animation: fin 0.9s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
+.world.lights { animation: drone 9s ease-in-out infinite, lights 1.6s ease-out both; }
+@keyframes lights { from { filter: brightness(0.15) saturate(0); } }
+.still .world.lights { animation: none; }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage">
+  <section class="cam"><div class="world lights">
+    <canvas id="city" width="2048" height="1152"></canvas>
+    <div class="mist" style="top:300px"></div>
+    <div class="mist" style="top:420px;animation-duration:110s;animation-direction:reverse;opacity:.7"></div>
+    <canvas id="fx" width="2048" height="1152"></canvas>
+    <div class="sweep"></div>
+
+    <div class="mcard in" data-at="arena" style="--d:.5s"><i class="ln"></i><div class="bx">
+      <div class="lb">MATCH DAY // W04 · 中央競技場</div>
+      <h1>比賽日</h1>
+      <div class="vs">天使戰隊<i>VS</i><em>暗影工作室</em></div>
+    </div></div>
+
+    <div class="tag in" data-at="finance" style="--d:.9s;--L:60px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">06 · 2.9 KM</span><b>財務</b><span class="en">FINANCE</span><span class="st"><i>−14.6</i>萬／週</span></div></div>
+    <div class="tag R in" data-at="market" style="--d:.7s;--L:70px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">02 · 1.8 KM</span><b>轉會市場</b><span class="en">RECRUIT</span><span class="st"><span class="new"></span><i>3</i>名自由球員</span></div></div>
+    <div class="tag in" data-at="training" style="--d:.8s;--L:100px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">03 · 0.7 KM</span><b>訓練基地</b><span class="en">TRAINING</span><span class="st"><i>200</i>／200 訓練點</span></div></div>
+    <div class="tag in" data-at="league" style="--d:.75s;--L:60px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">04 · 2.5 KM</span><b>聯賽</b><span class="en">LEAGUE</span><span class="st">第 <i>7</i> 名 · 3 分</span></div></div>
+    <div class="tag R in" data-at="betting" style="--d:.85s;--L:100px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">05 · 0.8 KM</span><b>賭盤</b><span class="en">BETTING</span><span class="st"><i>4</i>場開盤中</span></div></div>
+    <div class="tag R op in" data-at="rival" style="--d:.95s;--L:70px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">TARGET · 1.7 KM</span><b>暗影工作室</b><span class="en">RIVAL HQ</span><span class="st">情報 <i>2</i> 則</span></div></div>
+  </div></section>
+
+  <canvas id="rain" width="1920" height="1080"></canvas>
+
+  <i class="corner" style="left:24px;top:24px;border-left-width:2px;border-top-width:2px"></i>
+  <i class="corner" style="right:24px;top:24px;border-right-width:2px;border-top-width:2px"></i>
+  <i class="corner" style="left:24px;bottom:24px;border-left-width:2px;border-bottom-width:2px"></i>
+  <i class="corner" style="right:24px;bottom:24px;border-right-width:2px;border-bottom-width:2px"></i>
+  <div class="tape in" style="--d:.3s"><div class="tk"><span>300</span><span>315</span><span>330</span><span>345</span><span class="n">N</span><span>015</span><span>030</span><span>045</span><span>060</span><span>075</span><span>090</span><span>105</span></div><i class="mk"></i></div>
+
+  <header class="top in">
+    <div class="team"><span data-crest="天使戰隊" data-primary="#eef2f6" data-secondary="#f0b54a" data-size="64"></span><div><b>天使戰隊</b><small>ANGEL GAMING // 新創聯賽</small></div></div>
+    <div class="slash"></div>
+    <div class="wk"><b>W04</b><span>/ 09 · REGULAR</span></div>
+    <div class="res">
+      <div class="funds"><div class="lb">FUNDS</div><b>104.8<small>萬</small></b><div class="dl">▼ 14.6 / WEEK</div></div>
+      <div class="gauge"><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="#eef2f6" stroke-width="6" stroke-linecap="round" stroke-dasharray="61 182"/></svg><b>10</b></div>
+      <div class="gl"><b>名氣</b>REP</div>
+      <div class="gauge"><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="#f0b54a" stroke-width="6" stroke-linecap="round" stroke-dasharray="64 182"/></svg><b>7</b></div>
+      <div class="gl"><b>資金跑道</b>WEEKS</div>
+      <div class="icon-btn"><span data-icon="mail" data-size="24"></span><em>3</em></div>
+      <div class="icon-btn"><span data-icon="menu" data-size="24"></span></div>
+    </div>
+  </header>
+
+  <section class="panel squad in" style="--d:.55s">
+    <div class="hd"><span class="no">01</span><b>戰隊</b><span class="en">SQUAD</span><span class="st">4／5 · 名單已排</span></div>
+    <div class="units">
+      <div class="u"><span class="pic tinted"><span data-avatar="xzr" data-jersey="#3a4458" data-size="74"></span></span><div><span class="rl">先鋒</span><b>謝子睿</b><span class="rt">1518<small>強攻</small></span></div></div>
+      <div class="u"><span class="pic tinted"><span data-avatar="qmz2" data-jersey="#3a4458" data-size="74"></span></span><div><span class="rl">中堅</span><b>邱明哲</b><span class="rt">1478<small>均衡</small></span></div></div>
+      <div class="u"><span class="pic tinted"><span data-avatar="xce" data-jersey="#3a4458" data-size="74"></span></span><div><span class="rl">大將</span><b>徐承恩</b><span class="rt">1479<small>龜守</small></span></div></div>
+    </div>
+  </section>
+
+  <div class="glowline in" style="--d:.7s"></div>
+  <section class="deploy in" style="--d:.65s">
+    <div class="cd"><span>開賽倒數</span><b id="cd">02:14:37</b></div>
+    <div class="go"><b>開戰</b><span>DEPLOY</span><span class="chev"><i></i><i></i><i></i></span></div>
+    <div class="lock">名單已鎖定 · 中央競技場 20:00</div>
+  </section>
+
+  <section class="panel target in" style="--d:.6s">
+    <div class="hd"><span class="no">TARGET</span><b>對手情報</b><span class="st">ODDS <b>×2.00</b></span></div>
+    <div class="body">
+      <span class="cr"><span data-crest="暗影工作室" data-primary="#2a1416" data-secondary="#ff5d5d" data-size="62"></span></span>
+      <div><div class="nm">暗影工作室</div><div class="meta">評分約 <b>1490</b> ± 40 · 2 勝 1 敗</div>
+        <div class="slots"><i>?</i><i>?</i><i>?</i><em>名單加密中</em></div></div>
+    </div>
+  </section>
+
+  <div class="scan"></div>
+  <div class="vig"></div>
+  <div class="design-note" style="left:56px;bottom:12px">設計稿 A · 夜城天台</div>
+</div></div>
+<script type="module" src="../../src/web/sketch/cyber.ts"></script>
+<script type="module" src="../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

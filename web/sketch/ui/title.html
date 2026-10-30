@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：標題</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 標題：左邊是隊徽放在 E 的刻度環裡（環在轉）；右邊是遊戲名與選單；繼續遊戲是唯一的金色按鈕 */
+.emb { position: absolute; left: 230px; top: 170px; width: 700px; height: 700px; transform: translate(calc(var(--mx) * -16px), calc(var(--my) * -10px)); }
+.emb svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.emb .rs { transform-box: view-box; transform-origin: 350px 350px; animation: spin 80s linear infinite; }
+.emb .rr { transform-box: view-box; transform-origin: 350px 350px; animation: spinr 120s linear infinite; }
+.emb .rf { transform-box: view-box; transform-origin: 350px 350px; animation: spin 20s linear infinite; }
+.emb text { font-family: var(--mono); font-size: 16px; letter-spacing: 7px; fill: rgba(255, 255, 255, 0.4); }
+.emb .cr { position: absolute; left: 175px; top: 175px; width: 350px; height: 350px; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 0 14px rgba(var(--gold-rgb), 0.14), 0 0 0 15px rgba(var(--gold-rgb), 0.5), 0 0 140px rgba(var(--gold-rgb), 0.35), 0 40px 90px rgba(0, 0, 0, 0.7); }
+
+.brand { position: absolute; left: 1010px; top: 230px; transform: translate(calc(var(--mx) * -8px), calc(var(--my) * -4px)); }
+.brand .en { font-family: var(--mono); font-size: 15px; letter-spacing: 0.5em; color: var(--gold2); }
+.brand .logo { margin-top: 8px; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 150px; line-height: 0.82; letter-spacing: 0.01em; color: #fff; text-shadow: 0 10px 0 rgba(0, 0, 0, 0.4); }
+.brand .logo span { display: block; color: transparent; -webkit-text-stroke: 2px var(--gold); }
+.brand .zh { display: flex; align-items: center; gap: 16px; margin-top: 18px; font-size: 32px; font-weight: 900; letter-spacing: 0.4em; transform: skewX(-7deg); transform-origin: 0 100%; }
+.brand .zh::before { content: ""; width: 60px; height: 4px; background: var(--gold); transform: skewX(-30deg); }
+
+.menu { position: absolute; left: 1010px; top: 640px; display: flex; flex-direction: column; gap: 14px; width: 560px; }
+.menu .btn { justify-content: flex-start; width: 100%; height: 76px; padding: 0 34px; }
+.menu .btn b { font-size: 28px; }
+.menu .btn .info { margin-left: auto; font-family: var(--en); font-style: italic; font-weight: 700; font-size: 20px; letter-spacing: 0.06em; }
+.menu .btn.ghost .info { color: var(--grey); }
+.menu .row4 { display: flex; gap: 14px; }
+.menu .row4 .btn { height: 60px; }
+.menu .row4 .btn b { font-size: 20px; }
+.ver { position: absolute; left: 56px; bottom: 40px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.24em; color: var(--grey2); }
+.press { position: absolute; right: 56px; bottom: 40px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.3em; color: var(--grey); }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="title" data-word="" data-shell="none">
+  <section class="emb in pop" style="--d:.1s">
+    <svg viewBox="0 0 700 700">
+      <defs><path id="tp" d="M 350 12 A 338 338 0 1 1 349.99 12"/><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#b9832a"/></linearGradient></defs>
+      <g class="rr"><text><textPath href="#tp">ANGEL GAMING · 天使戰隊 · NEW LEAGUE · SEASON 01 · 先鋒 · 中堅 · 大將 · ANGEL GAMING · 天使戰隊 · NEW LEAGUE ·</textPath></text></g>
+      <g class="rs"><circle cx="350" cy="350" r="310" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="12" stroke-dasharray="1.6 5.4"/><circle cx="350" cy="350" r="310" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="22" stroke-dasharray="3 159"/></g>
+      <circle cx="350" cy="350" r="282" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="10"/>
+      <circle cx="350" cy="350" r="282" fill="none" stroke="url(#gold)" stroke-width="10" stroke-linecap="round" stroke-dasharray="1180 1772" transform="rotate(-90 350 350)"/>
+      <g class="rf"><circle cx="350" cy="350" r="256" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2" stroke-dasharray="50 100 12 70 160 330 24 760"/></g>
+      <path d="M 350 34 L 350 58 M 350 642 L 350 666 M 34 350 L 58 350 M 642 350 L 666 350" stroke="#f0b54a" stroke-width="3"/>
+    </svg>
+    <span class="cr"><span data-crest="天使戰隊" data-size="220"></span></span>
+  </section>
+
+  <section class="brand in" style="--d:.3s">
+    <div class="en">ESPORTS CLUB MANAGER</div>
+    <div class="logo">ANGEL<span>GAMING</span></div>
+    <div class="zh">天使戰隊</div>
+  </section>
+
+  <section class="menu">
+    <a class="btn in" style="--d:.5s" href="../cyber.html"><b>繼續</b><span class="info">W04 · 104.8萬 · #7</span></a>
+    <a class="btn ghost in" style="--d:.58s" href="create.html"><b>創立新戰隊</b><span class="info">覆蓋目前存檔</span></a>
+    <div class="row4 in" style="--d:.66s"><a class="btn ghost"><b>匯入存檔</b></a><a class="btn ghost"><b>匯出存檔</b></a><a class="btn ghost"><b>設定</b></a></div>
+  </section>
+
+  <div class="ver in" style="--d:.8s">M4 PROTOTYPE · 新創聯賽 · 存檔 1</div>
+  <div class="press in" style="--d:.9s">ENTER 繼續</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+</body>
+</html>

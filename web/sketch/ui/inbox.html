@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：信件</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 左：信件列表（類型圖示＋標籤，未讀有金點）；右：打開的那封（內文＋相關選手卡＋動作） */
+.list { left: 0; top: 0; width: 760px; height: 766px; }
+.msg { position: relative; display: grid; grid-template-columns: 52px 1fr 60px; gap: 4px 16px; align-items: center; padding: 12px 16px; margin-bottom: 6px; background: rgba(255, 255, 255, 0.025); }
+.msg .ic { grid-row: span 2; width: 52px; height: 52px; display: grid; place-items: center; color: var(--white); background: rgba(255, 255, 255, 0.05); }
+.msg .ic.g { color: var(--gold); background: rgba(var(--gold-rgb), 0.1); }
+.msg .ic.r { color: var(--red); background: rgba(var(--red-rgb), 0.1); }
+.msg b { font-size: 18px; font-weight: 700; letter-spacing: 0.04em; display: flex; align-items: center; gap: 10px; }
+.msg p { margin: 0; font-size: 14px; color: var(--grey); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg .wk { grid-row: span 2; text-align: right; font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; color: var(--grey2); }
+.msg.unread b::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+.msg.on { background: linear-gradient(90deg, rgba(var(--gold-rgb), 0.16), rgba(var(--gold-rgb), 0.03)); box-shadow: inset 4px 0 0 var(--gold); }
+.msg.read b { color: var(--grey); font-weight: 500; }
+
+.open { left: 784px; top: 0; width: 908px; height: 766px; }
+.open .meta { display: flex; align-items: center; gap: 12px; }
+.open h2 { margin: 16px 0 6px; font-size: 46px; font-weight: 900; letter-spacing: 0.06em; line-height: 1.1; transform: skewX(-7deg); transform-origin: 0 100%; }
+.open .from { font-size: 15px; color: var(--grey); }
+.open .txt { margin-top: 18px; font-size: 18px; line-height: 1.8; color: #cfd6e0; max-width: 520px; }
+.open .txt b { color: #fff; }
+.open .txt .num { font-size: 26px; color: var(--gold2); }
+.open .card { position: absolute; right: 40px; top: 120px; }
+.open .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 26px; max-width: 540px; }
+.open .facts div { padding: 12px 14px; background: rgba(255, 255, 255, 0.04); }
+.open .facts small { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.open .facts .num { font-size: 32px; line-height: 1.1; }
+.open .acts { position: absolute; left: 32px; right: 40px; bottom: 30px; display: flex; gap: 14px; align-items: center; }
+.open .acts .dim { margin-left: auto; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="inbox" data-word="INBOX">
+  <div class="ph in" style="--d:.15s"><span class="en">INBOX // 信件</span><h1>信件</h1><div class="sub">未讀 <b>3</b> · 共 14 封 · 球探、練習賽、研發的報告都在第二週平日寄到</div></div>
+
+  <section class="body">
+    <div class="pn list in" style="--d:.25s">
+      <div class="pt"><span class="no">01</span><b>收件匣</b><span class="aux"><span class="tabs" style="display:inline-flex"><a class="on" style="padding:0 12px">全部</a><a style="padding:0 12px">報告</a><a style="padding:0 12px">戰報</a><a style="padding:0 12px">財務</a></span></span></div>
+      <div class="msg on unread"><span class="ic g"><span data-icon="search" data-size="26"></span></span><b>球探回報 · 賴星宇</b><span class="wk">W04</span><p>真實強度約 1561，比公開評分高 46（誤差 ±35）</p></div>
+      <div class="msg unread"><span class="ic r"><span data-icon="warn" data-size="26"></span></span><b>對手情報 · 暗影工作室大將換人</b><span class="wk">W04</span><p>新大將廖芷晴（伏擊流 v3，評分 1522）本週上場</p></div>
+      <div class="msg unread"><span class="ic"><span data-icon="coins" data-size="26"></span></span><b>贊助 · 名氣 10</b><span class="wk">W04</span><p>贊助商維持每週 8 萬；名氣到 15 會升級成二級贊助</p></div>
+      <div class="msg read"><span class="ic"><span data-icon="chart" data-size="26"></span></span><b>週結算 · W03</b><span class="wk">W03</span><p>本週淨額 −17.8 萬，現金 104.8 萬，名次 6 → 7</p></div>
+      <div class="msg read"><span class="ic"><span data-icon="swords" data-size="26"></span></span><b>戰報 · 敗 0:3 鐵壁電競</b><span class="wk">W03</span><p>先鋒、中堅、大將全敗；鐵壁的盾牆流壓制了我方</p></div>
+      <div class="msg read"><span class="ic"><span data-icon="flask" data-size="26"></span></span><b>研發報告 · 謝子睿</b><span class="wk">W03</span><p>針對伏擊流累計 120 場，加成 +14（上限 +36）</p></div>
+      <div class="msg read"><span class="ic"><span data-icon="target" data-size="26"></span></span><b>練習賽報告 · 謝子睿</b><span class="wk">W03</span><p>對伏擊流陪練 40 場 26 勝，估計勝率 65% ± 8%</p></div>
+      <div class="msg read"><span class="ic"><span data-icon="trophy" data-size="26"></span></span><b>聯賽公告 · 季後賽</b><span class="wk">W01</span><p>第 8 週準決賽 1 對 4、2 對 3；第 9 週決賽與季軍戰</p></div>
+    </div>
+
+    <div class="pn g open in sr" style="--d:.32s">
+      <div class="meta"><span class="chip fill">NEW</span><span class="chip g">球探回報</span><span class="chip">W04 · 平日</span></div>
+      <h2>賴星宇，被低估了</h2>
+      <div class="from">寄件人：球探組 · 委託於 W03，費用 1 萬</div>
+      <div class="txt">我們看了賴星宇最近的比賽。他的<b>真實強度約 <span class="num">1561</span></b>，比公開評分 1515 高 <b>46</b>，誤差約 ±35。<br>騎襲流在高版本會變很強，他現在 v2，簽下來慢慢升版是划算的。<br>他還是自由球員，<b>先到先簽</b>。</div>
+      <div class="facts">
+        <div><small>公開評分</small><span class="num">1515</span></div>
+        <div><small>真實強度（估）</small><span class="num gd">1561</span></div>
+        <div><small>簽約金／週薪</small><span class="num">21.2</span><small style="display:inline;letter-spacing:.1em"> ／5.3 萬</small></div>
+      </div>
+      <div class="card"><div class="pc t2 sel"><div class="top2"><span class="ver">v2</span><span>白銀 · SILVER</span></div>
+        <div class="por tinted"><span data-avatar="lxy" data-size="176"></span></div>
+        <div class="note">真實約 <b>1561</b><br>±35</div>
+        <div class="nm"><b>賴星宇</b><span class="ly"><i data-lineage="cavalry" data-size="15"></i>騎襲流</span></div>
+        <div class="st"><span class="num">1515</span><small>RATING</small><span class="wg"><span class="num">22</span> <small>歲</small></span></div></div></div>
+      <div class="acts"><a class="btn" href="market.html"><b>去市場簽約</b><span>SIGN</span></a><a class="btn ghost"><b>標記已讀</b></a><span class="dim">報告會留在選手卡上，簽約前都看得到</span></div>
+    </div>
+  </section>
+
+  <div class="design-note">完整 UI · 信件</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+</body>
+</html>

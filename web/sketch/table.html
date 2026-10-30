@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設計稿 D：戰術室</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&family=Noto+Serif+TC:wght@600;700;900&family=Caveat:wght@600;700&display=swap">
+<link rel="stylesheet" href="./stage.css">
+<style>
+/* 配色：胡桃木、黃銅、羊皮紙、沙盤綠；強調只有封蠟紅；我方藍、對手紫 */
+#stage { --wood: #4a2c18; --wood2: #6e4426; --brass: #c9a24a; --brass2: #f1d48a; --brass3: #7d5d22; --paper: #efe3c4; --ink: #2b2118; --red: #b8322a; --blue: #2f5fa8; --plum: #5b2f86; --felt: #3d6b47;
+  --serif: "Noto Serif TC", serif; --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --hand: "Caveat", cursive; font-family: var(--zh); color: var(--ink); background: #120a05; }
+/* 牆 */
+.wallbg { position: absolute; left: 0; right: 0; top: 0; height: 520px; background: linear-gradient(180deg, #1c120b, #2a1a0f 70%, #1a0f08), repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.18) 0 3px, transparent 3px 160px); background-blend-mode: multiply; }
+.wallbg::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 160px); }
+.lampcone { position: absolute; left: 960px; top: -40px; width: 1500px; height: 1200px; margin-left: -750px; background: radial-gradient(ellipse 45% 55% at 50% 62%, rgba(255, 214, 150, 0.42), rgba(255, 190, 110, 0.12) 50%, transparent 72%); pointer-events: none; animation: lamp 6s ease-in-out infinite; }
+@keyframes lamp { 50% { opacity: 0.88; } 52% { opacity: 1; } }
+.lamp { position: absolute; left: 960px; top: -10px; width: 300px; height: 120px; margin-left: -150px; }
+.lamp i { position: absolute; left: 148px; top: 0; width: 4px; height: 40px; background: #2a2a2a; }
+.lamp b { position: absolute; left: 30px; top: 38px; width: 240px; height: 70px; border-radius: 120px 120px 10px 10px; background: radial-gradient(ellipse at 50% 20%, #3f6b4b, #1f3a28); box-shadow: inset 0 -8px 0 #c9a24a, 0 10px 30px rgba(0, 0, 0, 0.6); }
+.lamp b::after { content: ""; position: absolute; left: 30px; right: 30px; bottom: -14px; height: 22px; border-radius: 50%; background: radial-gradient(ellipse, #fff3cf, rgba(255, 220, 150, 0)); }
+/* 牆上物件 */
+.wobj { position: absolute; filter: drop-shadow(0 14px 16px rgba(0, 0, 0, 0.55)); transform: translate(calc(var(--mx) * -10px), calc(var(--my) * -6px)); }
+.banner { left: 70px; top: 0; width: 230px; height: 300px; padding-top: 30px; display: flex; flex-direction: column; align-items: center; gap: 10px; color: #f6e7b0;
+  background: linear-gradient(180deg, #1f3f8a, #172e66); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 86%, 0 100%); }
+.banner b { font-family: var(--serif); font-size: 36px; letter-spacing: 0.15em; }
+.banner small { font-size: 14px; letter-spacing: 0.3em; opacity: 0.8; }
+.patch { border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 40% 35%, #f8f3e6, #ddd0ae); box-shadow: inset 0 0 0 5px var(--brass), inset 0 0 0 8px #f8f3e6, inset 0 0 0 10px var(--brass); }
+.cal { left: 340px; top: 60px; width: 190px; height: 210px; background: var(--paper); border-top: 40px solid var(--red); text-align: center; transform: translate(calc(var(--mx) * -10px), calc(var(--my) * -6px)) rotate(-3deg); }
+.cal::before { content: "新創聯賽"; position: absolute; left: 0; right: 0; top: -33px; color: #fff; font-size: 17px; letter-spacing: 0.3em; }
+.cal b { display: block; font-family: var(--serif); font-size: 108px; line-height: 1.1; color: var(--ink); }
+.cal span { font-size: 18px; letter-spacing: 0.25em; }
+.dials { left: 1070px; top: 70px; display: flex; gap: 14px; align-items: flex-end; }
+.dial { position: relative; width: 130px; height: 130px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #f6edd2, #d8c69a); box-shadow: inset 0 0 0 8px var(--brass), inset 0 0 0 11px var(--brass3), inset 0 4px 12px rgba(0, 0, 0, 0.3), 0 10px 20px rgba(0, 0, 0, 0.5); }
+.dial svg { position: absolute; inset: 0; }
+.dial .nd { transform-box: view-box; transform-origin: 75px 75px; animation: wobble 4s ease-in-out infinite; }
+@keyframes wobble { 50% { transform: rotate(var(--wob, 3deg)); } }
+.dial .lb { position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; font-family: var(--serif); font-size: 15px; color: var(--ink); }
+.dial .v { position: absolute; left: 0; right: 0; top: 28px; text-align: center; font-family: var(--serif); font-weight: 900; font-size: 26px; }
+.ledgerplate { position: relative; padding: 16px 26px; background: linear-gradient(180deg, #f4e9cc, #e2d2a8); border-radius: 6px; box-shadow: inset 0 0 0 4px var(--brass), 0 10px 20px rgba(0, 0, 0, 0.5); text-align: right; }
+.ledgerplate small { display: block; font-family: var(--serif); font-size: 16px; letter-spacing: 0.3em; }
+.ledgerplate b { font-family: var(--serif); font-weight: 900; font-size: 58px; line-height: 1; }
+.ledgerplate b em { font-style: normal; font-size: 22px; margin-left: 4px; }
+.ledgerplate .dl { font-family: var(--hand); font-size: 26px; color: var(--red); }
+.cork { left: 1600px; top: 30px; width: 290px; height: 420px; padding: 18px; border-radius: 8px; background: radial-gradient(circle at 30% 30%, rgba(0, 0, 0, 0.07) 2px, transparent 3px) 0 0 / 14px 14px, #b8895a; box-shadow: inset 0 0 0 12px #5a3a20, 0 16px 22px rgba(0, 0, 0, 0.55); }
+.sheet { position: relative; margin: 12px 6px 0; padding: 30px 20px 14px; background: var(--paper); transform: rotate(1.5deg); background-image: repeating-linear-gradient(180deg, transparent 0 33px, rgba(43, 33, 24, 0.12) 33px 34px); box-shadow: 0 6px 10px rgba(0, 0, 0, 0.35); }
+.sheet::before { content: ""; position: absolute; left: 50%; top: -9px; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff7468, var(--red)); box-shadow: 0 3px 4px rgba(0, 0, 0, 0.4); }
+.sheet h3 { margin: 0 0 4px; font-family: var(--serif); font-size: 22px; letter-spacing: 0.3em; text-align: center; }
+.sheet .r { display: grid; grid-template-columns: 24px 28px 1fr 26px; align-items: center; gap: 6px; height: 34px; font-size: 17px; }
+.sheet .r b { font-family: var(--serif); text-align: right; }
+.sheet .r.me { color: var(--red); font-weight: 700; position: relative; }
+.sheet .r.me::after { content: ""; position: absolute; left: -8px; right: -8px; top: 3px; bottom: 3px; border: 2.5px solid var(--red); border-radius: 50%; transform: rotate(-2deg); }
+.sheet .r.cut { border-bottom: 2px dashed rgba(184, 50, 42, 0.6); }
+/* 桌面：斜俯視、廣角。平面座標 (px, s)：s 是離桌子遠端的距離；.up 的元素以底邊為軸立起來面向鏡頭 */
+.desk { position: absolute; inset: 0; perspective: 1600px; perspective-origin: 960px 200px; }
+.table { position: absolute; left: -390px; top: 575px; width: 2700px; height: 1150px; transform-origin: 50% 0; transform-style: preserve-3d;
+  transform: translateZ(-900px) rotateX(calc(60deg + var(--my) * 1.5deg)) rotateZ(calc(var(--mx) * -1deg));
+  background: radial-gradient(ellipse 34% 40% at 50% 36%, rgba(255, 210, 140, 0.38), transparent 72%), repeating-linear-gradient(91deg, rgba(0, 0, 0, 0.09) 0 3px, transparent 3px 14px), repeating-linear-gradient(89deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 37px), linear-gradient(180deg, #6e4426, #4a2c18 60%, #3a2213);
+  box-shadow: 0 -22px 0 #2e1a0d; }
+.on { position: absolute; transform-style: preserve-3d; }
+.up { transform-origin: 50% 100%; transform: rotateX(-60deg); }
+.foot { position: absolute; border-radius: 50%; background: radial-gradient(ellipse, rgba(0, 0, 0, 0.55), transparent 70%); }
+/* 圓形沙盤（平放在桌上，慢慢轉） */
+.dio { left: 1030px; top: 100px; width: 640px; height: 640px; }
+.dio .rim { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, transparent 60%, #2e1a0d 60.5%, #5a3a20 63%, #3a2213 69%); box-shadow: 0 40px 50px rgba(0, 0, 0, 0.6), inset 0 0 0 5px var(--brass); }
+.dio svg { position: absolute; left: 32px; top: 32px; width: 576px; height: 576px; border-radius: 50%; animation: spin 90s linear infinite; }
+.dio .eng { position: absolute; left: 0; top: 0; width: 640px; height: 640px; animation: spinr 140s linear infinite; }
+/* 沙盤中央插著的對戰牌 */
+.vsplate { left: 1130px; top: -80px; width: 440px; height: 240px; padding: 22px 24px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: linear-gradient(180deg, #f4e9cc, #e2d2a8); box-shadow: inset 0 0 0 6px var(--brass), inset 0 0 0 9px var(--brass3); }
+.vsplate .row { display: flex; align-items: center; gap: 18px; }
+.vsplate .t { display: flex; flex-direction: column; align-items: center; gap: 6px; font-family: var(--serif); font-weight: 900; font-size: 26px; white-space: nowrap; }
+.vsplate .vs { font-family: var(--serif); font-weight: 900; font-size: 52px; color: var(--red); padding: 0 16px; border: 5px solid var(--red); border-radius: 12px; transform: rotate(-8deg); }
+.vsplate small { font-family: var(--hand); font-size: 30px; color: #6b4a2b; }
+/* 立在桌上的圓形徽牌（選單） */
+.tok { width: 210px; height: 250px; display: flex; flex-direction: column; align-items: center; }
+.tok .face { width: 210px; height: 210px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #2a1608;
+  background: radial-gradient(circle at 40% 32%, #e8bf80, #b98544 55%, #8a5a2a); box-shadow: inset 0 0 0 9px rgba(0, 0, 0, 0.14), inset 0 0 0 13px rgba(255, 220, 160, 0.4), inset 0 -10px 20px rgba(0, 0, 0, 0.25), 0 0 0 5px var(--brass3); transition: transform 0.25s; }
+.tok:hover .face { transform: translateY(-16px) scale(1.04); }
+.tok .stand { width: 120px; height: 40px; margin-top: -6px; background: linear-gradient(180deg, #5a3a1c, #3a2213); border-radius: 6px 6px 2px 2px; }
+.tok .ic { color: #3a1f0a; }
+.tok b { font-family: var(--serif); font-weight: 900; font-size: 44px; letter-spacing: 0.08em; line-height: 1; text-shadow: 0 1px 0 rgba(255, 230, 180, 0.7); }
+.tok i { font-style: normal; font-size: 21px; padding: 2px 14px; border-radius: 999px; background: rgba(42, 22, 8, 0.85); color: #f1d48a; }
+.tok i.bad { background: var(--red); color: #fff; }
+/* 立在卡架上的選手卡 */
+.card { width: 300px; padding: 12px 12px 16px; background: #fbf7ee; border-radius: 12px; box-shadow: 0 18px 24px rgba(0, 0, 0, 0.5); transform-origin: 50% 100%; }
+.card .ph { height: 220px; overflow: hidden; border-radius: 6px; border: 3px solid #d9c9a3; }
+.card .ph .avatar { width: 100%; height: 100%; display: block; }
+.card b { display: block; margin-top: 8px; text-align: center; font-family: var(--serif); font-size: 36px; }
+.card .ln { display: flex; justify-content: space-between; padding: 0 6px; font-size: 19px; color: #6b5b45; }
+.card .rt { position: absolute; right: -18px; top: -20px; width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-weight: 900; font-size: 25px; color: #fff; background: radial-gradient(circle at 35% 30%, #d0973f, #8a5520); box-shadow: inset 0 0 0 4px #e9c27a, 0 6px 8px rgba(0, 0, 0, 0.4); }
+.card .slot { position: absolute; left: 22px; top: 22px; padding: 6px 22px; font-family: var(--serif); font-weight: 900; font-size: 24px; letter-spacing: 0.25em; color: #3b2614; background: linear-gradient(180deg, #f0d48a, #c99a3c); border-radius: 999px; box-shadow: 0 4px 0 #8a6420; }
+.ledger { width: 440px; height: 330px; padding: 26px 26px 20px 36px; border-left: 20px solid #4a2f1c; background-color: var(--paper); background-image: repeating-linear-gradient(180deg, transparent 0 37px, rgba(70, 100, 160, 0.25) 37px 38px); box-shadow: 0 18px 24px rgba(0, 0, 0, 0.5); }
+.ledger h4 { margin: 0 0 6px; font-family: var(--serif); font-size: 28px; letter-spacing: 0.3em; }
+.ledger .l { display: flex; justify-content: space-between; align-items: center; height: 38px; font-size: 22px; }
+.ledger .l b { font-family: var(--hand); font-size: 34px; }
+.ledger .l.neg b { color: var(--red); }
+.chip { position: absolute; width: 120px; height: 120px; border-radius: 50%; border: 7px dashed rgba(255, 255, 255, 0.9); box-shadow: inset 0 0 0 10px rgba(255, 255, 255, 0.85), inset 0 0 0 15px currentColor, 0 10px 0 rgba(0, 0, 0, 0.35); }
+.env { width: 300px; height: 200px; background: #e9dcb9; box-shadow: 0 16px 22px rgba(0, 0, 0, 0.5); }
+.env::before { content: ""; position: absolute; inset: 0; background: linear-gradient(150deg, transparent 49.5%, rgba(0, 0, 0, 0.12) 50%, transparent 50.5%), linear-gradient(30deg, transparent 49.5%, rgba(0, 0, 0, 0.12) 50%, transparent 50.5%); }
+.env .seal { position: absolute; left: 50%; top: 50%; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-weight: 900; font-size: 30px; color: #fbe3d8; background: radial-gradient(circle at 40% 35%, #d9453a, #8f1c16); box-shadow: 0 3px 0 #5e110d; }
+.env .ct { position: absolute; right: -12px; top: -14px; padding: 2px 12px; border-radius: 999px; background: var(--red); color: #fff; font-weight: 700; font-size: 20px; }
+/* 開戰按鈕（畫面空間） */
+.go { position: absolute; left: 1610px; top: 770px; width: 250px; display: flex; flex-direction: column; align-items: center; transform: translate(calc(var(--mx) * 20px), calc(var(--my) * 8px)); }
+.go .base { width: 250px; height: 250px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 40% 30%, #f1d48a, #c9a24a 50%, #7d5d22); box-shadow: 0 16px 0 #4a3412, 0 30px 40px rgba(0, 0, 0, 0.6); }
+.go .btn { width: 180px; height: 180px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff4dc; background: radial-gradient(circle at 40% 30%, #ef5a4c, #9b1f17 70%); box-shadow: inset 0 -10px 16px rgba(0, 0, 0, 0.35), inset 0 8px 10px rgba(255, 255, 255, 0.25), 0 0 0 6px #5e110d, 0 0 40px rgba(239, 90, 76, 0.6); animation: glowr 2.4s ease-in-out infinite; }
+@keyframes glowr { 50% { box-shadow: inset 0 -10px 16px rgba(0, 0, 0, 0.35), inset 0 8px 10px rgba(255, 255, 255, 0.25), 0 0 0 6px #5e110d, 0 0 80px rgba(239, 90, 76, 0.95); } }
+.go .btn b { font-family: var(--serif); font-weight: 900; font-size: 48px; letter-spacing: 0.15em; line-height: 1; }
+.go .btn span { font-size: 16px; letter-spacing: 0.3em; margin-top: 6px; }
+.go .note { margin-top: 26px; font-family: var(--hand); font-size: 28px; color: #f6e7b0; text-shadow: 0 2px 4px #000; }
+.vig { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(1500px 1000px at 50% 52%, transparent 50%, rgba(0, 0, 0, 0.82)); }
+#dust { position: absolute; inset: 0; pointer-events: none; }
+/* 進場 */
+.in { animation: drop 0.8s cubic-bezier(.2, .9, .3, 1.2) both; animation-delay: var(--d, 0s); }
+@keyframes drop { from { opacity: 0; transform: translateZ(260px) scale(1.15); } }
+.wobj.in, .vsplate.in, .go.in { animation-name: fall; }
+@keyframes fall { from { opacity: 0; transform: translateY(-60px); } }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage">
+  <div class="wallbg"></div>
+  <div class="wobj banner in" style="--d:.1s"><div class="patch" style="width:120px;height:120px"><span data-crest="天使戰隊" data-size="72"></span></div><b>天使戰隊</b><small>ANGEL GAMING</small></div>
+  <div class="wobj cal in" style="--d:.2s"><b>4</b><span>例行賽 第 4 週</span></div>
+  <div class="wobj dials in" style="--d:.25s">
+    <div class="ledgerplate"><small>資金</small><b>104.8<em>萬</em></b><div class="dl">每週 −14.6</div></div>
+    <div class="dial"><svg viewBox="0 0 150 150"><path d="M 30 105 A 52 52 0 1 1 120 105" fill="none" stroke="#7d5d22" stroke-width="3"/><path d="M 30 105 A 52 52 0 0 1 48 44" fill="none" stroke="#b8322a" stroke-width="6"/><g class="nd" style="--wob:4deg"><line x1="75" y1="75" x2="75" y2="30" stroke="#2b2118" stroke-width="4" stroke-linecap="round" transform="rotate(-38 75 75)"/></g><circle cx="75" cy="75" r="8" fill="#7d5d22"/></svg><span class="v">7 週</span><span class="lb">資金跑道</span></div>
+    <div class="dial"><svg viewBox="0 0 150 150"><path d="M 30 105 A 52 52 0 1 1 120 105" fill="none" stroke="#7d5d22" stroke-width="3"/><g class="nd" style="--wob:-3deg"><line x1="75" y1="75" x2="75" y2="30" stroke="#2b2118" stroke-width="4" stroke-linecap="round" transform="rotate(-62 75 75)"/></g><circle cx="75" cy="75" r="8" fill="#7d5d22"/></svg><span class="v">10</span><span class="lb">名氣</span></div>
+  </div>
+  <div class="wobj cork in" style="--d:.3s"><div class="sheet"><h3>積分表</h3>
+    <div class="r"><span>1</span><span class="patch" style="width:26px;height:26px"><span data-crest="鐵壁電競" data-size="16"></span></span><span>鐵壁電競</span><b>9</b></div>
+    <div class="r"><span>2</span><span class="patch" style="width:26px;height:26px"><span data-crest="北辰戰隊" data-size="16"></span></span><span>北辰戰隊</span><b>9</b></div>
+    <div class="r"><span>3</span><span class="patch" style="width:26px;height:26px"><span data-crest="蒼穹電競" data-size="16"></span></span><span>蒼穹電競</span><b>6</b></div>
+    <div class="r cut"><span>4</span><span class="patch" style="width:26px;height:26px"><span data-crest="雷霆電競" data-size="16"></span></span><span>雷霆電競</span><b>3</b></div>
+    <div class="r"><span>5</span><span class="patch" style="width:26px;height:26px"><span data-crest="暗影工作室" data-size="16"></span></span><span>暗影工作室</span><b>3</b></div>
+    <div class="r"><span>6</span><span class="patch" style="width:26px;height:26px"><span data-crest="赤焰俱樂部" data-size="16"></span></span><span>赤焰俱樂部</span><b>3</b></div>
+    <div class="r me"><span>7</span><span class="patch" style="width:26px;height:26px"><span data-crest="天使戰隊" data-size="16"></span></span><span>天使戰隊</span><b>3</b></div>
+    <div class="r"><span>8</span><span class="patch" style="width:26px;height:26px"><span data-crest="星河戰隊" data-size="16"></span></span><span>星河戰隊</span><b>0</b></div>
+  </div></div>
+
+  <div class="desk"><div class="table">
+    <div class="on dio in" style="--d:.2s"><div class="rim"></div>
+      <svg viewBox="0 0 612 612">
+        <defs><radialGradient id="fld" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#6f9a62"/><stop offset="1" stop-color="#3d6b47"/></radialGradient></defs>
+        <circle cx="306" cy="306" r="306" fill="url(#fld)"/>
+        <g fill="none" stroke="rgba(40,70,40,.45)" stroke-width="3"><ellipse cx="170" cy="190" rx="110" ry="80"/><ellipse cx="170" cy="190" rx="70" ry="48"/><ellipse cx="170" cy="190" rx="32" ry="20"/><ellipse cx="450" cy="420" rx="120" ry="90"/><ellipse cx="450" cy="420" rx="76" ry="54"/><ellipse cx="450" cy="420" rx="34" ry="22"/></g>
+        <path d="M 0 360 C 120 320 200 420 306 300 S 480 180 612 230" fill="none" stroke="#4f86b8" stroke-width="34" stroke-linecap="round"/>
+        <path d="M 0 360 C 120 320 200 420 306 300 S 480 180 612 230" fill="none" stroke="#9cc6e6" stroke-width="6" stroke-dasharray="12 18" opacity=".7"/>
+        <rect x="290" y="270" width="34" height="62" rx="4" fill="#a7865a" transform="rotate(-35 306 300)"/>
+        <g fill="#2f5233"><circle cx="410" cy="150" r="20"/><circle cx="436" cy="168" r="18"/><circle cx="420" cy="190" r="22"/><circle cx="140" cy="440" r="20"/><circle cx="166" cy="460" r="22"/><circle cx="130" cy="478" r="18"/><circle cx="520" cy="300" r="16"/><circle cx="540" cy="320" r="18"/></g>
+        <g><rect x="200" y="300" width="40" height="22" rx="3" fill="#2f5fa8"/><rect x="230" y="345" width="40" height="22" rx="3" fill="#2f5fa8"/><rect x="170" y="350" width="40" height="22" rx="3" fill="#2f5fa8"/>
+          <rect x="370" y="250" width="40" height="22" rx="3" fill="#5b2f86"/><rect x="400" y="210" width="40" height="22" rx="3" fill="#5b2f86"/><rect x="420" y="270" width="40" height="22" rx="3" fill="#5b2f86"/></g>
+        <g><line x1="215" y1="300" x2="215" y2="250" stroke="#3a2213" stroke-width="4"/><path d="M 217 252 L 248 262 L 217 272 Z" fill="#2f5fa8"/><line x1="420" y1="210" x2="420" y2="160" stroke="#3a2213" stroke-width="4"/><path d="M 422 162 L 453 172 L 422 182 Z" fill="#5b2f86"/></g>
+      </svg>
+      <svg class="eng" viewBox="0 0 680 680"><defs><path id="rimp" d="M 340 16 A 324 324 0 1 1 339.99 16"/></defs><text font-family="Noto Serif TC" font-size="19" font-weight="700" letter-spacing="10" fill="rgba(241,212,138,.75)"><textPath href="#rimp">沙盤推演 · 例行賽 第四週 · 天使戰隊 對 暗影工作室 · 沙盤推演 · 例行賽 第四週 ·</textPath></text></svg>
+    </div>
+    <span class="on foot" style="left:1240px;top:140px;width:220px;height:50px"></span>
+    <div class="on vsplate up in" style="--d:.9s"><div class="row"><div class="t"><span class="patch" style="width:92px;height:92px"><span data-crest="天使戰隊" data-size="56"></span></span>天使戰隊</div><span class="vs">VS</span><div class="t"><span class="patch" style="width:92px;height:92px"><span data-crest="暗影工作室" data-size="56"></span></span>暗影工作室</div></div><small>押你贏 ×2.00</small></div>
+    <span class="on foot" style="left:600px;top:390px;width:220px;height:60px"></span>
+    <div class="on tok up in" style="left:605px;top:170px;--d:0.35s"><div class="face"><span class="ic" data-icon="users" data-size="44" data-stroke="2.4"></span><b>戰隊</b><i class="">4/5</i></div><div class="stand"></div></div>
+    <span class="on foot" style="left:697px;top:215px;width:220px;height:60px"></span>
+    <div class="on tok up in" style="left:702px;top:-5px;--d:0.42s"><div class="face"><span class="ic" data-icon="contract" data-size="44" data-stroke="2.4"></span><b>市場</b><i class="">3 人</i></div><div class="stand"></div></div>
+    <span class="on foot" style="left:901px;top:110px;width:220px;height:60px"></span>
+    <div class="on tok up in" style="left:906px;top:-110px;--d:0.49s"><div class="face"><span class="ic" data-icon="target" data-size="44" data-stroke="2.4"></span><b>訓練</b><i class="">200 場</i></div><div class="stand"></div></div>
+    <span class="on foot" style="left:1579px;top:110px;width:220px;height:60px"></span>
+    <div class="on tok up in" style="left:1584px;top:-110px;--d:0.56s"><div class="face"><span class="ic" data-icon="trophy" data-size="44" data-stroke="2.4"></span><b>聯賽</b><i class="">第 7</i></div><div class="stand"></div></div>
+    <span class="on foot" style="left:1783px;top:215px;width:220px;height:60px"></span>
+    <div class="on tok up in" style="left:1788px;top:-5px;--d:0.63s"><div class="face"><span class="ic" data-icon="ticket" data-size="44" data-stroke="2.4"></span><b>賭盤</b><i class="">4 場</i></div><div class="stand"></div></div>
+    <span class="on foot" style="left:1880px;top:390px;width:220px;height:60px"></span>
+    <div class="on tok up in" style="left:1885px;top:170px;--d:0.70s"><div class="face"><span class="ic" data-icon="chart" data-size="44" data-stroke="2.4"></span><b>財務</b><i class="bad">−14.6</i></div><div class="stand"></div></div>
+    <span class="on foot" style="left:1010px;top:960px;width:320px;height:80px"></span>
+    <div class="on card in" style="left:1020px;top:640px;transform:rotateX(-20deg) rotateZ(-5deg);--d:0.6s"><span class="rt">1518</span><div class="ph"><span data-avatar="xzr" data-size="300"></span></div><b>謝子睿</b><div class="ln"><span>強攻流</span><span>v3 黃金</span></div><span class="slot">先鋒</span></div>
+    <span class="on foot" style="left:1350px;top:960px;width:320px;height:80px"></span>
+    <div class="on card in" style="left:1360px;top:640px;transform:rotateX(-20deg) rotateZ(0deg);--d:0.7s"><span class="rt">1478</span><div class="ph"><span data-avatar="qmz2" data-size="300"></span></div><b>邱明哲</b><div class="ln"><span>均衡流</span><span>v2 白銀</span></div><span class="slot">中堅</span></div>
+    <span class="on foot" style="left:1690px;top:960px;width:320px;height:80px"></span>
+    <div class="on card in" style="left:1700px;top:640px;transform:rotateX(-20deg) rotateZ(5deg);--d:0.8s"><span class="rt">1479</span><div class="ph"><span data-avatar="xce" data-size="300"></span></div><b>徐承恩</b><div class="ln"><span>龜守流</span><span>v2 白銀</span></div><span class="slot">大將</span></div>
+    <div class="on ledger in" style="left:300px;top:690px;transform:rotate(5deg);--d:.5s"><h4>帳本</h4><div class="l"><span>贊助</span><b>+8</b></div><div class="l"><span>獎金</span><b>+5</b></div><div class="l neg"><span>薪資</span><b>−20.6</b></div><div class="l neg"><span>訓練中心</span><b>−2</b></div></div>
+    <div class="on env in" style="left:740px;top:880px;transform:rotate(-12deg);--d:.75s"><span class="seal">信</span><span class="ct">3 封</span></div>
+    <span class="on chip" style="left:2080px;top:820px;color:#b8322a;background:#b8322a"></span><span class="on chip" style="left:2160px;top:850px;color:#1f3f8a;background:#1f3f8a"></span><span class="on chip" style="left:2120px;top:790px;color:#2f5a3c;background:#2f5a3c"></span>
+  </div></div>
+
+  <div class="lampcone"></div>
+  <div class="lamp"><i></i><b></b></div>
+  <div class="go in" style="--d:1s"><div class="base"><div class="btn"><b>開戰</b><span>第 4 週</span></div></div></div>
+  <canvas id="dust" width="1920" height="1080"></canvas>
+  <div class="vig"></div>
+  <div class="design-note" style="left:40px;bottom:18px">設計稿 D · 戰術室</div>
+</div></div>
+<script type="module" src="../../src/web/sketch/table.ts"></script>
+<script type="module" src="../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

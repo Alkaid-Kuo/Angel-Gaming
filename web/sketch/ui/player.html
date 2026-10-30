@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI：選手詳情</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="../stage.css">
+<link rel="stylesheet" href="../angel.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+/* 左半：E 的王牌鏡頭（刻度環、圓周文字、評分弧）＋名牌；右半：版本、走勢、戰術預設、合約 */
+.back { position: absolute; left: 172px; top: 132px; z-index: 3; display: flex; align-items: center; gap: 10px; font-size: 16px; letter-spacing: 0.14em; color: var(--grey); }
+.back b { color: var(--white); }
+.hero2 { position: absolute; left: 190px; top: 128px; width: 640px; height: 640px; transform: translate(calc(var(--mx) * -12px), calc(var(--my) * -8px)); }
+.hero2 svg { position: absolute; inset: 0; overflow: visible; }
+.hero2 .rs { transform-box: view-box; transform-origin: 320px 320px; animation: spin 90s linear infinite; }
+.hero2 .rr { transform-box: view-box; transform-origin: 320px 320px; animation: spinr 140s linear infinite; }
+.hero2 .rf { transform-box: view-box; transform-origin: 320px 320px; animation: spin 18s linear infinite; }
+.hero2 text { font-family: var(--mono); font-size: 15px; letter-spacing: 6px; fill: rgba(255, 255, 255, 0.42); }
+.lens { position: absolute; left: 150px; top: 150px; width: 340px; height: 340px; border-radius: 50%; overflow: hidden; background: #1a2130;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 0 13px rgba(var(--gold-rgb), 0.14), 0 0 0 14px rgba(var(--gold-rgb), 0.5), 0 40px 90px rgba(0, 0, 0, 0.7), 0 0 120px rgba(var(--gold-rgb), 0.25); }
+.lens .avatar { position: absolute; left: -15px; top: 8px; width: 370px; height: 370px; }
+.lens .scan { position: absolute; left: 0; right: 0; height: 80px; z-index: 3; background: linear-gradient(180deg, transparent, rgba(255, 230, 170, 0.28), transparent); animation: scan 4.2s ease-in-out infinite; }
+@keyframes scan { 0% { top: -80px; } 60%, 100% { top: 340px; } }
+.orb { position: absolute; width: 100px; height: 100px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(var(--ink-rgb), 0.9); border: 2px solid var(--gold); box-shadow: 0 0 24px rgba(var(--gold-rgb), 0.35); }
+.orb b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 34px; line-height: 1; color: var(--gold2); }
+.orb span { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.orb.w { border-color: var(--white); box-shadow: 0 0 24px rgba(255, 255, 255, 0.16); }
+.orb.w b { color: var(--white); }
+
+.plate { position: absolute; left: 190px; top: 760px; transform: translate(calc(var(--mx) * -26px), calc(var(--my) * -10px)); }
+.plate h1 { margin: 6px 0 0; font-size: 104px; line-height: 1; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); text-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 0 40px rgba(var(--gold-rgb), 0.25); }
+.roman { font-family: var(--en); font-style: italic; font-weight: 700; font-size: 26px; letter-spacing: 0.45em; color: var(--gold); margin-top: 2px; }
+.stats { display: flex; align-items: flex-end; gap: 24px; margin-top: 12px; }
+.stats div { display: flex; align-items: baseline; gap: 8px; }
+.stats b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 46px; line-height: 1; }
+.stats span { font-family: var(--mono); font-size: 13px; letter-spacing: 0.2em; color: var(--grey); }
+.stats i { width: 2px; height: 38px; background: rgba(255, 255, 255, 0.25); transform: skewX(-20deg); }
+
+/* 右半面板 */
+.p-ver { left: 820px; top: -120px; width: 872px; height: 300px; }
+.ladder { position: relative; display: flex; justify-content: space-between; margin: 26px 20px 0; }
+.ladder::before { content: ""; position: absolute; left: 30px; right: 30px; top: 30px; height: 2px; background: linear-gradient(90deg, var(--gold) 0 66%, rgba(255, 255, 255, 0.15) 66%); }
+.ladder .nd { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 120px; }
+.ladder .nd i { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-family: var(--en); font-weight: 800; font-size: 24px; color: var(--grey); background: var(--ink2); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18); }
+.ladder .nd.done i { color: var(--gold2); box-shadow: inset 0 0 0 2px var(--gold3); }
+.ladder .nd.cur i { color: var(--ink); background: radial-gradient(circle at 40% 30%, var(--gold2), var(--gold) 50%, var(--gold3)); box-shadow: 0 0 0 4px rgba(var(--gold-rgb), 0.25), 0 0 30px rgba(var(--gold-rgb), 0.6); }
+.ladder .nd.next i { color: #fff; box-shadow: inset 0 0 0 2px #fff; }
+.ladder .nd b { font-size: 15px; letter-spacing: 0.12em; }
+.ladder .nd small { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; color: var(--grey); }
+.upg { display: flex; align-items: center; gap: 28px; margin-top: 26px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.upg .kv { display: flex; flex-direction: column; }
+.upg .kv small { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.upg .kv .num { font-size: 30px; line-height: 1.1; }
+.upg .btn { margin-left: auto; }
+
+.p-trend { left: 820px; top: 204px; width: 424px; height: 300px; }
+.p-trend svg { display: block; margin-top: 4px; }
+.p-tac { left: 1268px; top: 204px; width: 424px; height: 300px; }
+.tac { display: flex; flex-direction: column; gap: 18px; }
+.tac .t { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: baseline; }
+.tac .t span { font-size: 15px; color: var(--grey); }
+.tac .t span b { color: var(--white); font-weight: 700; }
+.tac .t .num { font-size: 24px; }
+.tac .meter { grid-column: span 2; }
+.p-con { left: 820px; top: 528px; width: 872px; height: 238px; }
+.con { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.con .kv small { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.con .kv .num { font-size: 34px; line-height: 1.15; }
+.con .kv span { font-size: 14px; color: var(--grey); }
+.acts { display: flex; gap: 14px; margin-top: 22px; }
+.acts .btn.danger { margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage" data-screen="squad" data-word="PLAYER">
+  <div class="back in" style="--d:.1s"><span data-icon="back" data-size="18"></span>戰隊 · <b>選手詳情</b></div>
+
+  <section class="hero2">
+    <svg class="in pop" viewBox="0 0 640 640" style="--d:.15s">
+      <defs><path id="tp" d="M 320 6 A 314 314 0 1 1 319.99 6"/><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#b9832a"/></linearGradient></defs>
+      <g class="rr"><text><textPath href="#tp">VANGUARD · 謝子睿 · 強攻流 · RATING 1518 · GOLD v3 · ANGEL GAMING · SEASON 01 · ACE · 謝子睿 · VANGUARD ·</textPath></text></g>
+      <g class="rs"><circle cx="320" cy="320" r="288" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="11" stroke-dasharray="1.5 5.04"/><circle cx="320" cy="320" r="288" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="20" stroke-dasharray="3 147.8"/></g>
+      <circle cx="320" cy="320" r="262" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/>
+      <circle cx="320" cy="320" r="262" fill="none" stroke="url(#gold)" stroke-width="9" stroke-linecap="round" stroke-dasharray="700 1646" transform="rotate(-90 320 320)"/>
+      <g class="rf"><circle cx="320" cy="320" r="238" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2" stroke-dasharray="50 100 12 70 160 330 24 760"/></g>
+      <path d="M 320 30 L 320 52 M 320 588 L 320 610 M 30 320 L 52 320 M 588 320 L 610 320" stroke="#f0b54a" stroke-width="3"/>
+    </svg>
+    <div class="lens tinted in pop" style="--d:.25s"><span data-avatar="xzr" data-size="370"></span><i class="scan"></i></div>
+    <div class="orb in pop" style="left:440px;top:66px;--d:.8s"><b>1518</b><span>RATING</span></div>
+    <div class="orb w in pop" style="left:96px;top:66px;--d:.9s"><b>v3</b><span>GOLD</span></div>
+  </section>
+
+  <section class="plate in" style="--d:.45s">
+    <div class="tags"><span class="g"><i>先鋒 · VANGUARD</i></span><span class="w"><i>強攻流</i></span><span class="o"><i>王牌</i></span></div>
+    <h1>謝子睿</h1>
+    <div class="roman">XIE ZI-RUI</div>
+    <div class="stats"><div><b>1518</b><span>RATING</span></div><i></i><div><b>2-1</b><span>RECORD</span></div><i></i><div><b>6.1</b><span>萬／週</span></div></div>
+  </section>
+
+  <section class="body">
+    <div class="pn g p-ver in sr" style="--d:.3s">
+      <div class="pt"><span class="no">01</span><b>版本線</b><span class="en">VERSION</span><span class="aux">強攻流：開局強勢，後期成長有限 · 最高 <b>v4</b></span></div>
+      <div class="ladder">
+        <div class="nd done"><i>v1</i><b>青銅</b><small>4.0 萬</small></div>
+        <div class="nd done"><i>v2</i><b>白銀</b><small>4.7 萬</small></div>
+        <div class="nd cur"><i>v3</i><b>黃金</b><small>6.1 萬</small></div>
+        <div class="nd next"><i>v4</i><b>白金</b><small>7.9 萬</small></div>
+      </div>
+      <div class="upg">
+        <div class="kv"><small>升版費用</small><span class="num">48.8<small class="dim" style="font-size:16px"> 萬</small></span></div>
+        <div class="kv"><small>需時</small><span class="num">2<small class="dim" style="font-size:16px"> 週</small></span></div>
+        <div class="kv"><small>升版後週薪</small><span class="num">7.9<small class="dim" style="font-size:16px"> 萬</small></span></div>
+        <div class="kv"><small>注意</small><span style="font-size:15px;color:var(--red2)">原戰術預設失效</span></div>
+        <a class="btn"><b>升版</b><span>UPGRADE</span></a>
+      </div>
+    </div>
+
+    <div class="pn p-trend in sr" style="--d:.38s">
+      <div class="pt"><span class="no">02</span><b>評分走勢</b><span class="aux">公開 Elo</span></div>
+      <svg width="370" height="190" viewBox="0 0 370 190">
+        <g stroke="rgba(255,255,255,.08)"><line x1="0" y1="30" x2="370" y2="30"/><line x1="0" y1="90" x2="370" y2="90"/><line x1="0" y1="150" x2="370" y2="150"/></g>
+        <g font-family="Share Tech Mono" font-size="11" fill="#5b6574" letter-spacing="2"><text x="0" y="24">1540</text><text x="0" y="84">1510</text><text x="0" y="144">1480</text><text x="40" y="184">休</text><text x="130" y="184">W1</text><text x="220" y="184">W2</text><text x="310" y="184">W3</text></g>
+        <path d="M44 110 L134 58 L224 92 L314 74 L314 160 L44 160 Z" fill="rgba(240,181,74,.10)"/>
+        <path d="M44 110 L134 58 L224 92 L314 74" fill="none" stroke="#f0b54a" stroke-width="3"/>
+        <g fill="#0b0e14" stroke="#ffd98a" stroke-width="2.5"><circle cx="44" cy="110" r="5"/><circle cx="134" cy="58" r="5"/><circle cx="224" cy="92" r="5"/><circle cx="314" cy="74" r="7" fill="#f0b54a"/></g>
+        <g font-family="Barlow Condensed" font-style="italic" font-weight="800" font-size="18" fill="#eef2f6"><text x="120" y="46">+26 W</text><text x="206" y="118">−17 L</text><text x="300" y="62">+9 W</text></g>
+      </svg>
+    </div>
+
+    <div class="pn p-tac in sr" style="--d:.46s">
+      <div class="pt"><span class="no">03</span><b>戰術預設</b><span class="aux">練習賽研發累積</span></div>
+      <div class="tac">
+        <div class="t"><span><b>泛用</b> · 對所有流派</span><span class="num">+8<small class="dim" style="font-size:14px"> /12</small></span><div class="meter g" style="--v:66%"><i></i></div></div>
+        <div class="t"><span><b>針對伏擊流</b> · 本週對手大將</span><span class="num gd">+14<small class="dim" style="font-size:14px"> /36</small></span><div class="meter g" style="--v:39%"><i></i></div></div>
+        <div class="t"><span><b>針對盾牆流</b></span><span class="num dim">0<small style="font-size:14px"> /36</small></span><div class="meter" style="--v:0%"><i></i></div></div>
+      </div>
+    </div>
+
+    <div class="pn p-con in sr" style="--d:.54s">
+      <div class="pt"><span class="no">04</span><b>合約與安排</b><span class="aux">練習賽本週已排 <b>40</b> 場</span></div>
+      <div class="con">
+        <div class="kv"><small>週薪</small><span class="num">6.1</span> <span>萬</span></div>
+        <div class="kv"><small>合約剩餘</small><span class="num">2</span> <span>個賽段</span></div>
+        <div class="kv"><small>簽約至今</small><span class="num">3</span> <span>週 · 出賽 3 場</span></div>
+        <div class="kv"><small>本季對位勝場</small><span class="num">2</span> <span>／3</span></div>
+      </div>
+      <div class="acts"><a class="btn ghost"><b>排練習賽</b></a><a class="btn ghost"><b>排戰術研發</b></a><a class="btn danger"><b>解約</b></a></div>
+    </div>
+  </section>
+
+  <div class="design-note">完整 UI · 選手詳情</div>
+</div></div>
+<script type="module" src="../../../src/web/sketch/ui.ts"></script>
+</body>
+</html>

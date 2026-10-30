@@ -60,3 +60,15 @@ export function pointRectDistSq(px: number, py: number, x0: number, y0: number, 
   const dy = py < y0 ? y0 - py : py > y1 ? py - y1 : 0;
   return dx * dx + dy * dy;
 }
+
+/**
+ * 四捨六入五成雙：剛好 .5 時取偶數。對奇函數對稱（round(-v) = -round(v)），
+ * 地圖寬高是偶數時 round(W - v) = W - round(v)，雙方鏡像的座標捨入後仍然鏡像。
+ */
+export function roundHalfEven(v: number): number {
+  const f = Math.floor(v);
+  const d = v - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+}

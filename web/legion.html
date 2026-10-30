@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天使戰隊 軍團戰</title>
+<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./legion.css">
+</head>
+<body>
+<div id="setup" class="setup">
+  <section class="hero">
+    <h1>天使戰隊 軍團戰<small>原型</small></h1>
+    <p>中世紀大會戰。雙方 AI 各用 500 點選兵、在看不到對手的情況下布陣，開場就行軍接敵——側擊背擊、騎兵衝鋒、長槍架陣、樹林埋伏，一場約 2～5 分鐘。你可以當上帝視角的觀眾，也可以親自指揮藍方。</p>
+    <div class="row"><a class="muted small" href="./index.html">← 回到 RTS 試玩版</a></div>
+  </section>
+  <section class="card">
+    <h2>開始觀戰</h2>
+    <div class="lg-pick">
+      <label class="side blue"><span class="sw" style="background:#3b82f6"></span>藍方
+        <select name="blue">
+          <option value="player">玩家（你來指揮）</option>
+          <option value="push" selected>鐵壁推進（整條戰線壓過河）</option>
+          <option value="ambush">林中伏兵（樹林埋伏、騎兵繞後）</option>
+          <option value="ranged">箭雨（高地弓兵、盾兵擋箭）</option>
+          <option value="commander">統帥（官方基準：三層指揮）</option>
+          <option value="marshal">元帥 v1.1（GPT 選手：高地火線）</option>
+          <option value="general2">將軍 v2.10（Claude 選手，第 1 輪提交）</option>
+          <option value="marshal2">元帥 v2.160（GPT 選手，第 1 輪提交）</option>
+          <option value="baseline168">基準 BOT v1.68（獨立訓練版）</option>
+          <option value="baseline114">基準 BOT v1.114（第二階段主版）</option>
+          <option value="random">隨機</option>
+        </select>
+      </label>
+      <span class="vs">VS</span>
+      <label class="side red"><span class="sw" style="background:#ef4444"></span>紅方
+        <select name="red">
+          <option value="push">鐵壁推進（整條戰線壓過河）</option>
+          <option value="ambush" selected>林中伏兵（樹林埋伏、騎兵繞後）</option>
+          <option value="ranged">箭雨（高地弓兵、盾兵擋箭）</option>
+          <option value="commander">統帥（官方基準：三層指揮）</option>
+          <option value="marshal">元帥 v1.1（GPT 選手：高地火線）</option>
+          <option value="general2">將軍 v2.10（Claude 選手，第 1 輪提交）</option>
+          <option value="marshal2">元帥 v2.160（GPT 選手，第 1 輪提交）</option>
+          <option value="baseline168">基準 BOT v1.68（獨立訓練版）</option>
+          <option value="baseline114">基準 BOT v1.114（第二階段主版）</option>
+          <option value="random">隨機</option>
+        </select>
+      </label>
+    </div>
+    <div class="modes">
+      <label class="mode-tile"><input type="radio" name="mode" value="annihilation" checked><span class="t">殲滅戰</span><span class="d">打垮對手全軍；時間到比戰果</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="capture"><span class="t">佔點</span><span class="d">大河谷的三個渡口各一面旗，佔領後每秒得分，先到 400 分獲勝</span></label>
+      <label class="mode-tile"><input type="radio" name="mode" value="sandbox"><span class="t">自訂（沙盒）</span><span class="d">雙方兵力自己選、不限點數，在平地測試場上擺好再開打；測試兵種對抗與操作</span></label>
+    </div>
+    <div class="row">
+      <label>Seed <input id="seed" type="number" min="0" step="1"></label>
+      <button id="reroll" type="button">隨機</button>
+      <span class="muted small">同一個 Seed、同一組對手，每次結果都一樣（AI 的隨機決定與弓兵命中由 Seed 決定）</span>
+    </div>
+    <button id="start" class="primary" type="button">開始觀戰</button>
+  </section>
+  <section class="card hidden" id="army">
+    <h2>你的軍隊</h2>
+    <p class="muted small" id="army-note"></p>
+    <div class="lg-army" id="army-rows"></div>
+    <div class="row"><span id="army-total"></span><button id="army-reset" type="button">預設陣容</button></div>
+  </section>
+  <section class="card hidden" id="sandbox">
+    <h2>自訂對戰</h2>
+    <p class="muted small">雙方各自選兵（不限點數）與指揮方式。按「開始布陣」後雙方會先面對面擺好，你可以拖曳任何一團調整位置、朝向與陣形，再按「開戰」。選現有 AI 時，它指揮的是你指定的兵團（AI 原本是照自己挑的兵設計的，組合差太多時可能會怪怪的）。</p>
+    <div class="sb-cols">
+      <div class="sb-side t0">
+        <label class="sb-role"><span class="sw" style="background:#3b82f6"></span>藍方 <select id="sb-role0"></select></label>
+        <div class="lg-army no-reserve" id="sb-rows0"></div>
+        <div class="row small"><span id="sb-total0"></span><button type="button" data-sb-clear="0">清空</button></div>
+      </div>
+      <div class="sb-side t1">
+        <label class="sb-role"><span class="sw" style="background:#ef4444"></span>紅方 <select id="sb-role1"></select></label>
+        <div class="lg-army no-reserve" id="sb-rows1"></div>
+        <div class="row small"><span id="sb-total1"></span><button type="button" data-sb-clear="1">清空</button></div>
+      </div>
+    </div>
+    <div class="row"><label>開打距離 <select id="sb-dist"><option value="6">6 格（貼近）</option><option value="12">12 格</option><option value="20" selected>20 格</option><option value="30">30 格</option></select></label><span class="muted small">雙方前排相距幾格（之後還可以拖曳調整）</span></div>
+  </section>
+  <section class="card">
+    <h2 id="map-name">地圖：河谷</h2>
+    <p class="muted" id="map-desc">160 × 100 格。中央一條 S 形河流，南北各一座 3 格寬的窄橋、中央一處淺灘（走得慢、受到的近戰傷害較高）；兩岸都有樹林可以埋伏，淺灘兩側各有一座高地（視野與射程加成）。藍方從西邊、紅方從東邊出發。</p>
+  </section>
+</div>
+<div id="game" class="game hidden"></div>
+<script type="module" src="../src/web/legion/main.ts"></script>
+</body>
+</html>

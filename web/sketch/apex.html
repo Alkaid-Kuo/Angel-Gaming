@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設計稿 E：環形競技台</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="./stage.css">
+<link rel="stylesheet" href="./angel.css">
+<style>
+/* 配色、字型、頂列與標籤元件見 angel.css（E、A 共用規格） */
+.bg { position: absolute; inset: 0; background: radial-gradient(1300px 820px at 50% 40%, #1c2535 0%, #0e131c 52%, #07090d 100%); }
+.bigword { position: absolute; left: 50%; top: 70px; transform: translateX(-50%) translate(calc(var(--mx) * -14px), calc(var(--my) * -8px)); font-family: var(--en); font-weight: 800; font-style: italic; font-size: 430px; line-height: 0.8; letter-spacing: 0.02em; color: transparent; -webkit-text-stroke: 2px rgba(255, 255, 255, 0.045); white-space: nowrap; }
+.beams i { position: absolute; top: -100px; width: 240px; height: 900px; background: linear-gradient(180deg, rgba(255, 236, 200, 0.11), transparent 75%); transform: skewX(-12deg); animation: beam 7s ease-in-out infinite; }
+.beams i:nth-child(1) { left: 700px; } .beams i:nth-child(2) { left: 1020px; width: 140px; animation-delay: -2.4s; } .beams i:nth-child(3) { left: 300px; width: 160px; opacity: 0.5; animation-delay: -4.8s; }
+@keyframes beam { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+#dust { position: absolute; inset: 0; pointer-events: none; }
+.vig { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(1450px 920px at 50% 48%, transparent 56%, rgba(0, 0, 0, 0.78)); }
+
+/* ── 3D 場景：地板、金環、選單磚（攝影機在環上方偏前） ── */
+.scene { position: absolute; inset: 0; perspective: 1400px; perspective-origin: 960px 380px; }
+.world { position: absolute; left: 960px; top: 640px; width: 0; height: 0; transform-style: preserve-3d; transform: rotateY(calc(var(--mx) * 7deg)) rotateX(calc(var(--my) * -2deg)); }
+.world > * { position: absolute; left: 0; top: 0; transform-style: preserve-3d; }
+.floor { left: -2600px; top: -2600px; width: 5200px; height: 5200px; transform: rotateX(90deg);
+  background: linear-gradient(rgba(255, 255, 255, 0.075) 2px, transparent 2px) 0 0 / 130px 130px, linear-gradient(90deg, rgba(255, 255, 255, 0.075) 2px, transparent 2px) 0 0 / 130px 130px;
+  -webkit-mask-image: radial-gradient(circle, #000 18%, transparent 46%); }
+.ring { left: -900px; top: -900px; width: 1800px; height: 1800px; border-radius: 50%; transform: rotateX(90deg); border: 5px solid rgba(240, 181, 74, 0.75); box-shadow: 0 0 60px rgba(240, 181, 74, 0.35), inset 0 0 60px rgba(240, 181, 74, 0.18); }
+.ring i { position: absolute; inset: 40px; border-radius: 50%; border: 6px dotted rgba(255, 255, 255, 0.14); animation: spin 80s linear infinite; }
+.ring b { position: absolute; inset: 300px; border-radius: 50%; border: 3px dashed rgba(255, 255, 255, 0.16); animation: spinr 120s linear infinite; }
+.ring em { position: absolute; inset: 560px; border-radius: 50%; border: 2px solid rgba(240, 181, 74, 0.35); }
+.spot { width: 300px; height: 300px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 217, 138, 0.55), rgba(240, 181, 74, 0.12) 40%, transparent 70%); transform-origin: 0 0; }
+.otile { transform-origin: 0 0; }
+.ot { position: relative; width: 340px; height: 210px; overflow: hidden; padding: 22px 26px; display: flex; flex-direction: column; justify-content: space-between; background: var(--paper); color: var(--ink);
+  box-shadow: 0 30px 50px rgba(0, 0, 0, 0.5); transition: transform 0.3s cubic-bezier(.2, .8, .2, 1), box-shadow 0.3s; animation: rise 0.8s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%); }
+@keyframes rise { from { opacity: 0; translate: 0 90px; scale: 0.9; } }
+.otile:hover .ot { transform: translateY(-24px); box-shadow: 0 50px 70px rgba(0, 0, 0, 0.6), 0 0 0 3px var(--gold); }
+.ot::before { content: ""; position: absolute; left: 0; top: 0; width: 6px; height: 100%; background: var(--gold); }
+.ot::after { content: ""; position: absolute; top: 0; bottom: 0; left: -40%; width: 30%; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.6), transparent); transform: skewX(-18deg); transition: left 0.6s; }
+.otile:hover .ot::after { left: 130%; }
+.ot .hd { display: flex; justify-content: space-between; align-items: center; }
+.ot .hd .ic { color: var(--gold3); }
+.ot .st { font-family: var(--mono); font-size: 16px; letter-spacing: 0.1em; color: var(--grey2); }
+.ot .zh { font-size: 54px; font-weight: 900; letter-spacing: 0.08em; line-height: 1; transform: skewX(-6deg); }
+.ot .en { font-family: var(--en); font-weight: 600; font-size: 20px; letter-spacing: 0.3em; color: var(--grey2); margin-top: 6px; }
+.ot.dk { background: linear-gradient(150deg, #262e3e, #121722); color: var(--white); border: 1px solid rgba(255, 255, 255, 0.14); }
+.ot.dk .en, .ot.dk .st { color: var(--grey); }
+.ot.dk .st.bad { color: var(--red); }
+.ot .pole { position: absolute; }
+
+/* ── 中央：王牌鏡頭 ── */
+.hero { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; transform: translate(calc(var(--mx) * -10px), calc(var(--my) * -8px)); }
+.rings { position: absolute; left: 670px; top: 130px; width: 580px; height: 580px; overflow: visible; }
+.rings .rs { transform-box: view-box; transform-origin: 320px 320px; animation: spin 90s linear infinite; }
+.rings .rr { transform-box: view-box; transform-origin: 320px 320px; animation: spinr 140s linear infinite; }
+.rings .rf { transform-box: view-box; transform-origin: 320px 320px; animation: spin 18s linear infinite; }
+.rings text { font-family: var(--mono); font-size: 15px; letter-spacing: 6px; fill: rgba(255, 255, 255, 0.42); }
+.lens { position: absolute; left: 790px; top: 250px; width: 340px; height: 340px; border-radius: 50%; overflow: hidden; background: #1a2130;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 0 13px rgba(240, 181, 74, 0.14), 0 0 0 14px rgba(240, 181, 74, 0.5), 0 40px 90px rgba(0, 0, 0, 0.7), 0 0 120px rgba(240, 181, 74, 0.25); }
+.lens .avatar { position: absolute; left: -15px; top: 8px; width: 370px; height: 370px; filter: grayscale(1) contrast(1.2) brightness(1.05); }
+.lens::after { content: ""; position: absolute; inset: 0; background: var(--tint); mix-blend-mode: color; opacity: 0.88; }
+.lens::before { content: ""; position: absolute; inset: 0; z-index: 2; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 2px, transparent 2px 5px), radial-gradient(circle at 50% 40%, transparent 55%, rgba(11, 14, 20, 0.65)); }
+.scan { position: absolute; left: 0; right: 0; height: 80px; z-index: 3; background: linear-gradient(180deg, transparent, rgba(255, 230, 170, 0.28), transparent); animation: scan 4.2s ease-in-out infinite; }
+@keyframes scan { 0% { top: -80px; } 60%, 100% { top: 340px; } }
+.orb { position: absolute; width: 100px; height: 100px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(11, 14, 20, 0.88); border: 2px solid var(--gold); box-shadow: 0 0 24px rgba(240, 181, 74, 0.35); }
+.orb b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 34px; line-height: 1; color: var(--gold2); }
+.orb span { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--grey); }
+.orb.w { border-color: var(--white); box-shadow: 0 0 24px rgba(255, 255, 255, 0.18); }
+.orb.w b { color: var(--white); }
+
+/* ── 左下：名牌 ── */
+.plate { position: absolute; left: 70px; top: 712px; transform: translate(calc(var(--mx) * -30px), calc(var(--my) * -14px)); }
+.plate h1 { margin: 4px 0 0; font-size: 100px; line-height: 1; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); text-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 0 40px rgba(240, 181, 74, 0.25); }
+.roman { font-family: var(--en); font-style: italic; font-weight: 700; font-size: 26px; letter-spacing: 0.45em; color: var(--gold); margin-top: 2px; }
+.stats { display: flex; align-items: flex-end; gap: 24px; margin-top: 10px; }
+.stats div { display: flex; align-items: baseline; gap: 8px; }
+.stats b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 46px; line-height: 1; }
+.stats span { font-family: var(--mono); font-size: 13px; letter-spacing: 0.2em; color: var(--grey); }
+.stats i { width: 2px; height: 38px; background: rgba(255, 255, 255, 0.25); transform: skewX(-20deg); }
+
+/* ── 右下：比賽日 ── */
+.mwrap { position: absolute; left: 1050px; top: 712px; width: 820px; height: 290px; perspective: 1400px; transform: translate(calc(var(--mx) * 22px), calc(var(--my) * 10px)); }
+.mday { position: relative; width: 100%; height: 100%; display: grid; grid-template-columns: 250px minmax(0, 1fr) 210px; padding: 24px 0 22px 30px; color: var(--white); transform: rotateY(-10deg) rotateX(3deg); transform-origin: 100% 50%;
+  background: linear-gradient(115deg, rgba(240, 181, 74, 0.22), rgba(240, 181, 74, 0) 38%), repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 12px), linear-gradient(150deg, #222a39, #0d1118); border: 1px solid rgba(240, 181, 74, 0.5); box-shadow: 0 40px 70px rgba(0, 0, 0, 0.6); }
+.mday::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--gold); }
+.mday .lb { font-family: var(--mono); font-size: 14px; letter-spacing: 0.28em; color: var(--gold2); }
+.mday h2 { margin: 6px 0 0; font-size: 70px; line-height: 1; font-weight: 900; letter-spacing: 0.06em; transform: skewX(-7deg); }
+.mday .sub { font-size: 15px; color: var(--grey); letter-spacing: 0.15em; margin-top: 8px; }
+.lu { display: flex; gap: 10px; margin-top: 18px; }
+.lu div { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; color: var(--grey); letter-spacing: 0.15em; }
+.cp { width: 56px; height: 56px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px var(--white), 0 0 0 5px rgba(240, 181, 74, 0.5); }
+.cp .avatar { width: 56px; height: 56px; display: block; }
+.vs { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.vs .t { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.vs .cc { width: 100px; height: 100px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, #2a3346, #10141c); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8), 0 0 0 9px rgba(240, 181, 74, 0.18), 0 20px 40px rgba(0, 0, 0, 0.5); }
+.vs .t.op .cc { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5), 0 0 0 9px rgba(255, 93, 93, 0.16), 0 20px 40px rgba(0, 0, 0, 0.5); }
+.vs .t b { font-size: 17px; letter-spacing: 0.1em; white-space: nowrap; }
+.vs .x { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.vs .x b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 54px; line-height: 0.9; color: var(--gold); text-shadow: 0 0 30px rgba(240, 181, 74, 0.5); }
+.vs .x span { font-family: var(--mono); font-size: 13px; letter-spacing: 0.15em; padding: 3px 10px; border: 1px solid rgba(240, 181, 74, 0.5); color: var(--gold2); white-space: nowrap; }
+.go { position: relative; display: grid; place-items: center; }
+.go svg { position: absolute; width: 206px; height: 206px; }
+.go .seg { transform-box: view-box; transform-origin: 103px 103px; transform: rotate(-90deg); }
+.go .rot { transform-box: view-box; transform-origin: 103px 103px; animation: spin 12s linear infinite; }
+.go .now { animation: blink 1.2s ease-in-out infinite; }
+.go .btn { position: relative; width: 128px; height: 128px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 40% 30%, var(--gold2), var(--gold) 45%, var(--gold3)); color: var(--ink); box-shadow: 0 0 0 4px rgba(11, 14, 20, 0.9), 0 0 40px rgba(240, 181, 74, 0.6); animation: pulse 2.4s ease-in-out infinite; }
+.go .btn b { font-size: 36px; font-weight: 900; letter-spacing: 0.12em; line-height: 1; }
+.go .btn span { font-family: var(--en); font-weight: 700; font-size: 14px; letter-spacing: 0.35em; margin-top: 4px; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(11, 14, 20, 0.9), 0 0 70px rgba(240, 181, 74, 0.95); } }
+
+/* ── 底部跑馬燈 ── */
+.ticker { position: absolute; left: -30px; right: -30px; bottom: 20px; height: 42px; display: flex; align-items: center; background: rgba(5, 7, 10, 0.75); border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.1); transform: skewX(-14deg); overflow: hidden; }
+.ticker .lv { flex: none; height: 100%; padding: 0 30px 0 70px; display: flex; align-items: center; gap: 10px; background: var(--gold); color: var(--ink); font-family: var(--en); font-weight: 800; font-size: 21px; letter-spacing: 0.25em; }
+.ticker .lv i { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: blink 1s infinite; }
+.ticker .tx { display: flex; gap: 60px; padding-left: 40px; white-space: nowrap; font-size: 16px; letter-spacing: 0.08em; color: #cfd6e0; transform: skewX(14deg); animation: tick 40s linear infinite; }
+.ticker .tx span::before { content: "◆"; color: var(--gold); margin-right: 14px; font-size: 12px; }
+@keyframes tick { from { transform: skewX(14deg) translateX(0); } to { transform: skewX(14deg) translateX(-50%); } }
+
+/* ── 進場 ── */
+.in { animation: fin 0.8s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--d, 0s); }
+@keyframes fin { from { opacity: 0; translate: 0 40px; } }
+.rings.in { animation-name: ringin; }
+@keyframes ringin { from { opacity: 0; scale: 0.8; rotate: -30deg; } }
+.lens.in { animation-name: open; }
+@keyframes open { from { clip-path: circle(0% at 50% 50%); } to { clip-path: circle(50% at 50% 50%); } }
+.orb.in { animation-name: pop; }
+@keyframes pop { from { opacity: 0; scale: 0.3; } }
+.ring.in { animation-name: ringgrow; }
+@keyframes ringgrow { from { opacity: 0; scale: 0.4; } }
+</style>
+</head>
+<body>
+<div id="vp"><div id="stage">
+  <div class="bg"></div>
+  <div class="bigword">ANGEL</div>
+  <div class="beams"><i></i><i></i><i></i></div>
+
+  <section class="scene"><div class="world">
+    <div class="floor"></div>
+    <div class="ring in" style="--d:.1s"><i></i><b></b><em></em></div>
+  </div></section>
+  <canvas id="dust" width="1920" height="1080"></canvas>
+
+  <section class="hero">
+    <svg class="rings in" viewBox="0 0 640 640" style="--d:.15s">
+      <defs><path id="tp" d="M 320 6 A 314 314 0 1 1 319.99 6"/><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#b9832a"/></linearGradient></defs>
+      <g class="rr"><text><textPath href="#tp">ACE · 謝子睿 · VANGUARD · 強攻流 · RATING 1518 · GOLD v3 · ANGEL GAMING · NEW LEAGUE · SEASON 01 · ACE · 謝子睿 ·</textPath></text></g>
+      <g class="rs"><circle cx="320" cy="320" r="288" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="11" stroke-dasharray="1.5 5.04"/>
+        <circle cx="320" cy="320" r="288" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="20" stroke-dasharray="3 147.8"/></g>
+      <circle cx="320" cy="320" r="262" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/>
+      <circle cx="320" cy="320" r="262" fill="none" stroke="url(#gold)" stroke-width="9" stroke-linecap="round" stroke-dasharray="700 1646" transform="rotate(-90 320 320)"/>
+      <g class="rf"><circle cx="320" cy="320" r="238" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2" stroke-dasharray="50 100 12 70 160 330 24 760"/></g>
+      <path d="M 320 30 L 320 52 M 320 588 L 320 610 M 30 320 L 52 320 M 588 320 L 610 320" stroke="#f0b54a" stroke-width="3"/>
+    </svg>
+    <div class="lens in" style="--d:.25s"><span data-avatar="xzr" data-jersey="#3a4458" data-size="370"></span><i class="scan"></i></div>
+    <div class="orb in" style="left:1090px;top:182px;--d:.9s"><b>1518</b><span>RATING</span></div>
+    <div class="orb w in" style="left:730px;top:182px;--d:1s"><b>v3</b><span>GOLD</span></div>
+  </section>
+
+  <section class="scene"><div class="world">
+    <div class="otile" data-ang="194"><div class="ot in" style="--d:.35s"><div class="hd"><span class="ic" data-icon="users" data-size="30"></span><span class="st">4 / 5 · 名單已排</span></div><div><div class="zh">戰隊</div><div class="en">SQUAD</div></div></div></div>
+    <div class="otile" data-ang="218"><div class="ot in" style="--d:.42s"><div class="hd"><span class="ic" data-icon="contract" data-size="30"></span><span class="st">3 FREE AGENTS</span></div><div><div class="zh">轉會市場</div><div class="en">RECRUIT</div></div></div></div>
+    <div class="otile" data-ang="242"><div class="ot in" style="--d:.49s"><div class="hd"><span class="ic" data-icon="target" data-size="30"></span><span class="st">200 / 200</span></div><div><div class="zh">訓練</div><div class="en">TRAINING</div></div></div></div>
+    <div class="otile" data-ang="298"><div class="ot in" style="--d:.56s"><div class="hd"><span class="ic" data-icon="trophy" data-size="30"></span><span class="st">#7 · 3 PTS</span></div><div><div class="zh">聯賽</div><div class="en">LEAGUE</div></div></div></div>
+    <div class="otile" data-ang="322"><div class="ot in" style="--d:.63s"><div class="hd"><span class="ic" data-icon="ticket" data-size="30"></span><span class="st">4 OPEN</span></div><div><div class="zh">賭盤</div><div class="en">BETTING</div></div></div></div>
+    <div class="otile" data-ang="346"><div class="ot dk in" style="--d:.7s"><div class="hd"><span class="ic" data-icon="chart" data-size="30"></span><span class="st bad">−14.6 / WK</span></div><div><div class="zh">財務</div><div class="en">FINANCE</div></div></div></div>
+  </div></section>
+
+  <section class="plate in" style="--d:.45s">
+    <div class="tags"><span class="g"><i>先鋒 · VANGUARD</i></span><span class="w"><i>強攻流</i></span><span class="o"><i>本週焦點</i></span></div>
+    <h1>謝子睿</h1>
+    <div class="roman">XIE ZI-RUI</div>
+    <div class="stats"><div><b>1518</b><span>RATING</span></div><i></i><div><b>2-1</b><span>RECORD</span></div><i></i><div><b>6.1</b><span>萬／週</span></div></div>
+  </section>
+
+  <section class="mwrap in" style="--d:.55s"><div class="mday">
+    <div>
+      <div class="lb">MATCH DAY // W04</div>
+      <h2>比賽日</h2>
+      <div class="sub">對手名單比賽日才公開</div>
+      <div class="lu">
+        <div><span class="cp tinted"><span data-avatar="xzr" data-jersey="#3a4458" data-size="56"></span></span>先鋒</div>
+        <div><span class="cp tinted"><span data-avatar="qmz2" data-jersey="#3a4458" data-size="56"></span></span>中堅</div>
+        <div><span class="cp tinted"><span data-avatar="xce" data-jersey="#3a4458" data-size="56"></span></span>大將</div>
+      </div>
+    </div>
+    <div class="vs">
+      <div class="t"><span class="cc"><span data-crest="天使戰隊" data-primary="#eef2f6" data-secondary="#f0b54a" data-size="66"></span></span><b>天使戰隊</b></div>
+      <div class="x"><b>VS</b><span>ODDS ×2.00</span></div>
+      <div class="t op"><span class="cc"><span data-crest="暗影工作室" data-primary="#2a1416" data-secondary="#ff5d5d" data-size="66"></span></span><b>暗影工作室</b></div>
+    </div>
+    <div class="go">
+      <svg viewBox="0 0 206 206">
+        <g class="seg"><circle cx="103" cy="103" r="95" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="7" stroke-dasharray="62.3 4"/>
+          <circle cx="103" cy="103" r="95" fill="none" stroke="#f0b54a" stroke-width="7" stroke-dasharray="62.3 4 62.3 4 62.3 4 0 2000"/>
+          <circle class="now" cx="103" cy="103" r="95" fill="none" stroke="#ffd98a" stroke-width="9" stroke-dasharray="0 198.9 62.3 2000"/></g>
+        <g class="rot"><circle cx="103" cy="103" r="82" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1.5" stroke-dasharray="3 9"/></g>
+      </svg>
+      <div class="btn"><b>開戰</b><span>START</span></div>
+    </div>
+  </div></section>
+
+  <header class="top in">
+    <div class="team"><span data-crest="天使戰隊" data-primary="#eef2f6" data-secondary="#f0b54a" data-size="64"></span><div><b>天使戰隊</b><small>ANGEL GAMING // 新創聯賽</small></div></div>
+    <div class="slash"></div>
+    <div class="wk"><b>W04</b><span>/ 09 · REGULAR</span></div>
+    <div class="res">
+      <div class="funds"><div class="lb">FUNDS</div><b>104.8<small>萬</small></b><div class="dl">▼ 14.6 / WEEK</div></div>
+      <div class="gauge"><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="#eef2f6" stroke-width="6" stroke-linecap="round" stroke-dasharray="61 182"/></svg><b>10</b></div>
+      <div class="gl"><b>名氣</b>REP</div>
+      <div class="gauge"><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="#f0b54a" stroke-width="6" stroke-linecap="round" stroke-dasharray="64 182"/></svg><b>7</b></div>
+      <div class="gl"><b>資金跑道</b>WEEKS</div>
+      <div class="icon-btn"><span data-icon="mail" data-size="24"></span><em>3</em></div>
+      <div class="icon-btn"><span data-icon="menu" data-size="24"></span></div>
+    </div>
+  </header>
+
+  <footer class="ticker"><span class="lv"><i></i>LIVE</span><div class="tx">
+    <span>鐵壁電競 3 : 0 星河戰隊</span><span>球探回報：賴星宇 真實強度約 1561，比評分高 46</span><span>贊助商來電：名氣 10，每週贊助 8 萬</span><span>暗影工作室 大將換人</span>
+    <span>鐵壁電競 3 : 0 星河戰隊</span><span>球探回報：賴星宇 真實強度約 1561，比評分高 46</span><span>贊助商來電：名氣 10，每週贊助 8 萬</span><span>暗影工作室 大將換人</span>
+  </div></footer>
+  <div class="vig"></div>
+  <div class="design-note" style="left:56px;top:120px">設計稿 E · 環形競技台</div>
+</div></div>
+<script type="module" src="../../src/web/sketch/apex.ts"></script>
+<script type="module" src="../../src/web/sketch/fill.ts"></script>
+</body>
+</html>

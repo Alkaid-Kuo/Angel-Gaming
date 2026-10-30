@@ -33,6 +33,11 @@
     "scripts"
   ],
   "exclude": [
-    "src/web"
+    "src/web",
+    "bots/legion-marshal.js",
+    "bots/legion-general-v2.js",
+    "bots/legion-marshal-v2.js",
+    "bots/legion-baseline-v1.68.js",
+    "bots/legion-baseline-v1.114.js"
   ]
 }
