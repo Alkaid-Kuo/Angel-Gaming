@@ -1,6 +1,7 @@
 // CS 射擊比賽驅動：載入選手 → init → 每 DECISION_INTERVAL tick 呼叫 decide；人類玩家的指令每個 tick 套用；可錄製回放。
 // 回放保存比賽選項與每次決策的指令，重播不需要選手程式。
 // 時間限制：decide 超過硬上限（50 ms）當該次無指令；同一回合連續超時 idleAfterTimeouts 次，該回合剩下的時間閒置。
+// 經營層閘道用的批次控制器可關掉時間限制（timeLimits: false）：結果只由程式碼與種子決定，不受機器快慢、背景分頁影響。
 // 反應延遲（v1.0 引擎強制）：Bot 在 tick t 決策出的指令排隊到 t + reactionTicks（≥ MIN_REACTION_TICKS）才套用；
 // 回合交接時還沒生效的指令作廢。人類玩家（takeRealtime）不延遲。回放記錄實際套用的 tick，重播不需要知道延遲。
 import type { KnobValues } from '../api/types.ts';
@@ -97,6 +98,11 @@ function timedCall<T>(fn: () => T, limitMs: number, fallback: T): CallOutcome<T>
   return { value, exception, timedOut: elapsedMs > limitMs, elapsedMs };
 }
 
+export interface BatchControllerOptions {
+  /** false：不做逾時判定（timedOut 永遠 false），比賽結果與機器快慢無關（經營層閘道用）；預設 true */
+  readonly timeLimits?: boolean;
+}
+
 /** 批次模式：與引擎同一執行緒直接呼叫 */
 export class ShooterBatchController implements ShooterController {
   readonly label: string;
@@ -106,9 +112,14 @@ export class ShooterBatchController implements ShooterController {
   private readonly seed: number;
   private readonly playerId: number;
   private mapId: string;
+  private readonly initMs: number;
+  private readonly decideMs: number;
 
-  constructor(compiled: CompiledBot, label: string, seed: number, playerId: number, map: ShooterMap = MAPS[DEFAULT_MAP_ID]()) {
+  constructor(compiled: CompiledBot, label: string, seed: number, playerId: number, map: ShooterMap = MAPS[DEFAULT_MAP_ID](), opts: BatchControllerOptions = {}) {
     this.label = label;
+    const limits = opts.timeLimits ?? true;
+    this.initMs = limits ? TIMING.initMs : Infinity;
+    this.decideMs = limits ? TIMING.decideHardMs : Infinity;
     this.seed = seed;
     this.playerId = playerId;
     this.mapId = map.id;
@@ -129,13 +140,13 @@ export class ShooterBatchController implements ShooterController {
         this.bot.init?.(data, this.helpers);
         return null;
       },
-      TIMING.initMs,
+      this.initMs,
       null,
     );
   }
 
   decide(obs: ShooterObservation): CallOutcome<unknown> {
-    return timedCall(() => this.bot.decide(obs), TIMING.decideHardMs, [] as unknown);
+    return timedCall(() => this.bot.decide(obs), this.decideMs, [] as unknown);
   }
 }
 
