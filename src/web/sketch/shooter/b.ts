@@ -378,7 +378,7 @@ function paintFog(g: CanvasRenderingContext2D, cam: Cam, poly: readonly Pt[]): v
 }
 
 /** 單位：剪影先行。T 頭巾尾巴往後飄，CT 頭盔帶護目鏡；外框粗、肩膀一刀硬邊陰影 */
-function paintHero(g: CanvasRenderingContext2D, cam: Cam, u: Unit): void {
+function paintHero(g: CanvasRenderingContext2D, cam: Cam, u: Unit, tag = true): void {
   const us = u.team === 'T';
   const main = us ? PAL.gold : PAL.cyan;
   const shade = us ? PAL.goldShade : PAL.cyanShade;
@@ -391,7 +391,8 @@ function paintHero(g: CanvasRenderingContext2D, cam: Cam, u: Unit): void {
   g.translate(u.x, u.y);
   g.rotate(a);
   g.scale(BODY, BODY);
-  const px = 1 / (cam.ppc * BODY);
+  // 封面放大時線不能細掉
+  const px = Math.max(1, cam.ppc / 40) / (cam.ppc * BODY);
   const lx = -SUN.x * Math.cos(-a) + SUN.y * Math.sin(-a);
   const ly = -SUN.x * Math.sin(-a) - SUN.y * Math.cos(-a);
   g.lineJoin = 'round';
@@ -490,6 +491,7 @@ function paintHero(g: CanvasRenderingContext2D, cam: Cam, u: Unit): void {
     ink(visor, PAL.cyan, 2.4);
   }
   g.setTransform(1, 0, 0, 1, 0, 0);
+  if (!tag) return;
   // 自己：頭上一個粗箭頭；隊友：對白框名牌
   const [sx, sy] = toScreen(cam, u.x, u.y);
   g.lineJoin = 'round';
@@ -725,14 +727,36 @@ function paintCaptions(g: CanvasRenderingContext2D, cam: Cam, list: readonly { r
   g.setTransform(1, 0, 0, 1, 0, 0);
 }
 
+/** 封面：集中線，主角放大到畫面一半 */
+function cover(g: CanvasRenderingContext2D, cx: number, cy: number): void {
+  g.fillStyle = PAL.wall;
+  g.fillRect(0, 0, 1920, 1080);
+  const rand = rng(2024);
+  g.fillStyle = PAL.wallDark;
+  for (let i = 0; i < 90; i++) {
+    const a = (i / 90) * Math.PI * 2 + rand() * 0.02;
+    const w = 0.012 + rand() * 0.022;
+    g.beginPath();
+    g.moveTo(cx + Math.cos(a) * 330, cy + Math.sin(a) * 330);
+    g.lineTo(cx + Math.cos(a - w) * 2300, cy + Math.sin(a - w) * 2300);
+    g.lineTo(cx + Math.cos(a + w) * 2300, cy + Math.sin(a + w) * 2300);
+    g.closePath();
+    g.fill();
+  }
+}
+
+/** 烘焙層：只畫一次，之後每幀貼圖 */
+let baked: { floor: HTMLCanvasElement; walls: HTMLCanvasElement } | null = null;
+
 const direction: Direction = {
   id: 'b',
   paintScene(g) {
     const cam = SCENE.cam;
-    g.drawImage(paintFloor(cam), 0, 0);
+    baked ??= { floor: paintFloor(cam), walls: paintWalls(cam) };
+    g.drawImage(baked.floor, 0, 0);
     paintFog(g, cam, SCENE.vision);
     g.setTransform(1, 0, 0, 1, 0, 0);
-    g.drawImage(paintWalls(cam), 0, 0);
+    g.drawImage(baked.walls, 0, 0);
     paintCaptions(g, cam, CALLOUTS, 15);
     paintGrenade(g, cam);
     for (const u of UNITS) paintHero(g, cam, u);
@@ -745,6 +769,21 @@ const direction: Direction = {
     g.drawImage(paintFloor(cam), 0, 0);
     g.drawImage(paintWalls(cam), 0, 0);
     paintCaptions(g, cam, regionLabels(), 12);
+  },
+  paintBackdrop(g, kind) {
+    const cam: Cam = { cx: 0, cy: 0, ppc: 150, w: 1920, h: 1080 };
+    const hero = (x: number, y: number, team: 'T' | 'CT', facing: number): void => {
+      paintHero(g, { ...cam, cx: -x / cam.ppc, cy: -y / cam.ppc }, { name: '', team, x: 0, y: 0, facing, gun: 1.25, hp: 100 }, false);
+    };
+    if (kind === 'setup') {
+      cover(g, 330, 540);
+      hero(-800, -400, 'T', 35);
+      hero(-40, 440, 'CT', -150);
+    } else {
+      cover(g, 960, 540);
+      hero(-800, 340, 'T', -40);
+      hero(800, -300, 'CT', 130);
+    }
   },
   paintRadar(g, size) {
     radarBase(g, size, PAL.wall, PAL.street, '#ddd0ec');

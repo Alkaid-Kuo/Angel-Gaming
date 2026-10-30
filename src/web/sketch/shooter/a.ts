@@ -920,16 +920,21 @@ function vignette(g: CanvasRenderingContext2D, cam: Cam): void {
   g.fillRect(0, 0, cam.w, cam.h);
 }
 
+/** 烘焙層：只畫一次，之後每幀貼圖 */
+let baked: { floor: HTMLCanvasElement; memory: HTMLCanvasElement; walls: HTMLCanvasElement } | null = null;
+
 const direction: Direction = {
   id: 'a',
   paintScene(g) {
     const cam = SCENE.cam;
-    const floor = paintFloor(cam, CALLOUTS, 0.72);
-    const walls = paintWalls(cam);
-    g.drawImage(floor, 0, 0);
-    paintFog(g, cam, memoryOf(floor), SCENE.vision);
+    if (baked === null) {
+      const floor = paintFloor(cam, CALLOUTS, 0.72);
+      baked = { floor, memory: memoryOf(floor), walls: paintWalls(cam) };
+    }
+    g.drawImage(baked.floor, 0, 0);
+    paintFog(g, cam, baked.memory, SCENE.vision);
     g.setTransform(1, 0, 0, 1, 0, 0);
-    g.drawImage(walls, 0, 0);
+    g.drawImage(baked.walls, 0, 0);
     paintGrenade(g, cam);
     for (const u of UNITS) {
       worldTransform(g, cam);
@@ -945,6 +950,13 @@ const direction: Direction = {
     const cam: Cam = { cx: 60, cy: 60, ppc: 9, w: 1920, h: 1080 };
     g.drawImage(paintFloor(cam, regionLabels(), 1.6), 0, 0);
     g.drawImage(paintWalls(cam), 0, 0);
+  },
+  paintBackdrop(g, kind) {
+    // 設定卡看 A 包點，結算回到剛才的 B 包點
+    const cam: Cam = kind === 'setup' ? { cx: 66, cy: 32, ppc: 22, w: 1920, h: 1080 } : SCENE.cam;
+    g.drawImage(paintFloor(cam, [], 1), 0, 0);
+    g.drawImage(paintWalls(cam), 0, 0);
+    vignette(g, cam);
   },
   paintRadar(g, size) {
     radarBase(g, size, '#141821', '#3a4252', 'rgba(240, 181, 74, 0.2)');

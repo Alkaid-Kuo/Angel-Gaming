@@ -434,14 +434,18 @@ function paintScale(g: CanvasRenderingContext2D, cam: Cam): void {
   g.fillText('10 格', x + w / 2, y - 6);
 }
 
+/** 烘焙層：只畫一次，之後每幀貼圖 */
+let baked: { floor: HTMLCanvasElement; walls: HTMLCanvasElement } | null = null;
+
 const direction: Direction = {
   id: 'c',
   paintScene(g) {
     const cam = SCENE.cam;
-    g.drawImage(paintFloor(cam), 0, 0);
+    baked ??= { floor: paintFloor(cam), walls: paintWalls(cam) };
+    g.drawImage(baked.floor, 0, 0);
     paintFog(g, cam, SCENE.vision);
     g.setTransform(1, 0, 0, 1, 0, 0);
-    g.drawImage(paintWalls(cam), 0, 0);
+    g.drawImage(baked.walls, 0, 0);
     paintCaptions(g, cam, CALLOUTS, 14);
     paintGrenade(g, cam);
     for (const u of UNITS) paintMark(g, cam, u);
@@ -453,6 +457,19 @@ const direction: Direction = {
     const cam: Cam = { cx: 60, cy: 60, ppc: 9, w: 1920, h: 1080 };
     g.drawImage(paintFloor(cam), 0, 0);
     g.drawImage(paintWalls(cam), 0, 0);
+    paintCaptions(g, cam, regionLabels(), 12);
+  },
+  paintBackdrop(g, kind) {
+    // 設定卡：左半張全圖當封面，右邊是表單；結算：同一張圖置中退到後面
+    const cam: Cam = { cx: kind === 'setup' ? 112 : 60, cy: 60, ppc: 9, w: 1920, h: 1080 };
+    g.drawImage(paintFloor(cam), 0, 0);
+    g.drawImage(paintWalls(cam), 0, 0);
+    const [x0] = toScreen(cam, 0, 0);
+    const [x1] = toScreen(cam, MAP.width, 0);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = PAL.paper;
+    g.fillRect(0, 0, Math.max(0, x0), 1080);
+    g.fillRect(x1, 0, 1920 - x1, 1080);
     paintCaptions(g, cam, regionLabels(), 12);
   },
   paintRadar(g, size) {

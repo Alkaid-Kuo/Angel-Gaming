@@ -80,3 +80,49 @@
 .dir-a .sheet .hist i { width: 44px; height: 30px; font-size: 13px; font-weight: 700; transform: skewX(-14deg); color: var(--ink); }
 .dir-a .sheet .hist .us { background: var(--gold); }
 .dir-a .sheet .hist .them { background: var(--blue2); }
+
+/* 設定卡：左邊標題壓在沙盤上，右邊一張天使金卡片 */
+.dir-a .sheet.setup { background: linear-gradient(90deg, rgba(11, 14, 20, 0.78), rgba(11, 14, 20, 0.28) 46%, rgba(11, 14, 20, 0.5)); }
+.dir-a .brand small { font-family: var(--mono); font-size: 16px; letter-spacing: 0.42em; color: var(--gold); }
+.dir-a .brand h1 { margin: 14px 0 18px; font-size: 92px; font-weight: 900; line-height: 1.12; letter-spacing: 0.08em; text-shadow: 0 6px 22px rgba(0, 0, 0, 0.5); }
+.dir-a .brand h1 em { font-style: normal; color: var(--gold); }
+.dir-a .brand p { margin: 0; font-size: 18px; line-height: 1.8; color: #dfe4ea; max-width: 560px; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6); }
+.dir-a .card { gap: 16px; padding: 28px 32px 32px; background: var(--panel); box-shadow: inset 5px 0 0 var(--gold); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 26px), calc(100% - 26px) 100%, 0 100%); }
+.dir-a .card h2 { margin: 0; font-size: 28px; font-weight: 900; letter-spacing: 0.16em; }
+.dir-a .sides { gap: 10px; }
+.dir-a .side { gap: 6px; padding: 14px 16px; background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.dir-a .side b { font-size: 22px; font-weight: 900; letter-spacing: 0.1em; }
+.dir-a .side span { font-size: 13px; line-height: 1.6; color: var(--grey); }
+.dir-a .side.us:has(input:checked) { box-shadow: inset 0 0 0 2px var(--gold); background: rgba(240, 181, 74, 0.12); }
+.dir-a .side.them:has(input:checked) { box-shadow: inset 0 0 0 2px var(--blue2); background: rgba(143, 208, 255, 0.1); }
+.dir-a .side.us b { color: var(--gold); }
+.dir-a .side.them b { color: var(--blue2); }
+.dir-a .fields { gap: 10px; }
+.dir-a .fld { gap: 10px; font-size: 14px; color: var(--grey); }
+.dir-a .fld input, .dir-a .fld select { height: 40px; padding: 0 10px; background: var(--ink); border: 1px solid rgba(255, 255, 255, 0.2); color: var(--white); font-family: var(--en); font-weight: 600; font-size: 20px; }
+.dir-a .fld select { font-family: var(--zh); font-size: 15px; }
+.dir-a .fld button, .dir-a .result button { height: 40px; padding: 0 16px; background: transparent; border: 1px solid rgba(255, 255, 255, 0.3); color: var(--white); font-weight: 700; letter-spacing: 0.08em; }
+.dir-a .tg { gap: 10px; font-size: 15px; }
+.dir-a .tg input { width: 18px; height: 18px; accent-color: var(--gold); }
+.dir-a .tg span { font-size: 13px; color: var(--grey); }
+.dir-a .sheet .go { height: 58px; border: none; background: var(--gold); color: var(--ink); font-size: 22px; font-weight: 900; letter-spacing: 0.3em; transform: skewX(-14deg); }
+.dir-a .card .go { margin-top: 6px; }
+
+/* 結算 */
+.dir-a .sheet.result { background: rgba(11, 14, 20, 0.62); }
+.dir-a .result .box { width: 1360px; }
+.dir-a .result .head { margin-bottom: 18px; gap: 18px; }
+.dir-a .result .head small { font-family: var(--mono); font-size: 14px; letter-spacing: 0.3em; color: var(--grey); writing-mode: vertical-rl; }
+.dir-a .result .head h1 { margin: 0; font-size: 96px; font-weight: 900; line-height: 1; letter-spacing: 0.14em; color: var(--gold); transform: skewX(-7deg); }
+.dir-a .result .vs { gap: 26px; }
+.dir-a .result .vs b { font-size: 30px; font-weight: 900; letter-spacing: 0.12em; }
+.dir-a .result .vs .us { color: var(--gold); }
+.dir-a .result .vs .them { color: var(--blue2); }
+.dir-a .result .vs .sc { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 104px; line-height: 1; }
+.dir-a .result .vs .sc i { color: var(--grey); margin: 0 10px; font-size: 70px; }
+.dir-a .result .hist i { width: 40px; height: 26px; }
+.dir-a .result .foot { margin-top: 22px; }
+.dir-a .result .meta { font-family: var(--mono); font-size: 13px; color: var(--grey); letter-spacing: 0.08em; }
+.dir-a .result .acts { gap: 10px; }
+.dir-a .result .acts button { height: 48px; padding: 0 22px; }
+.dir-a .result .acts .go { height: 48px; padding: 0 34px; font-size: 18px; letter-spacing: 0.2em; }

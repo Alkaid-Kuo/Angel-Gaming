@@ -1,7 +1,7 @@
 /* 攻防戰美術樣張共用：只定位置與結構，配色與形狀在各方向的 CSS。比照可玩版 HUD 的資訊：左上雷達、頂部比分、右上擊殺、左下血甲錢、右下彈藥與武器欄 */
-#stage canvas#view, #stage canvas#overview { position: absolute; inset: 0; width: 1920px; height: 1080px; display: block; }
+#stage canvas#view, #stage canvas#overview, #stage canvas#backdrop { position: absolute; inset: 0; width: 1920px; height: 1080px; display: block; }
 #stage .off { display: none !important; }
-#stage button, #stage input, #stage select { font: inherit; color: inherit; }
+:where(#stage) :where(button, input, select) { font: inherit; color: inherit; }
 .hud { position: absolute; inset: 0; pointer-events: none; font-variant-numeric: tabular-nums; }
 .h-radar { position: absolute; left: 28px; top: 28px; width: 270px; }
 .h-radar canvas { display: block; width: 270px; height: 270px; }
@@ -30,6 +30,23 @@
 .sheet .cols { display: grid; grid-template-columns: 1fr 1fr; }
 .sheet .hist { display: flex; justify-content: center; }
 .sheet .hist i { display: grid; place-items: center; font-style: normal; }
+
+/* 設定卡與結算：版面骨架 */
+.sheet.setup { justify-content: space-between; padding: 0 110px; }
+.sheet.setup .brand { width: 700px; }
+.sheet.setup .card { width: 640px; display: flex; flex-direction: column; }
+.sheet.setup .sides { display: grid; grid-template-columns: 1fr 1fr; }
+.sheet.setup .side { position: relative; display: flex; flex-direction: column; cursor: pointer; }
+.sheet.setup .side input { position: absolute; opacity: 0; pointer-events: none; }
+.sheet.setup .fields { display: grid; grid-template-columns: 1fr 1fr; }
+.sheet.setup .fld { display: flex; align-items: center; }
+.sheet.setup .fld input, .sheet.setup .fld select { flex: 1; min-width: 0; }
+.sheet.setup .tg { display: flex; align-items: center; cursor: pointer; }
+.sheet.result .box .head { display: flex; align-items: center; }
+.sheet.result .box .vs { display: flex; align-items: center; margin-left: auto; }
+.sheet.result .box .foot { display: flex; justify-content: space-between; align-items: center; }
+.sheet.result .box .acts { display: flex; }
+.sheet button { cursor: pointer; }
 
 /* 樣張專用的切換列：截圖模式（?still）不顯示 */
 .sk-bar { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 100; display: flex; gap: 2px; padding: 3px; background: rgba(8, 10, 14, 0.82); border-radius: 8px; font: 13px "Noto Sans TC", "Microsoft JhengHei", sans-serif; opacity: 0.55; transition: opacity 0.15s; }

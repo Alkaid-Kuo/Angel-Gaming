@@ -4,7 +4,7 @@ import { initStage, still } from '../stage.ts';
 import { BOARD_THEM, BOARD_US, HUD, type BoardLine } from './scene.ts';
 import { MAP, OPEN_LOOPS } from './world.ts';
 
-export type ViewId = 'play' | 'board' | 'map';
+export type ViewId = 'play' | 'board' | 'map' | 'setup' | 'result';
 
 export interface Direction {
   readonly id: 'a' | 'b' | 'c';
@@ -14,12 +14,16 @@ export interface Direction {
   paintOverview(g: CanvasRenderingContext2D): void;
   /** 小地圖（正方形，邊長 size） */
   paintRadar(g: CanvasRenderingContext2D, size: number): void;
+  /** 設定卡與結算畫面的背景 */
+  paintBackdrop(g: CanvasRenderingContext2D, kind: 'setup' | 'result'): void;
 }
 
 const VIEWS: readonly { readonly id: ViewId; readonly label: string }[] = [
   { id: 'play', label: '對局' },
   { id: 'board', label: '計分板' },
   { id: 'map', label: '全圖' },
+  { id: 'setup', label: '設定卡' },
+  { id: 'result', label: '結算' },
 ];
 
 const pips = (n: number): string => Array.from({ length: 5 }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
@@ -61,6 +65,38 @@ export function roundsHtml(list: readonly string[] = ROUNDS): string {
   return list.map((r) => `<i class="${r[0] === 'o' ? 'us' : 'them'}">${r.slice(1)}</i>`).join('');
 }
 
+/** 進場設定卡：欄位比照 web/shooter.html，加上之後會有的 Bot 等級下拉 */
+function setupHtml(): string {
+  return `
+  <div class="brand"><small>ANGEL GAMING</small><h1>天使戰隊<br><em>攻防戰</em></h1><p>5 對 5 攻防射擊。T 帶炸彈打 A／B 點、CT 防守；不重生、回合制、先贏 13 回合。地圖赤岩鎮。</p></div>
+  <form class="card" onsubmit="return false">
+    <h2>開始比賽</h2>
+    <div class="sides">
+      <label class="side us"><input type="radio" name="side" checked><b>T 攻方</b><span>帶炸彈進 A 或 B 點下包；引爆或殲滅 CT 就贏</span></label>
+      <label class="side them"><input type="radio" name="side"><b>CT 守方</b><span>守住兩個包點；時間到、拆彈或殲滅 T 就贏</span></label>
+    </div>
+    <div class="fields">
+      <label class="fld"><span>種子</span><input type="number" value="731942"><button type="button">隨機</button></label>
+      <label class="fld"><span>Bot 等級</span><select><option>陪練</option><option selected>一般</option><option>職業</option><option>頂尖</option></select></label>
+    </div>
+    <label class="tg"><input type="checkbox"><b>觀戰模式</b><span>不參賽，看 10 隻 Bot 互打</span></label>
+    <label class="tg"><input type="checkbox" checked><b>全螢幕開始</b><span>Ctrl＋W 不會關掉分頁</span></label>
+    <button type="button" class="go">開始</button>
+  </form>`;
+}
+
+/** 結算畫面：欄位比照可玩版 showEnd（比分、種子、回合數、終局雜湊、計分板、回合紀錄、三個按鈕） */
+function resultHtml(): string {
+  const list = ['o', 'x', 'x炸', 'o', 'o拆', 'x', 'o', 'x時', 'o', 'o', 'o炸', 'x', 'o', 'o', 'x', 'o拆', 'x炸', 'o', 'x', 'o', 'o', 'o'];
+  return `
+  <div class="box">
+    <div class="head"><small>對局結束</small><h1>勝利</h1><div class="vs"><b class="us">${HUD.us}</b><span class="sc">13<i>:</i>9</span><b class="them">${HUD.them}</b></div></div>
+    ${boardHtml()}
+    <div class="hist">${roundsHtml(list)}</div>
+    <div class="foot"><span class="meta">種子 731942・共 22 回合・終局雜湊 a3f9c21e</span><span class="acts"><button type="button" class="go">再來一場</button><button type="button">下載回放</button><button type="button">回開局畫面</button></span></div>
+  </div>`;
+}
+
 /** 小地圖的底：牆色鋪滿、可走區挖開、包點上色；鏡頭內的資訊由各方向再畫 */
 export function radarBase(g: CanvasRenderingContext2D, size: number, wall: string, floor: string, site: string): void {
   const k = size / MAP.width;
@@ -88,23 +124,47 @@ export async function mountPage(d: Direction, fonts: readonly string[]): Promise
   const stage = initStage();
   stage.classList.add(`dir-${d.id}`);
   stage.innerHTML =
-    `<canvas id="view" width="1920" height="1080"></canvas><canvas id="overview" width="1920" height="1080" class="off"></canvas>` +
+    `<canvas id="view" width="1920" height="1080"></canvas><canvas id="overview" width="1920" height="1080" class="off"></canvas><canvas id="backdrop" width="1920" height="1080" class="off"></canvas>` +
     `<div class="hud" id="hud">${hudHtml()}</div>` +
-    `<div class="sheet board off" id="sheet-board"><div class="box"><h2><span>計分板</span><em>${HUD.scoreUs} : ${HUD.scoreThem}</em></h2>${boardHtml()}<div class="hist">${roundsHtml()}</div></div></div>`;
+    `<div class="sheet board off" id="sheet-board"><div class="box"><h2><span>計分板</span><em>${HUD.scoreUs} : ${HUD.scoreThem}</em></h2>${boardHtml()}<div class="hist">${roundsHtml()}</div></div></div>` +
+    `<div class="sheet setup off" id="sheet-setup">${setupHtml()}</div><div class="sheet result off" id="sheet-result">${resultHtml()}</div>`;
   await fontsReady(fonts);
   const view = (stage.querySelector('#view') as HTMLCanvasElement).getContext('2d') as CanvasRenderingContext2D;
-  d.paintScene(view);
+  if (location.search.includes('measure')) {
+    // 網址帶 ?measure：第一次含烘焙，之後連畫 60 次只有每幀的量；最後讀一次像素，逼畫布把排隊的指令畫完
+    const t0 = performance.now();
+    d.paintScene(view);
+    view.getImageData(0, 0, 1, 1);
+    const t1 = performance.now();
+    for (let i = 0; i < 60; i++) {
+      view.setTransform(1, 0, 0, 1, 0, 0);
+      d.paintScene(view);
+    }
+    view.getImageData(0, 0, 1, 1);
+    document.documentElement.dataset.measure = `首次 ${Math.round(t1 - t0)} ms，每幀 ${((performance.now() - t1) / 60).toFixed(1)} ms`;
+  } else d.paintScene(view);
   d.paintRadar((stage.querySelector('#radar') as HTMLCanvasElement).getContext('2d') as CanvasRenderingContext2D, 540);
   let overviewDone = false;
+  let backdropFor: ViewId | null = null;
   const show = (v: ViewId): void => {
+    const full = v === 'setup' || v === 'result';
+    if (full && backdropFor !== v) {
+      backdropFor = v;
+      const b = (stage.querySelector('#backdrop') as HTMLCanvasElement).getContext('2d') as CanvasRenderingContext2D;
+      b.setTransform(1, 0, 0, 1, 0, 0);
+      d.paintBackdrop(b, v);
+    }
     if (v === 'map' && !overviewDone) {
       overviewDone = true;
       d.paintOverview((stage.querySelector('#overview') as HTMLCanvasElement).getContext('2d') as CanvasRenderingContext2D);
     }
-    stage.querySelector('#view')?.classList.toggle('off', v === 'map');
+    stage.querySelector('#view')?.classList.toggle('off', v === 'map' || full);
     stage.querySelector('#overview')?.classList.toggle('off', v !== 'map');
-    stage.querySelector('#hud')?.classList.toggle('off', v === 'map');
+    stage.querySelector('#backdrop')?.classList.toggle('off', !full);
+    stage.querySelector('#hud')?.classList.toggle('off', v === 'map' || full);
     stage.querySelector('#sheet-board')?.classList.toggle('off', v !== 'board');
+    stage.querySelector('#sheet-setup')?.classList.toggle('off', v !== 'setup');
+    stage.querySelector('#sheet-result')?.classList.toggle('off', v !== 'result');
     bar.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
   };
   const bar = document.createElement('div');

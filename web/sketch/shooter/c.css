@@ -75,3 +75,46 @@
 .dir-c .sheet .hist i { width: 34px; height: 34px; font-size: 12px; font-weight: 700; color: var(--white); }
 .dir-c .sheet .hist .us { background: var(--gold); border-radius: 50%; }
 .dir-c .sheet .hist .them { background: var(--blue); }
+
+/* 設定卡：左地圖右表單，對齊同一條基線 */
+.dir-c .sheet.setup { flex-direction: row-reverse; padding: 0 90px 0 0; background: transparent; }
+.dir-c .sheet.setup .brand { display: none; }
+.dir-c .sheet.setup .card { width: 700px; gap: 0; background: var(--white); border: 2.5px solid var(--ink); }
+.dir-c .card h2 { margin: 0; padding: 22px 28px 18px; font-size: 40px; font-weight: 700; letter-spacing: 0.04em; border-bottom: var(--hair); }
+.dir-c .card h2::before { content: "天使戰隊　攻防戰"; display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; letter-spacing: 0.3em; color: #7c7a74; }
+.dir-c .sides { border-bottom: var(--hair); }
+.dir-c .side { gap: 6px; padding: 16px 28px; }
+.dir-c .side.them { border-left: var(--hair); }
+.dir-c .side b { font-size: 20px; font-weight: 700; }
+.dir-c .side span { font-size: 13px; line-height: 1.6; color: #7c7a74; }
+.dir-c .side.us:has(input:checked) { box-shadow: inset 0 -6px 0 var(--gold); }
+.dir-c .side.them:has(input:checked) { box-shadow: inset 0 -6px 0 var(--blue); }
+.dir-c .fields { border-bottom: var(--hair); }
+.dir-c .fld { gap: 10px; padding: 14px 28px; font-size: 13px; color: #7c7a74; }
+.dir-c .fld + .fld { border-left: var(--hair); }
+.dir-c .fld input, .dir-c .fld select { height: 34px; padding: 0 4px; background: transparent; border: none; border-bottom: var(--hair); color: var(--ink); font-family: var(--en); font-weight: 600; font-size: 20px; }
+.dir-c .fld select { font-family: var(--zh); font-size: 15px; }
+.dir-c .fld button { height: 34px; padding: 0 10px; background: transparent; border: var(--hair); color: var(--ink); }
+.dir-c .tg { gap: 12px; padding: 12px 28px; font-size: 15px; border-bottom: 1px solid var(--tone); }
+.dir-c .tg input { width: 16px; height: 16px; accent-color: var(--ink); }
+.dir-c .tg b { font-weight: 700; }
+.dir-c .tg span { margin-left: auto; font-size: 13px; color: #7c7a74; }
+.dir-c .sheet .go { height: 68px; border: none; background: var(--ink); color: var(--white); font-size: 22px; font-weight: 700; letter-spacing: 0.4em; }
+
+.dir-c .sheet.result { background: rgba(247, 244, 236, 0.86); }
+.dir-c .result .box { width: 1320px; padding: 26px 36px 28px; }
+.dir-c .result .head { gap: 28px; margin-bottom: 20px; padding-bottom: 18px; border-bottom: 2.5px solid var(--ink); }
+.dir-c .result .head small { font-size: 13px; letter-spacing: 0.2em; color: #7c7a74; }
+.dir-c .result .head h1 { margin: 0; font-size: 72px; font-weight: 700; line-height: 1; letter-spacing: 0.1em; }
+.dir-c .result .vs { gap: 22px; }
+.dir-c .result .vs b { font-size: 24px; font-weight: 700; }
+.dir-c .result .vs .us { box-shadow: inset 0 -5px 0 var(--gold); }
+.dir-c .result .vs .them { box-shadow: inset 0 -5px 0 var(--blue); }
+.dir-c .result .vs .sc { font-family: var(--en); font-weight: 600; font-size: 96px; line-height: 1; }
+.dir-c .result .vs .sc i { font-style: normal; margin: 0 8px; color: var(--stone); }
+.dir-c .result .hist i { width: 30px; height: 30px; }
+.dir-c .result .foot { margin-top: 22px; }
+.dir-c .result .meta { font-size: 13px; color: #7c7a74; }
+.dir-c .result .acts { gap: 0; }
+.dir-c .result .acts button { height: 50px; padding: 0 22px; background: var(--white); border: var(--hair); border-left: none; color: var(--ink); }
+.dir-c .result .acts .go { height: 50px; background: var(--ink); color: var(--white); font-size: 16px; letter-spacing: 0.2em; }
