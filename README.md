@@ -65,6 +65,21 @@ npm run web
 npm run serve:lan
 ```
 
+## 攻防戰（CS 式 5v5 射擊，第二個電競項目）
+
+2D 俯視、參照 CS 規則的 5 對 5 攻防射擊：T 帶炸彈攻 A／B 點、CT 防守，回合制、不重生、MR12＋MR3 加時，經濟、四種道具、視錐迷霧（看不見就是看不見，Bot 也一樣）。選手 API 1.0 與引擎 1.0.0 已凍結；項目總覽（步驟 0～9、所有報告、已知問題）在 [docs/2026-10-29_CS射擊_夜間進度報告.md](docs/2026-10-29_CS射擊_夜間進度報告.md)，規格在 [docs/2026-10-29_CS射擊項目計畫與規格.md](docs/2026-10-29_CS射擊項目計畫與規格.md)。
+
+- **試玩**：`npm run web` 後開 <http://localhost:5173/web/shooter.html>（首頁也有入口）。選 T 或 CT 與 9 隻陪練 Bot 打；勾「觀戰模式」看 10 隻 Bot 互打（暫停、0.5～8 倍速、N 跳到下一回合）。打完可「下載回放」。
+- **經營與看比賽**：開 <http://localhost:5173/web/game.html>，創立戰隊時選「攻防戰」。每週的比賽在 Web Worker 裡由基準 Bot 依選手的角色、版本、習慣真打（一週約 20～40 秒）。結果畫面與聯賽頁的每一場都有「觀戰」：用存檔裡的請求單重跑那一場，比分與成績單逐回合對照。
+- **CLI**：
+
+```bash
+npx tsx src/cli/main.ts shooter match --seed 7 --replay out/m.json   # 無頭打一場（預設兩隊陪練 Bot），可錄回放
+npx tsx src/cli/main.ts shooter batch --games 20 --bots bots/shooter-baseline.js bots/shooter-practice.js
+npx tsx src/cli/main.ts shooter replay angel-watch-229762279.json      # 重播回放、核對終局雜湊
+node scripts/manage-shooter-season.ts --seed 2026                      # 經營層正式賽制整季（六種策略）
+```
+
 ## 軍團戰（原型）
 
 取代 RTS 的新電競項目：雙方 AI 各用 500 點選兵、在看不到對手的情況下布陣，開場就行軍接敵。規則見 [docs/軍團戰 規格書 v0.1（草案）.md](docs/軍團戰%20規格書%20v0.1（草案）.md)，原型實作與量測結果見 [docs/2026-10-22_軍團戰原型報告.md](docs/2026-10-22_軍團戰原型報告.md)。
