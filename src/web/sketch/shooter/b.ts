@@ -1,6 +1,6 @@
 // 方向 B：粗線漫畫。世界只有奶油色地面與紫色牆兩大色塊，隊色、危險色才飽和；線寬分三級（外框粗、結構中、紋理細），陰影一律硬邊。
 // 迷霧用漫畫網點：視線外蓋一層斜 45° 的紫色網點，顏色不變暗、資訊也不多給。
-// 圖層：地面烘焙 → 網點遮罩 → 牆烘焙 → 單位 → 煙 → 彈道與爆形。線寬用螢幕像素固定，不隨縮放變粗細。
+// 圖層：地面烘焙 → 網點遮罩 → 牆烘焙 → 單位 → 煙 → 彈道與爆形。單位與特效的線寬用螢幕像素固定，牆與地面烘焙時以格為單位。
 import { CALLOUTS, SCENE, UNITS, camRect, makeCanvas, toScreen, worldTransform, type Cam, type Unit } from './scene.ts';
 import { mountPage, radarBase, type Direction } from './shell.ts';
 import { LOW_RECTS, MAP, hash2, isWall, regionLabels, rng, wallPath, zoneAt, zonePath, type Pt, type Zone } from './world.ts';
