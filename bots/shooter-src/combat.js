@@ -280,12 +280,13 @@ export class Combat {
       out.move = { x: e.x, y: e.y };
       return out;
     }
-    // 隊友在彈道上
+    // 隊友在彈道上（自己在走的話，加上反應延遲內會走的距離：開火時位置已經變了）
     let block = false;
+    const drift = (Math.abs(me.vx) + Math.abs(me.vy)) * this.rules.reactionTicks;
     for (const m of obs.teammates) {
       if (!m.alive) continue;
       const s = segDist(m.x, m.y, me.x, me.y, aim.x, aim.y);
-      if (s.t > 0 && s.t < 1 && s.d < this.friendClear) block = true;
+      if (s.t > 0 && s.t < 1 && s.d < this.friendClear + drift) block = true;
     }
     if (block) {
       this.blocked++;

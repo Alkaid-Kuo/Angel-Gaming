@@ -1,4 +1,4 @@
-// CS 射擊基準 Bot（步驟 6）：產生檔與原始碼一致、選手模組限制、計畫／事件／買法字串、情境測試 P0～P13 與 T1～T15（每個 5 個種子；T 兩張圖都跑）、
+// CS 射擊基準 Bot（步驟 6、7）：產生檔與原始碼一致、選手模組限制、計畫／事件／買法／角色字串、角色分工、情境測試 P0～P13、T1～T15、R1～R6（每個 5 個種子；T、R 兩張圖都跑）、
 // 地圖分析（不寫死座標：兩張圖都算得出入口、守點位、下包位、至少 2 條路線）、短賽制對陪練零例外零超時。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -14,6 +14,8 @@ import { Grid, initTrig } from '../bots/shooter-src/base.js';
 import { MapIntel } from '../bots/shooter-src/analysis.js';
 import { parseEvent, parsePlan, planText } from '../bots/shooter-src/tactics.js';
 import { parseBuy } from '../bots/shooter-src/economy.js';
+import { ANCHOR, AWP, ENTRY, LURK, Roles, SUPPORT, autoRole, parseRole } from '../bots/shooter-src/roles.js';
+import { ROLE_KNOB, SHOOTER_ROLES } from '../src/shooter/players.ts';
 
 const source = readFileSync('bots/shooter-baseline.js', 'utf8');
 const baseline = compileBot(source, 'shooter-baseline.js');
@@ -28,7 +30,7 @@ describe('射擊基準 Bot：檔案與宣告', () => {
     expect(baseline.sizeBytes).toBeLessThanOrEqual(200 * 1024);
     const c = new ShooterBatchController(baseline, 'baseline', 1, 0, MAPS.redrock());
     expect(c.declaration.name).toBe('shooter-baseline');
-    expect(c.declaration.version).toBe('2.0');
+    expect(c.declaration.version).toBe('2.1');
     expect(c.declaration.style).toBe('基準');
     expect(c.declaration.knobs.length).toBeGreaterThanOrEqual(3);
     expect(c.declaration.knobs.length).toBeLessThanOrEqual(6);
@@ -42,6 +44,44 @@ describe('射擊基準 Bot：檔案與宣告', () => {
     expect(parseEvent('E:planted B')).toEqual({ kind: 'planted', site: 'B' });
     expect(parseBuy('B:eco')).toBe('eco');
     expect(parseBuy('P:rushA 0')).toBeNull();
+    expect(parseRole('R:4')).toBe(AWP);
+    expect(parseRole('R:0')).toBe(0);
+    expect(parseRole('B:eco')).toBe(0);
+  });
+});
+
+describe('射擊基準 Bot：角色分工（roles.js）', () => {
+  const ids = [5, 6, 7, 8, 9];
+  it('旋鈕 role 的代碼與 players.ts 的 ROLE_KNOB 一致；自動角色依隊內序號（awpSlot 指定狙擊）', () => {
+    expect(SHOOTER_ROLES.map((r) => ROLE_KNOB[r]).sort()).toEqual([1, 2, 3, 4, 5]);
+    expect({ ENTRY, SUPPORT, ANCHOR, AWP, LURK }).toEqual({ ENTRY: ROLE_KNOB.entry, SUPPORT: ROLE_KNOB.support, ANCHOR: ROLE_KNOB.anchor, AWP: ROLE_KNOB.awp, LURK: ROLE_KNOB.lurk });
+    expect([0, 1, 2, 3, 4].map((s) => autoRole(s, 4))).toEqual([ENTRY, SUPPORT, ANCHOR, LURK, AWP]);
+    expect([0, 1, 2, 3, 4].map((s) => autoRole(s, 1))).toEqual([ENTRY, AWP, ANCHOR, LURK, LURK]);
+    expect([0, 1, 2, 3, 4].map((s) => autoRole(s, 5))).toEqual([ENTRY, SUPPORT, ANCHOR, LURK, LURK]);
+  });
+
+  it('沒喊過的隊友照自動角色；喊了之後分工跟著變', () => {
+    const r = new Roles(ids, 7, AWP, 4);
+    expect(r.who(AWP)).toBe(7);
+    // 9 號（自動狙擊）跟 7 號重複：補缺的支援以外的第一個缺角
+    expect(r.of(9)).not.toBe(AWP);
+    r.hear(9, ANCHOR);
+    expect(r.of(9)).toBe(ANCHOR);
+    expect(r.awper()).toBe(7);
+  });
+
+  it('五個人都喊狙擊：序號最小的是狙擊手（只有他買狙擊槍），其他人依序補成突破、支援、錨點、游擊', () => {
+    const r = new Roles(ids, 5, AWP, 4);
+    for (const id of ids) r.hear(id, AWP);
+    expect(ids.map((id) => r.of(id))).toEqual([AWP, ENTRY, SUPPORT, ANCHOR, LURK]);
+    expect(r.awper()).toBe(5);
+  });
+
+  it('角色重複：每個角色由序號最小的人擔任，重複的人依序號補缺角', () => {
+    const r = new Roles(ids, 5, ENTRY, 4);
+    for (const id of ids) r.hear(id, ENTRY);
+    expect(ids.map((id) => r.of(id))).toEqual([ENTRY, SUPPORT, ANCHOR, LURK, 0]);
+    expect(r.awper()).toBe(-1);
   });
 });
 
@@ -72,7 +112,7 @@ describe('射擊基準 Bot：地圖分析', () => {
   }
 });
 
-describe('射擊基準 Bot：情境測試 P0～P13、T1～T15（每個情境 5 個種子）', () => {
+describe('射擊基準 Bot：情境測試 P0～P13、T1～T15、R1～R6（每個情境 5 個種子）', () => {
   for (const s of AI_SCENARIOS) {
     it(`${s.id} ${s.name}：${s.expect}`, () => {
       for (const seed of AI_SCENARIO_SEEDS) {

@@ -8,10 +8,18 @@
 //      「P:fake B 0 1[ >B]」（主力去 B、佯攻組去 A 製造聲音後主力執行）
 //   CT 「P:hold A=2 M=1 B=2[ rot=B][ go]」（開局配置；rot＝輪轉到哪個點；go＝回防集結完畢一起進）
 // 事件（感知輸出產生，隊友據此更新）：「E:contact <區域> <人數>」「E:dead <區域>」「E:planted <點>」「E:flash x y tick」「E:smoke x y」「E:kit」。
+// 角色（2.1，roles.js）：每回合第一次決策喊「R:<代碼>」；分組、突破手與煙霧手、進點順序、CT 守位、錨點、回防先後都先看角色，
+// 角色重複或缺角時退回隊內序號。
 // 經濟「B:full／force／half／eco」見 economy.js；道具的彈道見 utility.js。全部由地圖資料與觀察資料算，不寫死座標或區域代號。
-import { P, UNIT, clamp, cosd, dist, inRect, lerp, segDist, sind } from './base.js';
+import { P, UNIT, adiff, angleTo, clamp, cosd, dist, inRect, lerp, segDist, sind } from './base.js';
 import { Economy, parseBuy } from './economy.js';
 import { Utility } from './utility.js';
+import { ANCHOR, AWP, ENTRY, LURK, Roles, SUPPORT, parseRole } from './roles.js';
+
+/** T 主力組的優先順序（索引＝角色代碼）：突破、支援、錨點、無、游擊、狙擊 */
+const MAIN_PRI = [3, 0, 1, 2, 5, 4];
+/** T 的煙霧手：支援優先，其次錨點、游擊、無、突破、狙擊 */
+const SMOKE_PREF = [SUPPORT, ANCHOR, LURK, 0, ENTRY, AWP];
 
 /** @typedef {'A' | 'B'} SiteId */
 /** T 計畫：site 主力的點、r1／r2 兩組的路線序號、exec 執行哪個點（null = 還在佈置） @typedef {{ kind: 'go' | 'default' | 'rush' | 'split' | 'fake', site: SiteId, r1: number, r2: number, exec: SiteId | null }} TPlan */
@@ -86,7 +94,7 @@ export class Tactics {
   /**
    * @param {import('./base.js').Grid} g @param {import('./analysis.js').MapIntel} intel @param {import('./memory.js').Perception} perc
    * @param {import('./base.js').InitData} data @param {import('./base.js').Helpers} h
-   * @param {{ awpSlot: number, economy: number, ctSplitA: number, plan: number }} opts
+   * @param {{ awpSlot: number, role: number, economy: number, ctSplitA: number, plan: number }} opts
    * @param {{ aim: number, reaction: number, awareness: number, aggression: number, discipline: number, movement: number }} attrs
    */
   constructor(g, intel, perc, data, h, opts, attrs) {
@@ -98,10 +106,19 @@ export class Tactics {
     this.opts = opts;
     this.attrs = attrs;
     this.tps = data.rules.ticksPerSecond;
-    this.econ = new Economy(data, h, { awpSlot: opts.awpSlot, economy: opts.economy, discipline: attrs.discipline });
+    this.econ = new Economy(data, h, { economy: opts.economy, discipline: attrs.discipline });
     this.util = new Utility(g, data);
     /** 全隊 id（排序）：隊內序號 = 名次 */
     this.ids = [data.playerId, ...data.teammateIds].sort((a, b) => a - b);
+    /** 全隊的角色分工（整場） */
+    this.roles = new Roles(this.ids, data.playerId, opts.role, opts.awpSlot);
+    this.roleSaid = false;
+    /** 本回合讓突破手先進已經停了幾 tick；回防 go 的 tick */
+    this.yielded = 0;
+    this.slow = false;
+    this.spawnHeld = 0;
+    this.goTick = -1;
+    this.readyAt = -1;
     this.eventDelay = Math.round(lerp(P.eventDelay0, P.eventDelay100, attrs.awareness)) * data.rules.decisionInterval;
     /** 地圖算出來的位置（第一次用到才算） @type {Map<string, import('./analysis.js').Spot[]>} */
     this.spotCache = new Map();
@@ -245,6 +262,12 @@ export class Tactics {
     this.layout = null;
     this.layoutKey = '';
     this.saveCache = null;
+    this.roleSaid = false;
+    this.yielded = 0;
+    this.slow = false;
+    this.spawnHeld = 0;
+    this.goTick = -1;
+    this.readyAt = -1;
     this.util.reset();
   }
 
@@ -298,6 +321,10 @@ export class Tactics {
     const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false };
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
     this.enemiesAlive = obs.enemiesAlive;
+    if (!this.roleSaid) {
+      this.roleSaid = true;
+      out.cmds.push({ type: 'say', text: `R:${this.opts.role}` });
+    }
     this.trackTeam(obs, out);
     this.readChat(obs);
     const cmd = this.commanderOf(obs);
@@ -308,8 +335,13 @@ export class Tactics {
     this.report(obs, out);
     const live = obs.round.phase === 'live';
     out.allowPeek = live && obs.round.phaseTicksLeft > 25 * this.tps;
+    this.slow = false;
     /** @type {import('./utility.js').ThrowWish | null} */
     let wish = me.team === 'T' ? this.tGoal(obs, out) : this.ctGoal(obs, out);
+    if (this.slow) {
+      out.walk = true;
+      out.role += '・讓突破手先走';
+    }
     if (wish === null) wish = this.anyNade(obs);
     this.overlay(obs, out);
     /** @type {Set<number>} */
@@ -370,8 +402,13 @@ export class Tactics {
     const t = obs.tick;
     for (const c of obs.chat) {
       if (c.from === me.id) continue;
-      // 第一個計畫與買法立刻處理（凍結時間）；之後的變更與事件依警覺延遲
-      const first = this.plan === null && c.text.startsWith('P:');
+      const r = parseRole(c.text);
+      if (r > 0) {
+        this.roles.hear(c.from, r);
+        continue;
+      }
+      // 第一個計畫與買法立刻處理（凍結時間）；之後的變更與事件依警覺延遲；游擊對計畫變更（輪轉）不延遲
+      const first = (this.plan === null || this.roles.of(me.id) === LURK) && c.text.startsWith('P:');
       this.inbox.push({ ready: first || c.text.startsWith('B:') ? t : t + this.eventDelay, from: c.from, text: c.text });
     }
     const keep = [];
@@ -528,9 +565,12 @@ export class Tactics {
     if (p.kind === 'split') {
       const ready = this.alive(obs).every((m) => {
         const s = this.memberStage(obs, m.id, p);
-        return s === null || dist(m.x, m.y, s.x, s.y) < 3 * UNIT;
+        return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * UNIT;
       });
-      if (ready || el >= P.splitWait) return { ...p, exec: p.site };
+      // 兩組都到了再等 1.5 秒（狙擊手站定開鏡、隊友站好）
+      if (!ready) this.readyAt = -1;
+      else if (this.readyAt < 0) this.readyAt = t;
+      if ((ready && t - this.readyAt >= 1.5 * this.tps) || el >= P.splitWait) return { ...p, exec: p.site };
     }
     if (p.kind === 'fake') {
       const fakers = this.alive(obs).filter((m) => this.groupOf(obs, m.id, p) === 1);
@@ -648,7 +688,7 @@ export class Tactics {
     const waited = obs.round.phase !== 'freeze' || this.data.rules.freezeTicks - obs.round.phaseTicksLeft >= this.tps;
     if (this.buyCall === null && !waited) return;
     const call = this.buyCall ?? this.econ.teamCall(obs);
-    const items = this.econ.items(obs, call, this.data.slot);
+    const items = this.econ.items(obs, call, this.roles.of(me.id), this.roles.awper() === me.id);
     if (items.length > 0) out.cmds.push({ type: 'buy', items });
     this.bought = true;
   }
@@ -680,16 +720,21 @@ export class Tactics {
 
   // ───────── T ─────────
 
+  /** 主力組優先順序（小的先）：角色，其次隊內序號 @param {number} id */
+  mainPri(id) {
+    return MAIN_PRI[this.roles.of(id)] * 10 + this.slotOf(id);
+  }
+
   /**
-   * 分組：主力 3 人（含持彈者）＝ 0、第二組 2 人 ＝ 1；rush／go 全隊同組。第一次知道計畫時算好（之後有人陣亡不重分）
+   * 分組：主力 3 人（持彈者＋突破手、支援優先）＝ 0、第二組 2 人（游擊、狙擊）＝ 1；rush／go 全隊同組。第一次知道計畫時算好（之後有人陣亡不重分）
    * @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p
    */
   groupOf(obs, id, p) {
     if (p.kind === 'rush' || p.kind === 'go') return 0;
-    const key = `${p.kind}${p.site}`;
+    const key = `${p.kind}${p.site}${this.roles.key}`;
     if (this.groups === null || this.groupKey !== key) {
       const carrier = obs.me.hasBomb ? obs.me.id : (obs.teammates.find((m) => m.hasBomb)?.id ?? -1);
-      const others = this.ids.filter((x) => x !== carrier);
+      const others = this.ids.filter((x) => x !== carrier).sort((a, b) => this.mainPri(a) - this.mainPri(b));
       const main = carrier >= 0 ? [carrier, ...others.slice(0, 2)] : others.slice(0, 3);
       this.groups = new Map(this.ids.map((x) => [x, main.includes(x) ? 0 : 1]));
       this.groupKey = key;
@@ -697,11 +742,11 @@ export class Tactics {
     return this.groups.get(id) ?? 0;
   }
 
-  /** 組內名次（持彈者排最後；第 0 個是突破手） @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p */
+  /** 組內名次（持彈者排最後；其餘依角色：突破手是第 0 個） @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p */
   memberIndex(obs, id, p) {
     const gid = this.groupOf(obs, id, p);
     const carrier = obs.me.hasBomb ? obs.me.id : (obs.teammates.find((m) => m.hasBomb)?.id ?? -1);
-    const list = this.ids.filter((x) => this.groupOf(obs, x, p) === gid).sort((a, b) => (a === carrier ? 1 : 0) - (b === carrier ? 1 : 0) || a - b);
+    const list = this.ids.filter((x) => this.groupOf(obs, x, p) === gid).sort((a, b) => (a === carrier ? 1 : 0) - (b === carrier ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
     return Math.max(0, list.indexOf(id));
   }
 
@@ -755,6 +800,13 @@ export class Tactics {
     let exec = p.exec;
     if (exec === null && obs.round.phase === 'live' && obs.round.phaseTicksLeft <= (P.forceExecLeft - 3) * this.tps) exec = this.nearestSite(obs);
     const setup = this.setupOf(obs, me.id, p);
+    // 出生區裡先讓突破手走到前面（慢走讓他超過；出生區空間大，進了路線就是一列，突破手自然在最前）
+    this.slow = obs.round.phase === 'live' && p.kind !== 'go' && this.spawnWait(obs, p, exec ?? setup.site);
+    if (this.slow && this.spawnHeld <= P.spawnStop * this.tps) {
+      out.stop = true;
+      out.role = '讓突破手先走';
+      return null;
+    }
     if (exec === null) {
       // ── 佈置：走自己組的路線到待命格，看入口；靠近了靜步 ──
       const st = this.memberStage(obs, me.id, p);
@@ -764,6 +816,7 @@ export class Tactics {
       out.hold = st;
       const d = dist(me.x, me.y, st.x, st.y);
       out.role = p.kind === 'fake' && this.groupOf(obs, me.id, p) === 1 ? '佯攻' : '待命';
+      this.awpSettle(obs, out, st);
       if (d < 10 * UNIT && this.attrs.movement >= 0.3) out.walk = true;
       // 佯攻：到了待命格就開幾槍、丟道具進點製造聲音
       if (out.role === '佯攻' && d < 2.5 * UNIT) {
@@ -797,29 +850,43 @@ export class Tactics {
     const sinceExec = this.execTick >= 0 ? (t - this.execTick) / this.tps : 99;
     if (ent !== null && !this.inSite(me.x, me.y, exec, site.cx, site.cy) && dist(me.x, me.y, ent.ox, ent.oy) < 22 * UNIT) {
       const idx = this.memberIndex(obs, me.id, p);
+      const role = this.roles.of(me.id);
       const smokeFirst = p.kind !== 'rush' && p.kind !== 'go';
+      const st = this.memberStage(obs, me.id, p);
+      const near = st !== null && dist(me.x, me.y, st.x, st.y) < 6 * UNIT;
+      // 第一顆煙給支援丟：支援活著、還沒人丟煙、執行不到 8 秒時，其他人先不丟
+      const supportFirst = role !== SUPPORT && this.isAlive(obs, this.roles.who(SUPPORT)) && this.smokeHeard < 0 && sinceExec < 8;
       if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
-        const sp = this.smokePoint(exec, ent);
-        if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
-      } else if (this.util.has(me, 'flash') && (idx === 0 || (sinceExec > 2.5 && this.flashHeard < 0)) && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > 1.5)) {
+        // 封架點；從這裡丟不到就改封入口內側
+        const sp = supportFirst ? null : [this.smokePoint(exec, ent), { x: ent.ix, y: ent.iy }].find((q) => q !== null && this.util.solve(me.x, me.y, q.x, q.y) !== null);
+        if (sp !== undefined && sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
+      } else if (this.util.has(me, 'flash') && (idx === 0 || (sinceExec > 2.5 && this.flashHeard < 0)) && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5)) && !(role === ENTRY && smokeFirst && !near)) {
+        // 突破手只在待命格丟閃（離開了就直接進點，不停下來丟）
         const fp = this.flashPoint(obs, exec, ent, smokeFirst ? 2 : 5);
         // 照計畫執行（隊友在待命格等）照例先閃；其他時候（rush）要可能有人看得到爆點才丟
         if (fp !== null && (smokeFirst || this.viewer(fp, exec))) wish = { kind: 'flash', x: fp.x, y: fp.y, why: '閃進點' };
       }
       // 等閃光：還在待命格附近、閃光還沒丟、執行不到 3 秒
-      const st = this.memberStage(obs, me.id, p);
       const pending = this.mateFlash.some((x) => t <= x.pop);
-      const near = st !== null && dist(me.x, me.y, st.x, st.y) < 6 * UNIT;
       const waiting = smokeFirst && near && wish === null && (pending || (sinceExec < 3 && this.flashHeard < 0 && !this.util.used.has('flash')));
+      // 等突破手先走（狙擊手等兩個人進點）：執行後最多 P.stageLead 秒
+      const lead = smokeFirst && near && wish === null && sinceExec < P.stageLead && this.waitEntry(obs, exec);
       // 正在準備丟煙／閃的人也留在待命格（最多到執行後 4 秒，丟不出去就照樣進）
-      if ((waiting || (smokeFirst && near && wish !== null && sinceExec < 4)) && st !== null) {
+      if ((waiting || lead || (smokeFirst && near && wish !== null && sinceExec < 4)) && st !== null) {
         out.goal = { x: st.x, y: st.y };
         out.hold = st;
-        out.role = wish !== null ? '丟道具' : '等閃光';
+        out.role = wish !== null ? '丟道具' : lead && !waiting ? '等突破手先走' : '等閃光';
+        this.awpSettle(obs, out, st);
         return wish;
       }
     }
     out.role = `執行 ${exec}`;
+    if (p.kind !== 'go' && this.yieldTo(obs, exec)) {
+      out.stop = true;
+      out.look = { x: site.cx, y: site.cy };
+      out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
+      return wish;
+    }
     if (me.hasBomb) {
       const spot = site.plants[0];
       out.goal = { x: spot.x, y: spot.y };
@@ -844,16 +911,73 @@ export class Tactics {
     return wish;
   }
 
-  /** 支援（煙霧手）：組內序號 1、3 優先，其次 2、0 @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p */
+  /** 煙霧手：組內的支援優先，其次錨點、游擊…（同角色看隊內序號） @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p */
   smokerIndex(obs, id, p) {
     const gid = this.groupOf(obs, id, p);
     const members = this.ids.filter((x) => this.groupOf(obs, x, p) === gid && obs.teammates.every((m) => m.id !== x || m.alive));
-    const pref = [1, 3, 2, 0, 4];
-    for (const s of pref) {
-      const who = members.find((x) => this.slotOf(x) === s);
+    for (const r of SMOKE_PREF) {
+      const who = members.find((x) => this.roles.of(x) === r);
       if (who !== undefined) return this.memberIndex(obs, who, p);
     }
     return -1;
+  }
+
+  /** 在包點矩形裡 @param {number} x @param {number} y @param {SiteId} s */
+  inRectSite(x, y, s) {
+    return inRect(this.intel.sites[s].rect, Math.floor(x / UNIT), Math.floor(y / UNIT));
+  }
+
+  /**
+   * 進點順序：突破手先進——不是突破手的人離包點 P.yieldNear 格內、突破手還沒進點而且沒有明顯在前面，就停住等；
+   * 狙擊手等到兩個隊友進點才進。每回合最多停 P.yieldMax 秒
+   * @param {import('./base.js').Observation} obs @param {SiteId} s
+   */
+  yieldTo(obs, s) {
+    const me = obs.me;
+    const c = this.g.cellOf(me.x, me.y);
+    if (c < 0 || this.intel.distSite[s][c] > P.yieldNear * 10 || this.yielded >= P.yieldMax * this.tps) return false;
+    const wait = this.waitEntry(obs, s);
+    if (wait) this.yielded += this.data.rules.decisionInterval;
+    return wait;
+  }
+
+  /**
+   * 出生區讓位：和突破手同一組（rush 全隊同組）、還在出生區附近（P.spawnLead 格內）、突破手沒有比我靠近目標點 1 格以上 → 先停 P.spawnStop 秒、之後慢走；每回合最多 P.spawnLeadMax 秒
+   * @param {import('./base.js').Observation} obs @param {TPlan} p @param {SiteId} s
+   */
+  spawnWait(obs, p, s) {
+    const me = obs.me;
+    const e = obs.teammates.find((m) => m.alive && m.id === this.roles.who(ENTRY));
+    const c = this.g.cellOf(me.x, me.y);
+    if (e === undefined || c < 0 || this.spawnHeld >= P.spawnLeadMax * this.tps || this.intel.distSpawn.T[c] > P.spawnLead * 10) return false;
+    if (this.groupOf(obs, e.id, p) !== this.groupOf(obs, me.id, p)) return false;
+    const ce = this.g.cellOf(e.x, e.y);
+    const dS = this.intel.distSite[s];
+    const wait = ce >= 0 && dS[ce] >= dS[c] - 10;
+    if (wait) this.spawnHeld += this.data.rules.decisionInterval;
+    return wait;
+  }
+
+  /** 拿狙擊槍的狙擊手到了待命格 4 格內就站定（守位改成站的地方），讓戰鬥層開鏡架入口 @param {import('./base.js').Observation} obs @param {TacOut} out @param {import('./analysis.js').Spot} st */
+  awpSettle(obs, out, st) {
+    const me = obs.me;
+    if (this.roles.of(me.id) !== AWP || me.loadout.primary !== 'awp' || dist(me.x, me.y, st.x, st.y) >= 4 * UNIT) return;
+    out.stop = true;
+    out.hold = { ...st, x: me.x, y: me.y };
+  }
+
+  /** 該不該等：我不是突破手、還沒進點，突破手活著、沒進點、沒有明顯在我前面；狙擊手等到兩個隊友進點 @param {import('./base.js').Observation} obs @param {SiteId} s */
+  waitEntry(obs, s) {
+    const me = obs.me;
+    const role = this.roles.of(me.id);
+    const dS = this.intel.distSite[s];
+    const c = this.g.cellOf(me.x, me.y);
+    if (role === ENTRY || c < 0 || this.inRectSite(me.x, me.y, s)) return false;
+    const mates = obs.teammates.filter((m) => m.alive);
+    if (role === AWP) return mates.filter((m) => this.inRectSite(m.x, m.y, s)).length < Math.min(2, mates.length);
+    const e = mates.find((m) => m.id === this.roles.who(ENTRY));
+    const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
+    return e !== undefined && ce >= 0 && !this.inRectSite(e.x, e.y, s) && dS[ce] >= dS[c] - 10;
   }
 
   /** 路線的包點入口 @param {SiteId} site @param {number} routeIdx */
@@ -1055,7 +1179,10 @@ export class Tactics {
     const me = obs.me;
     const t = obs.tick;
     const spots = this.postSpots(s, bx, by);
-    const k = this.rank(obs);
+    // 錨點拿第一個守包位（看 CT 最近的入口）
+    const anchor = this.roles.who(ANCHOR);
+    const ids = [me.id, ...obs.teammates.filter((m) => m.alive).map((m) => m.id)].sort((a, b) => (a === anchor ? -1 : 0) - (b === anchor ? -1 : 0) || a - b);
+    const k = Math.max(0, ids.indexOf(me.id));
     out.hold = spots.length > 0 ? spots[k % spots.length] : null;
     out.goal = out.hold ?? { x: bx, y: by };
     out.role = '守包';
@@ -1118,25 +1245,28 @@ export class Tactics {
   // ───────── CT ─────────
 
   /**
-   * CT 守位分配：A 的守點位（a 個）、中路（m 個）、B 的守點位（b 個）；狙擊手拿長對線位。依隊內序號分配
+   * CT 守位分配：A 的守點位（a 個）、中路（m 個）、B 的守點位（b 個）；狙擊手（拿狙擊槍的人）拿長對線位。
+   * 角色先挑：錨點拿沒有狙擊手的點的第一個位、支援拿第二個位（疊點看主入口）、游擊拿中路、突破手拿狙擊手那一點的第一個位；其餘依隊內序號補
    * @param {import('./base.js').Observation} obs @param {CTPlan} p @returns {Map<number, { spot: import('./analysis.js').Spot, site: SiteId | null }>}
    */
   ctLayout(obs, p) {
-    const key = `${p.a}${p.m}${p.b}${this.awper}`;
+    const key = `${p.a}${p.m}${p.b}${this.awper}${this.roles.key}`;
     if (this.layout !== null && this.layoutKey === key) return this.layout;
-    /** @type {{ spot: import('./analysis.js').Spot, site: SiteId | null }[]} */
+    /** 位置：k ＝ 該點的第幾個（中路 −1） @type {{ spot: import('./analysis.js').Spot, site: SiteId | null, k: number }[]} */
     const pos = [];
     const mids = this.midSpots();
     let m = p.m;
     if (mids.length === 0) m = 0;
     const a = p.a + (mids.length === 0 ? Math.ceil(p.m / 2) : 0);
     const b = 5 - a - m;
-    for (const spot of this.siteSpots('A', a)) pos.push({ spot, site: 'A' });
-    for (let i = 0; i < m; i++) pos.push({ spot: mids[i % mids.length], site: null });
-    for (const spot of this.siteSpots('B', b)) pos.push({ spot, site: 'B' });
+    this.siteSpots('A', a).forEach((spot, k) => pos.push({ spot, site: 'A', k }));
+    for (let i = 0; i < m; i++) pos.push({ spot: mids[i % mids.length], site: null, k: -1 });
+    this.siteSpots('B', b).forEach((spot, k) => pos.push({ spot, site: 'B', k }));
     /** @type {Map<number, { spot: import('./analysis.js').Spot, site: SiteId | null }>} */
     const out = new Map();
     let ids = [...this.ids];
+    /** @type {SiteId | null} */
+    let snSite = null;
     if (this.awper >= 0) {
       const sn = this.sniperSpot();
       if (sn !== null) {
@@ -1147,22 +1277,46 @@ export class Tactics {
         pos.splice(idx, 1);
         out.set(this.awper, { spot: sn.spot, site: sn.site });
         ids = ids.filter((x) => x !== this.awper);
+        snSite = sn.site;
       }
     }
-    ids.forEach((id, i) => {
-      const q = pos[i % Math.max(1, pos.length)];
-      if (q !== undefined) out.set(id, q);
-    });
+    /** 角色對位置的偏好（小的好） @type {Record<number, (q: { site: SiteId | null, k: number }) => number>} */
+    const pref = {
+      [ANCHOR]: (q) => (q.site === null ? 9 : q.k === 0 ? (q.site !== snSite ? 0 : 1) : 2 + q.k),
+      [SUPPORT]: (q) => (q.site === null ? 5 : q.k === 1 ? (q.site !== snSite ? 0 : 1) : q.k >= 2 ? 2 : 4),
+      [LURK]: (q) => (q.site === null ? 0 : q.k >= 2 ? 1 : q.k === 1 ? 2 : 3),
+      [ENTRY]: (q) => (q.site === null ? 3 : q.k === 0 ? (q.site === snSite ? 0 : 1) : 2),
+    };
+    const free = pos.map(() => true);
+    const order = [ANCHOR, SUPPORT, LURK, ENTRY].map((r) => this.roles.who(r)).filter((id) => ids.includes(id));
+    for (const id of [...order, ...ids.filter((x) => !order.includes(x))]) {
+      const f = pref[this.roles.of(id)] ?? (() => 0);
+      let best = -1;
+      for (let i = 0; i < pos.length; i++) if (free[i] && (best < 0 || f(pos[i]) < f(pos[best]))) best = i;
+      if (best < 0) best = ids.indexOf(id) % Math.max(1, pos.length);
+      else free[best] = false;
+      const q = pos[best];
+      if (q !== undefined) out.set(id, { spot: q.spot, site: q.site });
+    }
     this.layout = out;
     this.layoutKey = key;
     return out;
   }
 
-  /** 錨點：每個點分到的第一個人 @param {import('./base.js').Observation} obs @param {CTPlan} p @param {SiteId} s */
+  /** 錨點：點上的錨點角色，否則分到這個點的第一個人 @param {import('./base.js').Observation} obs @param {CTPlan} p @param {SiteId} s */
   anchorOf(obs, p, s) {
     const lay = this.ctLayout(obs, p);
+    const an = this.roles.who(ANCHOR);
+    if (an >= 0 && lay.get(an)?.site === s && this.isAlive(obs, an)) return an;
     for (const id of this.ids) if (lay.get(id)?.site === s && this.isAlive(obs, id)) return id;
     return -1;
+  }
+
+  /** 輪轉時留守：另一點的錨點，或守在點上的錨點角色 @param {import('./base.js').Observation} obs @param {CTPlan} p @param {number} id */
+  stays(obs, p, id) {
+    if (p.rot === null) return false;
+    const site = this.ctLayout(obs, p).get(id)?.site ?? null;
+    return this.anchorOf(obs, p, other(p.rot)) === id || (this.roles.of(id) === ANCHOR && site !== null);
   }
 
   /** @param {import('./base.js').Observation} obs @param {number} id */
@@ -1193,13 +1347,21 @@ export class Tactics {
     if (lay === undefined) return null;
     let spot = lay.spot;
     out.role = lay.site === null ? '中路' : `守 ${lay.site}`;
-    // 輪轉：另一點的錨點以外全部去輪轉點的待命位（本來就守那點的不動）
-    if (p.rot !== null && lay.site !== p.rot && this.anchorOf(obs, p, other(p.rot)) !== me.id) {
+    // 輪轉：另一點的錨點（與守點的錨點角色）以外全部去輪轉點的待命位（本來就守那點的不動）
+    if (p.rot !== null && lay.site !== p.rot && !this.stays(obs, p, me.id)) {
       const stage = this.stageSpots('CT', p.rot, 0);
-      const rotators = this.ids.filter((id) => this.isAlive(obs, id) && this.ctLayout(obs, p).get(id)?.site !== p.rot && this.anchorOf(obs, p, other(/** @type {SiteId} */ (p.rot))) !== id);
+      const rotators = this.ids.filter((id) => this.isAlive(obs, id) && this.ctLayout(obs, p).get(id)?.site !== p.rot && !this.stays(obs, p, id));
       if (stage.length > 0) {
         spot = stage[Math.max(0, rotators.indexOf(me.id)) % stage.length];
         out.role = `輪轉 ${p.rot}`;
+      }
+      // 中路的人（游擊）離那一點最近：直接去疊點看主入口（第三個守位），不在待命位等
+      if (lay.site === null) {
+        const stack = this.siteSpots(p.rot, 3)[2];
+        if (stack !== undefined) {
+          spot = stack;
+          out.role = `輪轉疊點 ${p.rot}`;
+        }
       }
     }
     out.goal = { x: spot.x, y: spot.y };
@@ -1256,7 +1418,9 @@ export class Tactics {
     // 保槍：誰都來不及（最快的人走過去＋拆）；或 1 對 3 以上、紀律高、下回合買不起
     const fastest = Math.min(...team.map((m) => m.d / UNIT / 4.6 + defuseS(m.kit)));
     const outnumbered = team.length === 1 && obs.enemiesAlive >= 3 && this.attrs.discipline >= 0.5 && this.attrs.aggression < 0.6 && this.econ.shortOf(me.money + 1400, me.loadout.primary, 'CT') > 0;
-    if (me.defuseTicks === 0 && (left < fastest + 0.5 || outnumbered || this.saving)) {
+    // 隊友已經在拆（而且拆得完）就不保槍，留下來掩護
+    const mateDefusing = obs.teammates.some((m) => m.alive && m.defusing) && left > defuseS(this.kits.size > 0) - 0.5;
+    if (me.defuseTicks === 0 && !mateDefusing && (left < fastest + 0.5 || outnumbered || this.saving)) {
       this.saving = true;
       const away = this.saveSpot(obs, bx, by);
       if (away !== null) out.goal = away;
@@ -1266,12 +1430,16 @@ export class Tactics {
     const inside = this.inSite(me.x, me.y, s, bx, by);
     const stage = this.stageSpots('CT', s, 0);
     const go = p.go || this.plan === null;
-    if (!go && !inside && stage.length > 0) {
+    if (go && this.goTick < 0) this.goTick = t;
+    // go 之後突破手先進：其他還在待命位的人等他進點（最多 P.retakeLead 秒）
+    const entry = obs.teammates.find((m) => m.alive && m.id === this.roles.who(ENTRY));
+    const lead = go && entry !== undefined && !this.inSite(entry.x, entry.y, s, bx, by) && t - this.goTick < P.retakeLead * this.tps;
+    if ((!go || lead) && !inside && stage.length > 0) {
       const others = this.ids.filter((id) => this.isAlive(obs, id));
       const sp = stage[Math.max(0, others.indexOf(me.id)) % stage.length];
       out.goal = { x: sp.x, y: sp.y };
       out.hold = sp;
-      out.role = '回防集結';
+      out.role = lead ? '等突破手先進' : '回防集結';
       if (dist(me.x, me.y, sp.x, sp.y) < 10 * UNIT) out.walk = true;
       return null;
     }
@@ -1292,10 +1460,12 @@ export class Tactics {
       }
       return wish;
     }
-    // 掩護：炸彈附近的守點位，看入口
+    // 掩護：炸彈附近的守點位，看入口；優先 12 格內、看出去的方向不經過炸彈的位置（背對拆包的人）
     const others = this.ids.filter((id) => this.isAlive(obs, id) && id !== defuser.id);
     const k = Math.max(0, others.indexOf(me.id));
-    const spots = this.postSpots(s, bx, by);
+    const all = this.postSpots(s, bx, by);
+    const away = all.filter((q) => dist(q.x, q.y, bx, by) < 12 * UNIT && Math.abs(adiff(angleTo(q.x, q.y, q.fx, q.fy), angleTo(q.x, q.y, bx, by))) > 70);
+    const spots = away.length > 0 ? [...away, ...all.filter((q) => !away.includes(q))] : all;
     const sp = spots.length > 0 ? spots[k % spots.length] : null;
     out.hold = sp;
     out.goal = sp ?? { x: bx, y: by };
@@ -1484,6 +1654,8 @@ export class Tactics {
         queue.push(j);
       }
     }
+    // 離入口近的在前（組內第 0 個＝突破手站最前面，進點不用穿過隊友）
+    if (team === 'T') out.sort((a, b) => dist(a.x, a.y, ent.ox, ent.oy) - dist(b.x, b.y, ent.ox, ent.oy) || a.cell - b.cell);
     this.spotCache.set(key, out);
     return out;
   }

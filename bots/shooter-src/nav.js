@@ -55,6 +55,8 @@ export class Navigator {
     /** @type {Set<number> | null} */
     this.avoid = null;
     this.avoidUntil = -1;
+    /** 和隊友正面互卡時的側移點（2.1） @type {{ x: number, y: number, until: number } | null} */
+    this.side = null;
     /** 上一個走過的路徑點（被閃時退回去） @type {import('./base.js').Pt | null} */
     this.prevPt = null;
     /** @type {Peek | null} */
@@ -81,6 +83,8 @@ export class Navigator {
     /** @type {Set<number> | null} */
     this.avoid = null;
     this.avoidUntil = -1;
+    /** 和隊友正面互卡時的側移點（2.1） @type {{ x: number, y: number, until: number } | null} */
+    this.side = null;
     /** 上一個走過的路徑點（被閃時退回去） @type {import('./base.js').Pt | null} */
     this.prevPt = null;
     /** @type {Peek | null} */
@@ -279,6 +283,8 @@ export class Navigator {
     let avoid = this.avoid !== null && t < this.avoidUntil ? this.avoid : null;
     const blockedAhead = this.stuck >= 4 && this.personAhead(obs);
     if (this.stuck >= P.stuckDecisions || blockedAhead) {
+      // 隊友貼在前面（互相擋住）：往路徑的側邊讓開半秒（id 單雙決定往哪邊，避免兩人往同一邊）
+      if (blockedAhead && obs.teammates.some((m) => m.alive && dist(m.x, m.y, me.x, me.y) < 900)) this.side = this.sideStep(obs);
       avoid = this.peopleCells(obs);
       this.avoid = avoid;
       this.avoidUntil = t + 2 * this.tps;
@@ -352,6 +358,7 @@ export class Navigator {
       out.moving = false;
       return out;
     }
+    if (this.side !== null && t < this.side.until) target = this.side;
     out.cmds.push({ type: 'move', x: Math.round(target.x), y: Math.round(target.y) });
     this.moveStreak++;
     out.moving = true;
@@ -361,6 +368,21 @@ export class Navigator {
       if (th !== null && dist(th.x, th.y, me.x, me.y) < 20 * UNIT) out.walk = true;
     }
     return out;
+  }
+
+  /** 側移點：前進方向的垂直方向 1.2 格、走得到的那一邊 @param {import('./base.js').Observation} obs */
+  sideStep(obs) {
+    const me = obs.me;
+    const wp = this.wps[this.wpIdx] ?? this.goal ?? me;
+    const len = Math.max(1, dist(me.x, me.y, wp.x, wp.y));
+    const px = -(wp.y - me.y) / len;
+    const py = (wp.x - me.x) / len;
+    for (const sgn of me.id % 2 === 0 ? [1, -1] : [-1, 1]) {
+      const x = me.x + sgn * px * 1200;
+      const y = me.y + sgn * py * 1200;
+      if (this.g.walkLine(me.x, me.y, x, y)) return { x, y, until: obs.tick + 15 };
+    }
+    return null;
   }
 
   /** 有活人貼在前進方向 1 格內 @param {import('./base.js').Observation} obs */

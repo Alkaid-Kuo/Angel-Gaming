@@ -203,6 +203,8 @@ interface Setup {
   readonly map?: string;
   /** 受測座位的旋鈕 */
   readonly knobs?: Readonly<Record<string, number>>;
+  /** 個別受測座位另外的旋鈕（蓋過 knobs；角色情境用） */
+  readonly seatKnobs?: Partial<Record<number, Readonly<Record<string, number>>>>;
   /** 收集受測座位的喊話 */
   readonly log?: Said[];
   /** 對手選手坐的座位（其他非受測座位照舊是腳本） */
@@ -242,7 +244,7 @@ function driver(bot: CompiledBot, s: Setup): ShooterDriver {
   let d: ShooterDriver | null = null;
   const now = (): number => d?.match.tick ?? 0;
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => (s.seats.includes(pid) ? new SpyController(bot, s.seed, pid, map, s.log, now) : s.opp?.seats.includes(pid) === true ? new ShooterBatchController(s.opp.bot, 'opponent', s.seed, pid, map) : new ScriptController(`script-${pid}`, s.scripts?.[pid] ?? idle)));
-  const knobs = controllers.map((c) => resolveKnobs(c.declaration, c instanceof SpyController ? s.knobs : undefined, c.label));
+  const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, c instanceof SpyController ? { ...s.knobs, ...s.seatKnobs?.[pid] } : undefined, c.label));
   d = new ShooterDriver({ seed: s.seed, mapId, ...s.opts, controllers, knobs, record: false });
   if (s.alive !== undefined) killExcept(d.match, s.alive);
   return d;
@@ -1177,7 +1179,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'T2',
     name: 'CT 聽 B 槍聲 A 留一人其餘輪轉',
-    expect: 'CT 守好後，三個 T 出現在 B 點朝外開槍：10 秒內原本不在 B 的 CT 至少 2 人往 B 移動 ≥ 8 步，A 點附近仍留至少 1 人',
+    expect: 'CT 守好後，三個 T 出現在 B 點朝外開槍：10 秒內原本不在 B 的 CT 至少 2 人往 B 移動 ≥ 8 步（或本來就在 B 外 9～15 步而且朝 B 開火；步驟 7 加），A 點附近仍留至少 1 人',
     run: (bot, seed) =>
       onBoth((mapId) => {
         let target: Pt | null = null;
@@ -1195,12 +1197,19 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
         for (const pid of ts) m.players[pid].hp = 1000;
         target = tSpawn;
         const best = new Map(b0);
+        const shot = new Set<number>();
+        const ammo0 = new Map(CTS.map((pid) => [pid, ammo(m, pid)]));
         run(d, 10 * TPS, (mm) => {
           for (const pid of CTS) if (mm.players[pid].alive) best.set(pid, Math.min(best.get(pid) ?? 0, stepsAt(mm.map, 'B', mm.players[pid].x, mm.players[pid].y)));
+          for (const pid of CTS) if (ammo(mm, pid) < (ammo0.get(pid) ?? 0)) shot.add(pid);
         });
-        const movers = CTS.filter((pid) => (b0.get(pid) ?? 0) > 9 && (b0.get(pid) ?? 0) - (best.get(pid) ?? 0) >= 8).length;
+        // 往 B 移動 ≥ 8 步；或本來就在 B 點外 9～15 步（沙城的中路位）而且朝 B 的 T 開火（已經在支援 B）
+        const helps = CTS.filter((pid) => {
+          const b = b0.get(pid) ?? 0;
+          return b > 9 && (b - (best.get(pid) ?? 0) >= 8 || (b <= 15 && shot.has(pid)));
+        });
         const stayA = CTS.filter((pid) => m.players[pid].alive && stepsAt(m.map, 'A', m.players[pid].x, m.players[pid].y) <= 9).length;
-        return { pass: movers >= 2 && stayA >= 1, detail: `往 B 移動 ${movers} 人、A 留 ${stayA} 人` };
+        return { pass: helps.length >= 2 && stayA >= 1, detail: `支援 B ${helps.length} 人（${helps.join(',')}）、A 留 ${stayA} 人（${CTS.map((pid) => `${pid}:${b0.get(pid)}→${best.get(pid)}${shot.has(pid) ? '開火' : ''}`).join(' ')}）` };
       }),
   },
   {
@@ -1558,7 +1567,194 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   },
 ];
 
-export const AI_SCENARIOS: readonly AiScenario[] = [...SOLO_SCENARIOS, ...TEAM_SCENARIOS];
+// ───────── 步驟 7 角色情境（R1～R6）：旋鈕 role（1 突破、2 支援、3 錨點、4 狙擊、5 游擊），每條兩張圖都跑 ─────────
+
+const ENTRY = 1;
+const SUPPORT = 2;
+const ANCHOR = 3;
+const AWP = 4;
+const LURK = 5;
+/** 均衡陣容的角色依種子輪轉座位（角色不跟隊內序號綁在一起，才分辨得出旋鈕真的生效） */
+const rolesFor = (seed: number): number[] => TS.map((_, i) => [ENTRY, SUPPORT, ANCHOR, LURK, AWP][(i + seed) % 5]);
+const roleKnobs = (seats: readonly number[], roles: readonly number[], extra: Readonly<Record<string, number>> = {}): Partial<Record<number, Record<string, number>>> =>
+  Object.fromEntries(seats.map((pid, i) => [pid, { ...extra, role: roles[i] }]));
+
+interface ExecTrace {
+  /** 進包點矩形的順序（playerId） */
+  readonly order: number[];
+  /** 第一顆煙的主人（−1 沒有） */
+  readonly smokeBy: number;
+  /** 第一個人進點前，狙擊手開鏡站定的 tick 數（累計） */
+  readonly scoped: number;
+  readonly awps: number;
+  readonly rifles: number;
+  readonly m: ShooterMatch;
+}
+
+/** T 全買照計畫執行（CT 放進牆角）：記進點順序、第一顆煙、狙擊手執行前開鏡；roles 依座位 0～4 */
+function execTrace(bot: CompiledBot, seed: number, mapId: string, plan: number, roles: readonly number[]): ExecTrace {
+  const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], seatKnobs: roleKnobs(TS, roles, { plan }), opts: { roundMoney: [16000, null] } });
+  toLive(d);
+  const m = d.match;
+  park(m, CT0);
+  const awper = TS.find((pid) => m.players[pid].primary?.id === 'awp') ?? -1;
+  const awps = TS.filter((pid) => m.players[pid].primary?.id === 'awp').length;
+  const rifles = TS.filter((pid) => m.players[pid].primary?.id === 'ak').length;
+  const order: number[] = [];
+  let smokeBy = -1;
+  let scoped = 0;
+  const seen = new Set<object>();
+  run(d, 80 * TPS, (mm) => {
+    for (const g of mm.projectiles) {
+      if (seen.has(g) || g.owner >= TEAM_SIZE) continue;
+      seen.add(g);
+      if (g.kind === 'smoke' && smokeBy < 0 && order.length === 0) smokeBy = g.owner;
+    }
+    if (order.length === 0 && awper >= 0) {
+      const p = mm.players[awper];
+      if (p.alive && p.scoped && p.vx === 0 && p.vy === 0) scoped++;
+    }
+    for (const pid of TS) if (mm.players[pid].alive && !order.includes(pid) && inAnySite(mm.map, mm.players[pid].x, mm.players[pid].y)) order.push(pid);
+    return order.length >= TS.filter((pid) => mm.players[pid].alive).length;
+  });
+  return { order, smokeBy, scoped, awps, rifles, m };
+}
+
+const roleOf = (roles: readonly number[], pid: number): number => roles[TS.indexOf(pid as (typeof TS)[number])] ?? 0;
+const ROLE_LABEL = ['無', '突破', '支援', '錨點', '狙擊', '游擊'];
+
+const ROLE_SCENARIOS: readonly AiScenario[] = [
+  {
+    id: 'R1',
+    name: '突破手第一個進點',
+    expect: '均衡陣容（角色依種子輪轉座位）T 全買，split 與 rush 各一回合、兩張圖：第一個進包點的人是突破手（4 回合至少 3 回合）',
+    run: (bot, seed) => {
+      const roles = rolesFor(seed);
+      const res = TEAM_MAPS.flatMap((mapId) =>
+        [3, 2].map((plan) => {
+          const tr = execTrace(bot, seed, mapId, plan, roles);
+          const first = tr.order[0] ?? -1;
+          return { ok: first >= 0 && roleOf(roles, first) === ENTRY, txt: `${mapId}${plan === 3 ? ' split' : ' rush'} 第一個 ${first}（${ROLE_LABEL[roleOf(roles, first)] ?? '?'}）` };
+        }),
+      );
+      return { pass: res.filter((r) => r.ok).length >= 3, detail: res.map((r) => r.txt).join('；') };
+    },
+  },
+  {
+    id: 'R2',
+    name: '狙擊手不第一個進、架長線',
+    expect: '同 R1 的 split：狙擊手進點順序 ≥ 3（或到最後都沒進）、第一個人進點前開鏡站定累計 ≥ 2 秒；兩張圖',
+    run: (bot, seed) =>
+      onBoth((mapId) => {
+        const roles = rolesFor(seed);
+        const tr = execTrace(bot, seed, mapId, 3, roles);
+        const awp = TS.find((pid) => roleOf(roles, pid) === AWP) ?? -1;
+        const at = tr.order.indexOf(awp);
+        const late = at < 0 ? tr.order.length >= 2 : at >= 2;
+        return { pass: tr.awps === 1 && late && tr.scoped >= 2 * TPS, detail: `狙擊手 ${awp} 第 ${at < 0 ? '－' : at + 1} 個進點（${tr.order.join(',')}）、執行前開鏡 ${(tr.scoped / TPS).toFixed(1)} 秒` };
+      }),
+  },
+  {
+    id: 'R3',
+    name: '支援丟煙',
+    expect: '同 R1 的 split：第一個人進點前的第一顆煙由支援丟；兩張圖',
+    run: (bot, seed) =>
+      onBoth((mapId) => {
+        const roles = rolesFor(seed);
+        const tr = execTrace(bot, seed, mapId, 3, roles);
+        return { pass: tr.smokeBy >= 0 && roleOf(roles, tr.smokeBy) === SUPPORT, detail: `煙 ${tr.smokeBy}（${ROLE_LABEL[roleOf(roles, tr.smokeBy)] ?? '沒丟'}）` };
+      }),
+  },
+  {
+    id: 'R4',
+    name: '錨點不輪轉',
+    expect: '同 T2（手槍局、CT 守好後三個 T 在 B 點朝外開槍）：10 秒後 A 的錨點仍在 A 點 9 步內；開局在 A 的非錨點有人往 B 移動 ≥ 8 步；兩張圖',
+    run: (bot, seed) =>
+      onBoth((mapId) => {
+        let target: Pt | null = null;
+        const ts = [T0, T1, 2];
+        const roles = rolesFor(seed);
+        const d = driver(bot, { seed, map: mapId, seats: CTS, alive: [...CTS, ...ts], seatKnobs: roleKnobs(CTS, roles), scripts: Object.fromEntries(ts.map((pid) => [pid, shooter(() => target)])) });
+        toLive(d);
+        const m = d.match;
+        const far = farSpot(m.map);
+        for (const pid of ts) m.teleport(pid, far[0], far[1], 0);
+        run(d, 22 * TPS);
+        const anchor = CTS[roles.indexOf(ANCHOR)];
+        const atA = CTS.filter((pid) => stepsAt(m.map, 'A', m.players[pid].x, m.players[pid].y) <= 9);
+        const b0 = new Map(CTS.map((pid) => [pid, stepsAt(m.map, 'B', m.players[pid].x, m.players[pid].y)]));
+        const spots = siteSpots(m.map, 'B', 3);
+        const tSpawn = openSpot(m.map, m.map.spawnZones.T, 1);
+        spots.forEach((p, k) => m.teleport(ts[k], p[0], p[1], ang(p, tSpawn)));
+        for (const pid of ts) m.players[pid].hp = 1000;
+        target = tSpawn;
+        const best = new Map(b0);
+        run(d, 10 * TPS, (mm) => {
+          for (const pid of CTS) if (mm.players[pid].alive) best.set(pid, Math.min(best.get(pid) ?? 0, stepsAt(mm.map, 'B', mm.players[pid].x, mm.players[pid].y)));
+        });
+        const stay = atA.includes(anchor) && m.players[anchor].alive && stepsAt(m.map, 'A', m.players[anchor].x, m.players[anchor].y) <= 9;
+        const movers = atA.filter((pid) => pid !== anchor && (b0.get(pid) ?? 0) - (best.get(pid) ?? 0) >= 8);
+        return { pass: stay && movers.length >= 1, detail: `開局在 A：${atA.join(',')}；錨點 ${anchor} 留守 ${stay}；往 B ${movers.join(',') || '無'}` };
+      }),
+  },
+  {
+    id: 'R5',
+    name: '游擊走第二組／中路',
+    expect: 'T default（全買）：指揮喊執行以前，游擊到過另一點 30 步內、而且那時離另一點比離主力的點近；CT（手槍局）開打 25 秒後游擊在兩點 9 步外（中路）；兩張圖',
+    run: (bot, seed) =>
+      onBoth((mapId) => {
+        const roles = rolesFor(seed);
+        const log: Said[] = [];
+        const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], seatKnobs: roleKnobs(TS, roles, { plan: 1 }), log, opts: { roundMoney: [16000, null] } });
+        toLive(d);
+        park(d.match, CT0);
+        // 炸彈給突破手（持彈者一定在主力組；這裡看游擊有沒有走第二組）
+        const entry = TS[roles.indexOf(ENTRY)];
+        for (const pid of TS) d.match.players[pid].hasBomb = pid === entry;
+        Object.assign(d.match.bomb, { state: 'carried', carrier: entry });
+        const lurk = TS[roles.indexOf(LURK)];
+        let plan = '';
+        let dAway = Infinity;
+        let dMain = Infinity;
+        // 佈置期間（指揮喊執行以前）游擊離另一點最近的時候
+        run(d, 60 * TPS, (mm) => {
+          plan = [...log].reverse().find((l) => l.text.startsWith('P:default'))?.text ?? plan;
+          if (plan === '' || plan.includes('>')) return plan !== '';
+          const site = (/^P:default ([AB])/.exec(plan)?.[1] ?? 'A') as 'A' | 'B';
+          const p = mm.players[lurk];
+          const a = stepsAt(mm.map, site === 'A' ? 'B' : 'A', p.x, p.y);
+          if (p.alive && a < dAway) {
+            dAway = a;
+            dMain = stepsAt(mm.map, site, p.x, p.y);
+          }
+          return false;
+        });
+        const site = (/^P:default ([AB])/.exec(plan)?.[1] ?? 'A') as 'A' | 'B';
+        const away = site === 'A' ? 'B' : 'A';
+        const tOk = dAway < dMain && dAway <= 30;
+        const dc = driver(bot, { seed, map: mapId, seats: CTS, alive: [...CTS, T0], seatKnobs: roleKnobs(CTS, roles) });
+        toLive(dc);
+        park(dc.match, T0);
+        run(dc, 25 * TPS);
+        const cl = CTS[roles.indexOf(LURK)];
+        const q = dc.match.players[cl];
+        const ctOk = stepsAt(dc.match.map, 'A', q.x, q.y) > 9 && stepsAt(dc.match.map, 'B', q.x, q.y) > 9;
+        return { pass: plan !== '' && tOk && ctOk, detail: `${plan}：T 游擊 ${lurk} 離 ${away} ${dAway} 步、離 ${site} ${dMain} 步；CT 游擊 ${cl} 中路 ${ctOk}` };
+      }),
+  },
+  {
+    id: 'R6',
+    name: '五狙退化',
+    expect: '五個 role = 狙擊的 T 全買：只有一把狙擊槍、其餘四人買步槍，計畫照常執行（80 秒內有人進包點）；兩張圖',
+    run: (bot, seed) =>
+      onBoth((mapId) => {
+        const tr = execTrace(bot, seed, mapId, 0, [AWP, AWP, AWP, AWP, AWP]);
+        return { pass: tr.awps === 1 && tr.rifles === 4 && tr.order.length >= 1, detail: `狙擊槍 ${tr.awps}、步槍 ${tr.rifles}、進點 ${tr.order.length} 人` };
+      }),
+  },
+];
+
+export const AI_SCENARIOS: readonly AiScenario[] = [...SOLO_SCENARIOS, ...TEAM_SCENARIOS, ...ROLE_SCENARIOS];
 
 /** 跑一組情境（每個 5 個種子）；filter 只跑指定的情境 */
 export function runAiScenarios(bot: CompiledBot, filter?: (id: string) => boolean, opponent?: CompiledBot): { id: string; name: string; pass: boolean; detail: string }[] {

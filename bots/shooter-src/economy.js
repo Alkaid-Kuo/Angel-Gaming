@@ -12,28 +12,30 @@ export function parseBuy(text) {
   return m === null ? null : /** @type {BuyCall} */ (m[1]);
 }
 
-/** 道具購買順序（依隊內序號分角色）：T 突破手閃 2、支援煙 1 閃 1、錨點（CT）燃燒 1；每人至少一顆閃 */
+/** 道具購買順序（依角色，索引＝roles.js 的代碼：0 無、1 突破、2 支援、3 錨點、4 狙擊、5 游擊）：突破手閃 2、支援煙 1 閃 1（＋燃燒）、錨點燃燒 1 閃 1、游擊閃 1 手雷 */
 const UTIL = {
   T: [
-    ['flash', 'flash', 'smoke', 'he'],
-    ['smoke', 'flash', 'molotov', 'he'],
-    ['flash', 'smoke', 'flash', 'molotov'],
+    ['flash', 'smoke', 'he'],
+    ['flash', 'flash', 'he', 'smoke'],
     ['smoke', 'flash', 'molotov', 'flash'],
+    ['molotov', 'flash', 'smoke'],
+    ['smoke', 'flash'],
     ['flash', 'he', 'smoke'],
   ],
   CT: [
-    ['flash', 'incendiary', 'he'],
-    ['flash', 'smoke', 'flash'],
-    ['flash', 'he', 'flash'],
-    ['flash', 'incendiary', 'smoke'],
+    ['flash', 'he'],
     ['flash', 'flash', 'he'],
+    ['flash', 'incendiary', 'smoke'],
+    ['incendiary', 'flash', 'he'],
+    ['flash', 'smoke'],
+    ['flash', 'he', 'smoke'],
   ],
 };
 
 export class Economy {
   /**
    * @param {import('./base.js').InitData} data @param {import('./base.js').Helpers} h
-   * @param {{ awpSlot: number, economy: number, discipline: number }} opts
+   * @param {{ economy: number, discipline: number }} opts
    */
   constructor(data, h, opts) {
     this.data = data;
@@ -144,10 +146,10 @@ export class Economy {
   }
 
   /**
-   * 照買法買（在規則內）：狙擊手錢夠買狙擊槍；道具依角色；CT 全買帶拆彈器；備彈不到一半補
-   * @param {import('./base.js').Observation} obs @param {BuyCall} call @param {number} slot @returns {import('./base.js').BuyItem[]}
+   * 照買法買（在規則內）：狙擊手（awper）錢夠買狙擊槍；道具依角色；突破手護甲優先、錨點拆彈器優先；CT 全買帶拆彈器；備彈不到一半補
+   * @param {import('./base.js').Observation} obs @param {BuyCall} call @param {number} role @param {boolean} awper @returns {import('./base.js').BuyItem[]}
    */
-  items(obs, call, slot) {
+  items(obs, call, role, awper) {
     const me = obs.me;
     const rules = this.data.rules;
     const team = me.team;
@@ -163,12 +165,12 @@ export class Economy {
       money -= price;
       return true;
     };
-    const armor = () => me.loadout.armor < rules.maxArmor && take('armor', rules.armorPrice);
-    const kit = () => team === 'CT' && !me.loadout.kit && take('kit', rules.kitPrice);
+    const armor = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') && take('armor', rules.armorPrice);
+    const kit = () => team === 'CT' && !me.loadout.kit && !items.includes('kit') && take('kit', rules.kitPrice);
     const util = (/** @type {number} */ max) => {
       const owned = [...me.loadout.grenades];
       let n = 0;
-      for (const g of UTIL[team][slot % 5]) {
+      for (const g of UTIL[team][role] ?? UTIL[team][0]) {
         if (n >= max || owned.length >= rules.grenadeSlots) break;
         const def = this.data.grenades.find((x) => x.id === g);
         if (def === undefined || owned.filter((x) => x === g).length >= def.maxCarry) continue;
@@ -186,13 +188,13 @@ export class Economy {
     if (this.pistolRound(obs)) {
       armor();
     } else if (mode === 'full' || (good && mode !== 'eco')) {
-      const awper = slot === this.opts.awpSlot && money >= this.cost('awp') + rules.armorPrice + 200;
-      if (awper && primary !== 'awp') take('awp', this.cost('awp'));
+      if (awper && primary !== 'awp' && money >= this.cost('awp') + rules.armorPrice + 200) take('awp', this.cost('awp'));
       else if (!good && !take(rifle, this.cost(rifle))) take('smg', this.cost('smg'));
       armor();
       kit();
       util(4);
     } else if (mode === 'force') {
+      if (role === 1) armor();
       if (!good && money >= this.cost(rifle) + rules.armorPrice) take(rifle, this.cost(rifle));
       else if (!good && money >= this.cost('smg') + rules.armorPrice) take('smg', this.cost('smg'));
       armor();
@@ -200,8 +202,10 @@ export class Economy {
       kit();
       util(1);
     } else if (mode === 'half') {
+      if (role === 1) armor();
       if (!good && primary === null) take('smg', this.cost('smg'));
       armor();
+      if (role === 3) kit();
       util(1);
     } else if (rebel && money >= this.cost('deagle') + 1000 && me.loadout.secondary !== 'deagle') {
       // eco：紀律低的人偷買手槍升級

@@ -1,5 +1,6 @@
 // 把 bots/shooter-src/ 的多個原始碼檔案合併成單一檔案的選手模組 bots/shooter-baseline.js（選手模組不能 import）。
 // 從入口 baseline.js 開始，依 import 順序展開本地模組（先展開被依賴的），去掉 import／export 與跨檔的型別前綴。
+// 步驟 7 起合成時剝掉整行註解、空行與只有說明的 JSDoc（有 @ 標籤的保留，產生檔仍然能型別檢查）；原始碼保留註解，--check 比對剝過的結果。
 // 用法：node scripts/build-shooter-bots.ts          產生
 //       node scripts/build-shooter-bots.ts --check  只檢查產生的檔案是否和原始碼一致（不一致時結束碼為 1）
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -35,6 +36,31 @@ function body(file: string, entry: boolean): string[] {
     );
 }
 
+/**
+ * 剝註解：整行 // 註解、空行；JSDoc 只保留型別標籤（第一個 @ 以前的說明行拿掉，整塊沒有 @ 就整塊拿掉）。
+ * 只動整行，不碰行內的字串、正規表示式與行內型別轉換。
+ */
+export function stripComments(src: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < src.length; i++) {
+    const l = src[i];
+    const t = l.trim();
+    if (t === '' || (t.startsWith('//') && t !== '// @ts-check')) continue;
+    if (t.startsWith('/**') && !t.includes('*/')) {
+      let j = i;
+      while (j < src.length && !src[j].includes('*/')) j++;
+      const block = src.slice(i, j + 1);
+      const first = block.findIndex((x) => x.includes('@'));
+      if (first >= 0) out.push(...(first === 0 ? block : [block[0].replace(/\/\*\*.*$/, '/**'), ...block.slice(first)]));
+      i = j;
+      continue;
+    }
+    if (t.startsWith('/**') && t.endsWith('*/') && !t.includes('@')) continue;
+    out.push(l);
+  }
+  return out;
+}
+
 export function buildShooterBot(entry: string): string {
   const files: string[] = [];
   order(entry, new Set(), files);
@@ -45,8 +71,8 @@ export function buildShooterBot(entry: string): string {
     ...head.slice(0, firstCode),
     '// 本檔由 scripts/build-shooter-bots.ts 從 bots/shooter-src/ 產生：請修改原始碼後重新產生，不要直接改這個檔案。',
     '',
-    ...files.filter((f) => f !== entry).flatMap((f) => [...body(f, false), '']),
-    ...head.slice(firstCode),
+    ...stripComments(files.filter((f) => f !== entry).flatMap((f) => body(f, false))),
+    ...stripComments(head.slice(firstCode)),
   ];
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
