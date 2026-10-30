@@ -24,12 +24,12 @@ let ticket: WatchTicket | null = null;
 
 /** 下拉的選項（value：practice 或版本號） */
 const LEVELS: readonly { readonly value: string; readonly name: string; readonly hint: string }[] = [
-  { value: 'practice', name: '陪練 v5', hint: '對照組：會買槍打包，但沒有指揮與輪轉' },
-  { value: '1', name: '基準 v1', hint: '有指揮、喊話與輪轉，瞄準與反應最慢' },
+  { value: 'practice', name: '陪練 v5', hint: '對照組：會買槍打包，但沒有指揮與輪轉；反應固定最短，對上基準 Bot 不算弱' },
+  { value: '1', name: '基準 v1', hint: '有指揮、喊話與輪轉，基準裡瞄準與反應最慢' },
   { value: '2', name: '基準 v2', hint: '屬性比角色基準低一級' },
   { value: '3', name: '基準 v3', hint: '角色基準屬性，中段選手' },
   { value: '4', name: '基準 v4', hint: '屬性比角色基準高一級' },
-  { value: '5', name: '基準 v5', hint: '反應最快，經營層的頂級選手' },
+  { value: '5', name: '基準 v5', hint: '基準裡反應最快，經營層的頂級選手' },
 ];
 
 function levelOf(value: string | null): BotLevel {
