@@ -1,0 +1,38 @@
+/* 攻防戰美術樣張共用：只定位置與結構，配色與形狀在各方向的 CSS。比照可玩版 HUD 的資訊：左上雷達、頂部比分、右上擊殺、左下血甲錢、右下彈藥與武器欄 */
+#stage canvas#view, #stage canvas#overview { position: absolute; inset: 0; width: 1920px; height: 1080px; display: block; }
+#stage .off { display: none !important; }
+#stage button, #stage input, #stage select { font: inherit; color: inherit; }
+.hud { position: absolute; inset: 0; pointer-events: none; font-variant-numeric: tabular-nums; }
+.h-radar { position: absolute; left: 28px; top: 28px; width: 270px; }
+.h-radar canvas { display: block; width: 270px; height: 270px; }
+.h-radar .rz { display: flex; justify-content: space-between; align-items: baseline; }
+.h-top { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); display: flex; align-items: stretch; }
+.h-top .tm { display: flex; align-items: center; }
+.h-top .pips { display: flex; }
+.h-top .pips i { display: block; }
+.h-top .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.h-feed { position: absolute; right: 28px; top: 28px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.h-feed .k { display: flex; align-items: center; }
+.h-hint { position: absolute; left: 50%; top: 128px; transform: translateX(-50%); white-space: nowrap; }
+.h-vitals { position: absolute; left: 28px; bottom: 28px; display: flex; align-items: flex-end; }
+.h-vitals .stat { position: relative; }
+.h-vitals .bar { display: block; }
+.h-vitals .bar u { display: block; height: 100%; text-decoration: none; }
+.h-wpn { position: absolute; right: 28px; bottom: 28px; display: flex; flex-direction: column; align-items: flex-end; }
+.h-wpn .am { display: flex; align-items: baseline; }
+.h-wpn .wbar { display: flex; }
+.h-wpn .ws { display: flex; align-items: center; }
+
+.sheet { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.sheet table { width: 100%; border-collapse: collapse; }
+.sheet th, .sheet td { text-align: right; white-space: nowrap; }
+.sheet th.pn, .sheet td.pn { text-align: left; }
+.sheet .cols { display: grid; grid-template-columns: 1fr 1fr; }
+.sheet .hist { display: flex; justify-content: center; }
+.sheet .hist i { display: grid; place-items: center; font-style: normal; }
+
+/* 樣張專用的切換列：截圖模式（?still）不顯示 */
+.sk-bar { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 100; display: flex; gap: 2px; padding: 3px; background: rgba(8, 10, 14, 0.82); border-radius: 8px; font: 13px "Noto Sans TC", "Microsoft JhengHei", sans-serif; opacity: 0.55; transition: opacity 0.15s; }
+.sk-bar:hover { opacity: 1; }
+.sk-bar a, .sk-bar button { all: unset; cursor: pointer; padding: 4px 12px; border-radius: 6px; color: #d8dde5; }
+.sk-bar button.on { background: #eef2f6; color: #0b0e14; font-weight: 700; }
