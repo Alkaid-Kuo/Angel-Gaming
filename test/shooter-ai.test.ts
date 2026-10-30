@@ -70,10 +70,12 @@ describe('射擊基準 Bot：角色分工（roles.js）', () => {
     expect(r.awper()).toBe(7);
   });
 
-  it('五個人都喊狙擊：序號最小的是狙擊手（只有他買狙擊槍），其他人依序補成突破、支援、錨點、游擊', () => {
+  it('五個人都喊狙擊：序號最小的是狙擊手（只有他買狙擊槍），其他人都當突破手打（不補支援、錨點、游擊）', () => {
     const r = new Roles(ids, 5, AWP, 4);
     for (const id of ids) r.hear(id, AWP);
-    expect(ids.map((id) => r.of(id))).toEqual([AWP, ENTRY, SUPPORT, ANCHOR, LURK]);
+    expect(ids.map((id) => r.of(id))).toEqual([AWP, ENTRY, ENTRY, ENTRY, ENTRY]);
+    expect(r.who(ENTRY)).toBe(6);
+    expect(r.who(SUPPORT)).toBe(-1);
     expect(r.awper()).toBe(5);
   });
 

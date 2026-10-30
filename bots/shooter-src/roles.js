@@ -2,7 +2,8 @@
 // 角色（2.1）：旋鈕 role 1 突破手、2 支援、3 錨點、4 狙擊手、5 游擊；0 自動（隊內序號 0 突破、1 支援、2 錨點、3 游擊、4 狙擊；旋鈕 awpSlot 指定的序號當狙擊）。
 // 每個人每回合第一次決策喊「R:<代碼>」；隊友沒喊過的照他隊內序號的自動角色（大家用同一條規則，結果一致）。
 // 分工：每個角色由喊這個角色、序號最小的人擔任；喊重複的人依序號補缺的角色（突破、支援、錨點、游擊；狙擊不補）；
-// 都補滿了還多出來的人沒有角色（0）。五個人都喊狙擊時：序號最小的是狙擊手（只有他買狙擊槍），其他人依序補成突破、支援、錨點、游擊。
+// 都補滿了還多出來的人沒有角色（0）。例外：多出來的狙擊手（只有序號最小的買狙擊槍）一律當突破手打，不補別的角色——
+// 五個人都喊狙擊時是一個狙擊手加四個突破手，沒有支援、錨點、游擊（屬性還是狙擊手的；這是五狙輸給均衡的來源）。
 
 export const ENTRY = 1;
 export const SUPPORT = 2;
@@ -68,6 +69,11 @@ export class Roles {
       }
     }
     for (const id of extra) {
+      if (this.announced(id) === AWP) {
+        this.eff.set(id, ENTRY);
+        if (!this.holder.has(ENTRY)) this.holder.set(ENTRY, id);
+        continue;
+      }
       const r = FILL.find((x) => !this.holder.has(x)) ?? 0;
       this.eff.set(id, r);
       if (r !== 0) this.holder.set(r, id);

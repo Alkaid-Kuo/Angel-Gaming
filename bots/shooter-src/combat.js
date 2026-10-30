@@ -14,7 +14,7 @@ const HALF_ANGLE_K = 300 * 5730;
 export class Combat {
   /**
    * @param {import('./base.js').Grid} g @param {import('./analysis.js').MapIntel} intel @param {import('./memory.js').Perception} perc @param {import('./nav.js').Navigator} nav
-   * @param {Record<import('./base.js').AttributeKey, number>} attrs 0～1
+   * @param {Record<import('./base.js').AttributeKey, number> & { offAim?: number }} attrs 0～1（offAim：拿狙擊槍以外的槍時的瞄準）
    * @param {import('./base.js').InitData} data @param {import('./base.js').Helpers} h
    */
   constructor(g, intel, perc, nav, attrs, data, h) {
@@ -30,6 +30,10 @@ export class Combat {
     this.weapons = new Map(data.weapons.map((w) => [w.id, w]));
     this.err0 = lerp(P.aimErr0, P.aimErr100, attrs.aim) * UNIT;
     this.conv = lerp(P.aimConv0, P.aimConv100, attrs.aim);
+    // 狙擊專長（2.1）：狙擊手拿狙擊槍以外的槍時瞄準打折（attrs.offAim；其他人等於 aim）
+    const off = attrs.offAim ?? attrs.aim;
+    this.errOff = lerp(P.aimErr0, P.aimErr100, off) * UNIT;
+    this.convOff = lerp(P.aimConv0, P.aimConv100, off);
     this.reactExtra = Math.round(lerp(P.react0, P.react100, attrs.reaction));
     this.soundReact = Math.round(lerp(3, 0, attrs.reaction));
     this.lead = data.rules.reactionTicks + P.leadExtra;
@@ -209,13 +213,14 @@ export class Combat {
       this.targetId = e.id;
       this.seen = 0;
       const a = Math.floor(this.h.random() * 360);
-      const mag = this.err0 * (0.6 + 0.8 * this.h.random());
+      const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random());
       this.errX = cosd(a) * mag;
       this.errY = sind(a) * mag;
     } else {
       this.seen++;
       const moving = Math.abs(me.vx) + Math.abs(me.vy) > 30;
-      const k = moving ? Math.sqrt(this.conv) : this.conv;
+      const c = me.weapon === 'awp' ? this.conv : this.convOff;
+      const k = moving ? Math.sqrt(c) : c;
       this.errX *= k;
       this.errY *= k;
     }

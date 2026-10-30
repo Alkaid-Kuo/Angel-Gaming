@@ -206,6 +206,8 @@ export const P = {
   spawnLead: 10,
   spawnLeadMax: 4,
   spawnStop: 1.5,
+  /** 狙擊專長：狙擊手拿狙擊槍以外的槍時，瞄準屬性少這麼多（0～1） */
+  awpOffAim: 0.35,
   /** CT 回防 go 之後，其他人等突破手先進點最多幾秒 */
   retakeLead: 1.2,
 };

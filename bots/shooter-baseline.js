@@ -135,6 +135,7 @@ const P = {
   spawnLead: 10,
   spawnLeadMax: 4,
   spawnStop: 1.5,
+  awpOffAim: 0.35,
   retakeLead: 1.2,
 };
 const COS = new Float64Array(360);
@@ -1680,7 +1681,7 @@ const HALF_ANGLE_K = 300 * 5730;
 class Combat {
   /**
    * @param {Grid} g @param {MapIntel} intel @param {Perception} perc @param {Navigator} nav
-   * @param {Record<AttributeKey, number>} attrs 0～1
+   * @param {Record<AttributeKey, number> & { offAim?: number }} attrs 0～1（offAim：拿狙擊槍以外的槍時的瞄準）
    * @param {InitData} data @param {Helpers} h
    */
   constructor(g, intel, perc, nav, attrs, data, h) {
@@ -1696,6 +1697,9 @@ class Combat {
     this.weapons = new Map(data.weapons.map((w) => [w.id, w]));
     this.err0 = lerp(P.aimErr0, P.aimErr100, attrs.aim) * UNIT;
     this.conv = lerp(P.aimConv0, P.aimConv100, attrs.aim);
+    const off = attrs.offAim ?? attrs.aim;
+    this.errOff = lerp(P.aimErr0, P.aimErr100, off) * UNIT;
+    this.convOff = lerp(P.aimConv0, P.aimConv100, off);
     this.reactExtra = Math.round(lerp(P.react0, P.react100, attrs.reaction));
     this.soundReact = Math.round(lerp(3, 0, attrs.reaction));
     this.lead = data.rules.reactionTicks + P.leadExtra;
@@ -1863,13 +1867,14 @@ class Combat {
       this.targetId = e.id;
       this.seen = 0;
       const a = Math.floor(this.h.random() * 360);
-      const mag = this.err0 * (0.6 + 0.8 * this.h.random());
+      const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random());
       this.errX = cosd(a) * mag;
       this.errY = sind(a) * mag;
     } else {
       this.seen++;
       const moving = Math.abs(me.vx) + Math.abs(me.vy) > 30;
-      const k = moving ? Math.sqrt(this.conv) : this.conv;
+      const c = me.weapon === 'awp' ? this.conv : this.convOff;
+      const k = moving ? Math.sqrt(c) : c;
       this.errX *= k;
       this.errY *= k;
     }
@@ -2567,6 +2572,11 @@ class Roles {
       }
     }
     for (const id of extra) {
+      if (this.announced(id) === AWP) {
+        this.eff.set(id, ENTRY);
+        if (!this.holder.has(ENTRY)) this.holder.set(ENTRY, id);
+        continue;
+      }
       const r = FILL.find((x) => !this.holder.has(x)) ?? 0;
       this.eff.set(id, r);
       if (r !== 0) this.holder.set(r, id);
@@ -4250,8 +4260,11 @@ export default class ShooterBaseline {
     const k = data.knobs;
     /** @param {AttributeKey} key */
     const at = (key) => clamp((data.attributes?.[key] ?? 50) / 100, 0, 1);
+    const awpSlot = k.awpSlot ?? 4;
+    const role = (k.role ?? 0) > 0 ? /** @type {number} */ (k.role) : autoRole(data.slot, awpSlot);
     const attrs = {
       aim: at('aim'),
+      offAim: role === AWP ? clamp(at('aim') - P.awpOffAim, 0, 1) : at('aim'),
       reaction: at('reaction'),
       awareness: at('awareness'),
       aggression: clamp(at('aggression') + (k.aggression ?? 0) / 100, 0, 1),
@@ -4264,8 +4277,6 @@ export default class ShooterBaseline {
     this.perc = new Perception(this.g, this.intel, data, attrs.awareness);
     this.nav = new Navigator(this.g, this.intel, this.perc, attrs, data);
     this.combat = new Combat(this.g, this.intel, this.perc, this.nav, attrs, data, helpers);
-    const awpSlot = k.awpSlot ?? 4;
-    const role = (k.role ?? 0) > 0 ? /** @type {number} */ (k.role) : autoRole(data.slot, awpSlot);
     this.tactics = new Tactics(this.g, this.intel, this.perc, data, helpers, { awpSlot, role, economy: k.economy ?? 0, ctSplitA: k.ctSplitA ?? P.ctSplitA, plan: k.plan ?? 0 }, attrs);
     this.tactics.combat = this.combat;
     this.tactics.nav = this.nav;

@@ -17,7 +17,7 @@ import { Perception } from './memory.js';
 import { Navigator } from './nav.js';
 import { Combat } from './combat.js';
 import { Tactics } from './tactics.js';
-import { ROLE_NAME, autoRole } from './roles.js';
+import { AWP, ROLE_NAME, autoRole } from './roles.js';
 
 export default class ShooterBaseline {
   constructor() {
@@ -70,8 +70,11 @@ export default class ShooterBaseline {
     const k = data.knobs;
     /** @param {import('./base.js').AttributeKey} key */
     const at = (key) => clamp((data.attributes?.[key] ?? 50) / 100, 0, 1);
+    const awpSlot = k.awpSlot ?? 4;
+    const role = (k.role ?? 0) > 0 ? /** @type {number} */ (k.role) : autoRole(data.slot, awpSlot);
     const attrs = {
       aim: at('aim'),
+      offAim: role === AWP ? clamp(at('aim') - P.awpOffAim, 0, 1) : at('aim'),
       reaction: at('reaction'),
       awareness: at('awareness'),
       aggression: clamp(at('aggression') + (k.aggression ?? 0) / 100, 0, 1),
@@ -84,8 +87,6 @@ export default class ShooterBaseline {
     this.perc = new Perception(this.g, this.intel, data, attrs.awareness);
     this.nav = new Navigator(this.g, this.intel, this.perc, attrs, data);
     this.combat = new Combat(this.g, this.intel, this.perc, this.nav, attrs, data, helpers);
-    const awpSlot = k.awpSlot ?? 4;
-    const role = (k.role ?? 0) > 0 ? /** @type {number} */ (k.role) : autoRole(data.slot, awpSlot);
     this.tactics = new Tactics(this.g, this.intel, this.perc, data, helpers, { awpSlot, role, economy: k.economy ?? 0, ctSplitA: k.ctSplitA ?? P.ctSplitA, plan: k.plan ?? 0 }, attrs);
     this.tactics.combat = this.combat;
     this.tactics.nav = this.nav;
