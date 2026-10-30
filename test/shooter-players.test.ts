@@ -1,4 +1,4 @@
-// CS 射擊選手衍生（步驟 7）：derivePlayer 確定性與範圍、版本成長、習慣偏移、反應延遲公式、驅動層接屬性。
+// CS 射擊選手衍生（步驟 7）：derivePlayer 確定性與範圍、版本成長、習慣偏移、反應延遲公式、驅動層接屬性、射擊內容包。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { compileBot } from '../src/sandbox/compile.ts';
@@ -10,6 +10,9 @@ import { MAPS } from '../src/shooter/map.ts';
 import { BALANCED_ROLES, MAX_VERSION, ROLE_TABLE, SHOOTER_ROLES, balancedLineup, derivePlayer, habitOffsets, reactionTicksFor } from '../src/shooter/players.ts';
 import { ShooterBatchController, ShooterDriver, runShooterMatch, type CallOutcome } from '../src/shooter/runner.ts';
 import { DEFAULT_ATTRIBUTES, PLAYER_COUNT } from '../src/shooter/sim.ts';
+import { SHOOTER_CONTENT } from '../src/manage/content-shooter.ts';
+import { STUB_CONTENT } from '../src/manage/content.ts';
+import { expectedPermille } from '../src/manage/rating.ts';
 
 const sum = (a: Attributes): number => ATTRIBUTE_KEYS.reduce((s, k) => s + a[k], 0);
 
@@ -140,4 +143,25 @@ describe('驅動層接屬性', () => {
     expect(play(5)).toBe(a);
     expect(play(1)).not.toBe(a);
   }, 60_000);
+});
+
+describe('射擊內容包 SHOOTER_CONTENT', () => {
+  it('五個 lineage（id ＝ 角色）、power 長度＝MAX_VERSION、隨版本嚴格遞增、可以餵 expectedPermille', () => {
+    expect(SHOOTER_CONTENT.id).toBe('shooter-1');
+    expect(SHOOTER_CONTENT.formatId).toBe('shooter-mr12');
+    expect(SHOOTER_CONTENT.lineages.map((l) => l.id).sort()).toEqual([...SHOOTER_ROLES].sort());
+    for (const l of SHOOTER_CONTENT.lineages) {
+      expect(l.power.length).toBe(MAX_VERSION);
+      expect(l.name).toBe(ROLE_TABLE[l.id as keyof typeof ROLE_TABLE].name);
+      for (let i = 1; i < l.power.length; i++) expect(l.power[i]).toBeGreaterThan(l.power[i - 1]);
+      for (const p of l.power) expect(Number.isInteger(p) && p > 1000 && p < 2000).toBe(true);
+    }
+    const top = SHOOTER_CONTENT.lineages[0].power[MAX_VERSION - 1];
+    const low = SHOOTER_CONTENT.lineages[0].power[0];
+    const e = expectedPermille(top - low);
+    expect(e).toBeGreaterThan(500);
+    expect(e).toBeLessThanOrEqual(995);
+    expect(SHOOTER_CONTENT.teamNames.length).toBe(7);
+    expect(SHOOTER_CONTENT.economy).toBe(STUB_CONTENT.economy);
+  });
 });
