@@ -1,6 +1,9 @@
 /// <reference lib="webworker" />
 // CS 射擊可玩版的引擎 Worker：固定 30 TPS 推進比賽（累積時間，不靠計時器間隔），每次推進後把畫面資料送回主執行緒。
 // 玩家模式只送觀察資料與計分板公開資訊；觀戰模式另送引擎全狀態。主執行緒不持有引擎。
+// 經營層觀戰（watch）：請求單 → gatewayDriverOptions（與經營層閘道同一條路）→ ShooterDriver，以觀戰模式播放；結束時附上閘道換算的成績單。
+// 回放：每場都錄（record: true），比賽結束後主執行緒要才送（getReplay）。
+import baselineSource from '../../../bots/shooter-baseline.js?raw';
 import practiceSource from '../../../bots/shooter-practice.js?raw';
 import type { ShooterObservation, SoundEvent, Team } from '../../shooter/api.ts';
 import { GRENADES, TPS } from '../../shooter/config.ts';
@@ -8,13 +11,16 @@ import { ShooterHumanController } from '../../shooter/human.ts';
 import { DEFAULT_MAP_ID, MAPS } from '../../shooter/map.ts';
 import { ShooterBatchController, ShooterDriver, type ShooterController } from '../../shooter/runner.ts';
 import { PLAYER_COUNT, activeWeaponId, shooterInitData, smokeRadius, type ShooterMatch } from '../../shooter/sim.ts';
-import { compileBot } from '../../sandbox/compile.ts';
-import type { BoardRow, FromShooterWorker, FullState, KillFeedItem, ShooterSetup, ToShooterWorker } from './protocol.ts';
+import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
+import { gatewayDriverOptions, outcomeOf } from '../../shooter/gateway.ts';
+import type { BoardRow, FromShooterWorker, FullState, KillFeedItem, ShooterFrame, ShooterSetup, ToShooterWorker, WatchInfo, WatchSetup } from './protocol.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (msg: FromShooterWorker): void => ctx.postMessage(msg);
 
 const practice = compileBot(practiceSource, 'shooter-practice.js');
+/** 基準 Bot（經營層觀戰才用；第一次觀戰時才編譯） */
+let baseline: CompiledBot | null = null;
 const TICK_MS = 1000 / TPS;
 /** 一次迴圈最多補幾個 tick（分頁在背景被節流後回來，不要一口氣快轉太多） */
 const MAX_CATCH_UP = 8;
@@ -31,20 +37,39 @@ let last = 0;
 let feedIdx = 0;
 let pendingSounds: SoundEvent[] = [];
 let overSent = false;
+/** 經營層觀戰的顯示資訊（null＝試玩或陪練觀戰） */
+let watching: WatchInfo | null = null;
+/** 跳回合略過的回合結果，下一個 frame 帶出去 */
+let skipped: NonNullable<ShooterFrame['skipped']>[number][] = [];
 
 function names(spectate: boolean, pid: number): string[] {
   return Array.from({ length: PLAYER_COUNT }, (_, i) => (!spectate && i === pid ? '你' : `陪練 ${i < 5 ? i + 1 : i - 4}${i < 5 ? 'α' : 'β'}`));
 }
 
 function begin(s: ShooterSetup): void {
-  setup = s;
   const map = MAPS[DEFAULT_MAP_ID]();
-  playerId = s.spectate ? 0 : s.team === 'T' ? 0 : 5;
+  const pid = s.spectate ? 0 : s.team === 'T' ? 0 : 5;
   human = s.spectate ? null : new ShooterHumanController();
-  const controllers: ShooterController[] = Array.from({ length: PLAYER_COUNT }, (_, pid) =>
-    human !== null && pid === playerId ? human : new ShooterBatchController(practice, 'shooter-practice.js', s.seed, pid, map),
+  const h = human;
+  const controllers: ShooterController[] = Array.from({ length: PLAYER_COUNT }, (_, i) =>
+    h !== null && i === pid ? h : new ShooterBatchController(practice, 'shooter-practice.js', s.seed, i, map),
   );
-  driver = new ShooterDriver({ seed: s.seed, mapId: map.id, controllers, record: true, defaultLoadout: s.loadout !== undefined ? { T: s.loadout, CT: s.loadout } : undefined });
+  launch(s, new ShooterDriver({ seed: s.seed, mapId: map.id, controllers, record: true, defaultLoadout: s.loadout !== undefined ? { T: s.loadout, CT: s.loadout } : undefined }), pid, names(s.spectate, pid), null);
+}
+
+/** 經營層觀戰：與閘道同一條建驅動的路徑，所以播出來的就是存檔裡那一場 */
+function beginWatch(w: WatchSetup): void {
+  baseline ??= compileBot(baselineSource, 'shooter-baseline.js');
+  human = null;
+  const info: WatchInfo = { teams: w.teams, tags: w.tags, mine: w.mine };
+  launch({ team: 'T', seed: w.request.seed, spectate: true }, new ShooterDriver(gatewayDriverOptions(w.request, baseline, { record: true })), 0, [...w.names], info);
+}
+
+function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string[], info: WatchInfo | null): void {
+  setup = s;
+  driver = d;
+  watching = info;
+  playerId = pid;
   viewId = playerId;
   paused = false;
   speed = 1;
@@ -52,23 +77,44 @@ function begin(s: ShooterSetup): void {
   last = performance.now();
   feedIdx = 0;
   pendingSounds = [];
+  skipped = [];
   overSent = false;
-  const init = shooterInitData(driver.match.map, playerId, {});
+  const m = d.match;
+  // 規則照這場的賽制（短賽制的半場長度、加時與否）
+  const init = shooterInitData(m.map, playerId, {}, { roundsPerHalf: m.roundsPerHalf, winRounds: m.winRounds, overtime: m.overtimeRule ?? false });
   post({
     type: 'meta',
     meta: {
       playerId,
       spectate: s.spectate,
       seed: s.seed,
-      names: names(s.spectate, playerId),
-      groups: driver.match.players.map((p) => p.group),
+      names: nameList,
+      groups: m.players.map((p) => p.group),
       rules: init.rules,
       map: init.map,
       weapons: init.weapons,
       grenades: init.grenades,
+      ...(info !== null ? { watch: info } : {}),
     },
   });
   sendFrame();
+}
+
+/** 跳到下一回合：同步推進到回合數 +1（凍結時間開始），中間的 frame、聲音、擊殺訊息不送 */
+function skipRound(): void {
+  const d = driver;
+  if (d === null || !setup?.spectate || d.match.over) return;
+  const m = d.match;
+  const target = m.roundNumber + 1;
+  const before = m.rounds.length;
+  while (!m.over && m.roundNumber < target) d.step();
+  skipped.push(...m.rounds.slice(before).map((r) => ({ number: r.number, winner: r.winner, winnerGroup: r.winnerGroup, reason: r.reason })));
+  feedIdx = m.kills.length;
+  pendingSounds = [];
+  acc = 0;
+  last = performance.now();
+  sendFrame();
+  if (m.over) sendOver();
 }
 
 /** 死後（或觀戰時被跟隨的人死了）自動換到同隊還活著的人 */
@@ -118,8 +164,9 @@ function sendFrame(viewObs?: ShooterObservation): void {
   const board: BoardRow[] = m.players.map((p) => ({ id: p.id, team: p.team, alive: p.alive, kills: p.kills, deaths: p.deaths, money: setup?.spectate || p.team === myTeam ? p.money : null }));
   const feed: KillFeedItem[] = m.kills.slice(feedIdx).map((k) => ({ tick: k.tick, killer: k.killer, victim: k.victim, weapon: k.weapon }));
   feedIdx = m.kills.length;
-  post({ type: 'frame', frame: { tick: m.tick, viewId, view, self, sounds: pendingSounds, board, feed, full: setup.spectate ? fullState(m) : null, paused } });
+  post({ type: 'frame', frame: { tick: m.tick, viewId, view, self, sounds: pendingSounds, board, feed, full: setup.spectate ? fullState(m) : null, paused, ...(skipped.length > 0 ? { skipped } : {}) } });
   pendingSounds = [];
+  skipped = [];
 }
 
 function sendOver(): void {
@@ -137,6 +184,7 @@ function sendOver(): void {
       players: m.players.map((p) => ({ id: p.id, kills: p.kills, deaths: p.deaths, money: p.money })),
       overtimes: r.overtimes,
       finalHash: m.hash(),
+      ...(watching !== null ? { outcome: outcomeOf(r, m) } : {}),
     },
   });
 }
@@ -177,6 +225,15 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
       case 'start':
         begin(msg.setup);
         break;
+      case 'watch':
+        beginWatch(msg.watch);
+        break;
+      case 'skipRound':
+        skipRound();
+        break;
+      case 'getReplay':
+        if (driver?.replay && driver.match.over) post({ type: 'replay', replay: driver.replay });
+        break;
       case 'cmd':
         if (human !== null && driver !== null && !paused) human.enqueue(msg.cmds);
         break;
@@ -199,6 +256,7 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
         driver = null;
         human = null;
         setup = null;
+        watching = null;
         break;
     }
   } catch (e) {

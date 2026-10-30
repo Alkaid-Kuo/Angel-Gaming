@@ -1,7 +1,10 @@
 // CS 射擊可玩版：主執行緒與引擎 Worker 之間的訊息格式。
 // 公平原則：玩家模式下 Worker 只送觀察資料（ShooterObservation）與計分板的公開資訊，主執行緒不持有引擎；
 // 只有開局勾選「觀戰模式」才另送引擎全狀態快照（FullState）。
-import type { GrenadeInfo, MapInfo, RulesInfo, ShooterCommand, ShooterObservation, SoundEvent, Team, WeaponInfo, WeaponId, GrenadeId } from '../../shooter/api.ts';
+// 經營層觀戰（watch）：用存檔的請求單、經 src/shooter/gateway.ts 的 gatewayDriverOptions 建驅動重跑那一場，畫面同觀戰模式。
+import type { MatchOutcome, MatchRequest } from '../../manage/gateway.ts';
+import type { ShooterReplay } from '../../shooter/runner.ts';
+import type { GrenadeInfo, MapInfo, RoundEndReason, RulesInfo, ShooterCommand, ShooterObservation, SoundEvent, Team, WeaponInfo, WeaponId, GrenadeId } from '../../shooter/api.ts';
 
 export interface ShooterSetup {
   /** 玩家開局的陣營（T = playerId 0、CT = playerId 5；半場換邊後陣營互換） */
@@ -13,8 +16,30 @@ export interface ShooterSetup {
   readonly loadout?: WeaponId;
 }
 
+/** 經營層觀戰的顯示資訊（Worker 原樣放回 meta.watch） */
+export interface WatchInfo {
+  /** 依組別：0＝請求單 A（主隊、上半場 T）、1＝B */
+  readonly teams: readonly [string, string];
+  /** 依 playerId：角色與版本（例如「突破 v3」） */
+  readonly tags: readonly string[];
+  /** 我方是哪一組（別隊的比賽＝null）：天使金外框依此上色 */
+  readonly mine: 0 | 1 | null;
+}
+
+export interface WatchSetup extends WatchInfo {
+  readonly request: MatchRequest;
+  /** 依 playerId 的選手名（A 名單 0～4、B 名單 5～9） */
+  readonly names: readonly string[];
+}
+
 export type ToShooterWorker =
   | { readonly type: 'start'; readonly setup: ShooterSetup }
+  /** 經營層觀戰：重跑一場打完的比賽 */
+  | { readonly type: 'watch'; readonly watch: WatchSetup }
+  /** 觀戰：以最高速推進到下一回合開始（凍結時間），中間不送畫面 */
+  | { readonly type: 'skipRound' }
+  /** 比賽結束後要回放（下載用；比賽中不給） */
+  | { readonly type: 'getReplay' }
   | { readonly type: 'cmd'; readonly cmds: readonly ShooterCommand[] }
   /** 死後看隊友（玩家模式）或觀戰模式跟隨的選手：±1 循環切換，或直接指定 */
   | { readonly type: 'view'; readonly step?: number; readonly id?: number }
@@ -34,6 +59,8 @@ export interface ShooterMeta {
   readonly map: MapInfo;
   readonly weapons: readonly WeaponInfo[];
   readonly grenades: readonly GrenadeInfo[];
+  /** 經營層觀戰才有 */
+  readonly watch?: WatchInfo;
 }
 
 /** 計分板一列（公開資訊）：敵人的金錢在比賽中為 null */
@@ -94,6 +121,8 @@ export interface ShooterFrame {
   readonly feed: readonly KillFeedItem[];
   readonly full: FullState | null;
   readonly paused: boolean;
+  /** 跳回合時略過的回合結果（畫面沒看到它們的結束 frame，回合紀錄靠這個補） */
+  readonly skipped?: readonly { readonly number: number; readonly winner: Team; readonly winnerGroup: 0 | 1; readonly reason: RoundEndReason }[];
 }
 
 export interface ShooterSummary {
@@ -106,10 +135,13 @@ export interface ShooterSummary {
   /** 打了幾段加時（v1.0） */
   readonly overtimes: number;
   readonly finalHash: string;
+  /** 經營層觀戰才有：照閘道的換算得到的成績單（與存檔的成績單對照） */
+  readonly outcome?: MatchOutcome;
 }
 
 export type FromShooterWorker =
   | { readonly type: 'meta'; readonly meta: ShooterMeta }
   | { readonly type: 'frame'; readonly frame: ShooterFrame }
   | { readonly type: 'over'; readonly summary: ShooterSummary }
+  | { readonly type: 'replay'; readonly replay: ShooterReplay }
   | { readonly type: 'error'; readonly message: string };

@@ -9,6 +9,8 @@
 // 反應延遲由驅動層依屬性重算（reactionTicksFor）。
 // 座位：A 名單 0～4、B 名單 5～9（A 上半場當 T）；地圖赤岩鎮；種子＝請求單的種子。
 // 確定性：控制器關掉逾時判定（timeLimits: false），結果只由程式碼與種子決定；Bot 例外仍算「該次無指令」。
+// 觀戰回放（步驟 9）：可玩版的觀戰 Worker 用同一個 gatewayDriverOptions 建 ShooterDriver、逐 tick 推進，
+// 所以重播與經營層當時打的那一場是同一場（成績單與終局雜湊相同，test/manage-shooter.test.ts）。
 import type { MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec } from '../manage/gateway.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
@@ -16,8 +18,8 @@ import type { Attributes } from './api.ts';
 import { TEAM_SIZE } from './config.ts';
 import { MAPS } from './map.ts';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES, type ShooterRole } from './players.ts';
-import { ShooterBatchController, runShooterMatch, type ShooterReplay } from './runner.ts';
-import { PLAYER_COUNT, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
+import { ShooterBatchController, runShooterMatch, type ShooterReplay, type ShooterRunOptions } from './runner.ts';
+import { PLAYER_COUNT, type ShooterMatch, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
 
 export const GATEWAY_MAP_ID = 'redrock';
 
@@ -70,29 +72,44 @@ function roundLabel(n: number, regulation: number): string {
   return n <= regulation ? `第 ${n} 回合` : `加時 ${n - regulation}`;
 }
 
-/** 引擎結果 → 成績單（A＝組 0＝玩家 0～4） */
-export function outcomeOf(result: ShooterResult, regulation: number): MatchOutcome {
+/** 賽段標籤：正規「上半場」「下半場」；加時每段（兩個加時半場）一個「加時 k」 */
+export function roundPhase(n: number, rules: Pick<ShooterMatch, 'roundsPerHalf' | 'overtimeRule'>): string {
+  const reg = rules.roundsPerHalf * 2;
+  if (n <= rules.roundsPerHalf) return '上半場';
+  if (n <= reg) return '下半場';
+  const per = (rules.overtimeRule?.roundsPerHalf ?? 1) * 2;
+  return `加時 ${Math.floor((n - reg - 1) / per) + 1}`;
+}
+
+/** 引擎結果 → 成績單（A＝組 0＝玩家 0～4）；rules：該場的半場長度與加時規則（ShooterMatch 本身就有） */
+export function outcomeOf(result: ShooterResult, rules: Pick<ShooterMatch, 'roundsPerHalf' | 'overtimeRule'>): MatchOutcome {
+  const regulation = rules.roundsPerHalf * 2;
   let a = 0;
   let b = 0;
   const rounds: MatchRound[] = result.rounds.map((r) => {
     if (r.winnerGroup === 0) a++;
     else b++;
-    return { label: roundLabel(r.number, regulation), winner: r.winnerGroup === 0 ? 'a' : 'b', scoreA: a, scoreB: b };
+    return { label: roundLabel(r.number, regulation), winner: r.winnerGroup === 0 ? 'a' : 'b', scoreA: a, scoreB: b, phase: roundPhase(r.number, rules) };
   });
   return { winner: result.winner === 0 ? 'a' : result.winner === 1 ? 'b' : 'draw', rounds };
 }
 
 export interface GatewayMatch {
   readonly outcome: MatchOutcome;
-  /** record: true 時才有（回放，步驟 9 觀戰用） */
+  /** record: true 時才有（回放） */
   readonly replay?: ShooterReplay;
+  /** 終局雜湊（與觀戰重播、回放重播對照用） */
+  readonly finalHash: string;
   readonly wallMs: number;
   /** 除錯用：Bot 例外次數（不影響結果） */
   readonly exceptions: number;
 }
 
-/** 打一場：同一張請求單＋同一份 Bot 程式碼 → 同一個結果 */
-export function runGatewayMatch(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): GatewayMatch {
+/**
+ * 請求單 → 驅動選項（座位、旋鈕、屬性、逾時關閉、賽制長度、是否錄影）。
+ * runGatewayMatch 與觀戰 Worker 都只走這裡建 ShooterDriver，兩邊打的是同一場。
+ */
+export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): ShooterRunOptions {
   const format = formatOf(request.formatId);
   for (const side of [request.a, request.b]) {
     if (side.players.length !== format.lineupSize) throw new Error(`攻防戰每方 ${format.lineupSize} 人，名單是 ${side.players.length} 人`);
@@ -103,11 +120,16 @@ export function runGatewayMatch(request: MatchRequest, bot: CompiledBot, opts: {
   // 只給選手宣告過的旋鈕（基準 Bot 有 role）
   const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, c.declaration.knobs.some((k) => k.key === 'role') ? seats[pid].knobs : {}, c.label));
   const fo = FORMAT_OPTIONS[format.id] ?? {};
-  const run = runShooterMatch({ seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), record: opts.record === true, ...fo });
-  const regulation = 2 * (fo.roundsPerHalf ?? run.match.roundsPerHalf);
+  return { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), record: opts.record === true, ...fo };
+}
+
+/** 打一場：同一張請求單＋同一份 Bot 程式碼 → 同一個結果 */
+export function runGatewayMatch(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): GatewayMatch {
+  const run = runShooterMatch(gatewayDriverOptions(request, bot, opts));
   return {
-    outcome: outcomeOf(run.result, regulation),
+    outcome: outcomeOf(run.result, run.match),
     ...(run.replay ? { replay: run.replay } : {}),
+    finalHash: run.finalHash,
     wallMs: run.wallMs,
     exceptions: run.runtime.reduce((s, r) => s + r.exceptions, 0),
   };

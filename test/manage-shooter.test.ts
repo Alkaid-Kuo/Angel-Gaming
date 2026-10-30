@@ -1,4 +1,5 @@
 // 攻防戰閘道接經營層（步驟 8）：真引擎確定性、名單 → 屬性換算、短賽制整季與存檔重跑、正式賽制一場。
+// 步驟 9：觀戰重播一致（閘道與觀戰驅動同一條建驅動路徑）、賽段標籤、watchable。
 // 真引擎一回合約 0.5～0.7 秒（Node 單執行緒），整季用短賽制（每半場 1 回合）。
 import { describe, expect, it } from 'vitest';
 import { runSeason } from '../src/manage/autoplayer.ts';
@@ -10,7 +11,11 @@ import { ShooterGateway } from '../src/manage/gateway-shooter.ts';
 import { deserialize, serialize } from '../src/manage/save.ts';
 import type { GameState } from '../src/manage/types.ts';
 import { ATTRIBUTE_KEYS } from '../src/shooter/config.ts';
-import { attributeShift, seatOf } from '../src/shooter/gateway.ts';
+import { SHOOTER_FORMATS, attributeShift, gatewayDriverOptions, outcomeOf, roundPhase, runGatewayMatch, seatOf } from '../src/shooter/gateway.ts';
+import { ShooterDriver, runShooterReplay } from '../src/shooter/runner.ts';
+import type { ShooterResult } from '../src/shooter/sim.ts';
+import { compileBot } from '../src/sandbox/compile.ts';
+import { readFileSync } from 'node:fs';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES } from '../src/shooter/players.ts';
 
 const gateway = new ShooterGateway();
@@ -102,7 +107,56 @@ describe('攻防戰閘道：真引擎', () => {
     }
     expect(o.winner).toBe(pa > pb ? 'a' : pb > pa ? 'b' : 'draw');
     if (o.winner !== 'draw') expect(Math.max(pa, pb)).toBeGreaterThanOrEqual(13);
+    // 賽段標籤：1～12 上半場、13～24 下半場、之後加時
+    o.rounds.forEach((r, i) => expect(r.phase).toBe(i < 12 ? '上半場' : i < 24 ? '下半場' : `加時 ${Math.floor((i - 24) / 6) + 1}`));
   }, 120_000);
+});
+
+describe('觀戰重播一致（步驟 9）', () => {
+  const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'shooter-baseline.js');
+  // 3 張請求單：不同種子、版本、習慣與預設加成、A／B 強弱互換
+  const reqs: MatchRequest[] = [
+    { formatId: 'shooter-short', a: side(3), b: side(3), seed: 11 },
+    { formatId: 'shooter-short', a: side(5, 45, 30), b: side(2, -40), seed: 2_026_103 },
+    { formatId: 'shooter-short', a: side(1, -60), b: side(4, 20, 90), seed: 4_294_967_295 },
+  ];
+
+  it('runGatewayMatch 與「用 gatewayDriverOptions 建驅動、逐 tick 跑完」成績單與終局雜湊相同；錄下的回放重播雜湊也相同', () => {
+    for (const req of reqs) {
+      const m = runGatewayMatch(req, bot);
+      const d = new ShooterDriver(gatewayDriverOptions(req, bot, { record: true }));
+      let ticks = 0;
+      while (!d.match.over) {
+        d.step();
+        ticks++;
+      }
+      expect(ticks).toBeGreaterThan(0);
+      expect(outcomeOf(d.match.result(), d.match)).toEqual(m.outcome);
+      expect(d.match.hash()).toBe(m.finalHash);
+      const rp = d.replay as NonNullable<typeof d.replay>;
+      const back = runShooterReplay(JSON.parse(JSON.stringify(rp)) as typeof rp);
+      expect(back.desyncTick).toBeNull();
+      expect(back.finalHash).toBe(m.finalHash);
+    }
+  }, 120_000);
+
+  it('攻防戰賽制都能觀戰（watchable 自報 true）', () => {
+    expect(SHOOTER_FORMATS.every((f) => f.watchable)).toBe(true);
+    expect(gateway.formats.every((f) => f.watchable)).toBe(true);
+  });
+
+  it('賽段標籤：上半場、下半場、加時 k（每段兩個加時半場）', () => {
+    const rules = { roundsPerHalf: 12, overtimeRule: { roundsPerHalf: 3, winRounds: 4, startMoney: 10000 } } as unknown as Parameters<typeof roundPhase>[1];
+    expect([1, 12, 13, 24, 25, 30, 31, 36, 37].map((n) => roundPhase(n, rules))).toEqual(['上半場', '上半場', '下半場', '下半場', '加時 1', '加時 1', '加時 2', '加時 2', '加時 3']);
+    expect([1, 2].map((n) => roundPhase(n, { roundsPerHalf: 1, overtimeRule: null }))).toEqual(['上半場', '下半場']);
+    const fake = { winner: 1, rounds: [1, 2, 3].map((number, i) => ({ number, winnerGroup: i === 1 ? 0 : 1 })) } as unknown as ShooterResult;
+    const o = outcomeOf(fake, { roundsPerHalf: 1, overtimeRule: { roundsPerHalf: 1 } } as unknown as Parameters<typeof outcomeOf>[1]);
+    expect(o.rounds.map((r) => [r.label, r.phase, r.scoreA, r.scoreB])).toEqual([
+      ['第 1 回合', '上半場', 0, 1],
+      ['第 2 回合', '下半場', 1, 1],
+      ['加時 1', '加時 1', 1, 2],
+    ]);
+  });
 });
 
 describe('攻防戰內容包＋真閘道（短賽制）', () => {
