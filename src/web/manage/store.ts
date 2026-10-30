@@ -1,6 +1,7 @@
 // 經營頁的遊戲控制器：持有狀態、發指令、推進一週，並在每次變動後存到 localStorage。
 // 對戰只經由 BattleGateway：內容包決定用哪個閘道（軍團戰暫代包＝假比賽、攻防戰＝Worker 池跑真引擎）。
 // 讀檔時依存檔的 contentId 選內容包與閘道；版本不符或內容包不明時讀不了，介面顯示 saveProblem() 的訊息。
+// 觀戰：賽制自報 watchable 時，畫面可用 watchTicket() 取得某場的請求單（存檔原樣），交給可玩版重播。
 import {
   FakeGateway,
   SAVE_VERSION,
@@ -18,12 +19,21 @@ import {
   type ContentPack,
   type GameState,
   type KnownView,
+  type MatchFormat,
+  type MatchOutcome,
+  type MatchRequest,
   type Phase,
 } from '../../manage/index.ts';
 import { SHOOTER_CONTENT } from '../../manage/content-shooter.ts';
 import { WorkerShooterGateway } from './shooter-gateway.ts';
 
+// 鍵名沿用第 2 版：同一個鍵讀到舊版存檔時才能說清楚「哪一版、為什麼不能用」
 const SAVE_KEY = 'angel-gaming-m4-save-v2';
+/** 各舊版存檔不能用的原因（標題畫面的訊息） */
+const VERSION_NOTE: Readonly<Record<number, string>> = {
+  1: '三個 1 對 1 對位',
+  2: '比賽沒有保存請求單，不能觀戰回放',
+};
 /** 舊存檔鍵（SAVE_VERSION 1，三個 1 對 1 對位的年代）；只拿來告訴玩家舊檔不能用了 */
 const OLD_SAVE_KEYS = ['angel-gaming-m4-save-v1'];
 
@@ -77,7 +87,10 @@ function parseSave(json: string): { state: GameState; content: ContentPack } {
   } catch {
     throw new Error('存檔格式不對（不是 JSON）');
   }
-  if (raw.version !== SAVE_VERSION) throw new Error(`存檔是第 ${String(raw.version)} 版，目前是第 ${SAVE_VERSION} 版（比賽改成名單對名單一場），舊存檔不能繼續`);
+  if (raw.version !== SAVE_VERSION) {
+    const note = typeof raw.version === 'number' ? VERSION_NOTE[raw.version] : undefined;
+    throw new Error(`存檔是第 ${String(raw.version)} 版${note ? `（${note}）` : ''}，目前是第 ${SAVE_VERSION} 版，舊存檔不能繼續`);
+  }
   const kind = kindOf(String(raw.contentId));
   if (!kind) throw new Error(`存檔的項目（內容包 ${String(raw.contentId)}）這個版本沒有`);
   return { state: deserialize(json, kind.content), content: kind.content };
@@ -162,7 +175,7 @@ export class ManageGame {
       }
     }
     try {
-      if (OLD_SAVE_KEYS.some((k) => localStorage.getItem(k) !== null)) return `找到舊版存檔（第 1 版：三個 1 對 1 對位），目前是第 ${SAVE_VERSION} 版，舊存檔不能繼續`;
+      if (OLD_SAVE_KEYS.some((k) => localStorage.getItem(k) !== null)) return `找到舊版存檔（第 1 版：${VERSION_NOTE[1]}），目前是第 ${SAVE_VERSION} 版，舊存檔不能繼續`;
     } catch {
       return null;
     }
@@ -183,8 +196,28 @@ export class ManageGame {
     return this.content.id;
   }
 
+  /** 目前賽制（閘道自報） */
+  get format(): MatchFormat | undefined {
+    return this.gateway.formats.find((x) => x.id === this.state.formatId);
+  }
+
   view(): KnownView {
-    return knownView(this.state, this.content, this.state.humanTeamId);
+    return knownView(this.state, this.content, this.state.humanTeamId, this.format);
+  }
+
+  /**
+   * 某場打完的比賽的觀戰票：存檔裡的請求單原樣＋當時的成績單（重播完拿來對照）。
+   * 賽制不能觀戰、比賽沒打或不存在時回傳 null。請求單含隱藏資料（習慣、預設加成），只交給觀戰頁重跑，不顯示。
+   */
+  watchTicket(fixtureId: string): { request: MatchRequest; outcome: MatchOutcome } | null {
+    if (this.format?.watchable !== true) return null;
+    const f = this.state.fixtures.find((x) => x.id === fixtureId);
+    const r = f?.result;
+    if (!f || !r) return null;
+    return {
+      request: structuredClone(r.request),
+      outcome: { winner: r.winner === null ? 'draw' : r.winner === f.home ? 'a' : 'b', rounds: r.rounds.map((x) => ({ ...x })) },
+    };
   }
 
   command(cmd: Command): CommandResult {

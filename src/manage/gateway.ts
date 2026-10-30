@@ -3,9 +3,10 @@
 // 契約：
 // 1. 請求單只含「賽制代號、雙方出賽名單、種子」；經營層不解讀賽制內容，也不寫任何與具體賽制有關的規則。
 // 2. 成績單只含勝負與各回合累計比分（只供顯示）。
-// 3. 同一張請求單永遠得到同一張成績單（確定性）；回放可由請求單重跑重現，存檔不必存回放。
+// 3. 同一張請求單永遠得到同一張成績單（確定性）；回放可由請求單重跑重現：存檔保存每場送出的請求單（FixtureResult.request），不存回放。
 // 4. 攻守與座位的公平由賽制自己處理（每方輪到各個角色），經營層不管。
 // 5. 賽制自報每場回合數、估計耗時與名單人數，經營層才估得出「推進一週要等多久」、開局時才查得出內容包配不配。
+// 6. 賽制自報能不能觀戰（watchable）；經營層不解讀，只透傳給畫面決定要不要放「觀戰」。
 import type { Winner } from './types.ts';
 
 export interface MatchFormat {
@@ -17,6 +18,8 @@ export interface MatchFormat {
   readonly estMsPerRound: number;
   /** 每方出賽名單人數；內容包的 lineupSize 必須相同 */
   readonly lineupSize: number;
+  /** 打完的比賽能不能用請求單重播觀戰（真引擎 true、假比賽 false） */
+  readonly watchable: boolean;
 }
 
 /** 一位出賽選手。config 對經營層是不透明的一包資料，內容由內容包的 schema 決定。 */
@@ -44,6 +47,8 @@ export interface MatchRound {
   readonly winner: Winner;
   readonly scoreA: number;
   readonly scoreB: number;
+  /** 賽段標籤（例如「上半場」「下半場」「加時 1」）；有給時畫面在標籤改變處畫分隔，經營層不解讀 */
+  readonly phase?: string;
 }
 
 export interface MatchOutcome {

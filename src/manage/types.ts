@@ -1,7 +1,8 @@
 // M4 經營層：狀態與指令型別。
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
+import type { MatchRequest } from './gateway.ts';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -95,6 +96,8 @@ export interface RoundResult {
   winner: Winner;
   scoreA: number;
   scoreB: number;
+  /** 賽段標籤（閘道給的，只供顯示） */
+  phase?: string;
 }
 
 /** 一場戰隊賽（名單對名單一場比賽）。A＝主隊、B＝客隊 */
@@ -108,6 +111,8 @@ export interface FixtureResult {
   scoreB: number;
   /** 逐回合（累計比分，只供顯示） */
   rounds: RoundResult[];
+  /** 隱藏：當時送出的請求單原樣（雙方 PlayerSpec 快照＋種子＋賽制）；觀戰回放由它重跑，含習慣與預設加成，不進已知層視圖 */
+  request: MatchRequest;
 }
 
 export interface Fixture {

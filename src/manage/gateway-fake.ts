@@ -13,7 +13,7 @@ export class FakeGateway implements BattleGateway {
 
   constructor(content: ContentPack) {
     this.lineages = new Map(content.lineages.map((l) => [l.id, l]));
-    this.formats = [{ id: 'stub-bo1', name: '暫代賽制（單回合擲骰）', rounds: 1, estMsPerRound: 0, lineupSize: content.lineupSize }];
+    this.formats = [{ id: 'stub-bo1', name: '暫代賽制（單回合擲骰）', rounds: 1, estMsPerRound: 0, lineupSize: content.lineupSize, watchable: false }];
   }
 
   simulateBatch(requests: readonly MatchRequest[], onProgress?: (done: number, total: number) => void): Promise<MatchOutcome[]> {

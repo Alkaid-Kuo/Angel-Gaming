@@ -181,7 +181,7 @@ async function playMatchDay(state: GameState, content: ContentPack, gateway: Bat
     const out = outs[fi];
     const sc = finalScore(out);
     const winner = out.winner === 'a' ? f.home : out.winner === 'b' ? f.away : null;
-    f.result = { lineupA: hp.map((p) => p.id), lineupB: ap.map((p) => p.id), winner, scoreA: sc.a, scoreB: sc.b, rounds: out.rounds.map((r) => ({ ...r })) };
+    f.result = { lineupA: hp.map((p) => p.id), lineupB: ap.map((p) => p.id), winner, scoreA: sc.a, scoreB: sc.b, rounds: out.rounds.map((r) => ({ ...r })), request: structuredClone(reqs[fi]) };
     // 名單平均 Elo 算期望值，名單內每人加同一個 delta（兩隊人數相同，總分守恆）
     const delta = eloDelta(mean(hp), mean(ap), out.winner === 'a' ? 1000 : out.winner === 'b' ? 0 : 500, e.eloK);
     for (const p of hp) {

@@ -3,6 +3,7 @@
 // 玩家要知道，只能靠公開戰績、花錢買的情報、練習賽樣本。
 import { fixtureOdds } from './betting.ts';
 import type { ContentPack } from './content.ts';
+import type { MatchFormat } from './gateway.ts';
 import type { StandingRow } from './league.ts';
 import { standings } from './league.ts';
 import { capacityLeft, rosterOf, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
@@ -29,12 +30,15 @@ export interface KnownFixture {
   away: TeamId;
   /** 最終比分，打完才有 */
   score: { home: number; away: number } | null;
-  /** 比賽內容（公開戰績）：雙方出賽名單、勝方（null＝平手）、逐回合累計比分（a＝主隊）；打完才有 */
+  /** 比賽內容（公開戰績）：雙方出賽名單、勝方（null＝平手）、逐回合累計比分（a＝主隊）、能不能觀戰；打完才有 */
   match: {
     home: PlayerId[];
     away: PlayerId[];
     winner: TeamId | null;
-    rounds: { label: string; winner: Winner; home: number; away: number }[];
+    /** phase：閘道給的賽段標籤（上半場、加時等），沒有就不畫分隔 */
+    rounds: { label: string; winner: Winner; home: number; away: number; phase?: string }[];
+    /** 賽制自報能觀戰（knownView 有傳賽制時才可能 true；請求單本身含隱藏資料，不放進視圖） */
+    watchable: boolean;
   } | null;
 }
 
@@ -82,7 +86,8 @@ export interface KnownView {
   seasonResult: SeasonResult | null;
 }
 
-export function knownView(state: GameState, content: ContentPack, teamId: TeamId): KnownView {
+/** format：目前賽制（只拿 watchable 透傳給畫面；NPC、自動玩家不傳＝不能觀戰） */
+export function knownView(state: GameState, content: ContentPack, teamId: TeamId, format?: MatchFormat): KnownView {
   const team = teamOf(state, teamId);
   const fixed = weeklyFixedCost(state, content, team);
   const sponsor = weeklySponsor(content, team);
@@ -129,7 +134,8 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
             home: [...f.result.lineupA],
             away: [...f.result.lineupB],
             winner: f.result.winner,
-            rounds: f.result.rounds.map((r) => ({ label: r.label, winner: r.winner, home: r.scoreA, away: r.scoreB })),
+            rounds: f.result.rounds.map((r) => ({ label: r.label, winner: r.winner, home: r.scoreA, away: r.scoreB, ...(r.phase !== undefined ? { phase: r.phase } : {}) })),
+            watchable: format?.watchable === true,
           }
         : null,
     })),

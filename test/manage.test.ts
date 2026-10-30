@@ -10,7 +10,7 @@ import { expectedPermille, updateElo } from '../src/manage/rating.ts';
 import { deserialize, serialize } from '../src/manage/save.ts';
 import { humanTeam, rosterOf } from '../src/manage/state.ts';
 import type { GameState } from '../src/manage/types.ts';
-import { REGULAR_WEEKS, TOTAL_WEEKS } from '../src/manage/types.ts';
+import { REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from '../src/manage/types.ts';
 import { knownView } from '../src/manage/view.ts';
 
 const content = STUB_CONTENT;
@@ -230,6 +230,64 @@ describe('完整賽段', () => {
     expect(s.phase).toBe('bankrupt');
     await expect(advance(s, content, gateway)).rejects.toThrow();
     expect(applyCommand(s, content, s.humanTeamId, { type: 'upgradeTraining' }).ok).toBe(false);
+  });
+});
+
+describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
+  /** 記下送出的請求單，原樣交給假閘道 */
+  class SpyGateway implements BattleGateway {
+    readonly formats = gateway.formats;
+    readonly sent: MatchRequest[] = [];
+    simulateBatch(requests: readonly MatchRequest[]): ReturnType<BattleGateway['simulateBatch']> {
+      this.sent.push(...requests.map((r) => structuredClone(r)));
+      return gateway.simulateBatch(requests);
+    }
+  }
+
+  it('每場的 FixtureResult.request 與當時送出的請求單完全相同；同一張請求單重打得到同一張成績單', async () => {
+    const s = newGame(61, content);
+    const spy = new SpyGateway();
+    await advance(s, content, spy);
+    await advance(s, content, spy);
+    const played = s.fixtures.filter((f) => f.result !== null);
+    expect(played).toHaveLength(4);
+    expect(played.map((f) => f.result?.request)).toEqual(spy.sent);
+    expect(s.version).toBe(SAVE_VERSION);
+    expect(SAVE_VERSION).toBe(3);
+    for (const f of played) {
+      const r = f.result as NonNullable<typeof f.result>;
+      expect(r.request.formatId).toBe(s.formatId);
+      expect(r.request.a.players).toHaveLength(content.lineupSize);
+      const [o] = await gateway.simulateBatch([r.request]);
+      expect(o.winner).toBe(r.winner === null ? 'draw' : r.winner === f.home ? 'a' : 'b');
+      expect(o.rounds.map((x) => [x.scoreA, x.scoreB])).toEqual(r.rounds.map((x) => [x.scoreA, x.scoreB]));
+    }
+    // 讀回來請求單還在
+    const back = deserialize(serialize(s), content);
+    expect(back.fixtures.map((f) => f.result?.request ?? null)).toEqual(s.fixtures.map((f) => f.result?.request ?? null));
+  });
+
+  it('第 2 版存檔被拒，訊息說明版本', () => {
+    const s = newGame(62, content);
+    const old = JSON.stringify({ ...s, version: 2 });
+    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 3 不符/);
+  });
+
+  it('watchable 由賽制自報、透傳到視圖；視圖不帶請求單（含隱藏的習慣）', async () => {
+    const s = newGame(63, content);
+    await advance(s, content, gateway);
+    await advance(s, content, gateway);
+    const me = humanTeam(s).id;
+    const f = knownView(s, content, me).fixtures.find((x) => x.match !== null);
+    expect(f?.match?.watchable).toBe(false);
+    expect(gateway.formats[0].watchable).toBe(false);
+    const fmt = { ...gateway.formats[0], watchable: true };
+    const v = knownView(s, content, me, fmt);
+    expect(v.fixtures.filter((x) => x.match !== null).every((x) => x.match?.watchable === true)).toBe(true);
+    const json = JSON.stringify(v);
+    expect(json).not.toContain('"request"');
+    expect(json).not.toContain('"habit"');
+    expect(json).not.toContain('"seed"');
   });
 });
 
