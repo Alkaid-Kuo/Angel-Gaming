@@ -8,7 +8,7 @@
 // 公平：只讀 init 資料與觀察資料；不寫死任何地圖座標、區域代號或地圖 id。
 // 屬性包（attributes，0～100）接到行為：aim 瞄準誤差與收斂（狙擊手拿其他槍時打折）；reaction 開火前額外等待與對聲音的反應；
 // awareness 雷達與聲音採信、隊內事件的反應延遲、預瞄（目標出現在正看著的方向時初始瞄準誤差小）、餘光察覺（視野邊緣的敵人多快注意到）；
-// aggression 探頭等待與方式、撤退門檻、架槍時間、T 計畫（rush 比例、default 執行時機）；
+// aggression 探頭等待與方式、架槍時間、T 計畫（rush 比例、default 執行時機）、殘局找人、保槍（撤退門檻步驟 7 起固定）；
 // discipline 隊友擋線的安全距離、守位中不追出射程外的目標、經濟服從（eco 不偷買）、不追殘血、殘局保槍；
 // movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步、佈置時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、T 計畫、角色）。
 // 本檔由 scripts/build-shooter-bots.ts 從 bots/shooter-src/ 產生：請修改原始碼後重新產生，不要直接改這個檔案。
@@ -95,10 +95,10 @@ const P = {
   friendClear0: 700,
   friendClear100: 1200,
   holdFirm: 50,
-  retreatHp0: 40,
-  retreatHp100: 20,
-  outnumber0: 2,
-  outnumber100: 4,
+  retreatHp0: 30,
+  retreatHp100: 30,
+  outnumber0: 3,
+  outnumber100: 3,
   mateNear: 10,
   coverRadius: 8,
   holdAngle0: 2.0,

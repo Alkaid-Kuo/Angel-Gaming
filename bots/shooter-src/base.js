@@ -137,11 +137,14 @@ export const P = {
   friendClear100: 1200,
   /** 紀律高於這個值：守位中目標跑出射程不追 */
   holdFirm: 50,
-  /** 撤退：血量門檻（侵略 0 → 100）；1 對多：看得到 ≥ N 個敵人（侵略 0 → 100，取整數部分）且 mateNear 格內沒有隊友 */
-  retreatHp0: 40,
-  retreatHp100: 20,
-  outnumber0: 2,
-  outnumber100: 4,
+  /**
+   * 撤退：血量門檻；1 對多：看得到 ≥ N 個敵人（取整數部分）且 mateNear 格內沒有隊友。
+   * 步驟 7 起不跟侵略連動（6-1 是 40→20 血、2→4 人）：侵略高的人殘血硬拚、以寡擊眾，抵銷了探頭與計畫的好處，鏡像裡侵略的梯度是平的
+   */
+  retreatHp0: 30,
+  retreatHp100: 30,
+  outnumber0: 3,
+  outnumber100: 3,
   mateNear: 10,
   /** 掩體搜尋半徑（格） */
   coverRadius: 8,
