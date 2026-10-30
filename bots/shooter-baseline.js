@@ -6,9 +6,9 @@
 //   戰術 tactics.js（回合開始＋每次決策）：隊內計畫與事件（say）、T 五種計畫與守包、CT 配置／輪轉／回防／保槍、殘局、換血
 //        economy.js（指揮統一買法 B:）、utility.js（道具彈道與投擲）、roles.js（2.1：五個角色的分工，隊內喊 R:）
 // 公平：只讀 init 資料與觀察資料；不寫死任何地圖座標、區域代號或地圖 id。
-// 屬性包（attributes，0～100）接到行為：aim 瞄準誤差與收斂；reaction 開火前額外等待與對聲音的反應；awareness 記憶衰減、
-// 已清空維持時間、守位掃描頻率、雷達與聲音採信；aggression 探頭等待與方式、撤退門檻、架槍時間；
-// 已清空維持時間、守位掃描頻率、雷達與聲音採信、隊內事件的反應延遲；aggression 另接 T 計畫（rush 比例、default 執行時機）；
+// 屬性包（attributes，0～100）接到行為：aim 瞄準誤差與收斂（狙擊手拿其他槍時打折）；reaction 開火前額外等待與對聲音的反應；
+// awareness 雷達與聲音採信、隊內事件的反應延遲、預瞄（目標出現在正看著的方向時初始瞄準誤差小）、餘光察覺（視野邊緣的敵人多快注意到）；
+// aggression 探頭等待與方式、撤退門檻、架槍時間、T 計畫（rush 比例、default 執行時機）；
 // discipline 隊友擋線的安全距離、守位中不追出射程外的目標、經濟服從（eco 不偷買）、不追殘血、殘局保槍；
 // movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步、佈置時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、T 計畫、角色）。
 // 本檔由 scripts/build-shooter-bots.ts 從 bots/shooter-src/ 產生：請修改原始碼後重新產生，不要直接改這個檔案。
@@ -43,17 +43,18 @@ const P = {
   confHurt: 60,
   confSound: 40,
   confDeath: 50,
-  decay0: 35,
-  decay100: 15,
+  decay0: 25,
+  decay100: 25,
   unconfirmed: 30,
-  clearTtl0: 5,
-  clearTtl100: 10,
+  clearTtl0: 7.5,
+  clearTtl100: 7.5,
   sectorHalfDeg: 15,
   bandNear: [0, 12],
   bandMid: [12, 30],
   bandFar: [30, 60],
   trust0: 0.7,
   trust100: 1,
+  scanEvery: 9,
   mateScanEvery: 2,
   dangerCoef: 0.6,
   sectorCoef: 0.3,
@@ -81,6 +82,11 @@ const P = {
   leadExtra: 2,
   react0: 3,
   react100: 0,
+  preAimErr: 0.6,
+  preAimDeg: 20,
+  periphDeg: 25,
+  notice0: 0.35,
+  notice100: 1,
   fireSpreadK: 2.6,
   awpErr: 0.22,
   awpClose: 8,
@@ -1701,13 +1707,19 @@ class Combat {
     this.errOff = lerp(P.aimErr0, P.aimErr100, off) * UNIT;
     this.convOff = lerp(P.aimConv0, P.aimConv100, off);
     this.reactExtra = Math.round(lerp(P.react0, P.react100, attrs.reaction));
+    this.preAim = 1 - P.preAimErr * attrs.awareness;
+    this.awareness = attrs.awareness;
+    this.wait = this.reactExtra;
+    this.notice = lerp(P.notice0, P.notice100, attrs.awareness);
+    /** 已注意到的敵人 → 最後看到的 tick @type {Map<number, number>} */
+    this.noticed = new Map();
     this.soundReact = Math.round(lerp(3, 0, attrs.reaction));
     this.lead = data.rules.reactionTicks + P.leadExtra;
     this.retreatHp = lerp(P.retreatHp0, P.retreatHp100, attrs.aggression);
     this.outnumber = Math.floor(lerp(P.outnumber0, P.outnumber100, attrs.aggression) + 1e-9);
     this.holdAngle = Math.round(lerp(P.holdAngle0, P.holdAngle100, attrs.aggression) * this.tps);
     this.sloppy = lerp(P.sloppyStop0, P.sloppyStop100, attrs.movement);
-    this.scanEvery = Math.round(lerp(14, 5, attrs.awareness));
+    this.scanEvery = P.scanEvery;
     this.friendClear = lerp(P.friendClear0, P.friendClear100, attrs.discipline);
     this.firm = attrs.discipline * 100 >= P.holdFirm;
     this.targetId = -1;
@@ -1734,6 +1746,7 @@ class Combat {
     this.blindBack = null;
   }
   reset() {
+    this.noticed = new Map();
     this.targetId = -1;
     this.seen = 0;
     this.errX = 0;
@@ -1832,6 +1845,15 @@ class Combat {
     }
     return null;
   }
+  /** 這個敵人注意到了沒（餘光察覺） @param {Observation} obs @param {Enemy} e */
+  spot(obs, e) {
+    const me = obs.me;
+    const t = obs.tick;
+    const last = this.noticed.get(e.id);
+    const ok = (last !== undefined && t - last <= this.tps) || e.firing || Math.abs(adiff(angleTo(me.x, me.y, e.x, e.y), me.facing)) <= P.periphDeg || this.h.random() < this.notice;
+    if (ok) this.noticed.set(e.id, t);
+    return ok;
+  }
   /**
    * @param {Observation} obs
    * @param {{ holding: boolean, objective: boolean }} ctx holding＝守位中；objective＝下包／拆包中（不開槍不移動）
@@ -1843,7 +1865,7 @@ class Combat {
     /** @type {Fight} */
     const out = { engaged: false, aim: null, fire: false, move: null, crouch: null, holdNav: false, cmds: [], why: '' };
     for (const s of me.shots) if (s.kill && this.targetId >= 0) this.perc.forget(this.targetId);
-    const vis = obs.enemies;
+    const vis = obs.enemies.filter((e) => this.spot(obs, e));
     if (vis.length === 0) return this.noEnemy(obs, out, ctx);
     let best = vis[0];
     let bestS = -Infinity;
@@ -1866,8 +1888,11 @@ class Combat {
     if (e.id !== this.targetId) {
       this.targetId = e.id;
       this.seen = 0;
+      const ahead = Math.abs(adiff(angleTo(me.x, me.y, e.x, e.y), me.facing)) <= P.preAimDeg;
+      const cut = ahead && this.h.random() < this.awareness ? 1 : 0;
+      this.wait = Math.max(Math.min(1, this.reactExtra), this.reactExtra - cut);
       const a = Math.floor(this.h.random() * 360);
-      const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random());
+      const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random()) * (ahead ? this.preAim : 1);
       this.errX = cosd(a) * mag;
       this.errY = sind(a) * mag;
     } else {
@@ -1939,8 +1964,10 @@ class Combat {
     const drift = (Math.abs(me.vx) + Math.abs(me.vy)) * this.rules.reactionTicks;
     for (const m of obs.teammates) {
       if (!m.alive) continue;
-      const s = segDist(m.x, m.y, me.x, me.y, aim.x, aim.y);
-      if (s.t > 0 && s.t < 1 && s.d < this.friendClear + drift) block = true;
+      for (const q of [aim, e]) {
+        const s = segDist(m.x, m.y, me.x, me.y, q.x, q.y);
+        if (s.t > 0 && s.t < 1 && s.d < this.friendClear + drift) block = true;
+      }
     }
     if (block) {
       this.blocked++;
@@ -1955,7 +1982,7 @@ class Combat {
       return this.finishMove(obs, out, e, false, d, ctx);
     }
     this.blocked = 0;
-    if (this.seen < this.reactExtra) {
+    if (this.seen < this.wait) {
       out.why = '反應中';
       return this.finishMove(obs, out, e, false, d, ctx);
     }
@@ -2686,7 +2713,7 @@ class Tactics {
     this.spawnHeld = 0;
     this.goTick = -1;
     this.readyAt = -1;
-    this.eventDelay = Math.round(lerp(P.eventDelay0, P.eventDelay100, attrs.awareness)) * data.rules.decisionInterval;
+    this.eventDelay = Math.round(lerp(P.eventDelay0, P.eventDelay100, attrs.awareness) * data.rules.decisionInterval);
     /** 地圖算出來的位置（第一次用到才算） @type {Map<string, Spot[]>} */
     this.spotCache = new Map();
     /** 戰鬥層（估計對手血量用）與導航層（躲閃光用）；由入口接上 @type {Combat | null} */

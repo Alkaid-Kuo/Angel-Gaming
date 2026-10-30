@@ -35,13 +35,23 @@ export class Combat {
     this.errOff = lerp(P.aimErr0, P.aimErr100, off) * UNIT;
     this.convOff = lerp(P.aimConv0, P.aimConv100, off);
     this.reactExtra = Math.round(lerp(P.react0, P.react100, attrs.reaction));
+    // 預瞄（2.1）：新目標出現在自己正看著的方向時，初始瞄準誤差縮小（警覺 0 → 100：× 1 → × (1 − P.preAimErr)），
+    // 而且有「警覺」的機率少等一次決策（至少還等一次，不會在瞄準還沒收斂時就開火）
+    this.preAim = 1 - P.preAimErr * attrs.awareness;
+    this.awareness = attrs.awareness;
+    this.wait = this.reactExtra;
+    // 餘光察覺（2.1）：離準心 P.periphDeg 度以外出現的敵人，每次決策以這個機率注意到（警覺 0 → 100）；開火的敵人一定注意到
+    this.notice = lerp(P.notice0, P.notice100, attrs.awareness);
+    /** 已注意到的敵人 → 最後看到的 tick @type {Map<number, number>} */
+    this.noticed = new Map();
     this.soundReact = Math.round(lerp(3, 0, attrs.reaction));
     this.lead = data.rules.reactionTicks + P.leadExtra;
     this.retreatHp = lerp(P.retreatHp0, P.retreatHp100, attrs.aggression);
     this.outnumber = Math.floor(lerp(P.outnumber0, P.outnumber100, attrs.aggression) + 1e-9);
     this.holdAngle = Math.round(lerp(P.holdAngle0, P.holdAngle100, attrs.aggression) * this.tps);
     this.sloppy = lerp(P.sloppyStop0, P.sloppyStop100, attrs.movement);
-    this.scanEvery = Math.round(lerp(14, 5, attrs.awareness));
+    // 守位掃描間隔（步驟 7 起固定：掃得越勤、看主要角度的時間越少，警覺高反而吃虧）
+    this.scanEvery = P.scanEvery;
     this.friendClear = lerp(P.friendClear0, P.friendClear100, attrs.discipline);
     this.firm = attrs.discipline * 100 >= P.holdFirm;
     this.targetId = -1;
@@ -69,6 +79,7 @@ export class Combat {
   }
 
   reset() {
+    this.noticed = new Map();
     this.targetId = -1;
     this.seen = 0;
     this.errX = 0;
@@ -176,6 +187,16 @@ export class Combat {
     return null;
   }
 
+  /** 這個敵人注意到了沒（餘光察覺） @param {import('./base.js').Observation} obs @param {import('./base.js').Enemy} e */
+  spot(obs, e) {
+    const me = obs.me;
+    const t = obs.tick;
+    const last = this.noticed.get(e.id);
+    const ok = (last !== undefined && t - last <= this.tps) || e.firing || Math.abs(adiff(angleTo(me.x, me.y, e.x, e.y), me.facing)) <= P.periphDeg || this.h.random() < this.notice;
+    if (ok) this.noticed.set(e.id, t);
+    return ok;
+  }
+
   /**
    * 交戰
    * @param {import('./base.js').Observation} obs
@@ -188,7 +209,7 @@ export class Combat {
     /** @type {Fight} */
     const out = { engaged: false, aim: null, fire: false, move: null, crouch: null, holdNav: false, cmds: [], why: '' };
     for (const s of me.shots) if (s.kill && this.targetId >= 0) this.perc.forget(this.targetId);
-    const vis = obs.enemies;
+    const vis = obs.enemies.filter((e) => this.spot(obs, e));
     if (vis.length === 0) return this.noEnemy(obs, out, ctx);
     // ── 目標：威脅排序 ──
     let best = vis[0];
@@ -212,8 +233,11 @@ export class Combat {
     if (e.id !== this.targetId) {
       this.targetId = e.id;
       this.seen = 0;
+      const ahead = Math.abs(adiff(angleTo(me.x, me.y, e.x, e.y), me.facing)) <= P.preAimDeg;
+      const cut = ahead && this.h.random() < this.awareness ? 1 : 0;
+      this.wait = Math.max(Math.min(1, this.reactExtra), this.reactExtra - cut);
       const a = Math.floor(this.h.random() * 360);
-      const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random());
+      const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random()) * (ahead ? this.preAim : 1);
       this.errX = cosd(a) * mag;
       this.errY = sind(a) * mag;
     } else {
@@ -290,8 +314,11 @@ export class Combat {
     const drift = (Math.abs(me.vx) + Math.abs(me.vy)) * this.rules.reactionTicks;
     for (const m of obs.teammates) {
       if (!m.alive) continue;
-      const s = segDist(m.x, m.y, me.x, me.y, aim.x, aim.y);
-      if (s.t > 0 && s.t < 1 && s.d < this.friendClear + drift) block = true;
+      // 到瞄準點與到敵人本人兩條線都要避開隊友（瞄準點還帶著誤差）
+      for (const q of [aim, e]) {
+        const s = segDist(m.x, m.y, me.x, me.y, q.x, q.y);
+        if (s.t > 0 && s.t < 1 && s.d < this.friendClear + drift) block = true;
+      }
     }
     if (block) {
       this.blocked++;
@@ -306,7 +333,7 @@ export class Combat {
       return this.finishMove(obs, out, e, false, d, ctx);
     }
     this.blocked = 0;
-    if (this.seen < this.reactExtra) {
+    if (this.seen < this.wait) {
       out.why = '反應中';
       return this.finishMove(obs, out, e, false, d, ctx);
     }

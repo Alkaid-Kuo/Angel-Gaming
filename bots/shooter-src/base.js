@@ -48,14 +48,14 @@ export const P = {
   confHurt: 60,
   confSound: 40,
   confDeath: 50,
-  /** 信心每秒衰減：警覺 0 → 100 */
-  decay0: 35,
-  decay100: 15,
+  /** 信心每秒衰減（步驟 7 起不跟警覺連動：衰減慢會一直防著過時的位置，警覺高反而吃虧） */
+  decay0: 25,
+  decay100: 25,
   /** 低於這個信心就移到「未確認」 */
   unconfirmed: 30,
-  /** 「已清空」維持幾秒（警覺 0 → 100） */
-  clearTtl0: 5,
-  clearTtl100: 10,
+  /** 「已清空」維持幾秒（步驟 7 起不跟警覺連動，理由同上） */
+  clearTtl0: 7.5,
+  clearTtl100: 7.5,
   /** 聲音扇形半寬（度）與距離帶（格） */
   sectorHalfDeg: 15,
   bandNear: [0, 12],
@@ -64,6 +64,8 @@ export const P = {
   /** 雷達與聲音的採信倍率：警覺 0 → 100 */
   trust0: 0.7,
   trust100: 1,
+  /** 守位時輪流看幾個方向：每幾次決策換一個 */
+  scanEvery: 9,
   /** 隊友視錐掃描（已清空）每幾次決策做一次 */
   mateScanEvery: 2,
 
@@ -113,6 +115,13 @@ export const P = {
   /** 看到新目標後額外等幾次決策才開火：reaction 0 → 100 */
   react0: 3,
   react100: 0,
+  /** 預瞄：新目標在自己朝向 ±preAimDeg 度內出現時，初始瞄準誤差 × (1 − preAimErr × 警覺) */
+  preAimErr: 0.6,
+  preAimDeg: 20,
+  /** 餘光察覺：離準心這麼多度以外出現的敵人，每次決策注意到的機率（警覺 0 → 100） */
+  periphDeg: 25,
+  notice0: 0.35,
+  notice100: 1,
   /** 開火散佈門檻：散佈 ≤ 目標半張角 × K（或基礎散佈）才開火 */
   fireSpreadK: 2.6,
   /** 狙擊開火的瞄準誤差上限（格） */

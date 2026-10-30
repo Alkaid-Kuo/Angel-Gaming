@@ -119,7 +119,7 @@ export class Tactics {
     this.spawnHeld = 0;
     this.goTick = -1;
     this.readyAt = -1;
-    this.eventDelay = Math.round(lerp(P.eventDelay0, P.eventDelay100, attrs.awareness)) * data.rules.decisionInterval;
+    this.eventDelay = Math.round(lerp(P.eventDelay0, P.eventDelay100, attrs.awareness) * data.rules.decisionInterval);
     /** 地圖算出來的位置（第一次用到才算） @type {Map<string, import('./analysis.js').Spot[]>} */
     this.spotCache = new Map();
     /** 戰鬥層（估計對手血量用）與導航層（躲閃光用）；由入口接上 @type {import('./combat.js').Combat | null} */
