@@ -1,20 +1,23 @@
 // 正式版經營介面（天使金規格）入口：畫面切換、外框、視窗、比賽日演出、事件處理。
 // 版面是 1920×1080 的舞台，等比縮放到視窗（stage.ts）。遊戲狀態與存檔沿用 ../manage/store.ts，跟舊介面同一份存檔。
 // 開新局時選項目（攻防戰／軍團戰暫代）；攻防戰的比賽在 Worker 池裡真打，推進時顯示「模擬中 n／m 場」。
+// 觀戰：賽制自報能觀戰時，結果幕與聯賽頁的比賽有「觀戰」，把存檔裡的請求單寫成觀戰票、開新分頁 web/shooter.html#watch 重播。
 import type { Command } from '../../manage/index.ts';
 import { GAME_KINDS, ManageGame } from '../manage/store.ts';
 import { EMBLEM_NAMES, type EmblemName } from '../club/art.ts';
 import { lineupOf, newClubUi } from '../club/model.ts';
+import { lineageName } from '../manage/format.ts';
+import { WATCH_HASH, writeTicket } from '../shooter/watch.ts';
 import { loadPrefs, savePrefs } from '../club/prefs.ts';
 import { mountCity, type CityView } from '../sketch/city.ts';
 import { dust, initStage, still } from '../sketch/stage.ts';
 import { hubPanels, hubTags } from './hub.ts';
 import { financeScreen, inboxScreen, leagueScreen } from './info.ts';
 import type { Ctx, GameUi, Screen } from './kit.ts';
-import { STANDALONE, esc, icon, myCrest, newGameUi, runStep, slotName, wan } from './kit.ts';
+import { STANDALONE, esc, icon, myCrest, newGameUi, runStep, slotName, teamName, wan } from './kit.ts';
 import { bettingScreen, trainingScreen } from './ops.ts';
 import { rail, topBar } from './shell.ts';
-import { buildScenes, snapshot, type Scene } from './show.ts';
+import { buildScenes, snapshot, stageName, type Scene } from './show.ts';
 import { marketScreen, playerScreen, squadScreen } from './squad.ts';
 import { createScreen, titleScreen, type Draft } from './title.ts';
 
@@ -242,6 +245,41 @@ async function doAdvance(): Promise<void> {
   busy = false;
   progress = null;
   render();
+}
+
+// ───── 觀戰 ─────
+/**
+ * 開新分頁重播一場打完的比賽（新分頁：比賽日演出與經營畫面留在原分頁，看完關掉就回來）。
+ * 被瀏覽器擋掉新分頁時改在本分頁開（回經營要按「繼續」讀檔）。
+ */
+function openWatch(fixtureId: string): void {
+  if (!game) return;
+  const ctx = context();
+  const f = ctx.v.fixtures.find((x) => x.id === fixtureId);
+  const t = game.watchTicket(fixtureId);
+  if (!t || !f?.match) {
+    toast('這場比賽不能觀戰', true);
+    return;
+  }
+  const me = ctx.v.me.teamId;
+  const specs = [...t.request.a.players, ...t.request.b.players];
+  const ok = writeTicket({
+    v: 1,
+    request: t.request,
+    outcome: t.outcome,
+    names: [...f.match.home, ...f.match.away].map((id) => ctx.pm.get(id)?.name ?? id),
+    // 打那場時的版本（之後升版不影響）
+    tags: specs.map((s) => `${lineageName(ctx.c, s.lineageId)} v${s.version}`),
+    teams: [teamName(ctx.v, f.home), teamName(ctx.v, f.away)],
+    mine: f.home === me ? 0 : f.away === me ? 1 : null,
+    title: stageName(f),
+  });
+  if (!ok) {
+    toast('無法寫入觀戰資料（瀏覽器儲存空間不可用）', true);
+    return;
+  }
+  const url = `./shooter.html${WATCH_HASH}`;
+  if (!window.open(url, '_blank')) location.href = url;
 }
 
 // ───── 指令 ─────
@@ -492,6 +530,7 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     showScene();
     actions['to-create'](document.body);
   },
+  watch: (el) => openWatch(el.dataset.f as string),
   'cine-next': () => nextScene(),
   'cine-skip': () => skipScenes(),
 };

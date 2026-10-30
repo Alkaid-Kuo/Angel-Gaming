@@ -24,10 +24,11 @@ function fixtureRow(ctx: Ctx, f: KnownFixture): string {
   const me = v.me.teamId;
   const s = f.score;
   const won = (id: string): boolean => !!s && (f.home === id ? s.home > s.away : s.away > s.home);
-  const dots = '';
-  return `<div class="mt ${f.home === me || f.away === me ? 'me' : ''}"><span class="t ${won(f.home) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.home, 28)}${esc(teamName(v, f.home))}</span>
-    <span class="vs">${s ? `<b>${s.home}</b>:<b>${s.away}</b>` : 'VS'}${dots ? `<span class="dots">${dots}</span>` : ''}</span>
-    <span class="t r ${won(f.away) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.away, 28)}${esc(teamName(v, f.away))}</span></div>`;
+  // 打完、賽制能觀戰（閘道自報）才有「觀戰」
+  const watch = f.match?.watchable ? `<button class="wt" data-act="watch" data-f="${esc(f.id)}" title="用存檔的請求單重播這一場">${icon('play', 14)}<span>觀戰</span></button>` : '';
+  return `<div class="mt ${f.home === me || f.away === me ? 'me' : ''} ${watch ? 'can-watch' : ''}"><span class="t ${won(f.home) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.home, 28)}${esc(teamName(v, f.home))}</span>
+    <span class="vs">${s ? `<b>${s.home}</b>:<b>${s.away}</b>` : 'VS'}</span>
+    <span class="t r ${won(f.away) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.away, 28)}${esc(teamName(v, f.away))}</span>${watch}</div>`;
 }
 
 export function leagueScreen(ctx: Ctx): string {

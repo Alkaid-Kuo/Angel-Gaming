@@ -48,7 +48,7 @@ export function countUps(root: HTMLElement, speed: number): void {
   });
 }
 
-function stageName(f: KnownFixture): string {
+export function stageName(f: KnownFixture): string {
   return f.stage === 'regular' ? `例行賽 · 第 ${f.week} 週` : f.stage === 'semi' ? '季後賽 · 準決賽' : f.stage === 'final' ? '季後賽 · 決賽' : '季後賽 · 季軍戰';
 }
 
@@ -176,7 +176,7 @@ function resultScene(ctx: Ctx, f: KnownFixture, before: Snapshot, summaryWeek: n
         <div class="gn"><small>名氣</small><div class="v"><span class="num">${before.fame}</span><span>→</span><span class="num ${fameD >= 0 ? 'up' : ''}">${v.me.fame}</span></div><p>每週贊助 ${wan(v.me.weeklySponsor)} 萬</p></div>
         <div class="gn"><small>名次</small><div class="v"><span class="num">${before.rank || '—'}</span><span>→</span><span class="num up">${rankOf(v, me)}</span></div><p>${f.stage === 'regular' ? '例行賽積分榜' : '季後賽'}</p></div>
       </section>
-      <div class="ctl"><button class="btn" data-act="cine-next"><b>繼續</b><span>NEXT</span></button></div></div>`,
+      <div class="ctl">${f.match?.watchable ? `<button class="btn ghost" data-act="watch" data-f="${esc(f.id)}"><b>觀戰</b><span>WATCH</span></button>` : ''}<button class="btn" data-act="cine-next"><b>繼續</b><span>NEXT</span></button></div></div>`,
     auto: 0,
   };
 }

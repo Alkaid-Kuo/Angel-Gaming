@@ -31,6 +31,8 @@ export interface InputHost {
   /** 觀戰模式：全圖透視、播放速度 */
   toggleXray(): void;
   speed(step: number): void;
+  /** 觀戰模式：跳到下一回合 */
+  skipRound(): void;
   toggleFullscreen(): void;
 }
 
@@ -204,6 +206,9 @@ export class ShooterInput {
         return;
       case 'BracketRight':
         this.host.speed(1);
+        return;
+      case 'KeyN':
+        if (this.host.meta.spectate) this.host.skipRound();
         return;
       case 'KeyF':
         this.host.toggleFullscreen();

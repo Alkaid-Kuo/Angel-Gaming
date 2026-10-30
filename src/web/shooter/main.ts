@@ -1,19 +1,25 @@
 // CS 射擊可玩版（步驟 4）：開局畫面 → Worker 跑比賽（30 TPS）→ 主執行緒每個 rAF 畫最新的觀察資料（前後 tick 插值）。
 // 主執行緒不持有引擎；玩家模式的畫面只來自觀察資料，觀戰模式才有全狀態。
+// 經營層觀戰（web/shooter.html#watch）：讀正式版寫的觀戰票（watch.ts），請 Worker 用請求單重跑那一場；外框換天使金、結束時對照存檔成績單、可回經營。
+// 回放下載：比賽結束後向 Worker 要回放（ShooterReplay JSON），可用 npx tsx src/cli/main.ts shooter replay 檔名 核對雜湊。
 import type { BuyItem, ShooterCommand } from '../../shooter/api.ts';
 import { BuyMenu } from './buy.ts';
-import { ShooterHud, roundBanner } from './hud.ts';
+import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { FromShooterWorker, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
+import type { ShooterReplay } from '../../shooter/runner.ts';
+import { WATCH_HASH, readTicket, type WatchTicket } from './watch.ts';
 import { DAMAGE_MS, HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type DamagePop, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 /** 縮放倍率（1 = 剛好看得到 30 格視野距離） */
 const ZOOMS = [0.55, 0.7, 0.85, 1, 1.2, 1.45];
-const SPEEDS = [0.5, 1, 2, 4, 8];
+const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 let worker: Worker | null = null;
 let game: Game | null = null;
+/** 經營層觀戰的票（#watch 開啟時才有） */
+let ticket: WatchTicket | null = null;
 
 class Game {
   readonly meta: ShooterMeta;
@@ -58,7 +64,11 @@ class Game {
     this.canvas = this.root.querySelector('.sg-canvas')!;
     this.mini = this.root.querySelector('.sg-mini')!;
     this.renderer = new ShooterRenderer(this.canvas, meta);
-    this.hud = new ShooterHud(this.root, meta);
+    // 經營層觀戰：外框（頂列、計分板、結束畫面）換天使金
+    this.root.classList.toggle('angel', meta.watch !== undefined);
+    // 別隊的比賽：外框不用金（金只給我方）
+    this.root.classList.toggle('neutral', meta.watch !== undefined && meta.watch.mine === null);
+    this.hud = new ShooterHud(this.root, meta, ticket);
     this.buy = new BuyMenu(this.root.querySelector('.sg-buy')!, meta, (items: BuyItem[]) => this.send([{ type: 'buy', items }]));
     this.zoomIdx = meta.spectate ? 2 : 3;
     this.input = new ShooterInput(this.canvas, {
@@ -87,12 +97,19 @@ class Game {
         // 全圖透視只在觀戰模式有
         if (meta.spectate) this.xray = !this.xray;
       },
-      speed: (step) => {
-        if (!meta.spectate) return;
-        this.speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, this.speedIdx + step));
-        this.post({ type: 'speed', speed: SPEEDS[this.speedIdx] });
-      },
+      speed: (step) => this.setSpeed(this.speedIdx + step),
+      skipRound: () => this.skipRound(),
       toggleFullscreen,
+    });
+    this.hud.ctl?.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('button');
+      if (b === null || b.disabled) return;
+      if (b.dataset.act === 'pause') this.togglePause();
+      else if (b.dataset.act === 'speed') this.setSpeed(Number(b.dataset.i));
+      else if (b.dataset.act === 'skip') this.skipRound();
+      else if (b.dataset.act === 'quit') home();
+      // 按鈕不留焦點：空白鍵是暫停，不要再觸發一次按鈕
+      b.blur();
     });
     this.hud.pause.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).closest('button')?.dataset.act;
@@ -102,8 +119,11 @@ class Game {
     });
     this.hud.end.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).closest('button')?.dataset.act;
-      if (act === 'again') start({ team: meta.spectate ? 'T' : meta.playerId < 5 ? 'T' : 'CT', seed: randomSeed(), spectate: meta.spectate });
-      else if (act === 'home') home();
+      if (act === 'again') {
+        if (ticket !== null) startWatch(ticket);
+        else start({ team: meta.spectate ? 'T' : meta.playerId < 5 ? 'T' : 'CT', seed: randomSeed(), spectate: meta.spectate });
+      } else if (act === 'home') home();
+      else if (act === 'replay') this.post({ type: 'getReplay' });
     });
     this.raf = requestAnimationFrame((t) => this.frame(t));
     // 切到別的分頁：玩家模式自動暫停（Worker 不會停，回來時不要已經被打死）
@@ -120,8 +140,22 @@ class Game {
     if (this.over !== null) return;
     this.paused = !this.paused;
     this.post({ type: 'pause', paused: this.paused });
-    this.hud.setPaused(this.paused);
+    // 觀戰有控制列，暫停時不蓋選單（畫面要看得到）；玩家模式照舊開暫停選單
+    this.hud.setPaused(this.paused && !this.meta.spectate);
     if (this.paused) this.input.releaseAll();
+  }
+
+  /** 觀戰速度（SPEEDS 的索引） */
+  private setSpeed(i: number): void {
+    if (!this.meta.spectate || !Number.isFinite(i)) return;
+    this.speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, i));
+    this.post({ type: 'speed', speed: SPEEDS[this.speedIdx] });
+  }
+
+  /** 觀戰：跳到下一回合（Worker 同步推進，暫停中也可以） */
+  private skipRound(): void {
+    if (!this.meta.spectate || this.over !== null) return;
+    this.post({ type: 'skipRound' });
   }
 
   private send(cmds: ShooterCommand[]): void {
@@ -134,7 +168,13 @@ class Game {
     // 回合提示、回合紀錄
     const banner = roundBanner(old?.view ?? null, f.view, this.meta);
     if (banner !== null) this.hud.showBanner(banner, now);
-    if (old !== null && old.view.round.ended === null && f.view.round.ended !== null) this.hud.rounds.push({ number: f.view.round.number, winner: f.view.round.ended.winner, reason: f.view.round.ended.reason });
+    // 跳回合略過的回合先補上（它們的結束 frame 沒送過來）
+    for (const r of f.skipped ?? []) this.hud.rounds.push(r);
+    if (old !== null && old.view.round.ended === null && f.view.round.ended !== null) {
+      const w = f.view.round.ended.winner;
+      const row = f.board.find((b) => b.team === w);
+      this.hud.rounds.push({ number: f.view.round.number, winner: w, reason: f.view.round.ended.reason, ...(row !== undefined ? { winnerGroup: this.meta.groups[row.id] } : {}) });
+    }
     if (old !== null && old.self.round.number !== f.self.round.number) {
       this.throwCdUntil = -1;
       this.input.resync();
@@ -212,6 +252,17 @@ class Game {
     this.renderer.draw(input);
     this.renderer.drawMinimap(this.mini, input);
     this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.xray });
+    this.hud.updateCtl(SPEEDS[this.speedIdx], this.paused, this.over !== null);
+  }
+
+  /** Worker 送來的回放 → 下載 JSON */
+  saveReplay(replay: ShooterReplay): void {
+    const name = ticket !== null ? `angel-watch-${replay.header.seed}.json` : `shooter-replay-${replay.header.seed}.json`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(replay)], { type: 'application/json' }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   private readonly onHidden = (): void => {
@@ -229,7 +280,8 @@ class Game {
   };
 
   private readonly onUnload = (e: BeforeUnloadEvent): void => {
-    if (this.over !== null) return;
+    // 觀戰隨時可以離開（重播不會丟東西）
+    if (this.over !== null || this.meta.spectate) return;
     e.preventDefault();
     e.returnValue = '';
   };
@@ -285,6 +337,9 @@ function ensureWorker(): Worker {
       case 'over':
         game?.onOver(msg.summary);
         break;
+      case 'replay':
+        game?.saveReplay(msg.replay);
+        break;
       case 'error':
         console.error(msg.message);
         alert(`引擎錯誤：${msg.message}`);
@@ -300,7 +355,32 @@ function start(s: ShooterSetup): void {
   ensureWorker().postMessage({ type: 'start', setup: s } satisfies ToShooterWorker);
 }
 
+/** 經營層觀戰：Worker 用請求單重跑那一場（基準 Bot 第一次觀戰時在 Worker 裡編譯，會停一下） */
+function startWatch(t: WatchTicket): void {
+  $('setup').innerHTML = `<section class="card sg-loading"><h2>準備觀戰</h2><p class="muted">${esc(t.teams[0])} VS ${esc(t.teams[1])}・${esc(t.title)}：載入基準 Bot、用存檔的請求單重跑這一場…</p></section>`;
+  ensureWorker().postMessage({ type: 'watch', watch: { request: t.request, names: t.names, tags: t.tags, teams: t.teams, mine: t.mine } } satisfies ToShooterWorker);
+}
+
+/**
+ * 回經營頁：由經營頁開的新分頁就關掉（原分頁的演出與畫面還在）；
+ * 同分頁開的（新分頁被擋）回上一頁；直接開網址的導到 game.html。
+ */
+function backToManage(): void {
+  if (window.opener !== null) {
+    window.close();
+    // 關不掉時（瀏覽器不允許）退回導頁
+    setTimeout(() => {
+      location.href = './game.html';
+    }, 300);
+  } else if (document.referrer.includes('/game.html') && history.length > 1) history.back();
+  else location.href = './game.html';
+}
+
 function home(): void {
+  if (ticket !== null) {
+    backToManage();
+    return;
+  }
   worker?.postMessage({ type: 'stop' } satisfies ToShooterWorker);
   game?.dispose();
   game = null;
@@ -310,6 +390,13 @@ function home(): void {
 }
 
 function init(): void {
+  if (location.hash === WATCH_HASH) {
+    document.title = '天使戰隊 攻防戰 觀戰';
+    ticket = readTicket();
+    if (ticket !== null) startWatch(ticket);
+    else $('setup').innerHTML = '<section class="card"><h2>沒有要觀戰的比賽</h2><p class="muted">從經營頁（web/game.html）比賽日的結果畫面或聯賽頁點「觀戰」，會在這裡重播那一場。</p><div class="row"><a class="primary" href="./game.html">回經營頁</a><a href="./shooter.html">攻防戰試玩</a></div></section>';
+    return;
+  }
   const seed = $<HTMLInputElement>('seed');
   seed.value = String(randomSeed());
   $('reroll').addEventListener('click', () => {

@@ -119,3 +119,45 @@
 .sg-pause .col { display: flex; flex-direction: column; gap: 8px; }
 .sg-pause .col button { justify-content: center; }
 .sg-pause p { margin: 0; }
+
+/* 觀戰控制列（陪練觀戰與經營層觀戰）：暫停、速度、下一回合、離開 */
+.sg-ctl { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; background: var(--sg-panel); border: 1px solid var(--sg-line); border-radius: 10px; padding: 6px 8px; z-index: 4; }
+.sg-ctl button { padding: 5px 10px; font-size: 13px; gap: 6px; }
+.sg-ctl .sp { display: flex; align-items: center; gap: 3px; padding: 0 6px; border-left: 1px solid var(--sg-line); border-right: 1px solid var(--sg-line); }
+.sg-ctl .sp button { min-width: 42px; justify-content: center; }
+.sg-ctl .sp button.on { background: rgba(248, 250, 252, 0.16); border-color: #f8fafc; font-weight: 700; }
+.sg-ctl kbd { margin-left: 2px; opacity: 0.7; }
+.sg .tg { margin-left: 6px; font-size: 11px; color: var(--muted); font-weight: 400; }
+.sg-loading { max-width: 640px; margin: 18vh auto 0; }
+.sg-end .ck { margin: 10px 0 2px; font-size: 14px; font-weight: 700; }
+.sg-end .ck.bad { color: #ff5d5d; }
+
+/* 經營層觀戰的天使金外框（只動 chrome：頂列、提示、擊殺訊息、計分板、控制列、結束畫面；地圖與角色的 T／CT 配色不動）
+   色票同 web/sketch/angel.css：墨黑為底；金只給我方與主要行動、紅只給對手、其他白灰 */
+.sg.angel { --sg-panel: rgba(11, 14, 20, 0.88); --sg-line: rgba(238, 242, 246, 0.14); --ag-gold: #f0b54a; --ag-red: #ff5d5d; --ag-white: #eef2f6; --ag-grey: #8b95a4; font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; color: var(--ag-white); }
+.sg.angel .sg-top { border-radius: 0; border: 0; background: linear-gradient(150deg, #222a39, #0d1118); box-shadow: inset 0 0 0 1px var(--sg-line); clip-path: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%); }
+.sg.angel .sg-top .tm { padding: 8px 22px; }
+.sg.angel .sg-top .tm b { font-size: 18px; font-weight: 900; letter-spacing: 0.08em; }
+.sg.angel .sg-top .tm small { font-family: "Share Tech Mono", monospace; font-size: 11px; letter-spacing: 0.2em; color: var(--ag-grey); }
+.sg.angel .sg-top .sc { font-family: "Barlow Condensed", sans-serif; font-style: italic; font-size: 34px; }
+.sg.angel .sg-top .clock { font-family: "Barlow Condensed", sans-serif; font-style: italic; }
+.sg.angel .sg-top .mid { border-color: var(--sg-line); }
+.sg.angel .sg-top .mid.planted .clock { color: var(--ag-red); }
+.sg.angel .sg-top .rd, .sg.angel .sg-top .ph { color: var(--ag-grey); }
+.sg.angel .sg-hint, .sg.angel .sg-feed .k, .sg.angel .sg-left, .sg.angel .sg-right, .sg.angel .sg-ctl { border-radius: 0; }
+.sg.angel .sg-ctl button { border-radius: 0; background: rgba(255, 255, 255, 0.03); border: 0; box-shadow: inset 0 0 0 1px var(--sg-line); color: var(--ag-white); }
+.sg.angel .sg-ctl .sp button.on { background: rgba(240, 181, 74, 0.16); box-shadow: inset 0 0 0 1px var(--ag-gold); color: var(--ag-gold); }
+.sg.angel .sg-board, .sg.angel .sg-end .box { border-radius: 0; border: 0; background: linear-gradient(150deg, #222a39, #0d1118); box-shadow: inset 4px 0 0 var(--ag-gold), inset 0 0 0 1px var(--sg-line); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%); }
+.sg.angel.neutral .sg-board, .sg.angel.neutral .sg-end .box { box-shadow: inset 4px 0 0 var(--ag-white), inset 0 0 0 1px var(--sg-line); }
+.sg.angel .sg-end .en { font-family: "Share Tech Mono", monospace; font-size: 12px; letter-spacing: 0.3em; color: var(--ag-grey); }
+.sg.angel .sg-end h2 { font-size: 46px; font-weight: 900; letter-spacing: 0.3em; transform: skewX(-7deg); margin: 2px 0 6px; }
+.sg.angel .sg-end h2.win { color: var(--ag-gold); }
+.sg.angel .sg-end h2.lose { color: transparent; -webkit-text-stroke: 1.5px var(--ag-red); }
+.sg.angel .sg-end .vsl { display: flex; align-items: center; gap: 22px; font-size: 22px; font-weight: 900; letter-spacing: 0.06em; }
+.sg.angel .sg-end .vsl .sc { font-family: "Barlow Condensed", sans-serif; font-style: italic; font-weight: 800; font-size: 48px; color: var(--ag-white); }
+.sg.angel .sg-end .vsl .sc i { font-style: normal; color: var(--ag-grey); margin: 0 8px; }
+.sg.angel .sg-end .ck.ok { color: var(--ag-white); }
+.sg.angel .sg-end .ck.bad { color: var(--ag-red); }
+.sg.angel button { border-radius: 0; }
+.sg.angel button.primary { background: var(--ag-gold); border-color: var(--ag-gold); color: #0b0e14; font-weight: 900; letter-spacing: 0.12em; }
+.sg.angel .sg-pause .box { border-radius: 0; }

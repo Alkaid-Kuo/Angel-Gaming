@@ -1,11 +1,21 @@
 // CS 射擊可玩版的 HUD：比分與時間、血甲錢、武器彈藥、道具格與投擲冷卻、炸彈狀態、回合提示、擊殺訊息、計分板、結束畫面。
 // 全部從觀察資料（與計分板的公開資訊）取值。
+// 經營層觀戰（meta.watch）：頂列、計分板、擊殺訊息、結束畫面改用天使金色票（我方金、對手紅；別隊的比賽主隊白、客隊灰），
+// 顯示隊名、選手名、角色與版本；地圖、角色、彈道的 T／CT 配色不動。
 import type { RoundEndReason, ShooterObservation, Team } from '../../shooter/api.ts';
 import { GRENADE_TAG, TEAM_COLOR, WEAPON_TAG } from './render.ts';
 import type { BoardRow, KillFeedItem, ShooterFrame, ShooterMeta, ShooterSummary } from './protocol.ts';
+import type { WatchTicket } from './watch.ts';
+
+/** 天使金色票（web/sketch/angel.css） */
+export const ANGEL = { gold: '#f0b54a', red: '#ff5d5d', white: '#eef2f6', grey: '#8b95a4' } as const;
+/** 觀戰速度（[ ] 或控制列切換） */
+export const SPEEDS = [0.5, 1, 2, 4, 8] as const;
 
 export const REASON: Readonly<Record<RoundEndReason, string>> = { elimination: '殲滅', bomb: '炸彈引爆', defuse: '拆彈成功', timeout: '時間到' };
 const FEED_MS = 6000;
+/** 名字、隊名來自經營層存檔（玩家可自訂隊名），放進 HTML 前跳脫 */
+const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const BANNER_MS = 3200;
 
 const clock = (ticks: number, tps: number): string => {
@@ -32,6 +42,14 @@ export interface RoundMark {
   readonly number: number;
   readonly winner: Team;
   readonly reason: RoundEndReason;
+  /** 勝方組別（0＝上半場 T 的那一組） */
+  readonly winnerGroup?: 0 | 1;
+}
+
+/** 經營層觀戰的重播與存檔成績單是否一致（勝方、回合數、逐回合勝方與累計比分） */
+export function sameOutcome(a: NonNullable<ShooterSummary['outcome']>, b: WatchTicket['outcome']): boolean {
+  if (a.winner !== b.winner || a.rounds.length !== b.rounds.length) return false;
+  return a.rounds.every((r, i) => r.winner === b.rounds[i].winner && r.scoreA === b.rounds[i].scoreA && r.scoreB === b.rounds[i].scoreB);
 }
 
 export class ShooterHud {
@@ -47,6 +65,9 @@ export class ShooterHud {
   readonly end: HTMLElement;
   /** 暫停選單（Esc）：繼續、全螢幕、離開比賽 */
   readonly pause: HTMLElement;
+  /** 觀戰控制列（暫停、速度、下一回合）；玩家模式沒有 */
+  readonly ctl: HTMLElement | null;
+  private readonly ticket: WatchTicket | null;
   private feedItems: { item: KillFeedItem; t: number }[] = [];
   private bannerUntil = 0;
   private boardShown = false;
@@ -54,8 +75,9 @@ export class ShooterHud {
   private myDeath: KillFeedItem | null = null;
   readonly rounds: RoundMark[] = [];
 
-  constructor(root: HTMLElement, meta: ShooterMeta) {
+  constructor(root: HTMLElement, meta: ShooterMeta, ticket: WatchTicket | null = null) {
     this.meta = meta;
+    this.ticket = meta.watch ? ticket : null;
     this.top = el('div', 'sg-top', root);
     this.feed = el('div', 'sg-feed', root);
     this.banner = el('div', 'sg-banner hidden', root);
@@ -66,8 +88,9 @@ export class ShooterHud {
     this.board = el('div', 'sg-board hidden', root);
     this.end = el('div', 'sg-end hidden', root);
     this.pause = el('div', 'sg-pause hidden', root);
+    this.ctl = meta.spectate ? el('div', 'sg-ctl', root) : null;
     const resume = meta.spectate ? '繼續（空白鍵）' : '繼續（Esc）';
-    const quit = meta.spectate ? '離開觀戰' : '離開比賽';
+    const quit = meta.watch ? '回經營' : meta.spectate ? '離開觀戰' : '離開比賽';
     this.pause.innerHTML =
       `<div class="box"><b>暫停</b>` +
       `<div class="col"><button type="button" class="primary" data-act="resume">${resume}</button>` +
@@ -121,10 +144,40 @@ export class ShooterHud {
     return weapon === 'bomb' ? '炸彈' : weapon in WEAPON_TAG ? WEAPON_TAG[weapon as keyof typeof WEAPON_TAG] : GRENADE_TAG[weapon as keyof typeof GRENADE_TAG];
   }
 
+  /** 組別的外框顏色（只在經營層觀戰）：我方金、對手紅；別隊的比賽主隊白、客隊灰 */
+  groupColor(g: 0 | 1): string {
+    const mine = this.meta.watch?.mine ?? null;
+    if (mine === null) return g === 0 ? ANGEL.white : ANGEL.grey;
+    return g === mine ? ANGEL.gold : ANGEL.red;
+  }
+
+  /** 選手名字的顏色：觀戰依組別、其他依陣營 */
+  private colorOf(id: number, team: Team | undefined): string {
+    if (this.meta.watch) return this.groupColor(this.meta.groups[id]);
+    return team !== undefined ? TEAM_COLOR[team] : '#e2e8f0';
+  }
+
+  /** 目前當 team 的是哪一組（看名單裡任一個該陣營的人） */
+  private groupOfTeam(team: Team, board: readonly BoardRow[]): 0 | 1 {
+    const row = board.find((b) => b.team === team);
+    return row !== undefined ? this.meta.groups[row.id] : team === 'T' ? 0 : 1;
+  }
+
   private name(id: number, board: readonly BoardRow[]): string {
-    const team = board[id]?.team;
-    const color = team !== undefined ? TEAM_COLOR[team] : '#e2e8f0';
-    return `<span style="color:${color}">${this.meta.names[id] ?? `#${id}`}</span>`;
+    return `<span style="color:${this.colorOf(id, board[id]?.team)}">${this.meta.names[id] ?? `#${id}`}</span>`;
+  }
+
+  /** 觀戰控制列：暫停／播放、速度、下一回合（按鈕的 data-act 由 main.ts 處理） */
+  updateCtl(speed: number, paused: boolean, over: boolean): void {
+    if (this.ctl === null) return;
+    const sp = SPEEDS.map((s, i) => `<button type="button" class="${s === speed ? 'on' : ''}" data-act="speed" data-i="${i}">${s}×</button>`).join('');
+    setHtml(
+      this.ctl,
+      `<button type="button" data-act="pause" ${over ? 'disabled' : ''}>${paused ? '▶ 播放' : 'Ⅱ 暫停'}<kbd>空白</kbd></button>` +
+        `<span class="sp">${sp}<kbd>[</kbd><kbd>]</kbd></span>` +
+        `<button type="button" data-act="skip" ${over ? 'disabled' : ''}>下一回合 ▶▶<kbd>N</kbd></button>` +
+        `<button type="button" data-act="quit">${this.meta.watch ? '回經營' : '離開觀戰'}</button>`,
+    );
   }
 
   update(f: ShooterFrame, now: number, extra: { throwCdFrac: number; grenade: string | null; bomb: boolean; speed: number; xray: boolean }): void {
@@ -149,12 +202,16 @@ export class ShooterHud {
     }
     const aliveT = f.board.filter((b) => b.team === 'T' && b.alive).length;
     const aliveCT = f.board.filter((b) => b.team === 'CT' && b.alive).length;
-    const pips = (team: Team, n: number): string => Array.from({ length: 5 }, (_, i) => `<i style="${i < n ? `background:${TEAM_COLOR[team]}` : ''}"></i>`).join('');
+    const w = this.meta.watch;
+    const tc = (team: Team): string => (w ? this.groupColor(this.groupOfTeam(team, f.board)) : TEAM_COLOR[team]);
+    const pips = (team: Team, n: number): string => Array.from({ length: 5 }, (_, i) => `<i style="${i < n ? `background:${tc(team)}` : ''}"></i>`).join('');
+    // 觀戰：隊名（依組別上色）＋小字陣營；其他：T／CT
+    const label = (team: Team): string => (w ? `<b style="color:${tc(team)}">${esc(w.teams[this.groupOfTeam(team, f.board)])}</b><small>${team}</small>` : `<b style="color:${TEAM_COLOR[team]}">${team}</b>`);
     setHtml(
       this.top,
-      `<div class="tm t"><b style="color:${TEAM_COLOR.T}">T</b><span class="sc">${r.scoreT}</span><span class="pips">${pips('T', aliveT)}</span></div>` +
+      `<div class="tm t">${label('T')}<span class="sc">${r.scoreT}</span><span class="pips">${pips('T', aliveT)}</span></div>` +
         `<div class="mid${r.phase === 'planted' ? ' planted' : ''}"><span class="clock">${time}</span><span class="ph">${phase}</span><span class="rd">第 ${r.number} 回合・${halfLabel(r.half, r.overtime)}</span></div>` +
-        `<div class="tm ct"><span class="pips">${pips('CT', aliveCT)}</span><span class="sc">${r.scoreCT}</span><b style="color:${TEAM_COLOR.CT}">CT</b></div>`,
+        `<div class="tm ct"><span class="pips">${pips('CT', aliveCT)}</span><span class="sc">${r.scoreCT}</span>${label('CT')}</div>`,
     );
     // 擊殺訊息
     this.feedItems = this.feedItems.filter((x) => now - x.t < FEED_MS);
@@ -173,7 +230,9 @@ export class ShooterHud {
     // 提示列
     const hints: string[] = [];
     if (this.meta.spectate) {
-      hints.push(`觀戰模式・跟隨 ${this.name(f.viewId, f.board)}（← → 切換）・<kbd>X</kbd> 全圖透視 ${extra.xray ? '開' : '關'}・<kbd>[</kbd><kbd>]</kbd> 速度 ${extra.speed}×・<kbd>空白</kbd> 暫停`);
+      const head = this.ticket ? `${esc(this.ticket.title)}・重播` : '觀戰模式';
+      const tag = w ? `<small class="tg">${esc(w.tags[f.viewId] ?? '')}</small>` : '';
+      hints.push(`${head}・跟隨 ${this.name(f.viewId, f.board)}${tag}（← → 切換）・<kbd>X</kbd> 全圖透視 ${extra.xray ? '開' : '關'}`);
     } else if (!self.me.alive) {
       const d = this.myDeath;
       if (d !== null) hints.push(d.killer >= 0 && d.killer !== d.victim ? `你被 ${this.name(d.killer, f.board)} 用 ${this.weaponName(d.weapon)} 擊殺` : `你被${this.weaponName(d.weapon)}炸死`);
@@ -246,19 +305,33 @@ export class ShooterHud {
   /** 計分板：兩隊各一欄（敵人的金錢在比賽中不公開） */
   renderBoard(target: HTMLElement, rows: readonly BoardRow[], summary: ShooterSummary | null): void {
     const teams: Team[] = ['T', 'CT'];
-    const marks = summary !== null ? summary.rounds.map((x) => ({ number: x.number, winner: x.winner, reason: x.reason as RoundEndReason })) : this.rounds;
-    const hist = marks.map((m) => `<i title="第 ${m.number} 回合：${m.winner} 勝・${REASON[m.reason]}" style="background:${TEAM_COLOR[m.winner]}">${m.reason === 'bomb' ? '炸' : m.reason === 'defuse' ? '拆' : m.reason === 'timeout' ? '時' : ''}</i>`).join('');
-    const cols = teams
-      .map((team) => {
-        const list = rows.filter((r) => r.team === team).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+    const w = this.meta.watch;
+    const marks: readonly RoundMark[] = summary !== null ? summary.rounds.map((x) => ({ number: x.number, winner: x.winner, reason: x.reason as RoundEndReason, winnerGroup: x.winnerGroup })) : this.rounds;
+    const markColor = (m: RoundMark): string => (w && m.winnerGroup !== undefined ? this.groupColor(m.winnerGroup) : TEAM_COLOR[m.winner]);
+    const markWho = (m: RoundMark): string => (w && m.winnerGroup !== undefined ? esc(w.teams[m.winnerGroup]) : m.winner);
+    const hist = marks.map((m) => `<i title="第 ${m.number} 回合：${markWho(m)} 勝・${REASON[m.reason]}" style="background:${markColor(m)}">${m.reason === 'bomb' ? '炸' : m.reason === 'defuse' ? '拆' : m.reason === 'timeout' ? '時' : ''}</i>`).join('');
+    // 觀戰的結束畫面依組別（主隊在左）；其他依陣營
+    const byGroup = w !== undefined && summary !== null;
+    const keys: readonly (Team | 0 | 1)[] = byGroup ? [0, 1] : teams;
+    const cols = keys
+      .map((key) => {
+        const inCol = (r: BoardRow): boolean => (typeof key === 'number' ? this.meta.groups[r.id] === key : r.team === key);
+        const list = rows.filter(inCol).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
         const body = list
           .map((r) => {
             const money = summary !== null ? summary.players[r.id].money : r.money;
             const me = r.id === this.meta.playerId && !this.meta.spectate;
-            return `<tr class="${r.alive || summary !== null ? '' : 'dead'}${me ? ' me' : ''}"><td>${this.meta.names[r.id]}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${money === null ? '—' : `$${money}`}</td></tr>`;
+            const tag = w ? `<small class="tg">${esc(w.tags[r.id] ?? '')}</small>` : '';
+            return `<tr class="${r.alive || summary !== null ? '' : 'dead'}${me ? ' me' : ''}"><td>${esc(this.meta.names[r.id] ?? '')}${tag}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${money === null ? '—' : `$${money}`}</td></tr>`;
           })
           .join('');
-        return `<table><thead><tr><th style="color:${TEAM_COLOR[team]}">${team}</th><th>擊殺</th><th>死亡</th><th>金錢</th></tr></thead><tbody>${body}</tbody></table>`;
+        let head: string;
+        if (typeof key === 'number') head = `<th style="color:${this.groupColor(key)}">${esc(w?.teams[key] ?? '')}</th>`;
+        else if (w) {
+          const g = this.groupOfTeam(key, rows);
+          head = `<th style="color:${this.groupColor(g)}">${esc(w.teams[g])} <small>${key}</small></th>`;
+        } else head = `<th style="color:${TEAM_COLOR[key]}">${key}</th>`;
+        return `<table><thead><tr>${head}<th>擊殺</th><th>死亡</th><th>金錢</th></tr></thead><tbody>${body}</tbody></table>`;
       })
       .join('');
     setHtml(target.querySelector('.sg-board-body') ?? target, `<div class="cols">${cols}</div><div class="hist">${hist}</div>`);
@@ -266,14 +339,39 @@ export class ShooterHud {
 
   showEnd(summary: ShooterSummary, rows: readonly BoardRow[], myGroup: 0 | 1): void {
     const [g0, g1] = summary.score;
+    if (this.meta.watch && this.ticket !== null) {
+      this.showWatchEnd(summary, rows);
+      return;
+    }
     let title: string;
     if (summary.winnerGroup === null) title = `平手 ${g0}：${g1}`;
     else if (this.meta.spectate) title = `${summary.winnerGroup === 0 ? '先攻組（上半場 T）' : '先守組（上半場 CT）'}獲勝 ${Math.max(g0, g1)}：${Math.min(g0, g1)}`;
     else title = `${summary.winnerGroup === myGroup ? '勝利' : '落敗'} ${summary.score[myGroup]}：${summary.score[1 - myGroup]}`;
     // 結束時的陣營是最後一個半場的（可能是加時），換回依組別顯示
     const finalRows = rows.map((r) => ({ ...r, alive: true }));
-    this.end.innerHTML = `<div class="box"><h2>${title}</h2><p class="muted small">種子 ${this.meta.seed}・共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・終局雜湊 ${summary.finalHash}</p><div class="sg-board-body"></div><div class="row"><button type="button" class="primary" data-act="again">再來一場</button><button type="button" data-act="home">回開局畫面</button></div></div>`;
+    this.end.innerHTML = `<div class="box"><h2>${title}</h2><p class="muted small">種子 ${this.meta.seed}・共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・終局雜湊 ${summary.finalHash}</p><div class="sg-board-body"></div><div class="row"><button type="button" class="primary" data-act="again">再來一場</button><button type="button" data-act="replay">下載回放</button><button type="button" data-act="home">回開局畫面</button></div></div>`;
     this.renderBoard(this.end.querySelector('.sg-board-body')!, finalRows, summary);
+    this.end.classList.remove('hidden');
+  }
+
+  /** 經營層觀戰的結束畫面：比分（主隊在左）、與存檔成績單的對照、回經營 */
+  private showWatchEnd(summary: ShooterSummary, rows: readonly BoardRow[]): void {
+    const t = this.ticket as WatchTicket;
+    const w = this.meta.watch as NonNullable<ShooterMeta['watch']>;
+    const [g0, g1] = summary.score;
+    const res = summary.winnerGroup === null ? '平手' : w.mine === null ? `${esc(w.teams[summary.winnerGroup])} 勝` : summary.winnerGroup === w.mine ? '勝利' : '落敗';
+    const saved = t.outcome.rounds[t.outcome.rounds.length - 1];
+    const ok = summary.outcome !== undefined && sameOutcome(summary.outcome, t.outcome);
+    const check = ok
+      ? `<p class="ck ok">✓ 與經營層成績單一致：比分 ${g0}：${g1}、${summary.rounds.length} 回合逐回合相同（存檔的請求單重跑）</p>`
+      : `<p class="ck bad">✕ 與存檔的成績單不符（存檔 ${saved?.scoreA ?? 0}：${saved?.scoreB ?? 0}、${t.outcome.rounds.length} 回合）</p>`;
+    const cls = summary.winnerGroup === null || w.mine === null ? '' : summary.winnerGroup === w.mine ? 'win' : 'lose';
+    this.end.innerHTML =
+      `<div class="box"><small class="en">${esc(t.title)} // REPLAY</small><h2 class="${cls}">${res}</h2>` +
+      `<div class="vsl"><b style="color:${this.groupColor(0)}">${esc(w.teams[0])}</b><span class="sc">${g0}<i>:</i>${g1}</span><b style="color:${this.groupColor(1)}">${esc(w.teams[1])}</b></div>` +
+      `${check}<p class="muted small">共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・種子 ${this.meta.seed}・終局雜湊 ${summary.finalHash}</p>` +
+      `<div class="sg-board-body"></div><div class="row"><button type="button" class="primary" data-act="home">回經營</button><button type="button" data-act="again">重看一次</button><button type="button" data-act="replay">下載回放</button></div></div>`;
+    this.renderBoard(this.end.querySelector('.sg-board-body')!, rows.map((r) => ({ ...r, alive: true })), summary);
     this.end.classList.remove('hidden');
   }
 }
