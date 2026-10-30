@@ -1,11 +1,10 @@
-// 比賽日演出：開場 → 對戰（兩個鏡頭對望，先鋒、中堅、大將逐一揭曉）→ 結果（WIN／LOSE 與這場的收穫）
+// 比賽日演出：開場 → 對戰（雙方名單、比分隨回合跳動、逐回合比分條）→ 結果（WIN／LOSE、比分、名單與評分變化、這場的收穫）
 // → 其他賽場 → 週結算 →（賽段結束時）頒獎典禮或破產。結果在推進時就算好了（確定性），這裡只負責怎麼揭曉。
-import type { AdvanceSummary, KnownFixture, KnownPlayer } from '../../manage/index.ts';
+import type { AdvanceSummary, KnownFixture } from '../../manage/index.ts';
 import { CATEGORY_NAME, lineageName } from '../manage/format.ts';
 import { rankOf, weekBreakdown } from '../club/model.ts';
-import { avatarSvg } from '../club/art.ts';
 import type { Ctx } from './kit.ts';
-import { avatar, crest, crestRing, esc, glyph, icon, teamName, wan } from './kit.ts';
+import { avatar, crest, crestRing, esc, glyph, icon, slotName, teamName, wan } from './kit.ts';
 
 export interface Snapshot {
   cash: number;
@@ -49,82 +48,105 @@ export function countUps(root: HTMLElement, speed: number): void {
   });
 }
 
-const SLOT = ['先鋒', '中堅', '大將'];
-const SLOT_EN = ['VANGUARD', 'CENTER', 'CAPTAIN'];
-
-function stageName(f: KnownFixture): string {
+export function stageName(f: KnownFixture): string {
   return f.stage === 'regular' ? `例行賽 · 第 ${f.week} 週` : f.stage === 'semi' ? '季後賽 · 準決賽' : f.stage === 'final' ? '季後賽 · 決賽' : '季後賽 · 季軍戰';
 }
 
-function lens(ctx: Ctx, p: KnownPlayer | undefined, foe: boolean): string {
-  return `<div class="ln2 ${foe ? 'foe' : ''}"><svg viewBox="0 0 410 410"><circle cx="205" cy="205" r="196" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="2" stroke-dasharray="3 8"/><g class="sp"><circle cx="205" cy="205" r="196" fill="none" stroke="${foe ? '#ff5d5d' : '#f0b54a'}" stroke-width="4" stroke-dasharray="180 1052"/></g></svg>
-    <div class="lens tinted ${foe ? 'grey' : ''}">${p ? avatarSvg(p.id + p.name, '#3a4458', 350) : ''}</div></div>`;
+interface MatchView {
+  home: boolean;
+  opp: string;
+  mine: string[];
+  theirs: string[];
+  my: number;
+  their: number;
+  res: 'win' | 'lose' | 'draw';
+  /** 逐回合，我方視角：mine＝我方贏這回合；phase：賽段（閘道沒給時用「加時」與否分） */
+  rounds: { label: string; phase: string; mine: boolean; my: number; their: number }[];
+}
+
+function matchView(ctx: Ctx, f: KnownFixture): MatchView {
+  const me = ctx.v.me.teamId;
+  const home = f.home === me;
+  const x = f.match as NonNullable<KnownFixture['match']>;
+  const s = f.score as { home: number; away: number };
+  const my = home ? s.home : s.away;
+  const their = home ? s.away : s.home;
+  return {
+    home,
+    opp: home ? f.away : f.home,
+    mine: home ? x.home : x.away,
+    theirs: home ? x.away : x.home,
+    my,
+    their,
+    res: x.winner === null ? 'draw' : x.winner === me ? 'win' : 'lose',
+    rounds: x.rounds.map((r) => ({ label: r.label, phase: r.phase ?? (r.label.startsWith('加時') ? '加時' : ''), mine: (r.winner === 'a') === home, my: home ? r.home : r.away, their: home ? r.away : r.home })),
+  };
+}
+
+/** Elo 變化字串（推進前後比） */
+function eloDelta(ctx: Ctx, before: Snapshot, id: string): number {
+  const b = before.elo.get(id);
+  const a = ctx.pm.get(id)?.elo;
+  return b === undefined || a === undefined ? 0 : a - b;
+}
+
+/** 一方名單（直排）：出賽位、頭像、名字、流派（角色）、版本、賽前評分 */
+function rosterCol(ctx: Ctx, ids: string[], before: Snapshot, foe: boolean): string {
+  return ids
+    .map((id, i) => {
+      const p = ctx.pm.get(id);
+      return `<div class="mp ${foe ? 'foe' : ''}" style="--d:${0.3 + i * 0.12}s">${avatar(ctx, p, 64)}<span class="c"><small>${esc(slotName(ctx, i))}</small><b>${esc(p?.name ?? '?')}</b><span class="inf">${p ? `${glyph(p.lineageId, 15)}${esc(lineageName(ctx.c, p.lineageId))} · v${p.version}` : ''}</span></span><span class="num">${before.elo.get(id) ?? p?.elo ?? ''}</span></div>`;
+    })
+    .join('');
+}
+
+/** 逐回合比分條：每回合一格（金＝我方贏、紅框＝對手贏），賽段改變處（下半場、加時）加分隔與標籤 */
+function roundStrip(m: MatchView, live: boolean): string {
+  return m.rounds
+    .map((r, i) => {
+      const sep = i > 0 && r.phase !== m.rounds[i - 1].phase ? `<i class="sep" data-ph="${esc(r.phase)}"></i>` : '';
+      return `${sep}<span class="rc ${r.mine ? 'w' : 'l'} ${live ? '' : 'on'}" data-r="${i}" title="${esc(r.label)} ${r.my}:${r.their}"></span>`;
+    })
+    .join('');
 }
 
 function matchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scene {
   const { v } = ctx;
   const me = v.me.teamId;
-  const home = f.home === me;
-  const opp = home ? f.away : f.home;
-  const s = f.score as { home: number; away: number };
-  const slots = f.slots.map((x) => ({ mine: home ? x.home : x.away, theirs: home ? x.away : x.home, won: x.winner === 'draw' ? null : (x.winner === 'a') === home }));
-  const de = (id: string): string => {
-    const b = before.elo.get(id);
-    const a = ctx.pm.get(id)?.elo;
-    return b === undefined || a === undefined || a === b ? '' : `${a > b ? '+' : ''}${a - b}`;
-  };
-  const sides = slots
-    .map((x, i) => {
-      const pm = ctx.pm.get(x.mine);
-      const pt = ctx.pm.get(x.theirs);
-      return `<div class="duel" data-bout="${i}">
-        <div class="side l">${lens(ctx, pm, false)}<div class="nm">${esc(pm?.name ?? '?')}</div><div class="inf">${pm ? `${glyph(pm.lineageId, 16)}${esc(lineageName(ctx.c, pm.lineageId))} · v${pm.version} · <span class="num">${before.elo.get(pm.id) ?? pm.elo}</span>` : ''}</div></div>
-        <div class="mid"><span class="rd2">BOUT 0${i + 1} · ${SLOT_EN[i]}</span><h2>${SLOT[i]}戰</h2><span class="vs">VS</span><div class="st"><i></i>對戰中</div>
-          <span class="stamp big ${x.won ? 'w' : 'l'}">${x.won === null ? 'DRAW' : x.won ? 'WIN' : 'LOSE'}</span></div>
-        <div class="side r">${lens(ctx, pt, true)}<div class="nm">${esc(pt?.name ?? '?')}</div><div class="inf">${pt ? `${glyph(pt.lineageId, 16)}${esc(lineageName(ctx.c, pt.lineageId))} · v${pt.version} · <span class="num">${before.elo.get(pt.id) ?? pt.elo}</span>` : ''}</div></div></div>`;
-    })
-    .join('');
-  const strips = slots
-    .map((x, i) => {
-      const pm = ctx.pm.get(x.mine);
-      const pt = ctx.pm.get(x.theirs);
-      return `<div class="bt2" data-strip="${i}">${avatar(ctx, pm, 50)}<span class="c"><small>0${i + 1} ${SLOT[i]}</small><b>${esc(pm?.name ?? '?')}<i>vs</i><span class="hide">？？？</span><span class="reveal">${esc(pt?.name ?? '?')}</span></b><em class="elo">${de(x.mine)}</em></span><span class="foeav">${avatar(ctx, pt, 50)}</span><span class="stamp ${x.won ? 'w' : 'l'}">${x.won === null ? 'DRAW' : x.won ? 'WIN' : 'LOSE'}</span></div>`;
-    })
-    .join('');
-  const BOUT = 2.6;
+  const m = matchView(ctx, f);
+  const n = m.rounds.length;
+  // 每回合揭曉的間隔：整段控制在 3～7 秒
+  const STEP = Math.max(0.12, Math.min(0.5, 6 / Math.max(1, n)));
+  const T0 = 1.6;
+  const tEnd = T0 + n * STEP;
   return {
-    html: `<div class="md md-match"><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span class="live"><i></i>LIVE · 三場對位，勝場多的隊伍獲勝</span></div>
-      <div class="score">${crestRing(ctx, me, 84)}<b class="tn">${esc(teamName(v, me))}</b><div class="sc"><span class="num me" data-sc="me">0</span><i>:</i><span class="num" data-sc="opp">0</span></div><b class="tn rd">${esc(teamName(v, opp))}</b>${crestRing(ctx, opp, 84, opp)}</div>
-      <div class="duels">${sides}</div><div class="bouts">${strips}</div>
-      <div class="final-score" hidden>${s.home}:${s.away}</div></div>`,
-    auto: (slots.length * BOUT + 1.4) * 1000,
+    html: `<div class="md md-match md-team"><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span class="live"><i></i>LIVE · ${m.mine.length} 對 ${m.theirs.length}，一場定勝負</span></div>
+      <div class="score">${crestRing(ctx, me, 84)}<b class="tn">${esc(teamName(v, me))}</b><div class="sc"><span class="num me" data-sc="me">0</span><i>:</i><span class="num" data-sc="opp">0</span></div><b class="tn rd">${esc(teamName(v, m.opp))}</b>${crestRing(ctx, m.opp, 84, m.opp)}</div>
+      <section class="col l">${rosterCol(ctx, m.mine, before, false)}</section>
+      <section class="col r">${rosterCol(ctx, m.theirs, before, true)}</section>
+      <section class="mid2"><span class="vs">VS</span><div class="st"><i></i><span data-rl>開賽</span></div><span class="stamp big ${m.res === 'win' ? 'w' : 'l'}">${m.res === 'win' ? 'WIN' : m.res === 'lose' ? 'LOSE' : 'DRAW'}</span></section>
+      <section class="strip"><div class="lb"><span>ROUNDS</span><b>${n} 回合</b></div><div class="cells">${roundStrip(m, true)}</div></section></div>`,
+    auto: (tEnd + 2.2) * 1000,
     enter: (root, speed) => {
-      let a = 0;
-      let b = 0;
-      const show = (i: number): void => {
-        root.querySelectorAll('.duel').forEach((d, k) => d.classList.toggle('on', k === i));
-        root.querySelector(`[data-strip="${i}"]`)?.classList.add('now');
-      };
-      show(0);
-      slots.forEach((x, i) => {
-        setTimeout(() => {
-          root.querySelector(`.duel[data-bout="${i}"]`)?.classList.add('done');
-          const st = root.querySelector(`[data-strip="${i}"]`);
-          st?.classList.remove('now');
-          st?.classList.add('done', x.won ? 'won' : 'lost');
-          if (x.won === true) a++;
-          else if (x.won === false) b++;
-          const ea = root.querySelector('[data-sc=me]');
-          const eb = root.querySelector('[data-sc=opp]');
-          if (ea) ea.textContent = String(a);
-          if (eb) eb.textContent = String(b);
-          const sc = root.querySelector('.sc');
-          sc?.classList.remove('bump');
-          void (sc as HTMLElement | null)?.offsetWidth;
-          sc?.classList.add('bump');
-        }, (i * BOUT + 1.7) * 1000 * speed);
-        if (i + 1 < slots.length) setTimeout(() => show(i + 1), ((i + 1) * BOUT) * 1000 * speed);
+      const ea = root.querySelector('[data-sc=me]');
+      const eb = root.querySelector('[data-sc=opp]');
+      const rl = root.querySelector('[data-rl]');
+      const sc = root.querySelector('.score .sc');
+      m.rounds.forEach((r, i) => {
+        setTimeout(
+          () => {
+            root.querySelector(`.rc[data-r="${i}"]`)?.classList.add('on');
+            if (ea) ea.textContent = String(r.my);
+            if (eb) eb.textContent = String(r.their);
+            if (rl) rl.textContent = r.phase && !r.label.startsWith(r.phase) ? `${r.phase} · ${r.label}` : r.label;
+            sc?.classList.remove('bump');
+            void (sc as HTMLElement | null)?.offsetWidth;
+            sc?.classList.add('bump');
+          },
+          (T0 + i * STEP) * 1000 * speed,
+        );
       });
+      setTimeout(() => root.querySelector('.mid2')?.classList.add('done'), (tEnd + 0.3) * 1000 * speed);
     },
   };
 }
@@ -133,37 +155,28 @@ function resultScene(ctx: Ctx, f: KnownFixture, before: Snapshot, summaryWeek: n
   const { v, c } = ctx;
   const e = c.economy;
   const me = v.me.teamId;
-  const home = f.home === me;
-  const opp = home ? f.away : f.home;
-  const s = f.score as { home: number; away: number };
-  const my = home ? s.home : s.away;
-  const their = home ? s.away : s.home;
-  const res = my > their ? 'win' : my < their ? 'lose' : 'draw';
-  const slots = f.slots.map((x) => ({ mine: home ? x.home : x.away, theirs: home ? x.away : x.home, won: x.winner === 'draw' ? null : (x.winner === 'a') === home }));
+  const m = matchView(ctx, f);
   const prize = v.ledger.filter((x) => x.week === summaryWeek && x.category === 'prize').reduce((t, x) => t + x.amount, 0);
   const bets = v.ledger.filter((x) => x.week === summaryWeek && x.category === 'bet' && x.amount > 0).reduce((t, x) => t + x.amount, 0);
-  const rows = slots
-    .map((x, i) => {
-      const pm = ctx.pm.get(x.mine);
-      const pt = ctx.pm.get(x.theirs);
-      const b = before.elo.get(x.mine);
-      const d = pm && b !== undefined ? pm.elo - b : 0;
-      return `<div class="bt3 ${x.won ? 'w' : 'l'}" style="--d:${0.5 + i * 0.08}s">${avatar(ctx, pm, 54)}<span class="c"><small>0${i + 1} ${SLOT[i]}</small><b>${esc(pm?.name ?? '?')}<i>vs</i>${esc(pt?.name ?? '?')}</b><em class="${d >= 0 ? 'up' : 'dn'}">${d ? `${d > 0 ? '+' : ''}${d}` : ''}</em></span>${avatar(ctx, pt, 54)}<span class="stamp ${x.won ? 'w' : 'l'}">${x.won === null ? 'DRAW' : x.won ? 'WIN' : 'LOSE'}</span></div>`;
-    })
-    .join('');
+  const chip = (id: string, i: number, foe: boolean): string => {
+    const p = ctx.pm.get(id);
+    const d = eloDelta(ctx, before, id);
+    return `<div class="ch ${foe ? 'foe' : ''}" style="--d:${0.5 + i * 0.06}s">${avatar(ctx, p, 46)}<span class="c"><b>${esc(p?.name ?? '?')}</b><small>${p ? `${glyph(p.lineageId, 12)}${esc(lineageName(c, p.lineageId))}` : ''}</small></span><em class="${d >= 0 ? 'up' : 'dn'}">${d ? `${d > 0 ? '+' : ''}${d}` : ''}</em></div>`;
+  };
   const fameD = v.me.fame - before.fame;
   return {
-    html: `<div class="md md-result ${res}"><div class="flare"></div><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span>FINAL</span></div>
-      <section class="big"><span class="huge">${res === 'win' ? 'WIN' : res === 'lose' ? 'LOSE' : 'DRAW'}</span><span class="zh">${res === 'win' ? '勝利' : res === 'lose' ? '落敗' : '平手'}</span></section>
-      <section class="vsrow"><div class="t">${crestRing(ctx, me, 80)}${esc(teamName(v, me))}</div><div class="sc"><b>${my}</b><i>:</i>${their}</div><div class="t r">${crestRing(ctx, opp, 80, opp)}<span class="rd">${esc(teamName(v, opp))}</span></div></section>
-      <section class="bouts">${rows}</section>
+    html: `<div class="md md-result md-team ${m.res}"><div class="flare"></div><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span>FINAL</span></div>
+      <section class="big"><span class="huge">${m.res === 'win' ? 'WIN' : m.res === 'lose' ? 'LOSE' : 'DRAW'}</span><span class="zh">${m.res === 'win' ? '勝利' : m.res === 'lose' ? '落敗' : '平手'}</span></section>
+      <section class="vsrow"><div class="t">${crestRing(ctx, me, 80)}${esc(teamName(v, me))}</div><div class="sc"><b>${m.my}</b><i>:</i>${m.their}</div><div class="t r">${crestRing(ctx, m.opp, 80, m.opp)}<span class="rd">${esc(teamName(v, m.opp))}</span></div></section>
+      <section class="strip2"><div class="cells">${roundStrip(m, false)}</div></section>
+      <section class="lineups"><div class="side">${m.mine.map((id, i) => chip(id, i, false)).join('')}</div><span class="vs">VS</span><div class="side r">${m.theirs.map((id, i) => chip(id, i, true)).join('')}</div></section>
       <section class="gains">
-        <div class="gn ${prize > 0 ? 'g' : ''}"><small>比賽收入</small><div class="v"><span class="num up">+${wan(prize)}</span><span>萬</span></div><p>${res === 'win' ? `勝 ${wan(e.matchWinPrize)}` : `${res === 'lose' ? '敗' : '平'} ${wan(e.matchLossPrize)}`} ＋ 對位勝 ${slots.filter((x) => x.won).length} 場 × ${wan(e.slotWinBonus)}</p></div>
+        <div class="gn ${prize > 0 ? 'g' : ''}"><small>比賽收入</small><div class="v"><span class="num up">+${wan(prize)}</span><span>萬</span></div><p>${m.res === 'win' ? `勝 ${wan(e.matchWinPrize)}` : `${m.res === 'lose' ? '敗' : '平'} ${wan(e.matchLossPrize)}`} ＋ 贏 ${m.my} 回合 × ${wan(e.roundWinBonus)}</p></div>
         <div class="gn ${bets > 0 ? 'g' : ''}"><small>下注開獎</small><div class="v"><span class="num ${bets > 0 ? 'up' : ''}">${bets > 0 ? `+${wan(bets)}` : '0'}</span><span>萬</span></div><p>${bets > 0 ? '押中的彩券已入帳' : '這週沒有押中'}</p></div>
         <div class="gn"><small>名氣</small><div class="v"><span class="num">${before.fame}</span><span>→</span><span class="num ${fameD >= 0 ? 'up' : ''}">${v.me.fame}</span></div><p>每週贊助 ${wan(v.me.weeklySponsor)} 萬</p></div>
-        <div class="gn"><small>名次</small><div class="v"><span class="num">${before.rank || '—'}</span><span>→</span><span class="num up">${rankOf(v, me)}</span></div><p>${f.stage === 'regular' ? '例行賽積分榜' : '季後賽'}</p></div>
+        <div class="gn"><small>名次</small><div class="v"><span class="num">${before.rank || '—'}</span><span>→</span><span class="num ${before.rank > 0 && rankOf(v, me) < before.rank ? 'up' : ''}">${rankOf(v, me)}</span></div><p>${f.stage === 'regular' ? '例行賽積分榜' : '季後賽'}</p></div>
       </section>
-      <div class="ctl"><button class="btn" data-act="cine-next"><b>繼續</b><span>NEXT</span></button></div></div>`,
+      <div class="ctl">${f.match?.watchable ? `<button class="btn ghost" data-act="watch" data-f="${esc(f.id)}"><b>觀戰</b><span>WATCH</span></button>` : ''}<button class="btn" data-act="cine-next"><b>繼續</b><span>NEXT</span></button></div></div>`,
     auto: 0,
   };
 }
@@ -263,7 +276,7 @@ function bankruptScene(ctx: Ctx): Scene {
       <section class="wreck">${crestRing(ctx, v.me.teamId, 300)}<span class="stamp huge">BANKRUPT</span><h1>破產</h1><p>現金跌到 <b>${wan(v.me.cash)} 萬</b>。<br>贊助商撤資，選手合約全部終止，${esc(v.me.name)}解散。</p></section>
       <section class="pn r why">${'<div class="pt"><span class="no">POSTMORTEM</span><b>錢去哪裡了</b><span class="aux">這個賽段</span></div>'}<div class="big"><span class="num">${spent >= 0 ? '+' : '−'}${wan(Math.abs(spent))}</span><span>萬，${v.week} 週</span></div>
         ${cats.map(([k, a]) => `<div class="ct"><span>${CATEGORY_NAME[k as keyof typeof CATEGORY_NAME] ?? k}</span><span class="bar"><i class="${a >= 0 ? 'p' : ''}" style="width:${Math.round((Math.abs(a) / max) * 100)}%"></i></span><span class="num ${a < 0 ? 'rd' : ''}">${a >= 0 ? '+' : '−'}${wan(Math.abs(a))}</span></div>`).join('')}
-        <div class="tip">平衡測試裡，簽滿 5 人又升級訓練中心，有八成會破產；適度投資（補 1 人、小額下注）比較穩。</div></section>
+        <div class="tip">平衡測試裡，把陣容簽滿又升級訓練中心，大多會破產；適度投資（補 1 名替補、小額下注）比較穩。</div></section>
       <div class="ctl"><button class="btn ghost" data-act="cine-next"><b>看看哪裡出錯</b></button><button class="btn" data-act="new-season"><b>重新創立戰隊</b><span>NEW TEAM</span></button></div></div>`,
     auto: 0,
     stop: true,

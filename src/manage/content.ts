@@ -43,7 +43,8 @@ export interface Economy {
   readonly sponsorPerFame: number;
   readonly matchWinPrize: number;
   readonly matchLossPrize: number;
-  readonly slotWinBonus: number;
+  /** 每贏一回合的獎金（乘本場贏的回合數） */
+  readonly roundWinBonus: number;
   /** 賽段名次獎金，索引＝名次 − 1 */
   readonly seasonPrizes: readonly number[];
   readonly fameWin: number;
@@ -68,6 +69,10 @@ export interface Economy {
 export interface ContentPack {
   readonly id: string;
   readonly formatId: string;
+  /** 每方出賽名單人數（＝開局每隊人數、陣容下限）；必須等於賽制的 lineupSize */
+  readonly lineupSize: number;
+  /** 出賽位的名稱，長度＝lineupSize（只供顯示） */
+  readonly slotNames: readonly string[];
   readonly lineages: readonly Lineage[];
   readonly personas: Readonly<Record<Persona, PersonaSpec>>;
   readonly economy: Economy;
@@ -81,6 +86,8 @@ export interface ContentPack {
 export const STUB_CONTENT: ContentPack = {
   id: 'stub-1',
   formatId: 'stub-bo1',
+  lineupSize: 3,
+  slotNames: ['先鋒', '中堅', '大將'],
   lineages: [
     { id: 'ambush', name: '伏擊流', style: '埋伏後突襲，後期版本成長快', power: [1430, 1490, 1560, 1640, 1720] },
     { id: 'push', name: '強攻流', style: '開局強勢，後期成長有限', power: [1500, 1540, 1570, 1590] },
@@ -112,7 +119,8 @@ export const STUB_CONTENT: ContentPack = {
     sponsorPerFame: 8,
     matchWinPrize: 120,
     matchLossPrize: 30,
-    slotWinBonus: 20,
+    // 舊制「每贏一個對位 20」：贏的一方平均約贏 2 個對位；現在一場只有 1 回合，贏的一方拿 40
+    roundWinBonus: 40,
     seasonPrizes: [1200, 700, 450, 300, 200, 150, 100, 50],
     fameWin: 2,
     fameLoss: 1,

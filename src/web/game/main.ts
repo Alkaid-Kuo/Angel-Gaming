@@ -1,19 +1,23 @@
 // 正式版經營介面（天使金規格）入口：畫面切換、外框、視窗、比賽日演出、事件處理。
 // 版面是 1920×1080 的舞台，等比縮放到視窗（stage.ts）。遊戲狀態與存檔沿用 ../manage/store.ts，跟舊介面同一份存檔。
+// 開新局時選項目（攻防戰／軍團戰暫代）；攻防戰的比賽在 Worker 池裡真打，推進時顯示「模擬中 n／m 場」。
+// 觀戰：賽制自報能觀戰時，結果幕與聯賽頁的比賽有「觀戰」，把存檔裡的請求單寫成觀戰票、開新分頁 web/shooter.html#watch 重播。
 import type { Command } from '../../manage/index.ts';
-import { ManageGame } from '../manage/store.ts';
+import { GAME_KINDS, ManageGame } from '../manage/store.ts';
 import { EMBLEM_NAMES, type EmblemName } from '../club/art.ts';
 import { lineupOf, newClubUi } from '../club/model.ts';
+import { lineageName } from '../manage/format.ts';
+import { WATCH_HASH, writeTicket } from '../shooter/watch.ts';
 import { loadPrefs, savePrefs } from '../club/prefs.ts';
 import { mountCity, type CityView } from '../sketch/city.ts';
 import { dust, initStage, still } from '../sketch/stage.ts';
 import { hubPanels, hubTags } from './hub.ts';
 import { financeScreen, inboxScreen, leagueScreen } from './info.ts';
 import type { Ctx, GameUi, Screen } from './kit.ts';
-import { STANDALONE, esc, icon, myCrest, newGameUi, wan } from './kit.ts';
-import { bettingScreen, trainingScreen } from './ops.ts';
+import { STANDALONE, esc, icon, myCrest, newGameUi, runStep, slotName, teamName, wan } from './kit.ts';
+import { bettingScreen, scrimWaitText, trainingScreen } from './ops.ts';
 import { rail, topBar } from './shell.ts';
-import { buildScenes, snapshot, type Scene } from './show.ts';
+import { buildScenes, snapshot, stageName, type Scene } from './show.ts';
 import { marketScreen, playerScreen, squadScreen } from './squad.ts';
 import { createScreen, titleScreen, type Draft } from './title.ts';
 
@@ -24,7 +28,6 @@ const toastEl = document.getElementById('toasts') as HTMLElement;
 const citySec = document.getElementById('city') as HTMLElement;
 const cityTags = document.getElementById('city-tags') as HTMLElement;
 
-const SLOT = ['先鋒', '中堅', '大將'];
 const randomSeed = (): number => Math.floor(Math.random() * 2 ** 31);
 const prefs = loadPrefs();
 let game: ManageGame | null = null;
@@ -33,9 +36,11 @@ let lastScreen: Screen | null = null;
 /** 換畫面後這段時間內的重畫仍算「剛進場」（同一次操作常連畫兩次，例如確認視窗關掉後又重畫） */
 let freshUntil = 0;
 let ui: GameUi = newGameUi(newClubUi());
-let draft: Draft = { name: '天使戰隊', crest: { ...myCrest(prefs) }, seed: randomSeed() };
+let draft: Draft = { name: '天使戰隊', crest: { ...myCrest(prefs) }, seed: randomSeed(), contentId: GAME_KINDS[0].content.id };
 let modal: { kind: 'menu' } | { kind: 'confirm'; title: string; text: string; ok: string; fn: () => void } | null = null;
 let busy = false;
+/** 推進中的模擬進度（null＝沒有在模擬） */
+let progress: { done: number; total: number; estMs: number } | null = null;
 let lastCash: number | null = null;
 let cine: { scenes: Scene[]; i: number } | null = null;
 let cineTimer = 0;
@@ -58,11 +63,15 @@ function toast(msg: string, bad = false): void {
 function context(): Ctx {
   const g = game as ManageGame;
   const v = g.view();
-  const ctx: Ctx = { v, c: g.content, ui, prefs, pm: new Map(v.players.map((p) => [p.id, p])) };
+  const ctx: Ctx = { v, c: g.content, ui, prefs, pm: new Map(v.players.map((p) => [p.id, p])), estMs: (n) => g.estimateMs(n) };
   const mine = v.me.roster;
-  const others = v.players.filter((p) => p.teamId !== v.me.teamId).map((p) => p.id);
+  // 練習賽對手是戰隊（ui.scrim.opponentId 存戰隊 id）：預設本週對手，沒有就第一支別隊
+  const others = v.teams.filter((t) => t.id !== v.me.teamId).map((t) => t.id);
   if (!mine.includes(ui.scrim.playerId)) ui.scrim.playerId = mine[0] ?? '';
-  if (!others.includes(ui.scrim.opponentId)) ui.scrim.opponentId = v.players.find((p) => p.teamId !== null && p.teamId !== v.me.teamId)?.id ?? others[0] ?? '';
+  if (!others.includes(ui.scrim.opponentId)) {
+    const f = v.fixtures.find((x) => x.week === v.week && x.score === null && (x.home === v.me.teamId || x.away === v.me.teamId));
+    ui.scrim.opponentId = f ? (f.home === v.me.teamId ? f.away : f.home) : (others[0] ?? '');
+  }
   if (!mine.includes(ui.research.playerId)) ui.research.playerId = mine[0] ?? '';
   return ctx;
 }
@@ -113,7 +122,7 @@ function render(): void {
   bgWord.textContent = WORD[screen] ?? '';
   if (screen === 'title' || screen === 'create' || !game) {
     citySec.hidden = true;
-    app.innerHTML = `<div class="scr v-${screen} ${changed ? 'fresh' : ''}">${screen === 'create' ? createScreen(draft) : titleScreen(ManageGame.peek(), myCrest(prefs))}</div>${modalHtml()}`;
+    app.innerHTML = `<div class="scr v-${screen} ${changed ? 'fresh' : ''}">${screen === 'create' ? createScreen(draft) : titleScreen(ManageGame.peek(), myCrest(prefs), ManageGame.saveProblem())}</div>${modalHtml()}`;
     lastScreen = screen;
     return;
   }
@@ -127,7 +136,7 @@ function render(): void {
   const hub = screen === 'hub';
   citySec.hidden = !hub;
   if (hub) cityTags.innerHTML = hubTags(ctx);
-  app.innerHTML = `<div class="scr v-${screen} ${changed ? 'fresh' : ''}">${screenHtml(ctx, seen)}</div>${topBar(ctx, unread(ctx), game.persist === false)}${hub ? '' : rail(ctx, screen, unread(ctx), busy)}${modalHtml()}`;
+  app.innerHTML = `<div class="scr v-${screen} ${changed ? 'fresh' : ''}">${screenHtml(ctx, seen)}</div>${topBar(ctx, unread(ctx), game.persist === false)}${hub ? '' : rail(ctx, screen, unread(ctx), busy)}${modalHtml()}${progressHtml()}`;
   lastScreen = screen;
   const cash = ctx.v.me.cash;
   if (lastCash !== null && lastCash !== cash) {
@@ -148,6 +157,30 @@ function render(): void {
     }
   }
   lastCash = cash;
+}
+
+// ───── 模擬進度 ─────
+function progressText(): string {
+  if (!progress) return '';
+  if (progress.total === 0) return '準備中…';
+  return `模擬中 ${progress.done}／${progress.total} 場`;
+}
+
+function progressHtml(): string {
+  if (!progress) return '';
+  const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+  const est = progress.estMs >= 3000 ? `預估約 ${Math.max(1, Math.round(progress.estMs / 1000))} 秒` : '';
+  return `<div class="sim-prog"><div class="box"><span class="en">SIMULATING // 比賽進行中</span><b id="sim-prog-text">${progressText()}</b><div class="meter g" style="--v:${pct}%"><i id="sim-prog-bar"></i></div><small>${est}</small></div></div>`;
+}
+
+function onProgress(done: number, total: number): void {
+  if (!progress) return;
+  progress.done = done;
+  progress.total = total;
+  const t = document.getElementById('sim-prog-text');
+  if (t) t.textContent = progressText();
+  const bar = document.getElementById('sim-prog-bar')?.parentElement;
+  if (bar) bar.style.setProperty('--v', `${total ? Math.round((done / total) * 100) : 0}%`);
 }
 
 // ───── 比賽日演出 ─────
@@ -195,9 +228,10 @@ async function doAdvance(): Promise<void> {
   const wasOff = game.state.phase === 'offseason';
   busy = true;
   modal = null;
+  progress = { done: 0, total: 0, estMs: game.estimateWeekMs() };
   render();
   try {
-    const summary = await game.advance();
+    const summary = await game.advance(onProgress);
     ui.slip = null;
     ui.leagueWeek = null;
     ui.pickSlot = null;
@@ -209,7 +243,43 @@ async function doAdvance(): Promise<void> {
     toast(e instanceof Error ? e.message : '推進失敗', true);
   }
   busy = false;
+  progress = null;
   render();
+}
+
+// ───── 觀戰 ─────
+/**
+ * 開新分頁重播一場打完的比賽（新分頁：比賽日演出與經營畫面留在原分頁，看完關掉就回來）。
+ * 被瀏覽器擋掉新分頁時改在本分頁開（回經營要按「繼續」讀檔）。
+ */
+function openWatch(fixtureId: string): void {
+  if (!game) return;
+  const ctx = context();
+  const f = ctx.v.fixtures.find((x) => x.id === fixtureId);
+  const t = game.watchTicket(fixtureId);
+  if (!t || !f?.match) {
+    toast('這場比賽不能觀戰', true);
+    return;
+  }
+  const me = ctx.v.me.teamId;
+  const specs = [...t.request.a.players, ...t.request.b.players];
+  const ok = writeTicket({
+    v: 1,
+    request: t.request,
+    outcome: t.outcome,
+    names: [...f.match.home, ...f.match.away].map((id) => ctx.pm.get(id)?.name ?? id),
+    // 打那場時的版本（之後升版不影響）
+    tags: specs.map((s) => `${lineageName(ctx.c, s.lineageId)} v${s.version}`),
+    teams: [teamName(ctx.v, f.home), teamName(ctx.v, f.away)],
+    mine: f.home === me ? 0 : f.away === me ? 1 : null,
+    title: stageName(f),
+  });
+  if (!ok) {
+    toast('無法寫入觀戰資料（瀏覽器儲存空間不可用）', true);
+    return;
+  }
+  const url = `./shooter.html${WATCH_HASH}`;
+  if (!window.open(url, '_blank')) location.href = url;
 }
 
 // ───── 指令 ─────
@@ -230,7 +300,7 @@ function assign(slot: number, pid: string): void {
   if (j >= 0 && j !== slot) ids[j] = ids[slot];
   ids[slot] = pid;
   ui.pickSlot = null;
-  run({ type: 'setLineup', lineup: ids }, `${ctx.pm.get(pid)?.name ?? ''} 擔任${SLOT[slot]}`);
+  run({ type: 'setLineup', lineup: ids }, `${ctx.pm.get(pid)?.name ?? ''} 擔任${slotName(ctx, slot)}`);
 }
 
 function confirmThen(title: string, text: string, ok: string, fn: () => void): void {
@@ -247,6 +317,15 @@ function startGame(g: ManageGame): void {
   modal = null;
   screen = 'hub';
   render();
+}
+
+/** 場數夾到滑桿級距的倍數、至少一級 */
+function clampRuns(n: number): number {
+  if (!game) return n;
+  const c = game.content.economy;
+  const lvl = game.state.teams.find((t) => t.human)?.trainingLevel ?? 1;
+  const step = runStep(c.scrimCapacity[lvl - 1] ?? c.scrimCapacity[0]);
+  return Math.max(step, Math.round(n / step) * step);
 }
 
 function maxStake(): number {
@@ -308,7 +387,8 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     go('training');
   },
   'scrim-vs': (el) => {
-    ui.scrim.opponentId = id(el);
+    const t = game?.view().players.find((p) => p.id === id(el))?.teamId;
+    if (t) ui.scrim.opponentId = t;
     ui.trainMode = 'scrim';
     go('training');
   },
@@ -333,8 +413,8 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     ui.research.target = el.dataset.t as string;
     render();
   },
-  scrim: () => run({ type: 'queueScrim', playerId: ui.scrim.playerId, opponentId: ui.scrim.opponentId, games: ui.scrim.games }, '練習賽排好了，推進一週後出報告'),
-  research: () => run({ type: 'queueResearch', playerId: ui.research.playerId, target: ui.research.target, games: ui.research.games }, '研發排好了，推進一週後出報告'),
+  scrim: () => run({ type: 'queueScrim', opponentTeamId: ui.scrim.opponentId, games: clampRuns(ui.scrim.games) }, '練習賽排好了，推進一週後出報告'),
+  research: () => run({ type: 'queueResearch', playerId: ui.research.playerId, target: ui.research.target, games: clampRuns(ui.research.games) }, '研發排好了，推進一週後出報告'),
   slip: (el) => {
     ui.slip = { fixtureId: el.dataset.fid as string, side: el.dataset.side as 'home' | 'away', stake: ui.slip?.stake ?? 5 };
     render();
@@ -399,8 +479,18 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     go('title');
   },
   'to-create': () => {
-    draft = { name: draft.name || '天使戰隊', crest: { ...myCrest(prefs) }, seed: randomSeed() };
+    draft = { name: draft.name || '天使戰隊', crest: { ...myCrest(prefs) }, seed: randomSeed(), contentId: draft.contentId };
     go('create');
+  },
+  kind: (el) => {
+    draft.contentId = el.dataset.k as string;
+    render();
+  },
+  'clear-save': () => {
+    confirmThen('清掉存檔', '這份存檔讀不了（版本不符或項目不明），清掉之後標題畫面不會再提示。確定嗎？', '清掉', () => {
+      ManageGame.clearBrokenSave();
+      toast('已清掉讀不了的存檔');
+    });
   },
   crest: (el) => {
     const k = el.dataset.k;
@@ -421,7 +511,7 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     const make = (): void => {
       prefs.crest = { ...draft.crest };
       savePrefs(prefs);
-      startGame(ManageGame.create(draft.seed, draft.name.trim() || '天使戰隊'));
+      startGame(ManageGame.create(draft.seed, draft.name.trim() || '天使戰隊', draft.contentId));
       toast(`${draft.name.trim() || '天使戰隊'} 成立了！`);
     };
     if (ManageGame.peek()) confirmThen('覆蓋存檔', '已經有一份進行中的存檔，創立新戰隊會把它覆蓋掉。確定嗎？', '覆蓋並創立', make);
@@ -430,7 +520,7 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
   continue: () => {
     const g = ManageGame.load();
     if (!g) {
-      toast('讀不到存檔', true);
+      toast(ManageGame.saveProblem() ?? '讀不到存檔', true);
       return;
     }
     startGame(g);
@@ -440,6 +530,7 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     showScene();
     actions['to-create'](document.body);
   },
+  watch: (el) => openWatch(el.dataset.f as string),
   'cine-next': () => nextScene(),
   'cine-skip': () => skipScenes(),
 };
@@ -478,8 +569,12 @@ function setField(path: string, raw: string): void {
     case 'scrim.games':
     case 'research.games': {
       const k = path === 'scrim.games' ? ui.scrim : ui.research;
-      k.games = Math.max(10, n);
+      k.games = clampRuns(n);
       document.querySelectorAll(`[data-out="${path}"]`).forEach((x) => (x.textContent = String(k.games)));
+      if (path === 'scrim.games' && game) {
+        const t = scrimWaitText(k.games, game.estimateMs(k.games));
+        document.querySelectorAll('[data-out="scrim.wait"]').forEach((x) => (x.textContent = t));
+      }
       return;
     }
     case 'slip.stake': {
@@ -563,7 +658,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 /**
- * 展示模式（截圖、示範用）：?demo=種子&weeks=先推進幾週&to=畫面&match=1（再播一次比賽日）&scene=第幾幕&hold=1（停在那一幕）&broke=1。
+ * 展示模式（截圖、示範用）：?demo=種子&content=內容包 id（預設軍團戰暫代）&weeks=先推進幾週&to=畫面&match=1（再播一次比賽日）&scene=第幾幕&hold=1（停在那一幕）&broke=1。
  * 不讀也不寫 localStorage，不會覆蓋玩家的存檔。
  */
 async function boot(): Promise<void> {
@@ -572,7 +667,7 @@ async function boot(): Promise<void> {
     render();
     return;
   }
-  const g = ManageGame.demo(Number(q.get('demo')) || 1, '天使戰隊');
+  const g = ManageGame.demo(Number(q.get('demo')) || 1, '天使戰隊', q.get('content') ?? undefined);
   const v0 = g.view();
   const fa = v0.players.filter((p) => p.teamId === null).sort((a, b) => b.elo - a.elo)[0];
   if (fa) g.command({ type: 'sign', playerId: fa.id });

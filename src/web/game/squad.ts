@@ -1,17 +1,16 @@
-// 戰隊（出賽名單三張卡＋陣容表＋本週對手）、選手詳情（王牌鏡頭＋版本線＋對位紀錄＋戰術預設＋合約）、轉會市場。
+// 戰隊（出賽名單 N 張卡＋陣容表＋本週對手）、選手詳情（王牌鏡頭＋版本線＋出賽紀錄＋戰術預設＋合約）、轉會市場。
+// 名單人數與出賽位名稱來自內容包（軍團戰暫代包 3 人：先鋒、中堅、大將；攻防戰 5 人：1～5 號位）。
 import type { KnownPlayer } from '../../manage/index.ts';
 import { lineageName } from '../manage/format.ts';
 import { lineupOf, maxVersionOf, myFixture, playerRecords, publicRating, rankOf, rosterOf, teamForm } from '../club/model.ts';
 import { avatarSvg } from '../club/art.ts';
 import type { Ctx } from './kit.ts';
-import { avatar, btn, canAct, crest, crestRing, esc, foeOf, head, icon, intelNote, lineage, pcard, pt, teamName, tierName, wan } from './kit.ts';
-
-const SLOT = ['先鋒', '中堅', '大將'];
-const SLOT_EN = ['VANGUARD', 'CENTER', 'CAPTAIN'];
+import { avatar, btn, canAct, crest, crestRing, esc, foeOf, head, icon, intelNote, lineage, pcard, pt, slotEn, slotName, teamName, tierName, wan } from './kit.ts';
 
 // ───── 戰隊 ─────
 export function squadScreen(ctx: Ctx): string {
   const { v, ui, c } = ctx;
+  const n = c.lineupSize;
   const lu = lineupOf(ctx);
   const recs = playerRecords(v);
   const active = canAct(v);
@@ -29,22 +28,22 @@ export function squadScreen(ctx: Ctx): string {
       const card = p
         ? pcard(ctx, p, { act: 'pick-slot', sel: ui.pickSlot === i || !lu.auto, sub: `<span class="num">${r.w}-${r.l}</span> <small>W-L</small>` }).replace('data-act="pick-slot"', `data-act="pick-slot" data-slot="${i}"`)
         : `<div class="pc empty" data-act="pick-slot" data-slot="${i}">空位</div>`;
-      return `<div class="ls s${i + 1} ${ui.pickSlot === i ? 'picking' : ''}" data-drop-slot="${i}"><div class="lb"><span class="num">0${i + 1}</span><b>${SLOT[i]}</b><span>${SLOT_EN[i]}</span></div>${card}
-        <div class="vsr"><span>對位</span><b>${f ? '？？？' : '—'}</b></div></div>`;
+      return `<div class="ls s${i + 1} ${ui.pickSlot === i ? 'picking' : ''}" data-drop-slot="${i}"><div class="lb"><span class="num">0${i + 1}</span><b>${esc(slotName(ctx, i))}</b><span>${slotEn(ctx, i)}</span></div>${card}
+        <div class="vsr"><span>${p ? esc(lineageName(c, p.lineageId)) : '流派'}</span><b>${p ? `v${p.version}` : '—'}</b></div></div>`;
     })
     .join('');
   const hint =
     !active
       ? '賽段已結束，名單不能再改。'
       : ui.pickSlot !== null
-        ? `<b class="gd2">點右邊陣容的一位選手，放到「${SLOT[ui.pickSlot]}」</b>　<button class="lnk" data-act="pick-slot" data-slot="-1">取消</button>`
-        : `${lu.auto ? '<b class="gd2">目前是自動名單（評分最高的 3 人）。</b>' : ''}點出賽位再點人，或把右邊的人拖到出賽位；選到已上場的人會互換位置。`;
+        ? `<b class="gd2">點右邊陣容的一位選手，放到「${esc(slotName(ctx, ui.pickSlot))}」</b>　<button class="lnk" data-act="pick-slot" data-slot="-1">取消</button>`
+        : `${lu.auto ? `<b class="gd2">目前是自動名單（評分最高的 ${n} 人）。</b>` : ''}點出賽位再點人，或把右邊的人拖到出賽位；選到已上場的人會互換位置。`;
   const rows = mine
     .map((p) => {
       const slot = lu.ids.indexOf(p.id);
       const r = recs.get(p.id) ?? { w: 0, l: 0 };
       const t = tierName(p.version);
-      const status = p.upgrading ? '<span class="st-tag bn">升版中</span>' : slot >= 0 ? `<span class="st-tag on">${SLOT[slot]}</span>` : '<span class="st-tag bn">替補</span>';
+      const status = p.upgrading ? '<span class="st-tag bn">升版中</span>' : slot >= 0 ? `<span class="st-tag on">${esc(slotName(ctx, slot))}</span>` : '<span class="st-tag bn">替補</span>';
       return `<div class="row ${slot === 0 || (slot >= 0 && !lu.auto) ? 'me' : ''} ${ui.pickSlot !== null ? 'pickable' : ''}" data-act="${ui.pickSlot !== null && active ? 'assign' : 'player'}" data-pid="${p.id}" ${active ? 'draggable="true"' : ''}>
         ${avatar(ctx, p, 46)}<span class="who"><b>${esc(p.name)}</b>${lineage(ctx, p.lineageId, 13)}</span>
         <span class="ver"><span class="num ${p.version >= 3 ? 'gd' : ''}">v${p.version}</span><small class="dim">${t.zh}</small></span>
@@ -67,9 +66,9 @@ export function squadScreen(ctx: Ctx): string {
   } else {
     opp = `<div class="pn opp in">${pt('TARGET', '本週對手')}<p class="dim big">${v.phase === 'offseason' ? '休賽期沒有比賽。第 1 週的對手會在開幕後公布。' : v.phase === 'season' ? '本週沒有我方的比賽。' : '這個賽段結束了。'}</p></div>`;
   }
-  return `${head('SQUAD // 戰隊管理', '戰隊', `出賽名單 <b>${lu.auto ? '自動' : '3／3'}</b> · 陣容 <b>${v.me.roster.length}／${c.economy.rosterMax}</b>${foe ? ` · 本週對手 <b class="rd">${esc(teamName(v, foe))}</b>` : ''}`)}
+  return `${head('SQUAD // 戰隊管理', '戰隊', `出賽名單 <b>${lu.auto ? '自動' : `${n}／${n}`}</b> · 陣容 <b>${v.me.roster.length}／${c.economy.rosterMax}</b>${foe ? ` · 本週對手 <b class="rd">${esc(teamName(v, foe))}</b>` : ''}`)}
     <section class="body s-squad">
-      <div class="lineup in"><div class="hint"><span class="chip g">出賽名單 LINEUP</span><span class="chip">三場對位，勝場多的隊伍獲勝</span></div>${cards}<div class="drag">${icon('swap', 18)}<span>${hint}</span></div></div>
+      <div class="lineup n${n} in"><div class="hint"><span class="chip g">出賽名單 LINEUP</span><span class="chip">${n} 人名單對 ${n} 人名單打一場${n === 3 ? '' : '，流派＝場上角色'}</span></div>${cards}<div class="drag">${icon('swap', 18)}<span>${hint}</span></div></div>
       <div class="pn roster in">${pt('02', '陣容', `${v.me.roster.length}／${c.economy.rosterMax} 人 · 週薪合計 <b class="num">${wan(salary)}</b> 萬`, 'ROSTER')}
         <div class="rows"><div class="row hd"><span></span><span>選手</span><span>版本</span><span>評分</span><span>戰績</span><span>週薪</span><span style="text-align:right">狀態</span></div>${rows}${empties}</div></div>
       ${opp}
@@ -79,23 +78,21 @@ export function squadScreen(ctx: Ctx): string {
 // ───── 選手詳情 ─────
 function history(ctx: Ctx, p: KnownPlayer): string {
   const { v } = ctx;
-  const games: { week: number; opp: string; won: boolean | null; slot: number }[] = [];
+  const games: { week: number; opp: string; won: boolean | null; slot: number; my: number; their: number }[] = [];
   for (const f of v.fixtures) {
-    f.slots.forEach((s, i) => {
-      if (s.home !== p.id && s.away !== p.id) return;
-      const home = s.home === p.id;
-      const opp = home ? s.away : s.home;
-      const won = s.winner === 'draw' ? null : (s.winner === 'a') === home;
-      games.push({ week: f.week, opp, won, slot: i });
-    });
+    const x = f.match;
+    const s = f.score;
+    if (!x || !s) continue;
+    const home = x.home.includes(p.id);
+    const i = (home ? x.home : x.away).indexOf(p.id);
+    if (i < 0) continue;
+    const won = x.winner === null ? null : (x.winner === f.home) === home;
+    games.push({ week: f.week, opp: home ? f.away : f.home, won, slot: i, my: home ? s.home : s.away, their: home ? s.away : s.home });
   }
   if (!games.length) return '<p class="dim">還沒有出賽紀錄。</p>';
   return `<div class="hist">${games
     .slice(-5)
-    .map((g) => {
-      const o = ctx.pm.get(g.opp);
-      return `<div class="hrow"><span class="wk">${g.week <= 7 ? `W${String(g.week).padStart(2, '0')}` : g.week === 8 ? '準決' : '決賽'}</span><span class="sl">${SLOT[g.slot]}</span><span class="vs">vs ${esc(o?.name ?? '?')} <small>${esc(teamName(v, o?.teamId ?? null))} · ${o?.elo ?? ''}</small></span><span class="stamp ${g.won ? 'w' : 'l'}">${g.won === null ? 'DRAW' : g.won ? 'WIN' : 'LOSE'}</span></div>`;
-    })
+    .map((g) => `<div class="hrow"><span class="wk">${g.week <= 7 ? `W${String(g.week).padStart(2, '0')}` : g.week === 8 ? '準決' : '決賽'}</span><span class="sl">${esc(slotName(ctx, g.slot))}</span><span class="vs">vs ${esc(teamName(v, g.opp))} <small class="num">${g.my}:${g.their}</small></span><span class="stamp ${g.won ? 'w' : 'l'}">${g.won === null ? 'DRAW' : g.won ? 'WIN' : 'LOSE'}</span></div>`)
     .join('')}</div>`;
 }
 
@@ -128,14 +125,14 @@ export function playerScreen(ctx: Ctx): string {
   const full = v.me.roster.length >= e.rosterMax;
   let actions: string;
   if (mine) {
-    actions = `${btn('排練習賽／研發', `data-act="train-with" data-id="${p.id}" ${active ? '' : 'disabled'}`, 'ghost')}${btn('解約', `data-act="release" data-id="${p.id}" ${!active || v.me.roster.length <= 3 ? 'disabled' : ''} title="${v.me.roster.length <= 3 ? '陣容至少要 3 人' : ''}"`, 'danger')}`;
+    actions = `${btn('排練習賽／研發', `data-act="train-with" data-id="${p.id}" ${active ? '' : 'disabled'}`, 'ghost')}${btn('解約', `data-act="release" data-id="${p.id}" ${!active || v.me.roster.length <= c.lineupSize ? 'disabled' : ''} title="${v.me.roster.length <= c.lineupSize ? `陣容至少要 ${c.lineupSize} 人` : ''}"`, 'danger')}`;
   } else if (p.teamId === null) {
     actions = `${btn(`簽約 · ${wan(fee)} 萬`, `data-act="sign" data-id="${p.id}" ${!active || full || v.me.cash < fee ? 'disabled' : ''}`, '', 'SIGN')}${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${p.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}`;
   } else {
-    actions = `${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${p.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}${btn('找他打練習賽', `data-act="scrim-vs" data-id="${p.id}" ${active ? '' : 'disabled'}`, 'ghost')}`;
+    actions = `${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${p.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}${btn('跟他的戰隊打練習賽', `data-act="scrim-vs" data-id="${p.id}" ${active ? '' : 'disabled'}`, 'ghost')}`;
   }
   const tags = mine
-    ? `<span class="g"><i>${slot >= 0 ? `${SLOT[slot]} · ${SLOT_EN[slot]}` : '替補 · BENCH'}</i></span><span class="w"><i>${esc(lineageName(c, p.lineageId))}</i></span>${p.upgrading ? '<span class="o"><i>升版中</i></span>' : ''}`
+    ? `<span class="g"><i>${slot >= 0 ? `${esc(slotName(ctx, slot))} · ${slotEn(ctx, slot)}` : '替補 · BENCH'}</i></span><span class="w"><i>${esc(lineageName(c, p.lineageId))}</i></span>${p.upgrading ? '<span class="o"><i>升版中</i></span>' : ''}`
     : `<span class="w"><i>${esc(teamName(v, p.teamId))}</i></span><span class="w"><i>${esc(lineageName(c, p.lineageId))}</i></span>`;
   const verPanel = `<div class="pn ${mine ? 'g' : ''} p-ver in">${pt('01', '版本線', `${esc(ln?.style ?? '')} · 最高 <b>v${maxV}</b>`, 'VERSION')}
       <div class="ladder" style="--fill:${fillPct}%">${ladder}</div>
@@ -150,7 +147,7 @@ export function playerScreen(ctx: Ctx): string {
   return `<div class="back in" data-act="go" data-to="${mine ? 'squad' : 'market'}">${icon('back', 18)}${mine ? '戰隊' : '轉會市場'} · <b>選手詳情</b></div>
     <section class="hero2"><svg class="rings in" viewBox="0 0 640 640">
         <defs><path id="tp" d="M 320 6 A 314 314 0 1 1 319.99 6"/><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#b9832a"/></linearGradient></defs>
-        <g class="rr"><text><textPath href="#tp">${esc(SLOT_EN[slot] ?? 'PLAYER')} · ${esc(p.name)} · ${esc(lineageName(c, p.lineageId))} · RATING ${p.elo} · ${t.en} v${p.version} · ${esc(teamName(v, p.teamId))} · ${esc(p.name)} ·</textPath></text></g>
+        <g class="rr"><text><textPath href="#tp">${slot >= 0 ? slotEn(ctx, slot) : 'PLAYER'} · ${esc(p.name)} · ${esc(lineageName(c, p.lineageId))} · RATING ${p.elo} · ${t.en} v${p.version} · ${esc(teamName(v, p.teamId))} · ${esc(p.name)} ·</textPath></text></g>
         <g class="rs"><circle cx="320" cy="320" r="288" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="11" stroke-dasharray="1.5 5.04"/><circle cx="320" cy="320" r="288" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="20" stroke-dasharray="3 147.8"/></g>
         <circle cx="320" cy="320" r="262" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/>
         <circle cx="320" cy="320" r="262" fill="none" stroke="${mine ? 'url(#gold)' : 'rgba(238,242,246,.6)'}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${Math.round(Math.max(0.05, Math.min(1, (p.elo - 1350) / 350)) * 1646)} 1646" transform="rotate(-90 320 320)"/>
@@ -162,7 +159,7 @@ export function playerScreen(ctx: Ctx): string {
     <section class="plate in"><div class="tags">${tags}</div><h1>${esc(p.name)}</h1><div class="roman">${esc(lineageName(c, p.lineageId))} · ${t.zh}</div>
       <div class="stats"><div><b>${p.elo}</b><span>RATING</span></div><i></i><div><b>${rec.w}-${rec.l}</b><span>RECORD</span></div><i></i><div><b>${wan(p.weeklySalary)}</b><span>萬／週</span></div></div></section>
     <section class="body s-player">${verPanel}
-      <div class="pn p-hist in">${pt('02', '對位紀錄', `${rec.w} 勝 ${rec.l} 敗`)}${history(ctx, p)}</div>
+      <div class="pn p-hist in">${pt('02', '出賽紀錄', `${rec.w} 勝 ${rec.l} 敗`)}${history(ctx, p)}</div>
       ${tac}
       <div class="pn p-con in">${pt('04', mine ? '合約與安排' : '動作', mine ? `週薪 <b>${wan(p.weeklySalary)}</b> 萬 · 出賽 ${p.games} 場` : esc(teamName(v, p.teamId)))}
         <div class="acts">${actions}</div></div>
@@ -230,8 +227,8 @@ export function marketScreen(ctx: Ctx): string {
           <div class="k"><small>資金跑道</small><div class="ch"><span class="num">${v.me.runwayWeeks ?? '∞'} 週</span><i>→</i><span class="num to ${runAfter !== null && runAfter < 4 ? 'bad' : ''}">${runAfter ?? '∞'} 週</span></div></div></div>
         ${runAfter !== null && runAfter < 4 ? `<div class="warn">${icon('warn', 20)}資金跑道會降到 ${runAfter} 週，之後要靠贏球收入或下注把淨額拉回來。</div>` : ''}
         <div class="go">${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${pick.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}${btn(full ? '陣容已滿' : `簽下${esc(pick.name)}`, `data-act="sign" data-id="${pick.id}" ${!active || full || v.me.cash < fee ? 'disabled' : ''}`, '', 'SIGN')}</div></div>`
-      : `<div class="pn sim">${pt('ACTION', '別隊選手', 'M5 才開放轉會')}<p class="dim">別隊選手不能簽，但可以派球探摸清真實強度，或找他打練習賽估勝率。</p>
-        <div class="go">${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${pick.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}${btn('找他打練習賽', `data-act="scrim-vs" data-id="${pick.id}" ${active ? '' : 'disabled'}`, 'ghost')}</div></div>`}</div>`;
+      : `<div class="pn sim">${pt('ACTION', '別隊選手', 'M5 才開放轉會')}<p class="dim">別隊選手不能簽，但可以派球探摸清真實強度，或跟他的戰隊打練習賽估勝率。</p>
+        <div class="go">${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${pick.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}${btn('跟他的戰隊打練習賽', `data-act="scrim-vs" data-id="${pick.id}" ${active ? '' : 'disabled'}`, 'ghost')}</div></div>`}</div>`;
   }
   return `${head('RECRUIT // 轉會市場', '轉會市場', `自由球員 <b>${free.length}</b> 名 · 先到先簽 · 簽約金＝${e.signingFeeWeeks} 週薪資 · 陣容 <b>${v.me.roster.length}／${e.rosterMax}</b>`)}
     <section class="body s-market"><div class="pn list in">${tabs}${list}

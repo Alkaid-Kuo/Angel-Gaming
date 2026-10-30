@@ -5,7 +5,7 @@ import { CATEGORY_NAME, esc, wan } from '../manage/format.ts';
 import { SLOT_NAMES, icon } from './art.ts';
 import { coin, crest, miniCard, signedCoin } from './cards.ts';
 import type { Ctx } from './model.ts';
-import { rankOf, teamName, weekBreakdown } from './model.ts';
+import { lineupPairs, rankOf, teamName, weekBreakdown } from './model.ts';
 
 export interface Snapshot {
   cash: number;
@@ -69,12 +69,7 @@ function matchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scene {
   const myScore = home ? s.home : s.away;
   const oppScore = home ? s.away : s.home;
   const result = myScore > oppScore ? 'win' : myScore < oppScore ? 'lose' : 'draw';
-  const slots = f.slots.map((x) => {
-    const mine = home ? x.home : x.away;
-    const theirs = home ? x.away : x.home;
-    const won = x.winner === 'draw' ? null : (x.winner === 'a') === home;
-    return { mine, theirs, won };
-  });
+  const slots = lineupPairs(f, home);
   const T0 = 1.1;
   const GAP = 1.35;
   const rows = slots

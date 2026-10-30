@@ -344,7 +344,7 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     ui.research.target = el.dataset.t as string;
     render();
   },
-  scrim: () => run({ type: 'queueScrim', playerId: ui.scrim.playerId, opponentId: ui.scrim.opponentId, games: ui.scrim.games }, '練習賽排好了，推進一週後出報告'),
+  scrim: () => run({ type: 'queueScrim', opponentTeamId: game?.view().players.find((p) => p.id === ui.scrim.opponentId)?.teamId ?? '', games: ui.scrim.games }, '練習賽排好了，推進一週後出報告'),
   research: () => run({ type: 'queueResearch', playerId: ui.research.playerId, target: ui.research.target, games: ui.research.games }, '研發排好了，推進一週後出報告'),
   slip: (el) => {
     ui.slip = { fixtureId: el.dataset.fid as string, side: el.dataset.side as 'home' | 'away', stake: ui.slip?.stake ?? 5 };

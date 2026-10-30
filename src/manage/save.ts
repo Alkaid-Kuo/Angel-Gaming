@@ -1,4 +1,4 @@
-// 存檔：狀態是純 JSON，直接序列化。回放不存（由請求單與種子重跑）。
+// 存檔：狀態是純 JSON，直接序列化。回放不存：每場的請求單存在 FixtureResult.request，觀戰時由它重跑。
 // 存檔記錄內容包 id；內容包換版後舊存檔不保證相容，原型階段直接作廢。
 import type { ContentPack } from './content.ts';
 import type { GameState } from './types.ts';

@@ -28,22 +28,22 @@ export interface StandingRow {
   draws: number;
   losses: number;
   points: number;
-  /** 對位勝場差 */
-  slotDiff: number;
+  /** 比分差（贏的回合 − 輸的回合） */
+  scoreDiff: number;
 }
 
-/** 例行賽積分榜（勝 3、平 1、敗 0；同分比對位勝場差、勝場、隊伍代號） */
+/** 例行賽積分榜（勝 3、平 1、敗 0；同分比比分差、勝場、隊伍代號） */
 export function standings(state: GameState): StandingRow[] {
   const rows = new Map<TeamId, StandingRow>();
-  for (const t of state.teams) rows.set(t.id, { teamId: t.id, played: 0, wins: 0, draws: 0, losses: 0, points: 0, slotDiff: 0 });
+  for (const t of state.teams) rows.set(t.id, { teamId: t.id, played: 0, wins: 0, draws: 0, losses: 0, points: 0, scoreDiff: 0 });
   for (const f of state.fixtures) {
     if (f.stage !== 'regular' || f.result === null) continue;
     const h = rows.get(f.home) as StandingRow;
     const a = rows.get(f.away) as StandingRow;
     h.played++;
     a.played++;
-    h.slotDiff += f.result.homeWins - f.result.awayWins;
-    a.slotDiff += f.result.awayWins - f.result.homeWins;
+    h.scoreDiff += f.result.scoreA - f.result.scoreB;
+    a.scoreDiff += f.result.scoreB - f.result.scoreA;
     if (f.result.winner === null) {
       h.draws++;
       a.draws++;
@@ -57,7 +57,7 @@ export function standings(state: GameState): StandingRow[] {
       lose.losses++;
     }
   }
-  return [...rows.values()].sort((x, y) => y.points - x.points || y.slotDiff - x.slotDiff || y.wins - x.wins || (x.teamId < y.teamId ? -1 : 1));
+  return [...rows.values()].sort((x, y) => y.points - x.points || y.scoreDiff - x.scoreDiff || y.wins - x.wins || (x.teamId < y.teamId ? -1 : 1));
 }
 
 function newFixture(state: GameState, week: number, stage: Stage, home: TeamId, away: TeamId): Fixture {
@@ -73,7 +73,7 @@ export function createRegularSeason(state: GameState): void {
   });
 }
 
-/** 比賽打平時由例行賽名次較高者晉級（M4 的暫代賽制不會平手，真引擎可能會） */
+/** 比賽打平時由例行賽名次較高者晉級（暫代賽制不會平手，真引擎可能會） */
 export function playoffWinner(state: GameState, f: Fixture): TeamId {
   if (f.result === null) throw new Error('賽事尚未打完');
   if (f.result.winner !== null) return f.result.winner;

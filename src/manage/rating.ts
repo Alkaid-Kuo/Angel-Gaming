@@ -16,9 +16,14 @@ export function expectedPermille(diff: number): number {
   return Math.max(5, Math.min(995, Math.round((1000 * x) / (1 + x))));
 }
 
-/** 一場比賽後的新評分。score1000：A 勝 1000、平 500、敗 0。總分守恆。 */
-export function updateElo(a: number, b: number, score1000: number, k: number): [number, number] {
+/** 一場比賽 A 的評分變化（整數；B 變化 −delta）。score1000：A 勝 1000、平 500、敗 0。 */
+export function eloDelta(a: number, b: number, score1000: number, k: number): number {
   const e = expectedPermille(a - b);
-  const delta = Math.round((k * (score1000 - e)) / 1000);
+  return Math.round((k * (score1000 - e)) / 1000);
+}
+
+/** 一場比賽後的新評分。總分守恆。 */
+export function updateElo(a: number, b: number, score1000: number, k: number): [number, number] {
+  const delta = eloDelta(a, b, score1000, k);
   return [a + delta, b - delta];
 }

@@ -4,15 +4,16 @@ import { settleBets } from './betting.ts';
 import { applyCommand } from './commands.ts';
 import type { ContentPack } from './content.ts';
 import type { BattleGateway, MatchRequest } from './gateway.ts';
+import { assertFormat, finalScore } from './gateway.ts';
 import { processJobs } from './jobs.ts';
 import { createFinals, createRegularSeason, createSemis, finalRanks } from './league.ts';
 import { npcLineup, npcOffseason } from './npc.ts';
-import { updateElo } from './rating.ts';
+import { eloDelta } from './rating.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
 import {
   buildSide,
-  findPlayer,
   humanTeam,
+  lineupValid,
   maxVersion,
   notify,
   playerOf,
@@ -24,19 +25,26 @@ import {
   weeklySalaries,
   weeklySponsor,
 } from './state.ts';
-import type { Command, Fixture, GameState, Persona, PlayerId, Team, TeamId } from './types.ts';
-import { LINEUP_SIZE, REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from './types.ts';
+import type { Command, Fixture, GameState, Persona, Player, PlayerId, TeamId } from './types.ts';
+import { REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from './types.ts';
 import { knownView } from './view.ts';
 import type { Prng } from '../shared/prng.ts';
 
 export interface NewGameOptions {
   humanName?: string;
+  /** 有給就在開局時檢查內容包與賽制配不配（名單人數不符拒絕開局）；推進時一律會再檢查 */
+  gateway?: BattleGateway;
+}
+
+export interface AdvanceOptions {
+  /** 比賽日與練習賽的模擬進度（已完成場數、總場數），由閘道回報 */
+  onProgress?: (done: number, total: number) => void;
 }
 
 export interface AdvanceSummary {
   /** 推進前的週數 */
   week: number;
-  results: { fixtureId: string; stage: Fixture['stage']; home: TeamId; away: TeamId; homeWins: number; awayWins: number }[];
+  results: { fixtureId: string; stage: Fixture['stage']; home: TeamId; away: TeamId; homeScore: number; awayScore: number; winner: TeamId | null }[];
 }
 
 function makePlayer(state: GameState, content: ContentPack, rng: Prng, teamId: TeamId | null, version: number): PlayerId {
@@ -67,6 +75,8 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, teamId: T
 }
 
 export function newGame(seed: number, content: ContentPack, opts: NewGameOptions = {}): GameState {
+  if (content.slotNames.length !== content.lineupSize) throw new Error(`內容包 ${content.id} 的出賽位名稱數與名單人數不符`);
+  if (opts.gateway) assertFormat(opts.gateway, content.formatId, content.lineupSize);
   const e = content.economy;
   const rng = rngFor(seed, STREAM.newGame);
   const state: GameState = {
@@ -107,7 +117,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         intel: [],
         scrims: [],
       });
-      for (let k = 0; k < LINEUP_SIZE; k++) makePlayer(state, content, rng, id, rng.range(e.humanVersions[0], e.humanVersions[1]));
+      for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, id, rng.range(e.humanVersions[0], e.humanVersions[1]));
     } else {
       const persona = personas[npcIndex];
       const spec = content.personas[persona];
@@ -124,7 +134,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         intel: [],
         scrims: [],
       });
-      for (let k = 0; k < LINEUP_SIZE; k++) makePlayer(state, content, rng, id, rng.range(spec.versions[0], spec.versions[1]));
+      for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, id, rng.range(spec.versions[0], spec.versions[1]));
       npcIndex++;
     }
   }
@@ -138,76 +148,63 @@ function applyAll(state: GameState, content: ContentPack, teamId: TeamId, cmds: 
   for (const c of cmds) applyCommand(state, content, teamId, c);
 }
 
-function lineupValid(state: GameState, team: Team): boolean {
-  const l = team.lineup;
-  if (l.length !== LINEUP_SIZE || new Set(l).size !== LINEUP_SIZE) return false;
-  return l.every((id) => findPlayer(state, id)?.teamId === team.id);
-}
-
-/** 開賽前補出賽名單：NPC 每週依個性重排；玩家名單無效時退回公開 Elo 最高的 3 人 */
+/** 開賽前補出賽名單：NPC 每週依個性重排；玩家名單無效時退回公開 Elo 最高的 lineupSize 人 */
 function ensureLineups(state: GameState, content: ContentPack): void {
   for (const team of state.teams) {
     if (team.persona !== null) {
       const rng = rngFor(state.seed, STREAM.npc, state.week, Number(team.id.slice(1)));
-      applyAll(state, content, team.id, npcLineup(knownView(state, content, team.id), content.personas[team.persona], rng));
-    } else if (!lineupValid(state, team)) {
-      const top = rosterOf(state, team.id)
+      applyAll(state, content, team.id, npcLineup(knownView(state, content, team.id), content.personas[team.persona], content.lineupSize, rng));
+    } else if (!lineupValid(state, content, team)) {
+      team.lineup = rosterOf(state, team.id)
         .sort((a, b) => b.elo - a.elo || (a.id < b.id ? -1 : 1))
-        .slice(0, LINEUP_SIZE)
+        .slice(0, content.lineupSize)
         .map((p) => p.id);
-      team.lineup = top;
     }
   }
 }
 
-async function playMatchDay(state: GameState, content: ContentPack, gateway: BattleGateway, summary: AdvanceSummary): Promise<void> {
+const mean = (ps: readonly Player[]): number => ps.reduce((s, p) => s + p.elo, 0) / ps.length;
+
+async function playMatchDay(state: GameState, content: ContentPack, gateway: BattleGateway, summary: AdvanceSummary, opts: AdvanceOptions): Promise<void> {
   const e = content.economy;
   const fixtures = state.fixtures.filter((f) => f.week === state.week && f.result === null);
-  const reqs: MatchRequest[] = [];
-  fixtures.forEach((f, fi) => {
-    const h = teamOf(state, f.home).lineup;
-    const a = teamOf(state, f.away).lineup;
-    for (let s = 0; s < LINEUP_SIZE; s++) {
-      const ph = playerOf(state, h[s]);
-      const pa = playerOf(state, a[s]);
-      reqs.push({ formatId: state.formatId, a: buildSide(ph, pa), b: buildSide(pa, ph), seed: rngFor(state.seed, STREAM.match, state.week, fi, s).nextU32() });
-    }
+  const lineups = fixtures.map((f) => [teamOf(state, f.home).lineup.map((id) => playerOf(state, id)), teamOf(state, f.away).lineup.map((id) => playerOf(state, id))] as const);
+  const reqs: MatchRequest[] = fixtures.map((_, fi) => {
+    const [h, a] = lineups[fi];
+    return { formatId: state.formatId, a: buildSide(h, a), b: buildSide(a, h), seed: rngFor(state.seed, STREAM.match, state.week, fi).nextU32() };
   });
-  const outs = await gateway.simulateBatch(reqs);
-  let k = 0;
-  for (const f of fixtures) {
+  const outs = await gateway.simulateBatch(reqs, opts.onProgress);
+  fixtures.forEach((f, fi) => {
     const home = teamOf(state, f.home);
     const away = teamOf(state, f.away);
-    const slots = [];
-    let hw = 0;
-    let aw = 0;
-    for (let s = 0; s < LINEUP_SIZE; s++) {
-      const out = outs[k++];
-      const ph = playerOf(state, home.lineup[s]);
-      const pa = playerOf(state, away.lineup[s]);
-      slots.push({ a: ph.id, b: pa.id, winner: out.winner, rounds: out.rounds.map((r) => ({ ...r })) });
-      if (out.winner === 'a') hw++;
-      else if (out.winner === 'b') aw++;
-      [ph.elo, pa.elo] = updateElo(ph.elo, pa.elo, out.winner === 'a' ? 1000 : out.winner === 'b' ? 0 : 500, e.eloK);
-      ph.games++;
-      pa.games++;
+    const [hp, ap] = lineups[fi];
+    const out = outs[fi];
+    const sc = finalScore(out);
+    const winner = out.winner === 'a' ? f.home : out.winner === 'b' ? f.away : null;
+    f.result = { lineupA: hp.map((p) => p.id), lineupB: ap.map((p) => p.id), winner, scoreA: sc.a, scoreB: sc.b, rounds: out.rounds.map((r) => ({ ...r })), request: structuredClone(reqs[fi]) };
+    // 名單平均 Elo 算期望值，名單內每人加同一個 delta（兩隊人數相同，總分守恆）
+    const delta = eloDelta(mean(hp), mean(ap), out.winner === 'a' ? 1000 : out.winner === 'b' ? 0 : 500, e.eloK);
+    for (const p of hp) {
+      p.elo += delta;
+      p.games++;
     }
-    const winner = hw > aw ? f.home : aw > hw ? f.away : null;
-    f.result = { slots, homeWins: hw, awayWins: aw, winner };
-    for (const [team, wins, loses] of [
-      [home, hw, aw],
-      [away, aw, hw],
+    for (const p of ap) {
+      p.elo -= delta;
+      p.games++;
+    }
+    for (const [team, mine, theirs, won, lost] of [
+      [home, sc.a, sc.b, winner === f.home, winner === f.away],
+      [away, sc.b, sc.a, winner === f.away, winner === f.home],
     ] as const) {
-      const won = wins > loses;
-      const lost = wins < loses;
-      const prize = (won ? e.matchWinPrize : e.matchLossPrize) + wins * e.slotWinBonus;
-      post(state, team, 'prize', prize, `${f.stage === 'regular' ? '例行賽' : '季後賽'} ${wins}:${loses}`);
+      const prize = (won ? e.matchWinPrize : e.matchLossPrize) + mine * e.roundWinBonus;
+      post(state, team, 'prize', prize, `${f.stage === 'regular' ? '例行賽' : '季後賽'} ${mine}:${theirs}`);
       team.fame = Math.max(1, team.fame + (won ? e.fameWin : lost ? -e.fameLoss : 0));
     }
-    notify(state, f.home, 'result', `第 ${state.week} 週 ${home.name} ${hw}:${aw} ${away.name}`);
-    notify(state, f.away, 'result', `第 ${state.week} 週 ${home.name} ${hw}:${aw} ${away.name}`);
-    summary.results.push({ fixtureId: f.id, stage: f.stage, home: f.home, away: f.away, homeWins: hw, awayWins: aw });
-  }
+    const line = `第 ${state.week} 週 ${home.name} ${sc.a}:${sc.b} ${away.name}${winner === null ? '（平手）' : ''}`;
+    notify(state, f.home, 'result', line);
+    notify(state, f.away, 'result', line);
+    summary.results.push({ fixtureId: f.id, stage: f.stage, home: f.home, away: f.away, homeScore: sc.a, awayScore: sc.b, winner });
+  });
 }
 
 function weeklyFinance(state: GameState, content: ContentPack): void {
@@ -263,8 +260,10 @@ function finishSeason(state: GameState, content: ContentPack): void {
   }
 }
 
-export async function advance(state: GameState, content: ContentPack, gateway: BattleGateway): Promise<AdvanceSummary> {
+export async function advance(state: GameState, content: ContentPack, gateway: BattleGateway, opts: AdvanceOptions = {}): Promise<AdvanceSummary> {
   if (state.phase === 'ended' || state.phase === 'bankrupt') throw new Error('賽段已結束');
+  if (state.contentId !== content.id) throw new Error(`狀態的內容包 ${state.contentId} 與 ${content.id} 不符`);
+  assertFormat(gateway, state.formatId, content.lineupSize);
   const summary: AdvanceSummary = { week: state.week, results: [] };
 
   if (state.phase === 'offseason') {
@@ -272,7 +271,7 @@ export async function advance(state: GameState, content: ContentPack, gateway: B
       if (team.persona === null) continue;
       applyAll(state, content, team.id, npcOffseason(knownView(state, content, team.id), team.persona, content.personas[team.persona], content));
     }
-    await processJobs(state, content, gateway);
+    await processJobs(state, content, gateway, opts.onProgress);
     state.phase = 'season';
     state.week = 1;
     notify(state, state.humanTeamId, 'system', '賽季開始：第 1 週。');
@@ -280,9 +279,9 @@ export async function advance(state: GameState, content: ContentPack, gateway: B
   }
 
   ensureLineups(state, content);
-  await playMatchDay(state, content, gateway, summary);
+  await playMatchDay(state, content, gateway, summary, opts);
   settleBets(state);
-  await processJobs(state, content, gateway);
+  await processJobs(state, content, gateway, opts.onProgress);
   weeklyFinance(state, content);
   completeUpgrades(state, content);
   bailoutNpcs(state);

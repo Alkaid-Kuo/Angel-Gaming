@@ -178,7 +178,7 @@ const actions: Record<string, (el: HTMLElement) => void | Promise<void>> = {
     if (p && confirm(`確定要解約 ${p.name} 嗎？他會成為自由選手，已付的簽約金不退。`)) run({ type: 'release', playerId: p.id }, '已解約');
   },
   upfac: () => run({ type: 'upgradeTraining' }, '訓練中心升級了'),
-  scrim: () => run({ type: 'queueScrim', playerId: ui.scrim.playerId, opponentId: ui.scrim.opponentId, games: ui.scrim.games }, '練習賽已排入，推進一週後出報告'),
+  scrim: () => run({ type: 'queueScrim', opponentTeamId: game?.view().players.find((p) => p.id === ui.scrim.opponentId)?.teamId ?? '', games: ui.scrim.games }, '練習賽已排入，推進一週後出報告'),
   research: () => run({ type: 'queueResearch', playerId: ui.research.playerId, target: ui.research.target, games: ui.research.games }, '研發已排入，推進一週後出報告'),
   bet: (el) => run({ type: 'bet', fixtureId: el.dataset.fid as string, side: el.dataset.side as 'home' | 'away', stake: (ui.stake[el.dataset.fid as string] ?? 5) * 10 }, '已下注'),
   market: (el) => {

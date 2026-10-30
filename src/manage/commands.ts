@@ -4,7 +4,6 @@ import { betLimit, fixtureOdds } from './betting.ts';
 import type { ContentPack } from './content.ts';
 import { capacityLeft, findPlayer, lineageOf, maxVersion, post, rosterOf, teamOf } from './state.ts';
 import type { Command, CommandResult, GameState, TeamId } from './types.ts';
-import { LINEUP_SIZE } from './types.ts';
 
 const OK: CommandResult = { ok: true };
 
@@ -33,7 +32,7 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
     case 'release': {
       const p = findPlayer(state, cmd.playerId);
       if (!p || p.teamId !== teamId) return fail('不是自己的選手');
-      if (rosterOf(state, teamId).length <= LINEUP_SIZE) return fail(`陣容至少要有 ${LINEUP_SIZE} 人才排得出出賽名單`);
+      if (rosterOf(state, teamId).length <= content.lineupSize) return fail(`陣容至少要有 ${content.lineupSize} 人才排得出出賽名單`);
       p.teamId = null;
       p.presets = [];
       p.upgradeUntilWeek = null;
@@ -41,8 +40,8 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       return OK;
     }
     case 'setLineup': {
-      if (cmd.lineup.length !== LINEUP_SIZE) return fail(`出賽名單需要 ${LINEUP_SIZE} 人`);
-      if (new Set(cmd.lineup).size !== LINEUP_SIZE) return fail('出賽名單不可重複');
+      if (cmd.lineup.length !== content.lineupSize) return fail(`出賽名單需要 ${content.lineupSize} 人`);
+      if (new Set(cmd.lineup).size !== content.lineupSize) return fail('出賽名單不可重複');
       if (!cmd.lineup.every((id) => findPlayer(state, id)?.teamId === teamId)) return fail('出賽名單含有不是自己的選手');
       team.lineup = [...cmd.lineup];
       return OK;
@@ -81,13 +80,11 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       return OK;
     }
     case 'queueScrim': {
-      const p = findPlayer(state, cmd.playerId);
-      const opp = findPlayer(state, cmd.opponentId);
-      if (!p || p.teamId !== teamId) return fail('不是自己的選手');
-      if (!opp || opp.teamId === teamId) return fail('練習賽對手必須是其他戰隊的選手');
+      const opp = state.teams.find((t) => t.id === cmd.opponentTeamId);
+      if (!opp || opp.id === teamId) return fail('練習賽對手必須是其他戰隊');
       if (!Number.isInteger(cmd.games) || cmd.games < 1) return fail('場數需為正整數');
       if (cmd.games > capacityLeft(state, content, team)) return fail('超過本週訓練中心可跑的場數');
-      state.jobs.push({ kind: 'scrim', id: state.nextId++, teamId, playerId: p.id, opponentId: opp.id, games: cmd.games });
+      state.jobs.push({ kind: 'scrim', id: state.nextId++, teamId, opponentTeamId: opp.id, games: cmd.games });
       return OK;
     }
     case 'queueResearch': {

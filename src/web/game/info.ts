@@ -24,10 +24,11 @@ function fixtureRow(ctx: Ctx, f: KnownFixture): string {
   const me = v.me.teamId;
   const s = f.score;
   const won = (id: string): boolean => !!s && (f.home === id ? s.home > s.away : s.away > s.home);
-  const dots = f.slots.map((x) => `<i class="${x.winner === 'a' ? 'h' : x.winner === 'b' ? 'a' : ''}"></i>`).join('');
-  return `<div class="mt ${f.home === me || f.away === me ? 'me' : ''}"><span class="t ${won(f.home) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.home, 28)}${esc(teamName(v, f.home))}</span>
-    <span class="vs">${s ? `<b>${s.home}</b>:<b>${s.away}</b>` : 'VS'}${dots ? `<span class="dots">${dots}</span>` : ''}</span>
-    <span class="t r ${won(f.away) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.away, 28)}${esc(teamName(v, f.away))}</span></div>`;
+  // 打完、賽制能觀戰（閘道自報）才有「觀戰」
+  const watch = f.match?.watchable ? `<button class="wt" data-act="watch" data-f="${esc(f.id)}" title="用存檔的請求單重播這一場">${icon('play', 14)}<span>觀戰</span></button>` : '';
+  return `<div class="mt ${f.home === me || f.away === me ? 'me' : ''} ${watch ? 'can-watch' : ''}"><span class="t ${won(f.home) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.home, 28)}${esc(teamName(v, f.home))}</span>
+    <span class="vs">${s ? `<b>${s.home}</b>:<b>${s.away}</b>` : 'VS'}</span>
+    <span class="t r ${won(f.away) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.away, 28)}${esc(teamName(v, f.away))}</span>${watch}</div>`;
 }
 
 export function leagueScreen(ctx: Ctx): string {
@@ -46,7 +47,7 @@ export function leagueScreen(ctx: Ctx): string {
       const form = teamForm(v, r.teamId, 3).map((x) => `<i class="${x === 'W' ? 'w' : 'l'}">${x}</i>`).join('');
       const me = r.teamId === v.me.teamId;
       return `<div class="row ${me ? 'me' : ''} ${r.teamId === foe ? 'foe' : ''} ${i < 4 ? 'top4' : ''} ${i === 3 ? 'cut' : ''}"><span class="rk">${i + 1}</span>${crest(ctx, r.teamId, 30)}<span class="nm ${r.teamId === foe ? 'rd' : ''}">${esc(teamName(v, r.teamId))}${me ? '<small>我方</small>' : r.teamId === foe ? '<small>本週對手</small>' : ''}</span>
-        <span class="num">${r.wins}-${r.draws}-${r.losses}</span><span class="num">${r.slotDiff >= 0 ? '+' : '−'}${Math.abs(r.slotDiff)}</span><span class="form">${form || '—'}</span><span class="num pts">${started ? r.points : '—'}</span></div>`;
+        <span class="num">${r.wins}-${r.draws}-${r.losses}</span><span class="num">${r.scoreDiff >= 0 ? '+' : '−'}${Math.abs(r.scoreDiff)}</span><span class="form">${form || '—'}</span><span class="num pts">${started ? r.points : '—'}</span></div>`;
     })
     .join('');
   const fx = v.fixtures.filter((f) => f.week === sel);
@@ -66,11 +67,11 @@ export function leagueScreen(ctx: Ctx): string {
   const myPts = v.standings.find((r) => r.teamId === v.me.teamId)?.points ?? 0;
   const fourth = v.standings[3]?.points ?? 0;
   const path = v.phase === 'ended' ? `最終第 <b>${v.seasonResult?.humanRank}</b> 名。` : myRank <= 4 ? `我方第 ${myRank}，目前在季後賽圈內。` : `我方第 ${myRank}，離第 4 差 <b>${Math.max(0, fourth - myPts)}</b> 分。`;
-  return `${head('LEAGUE // 新創聯賽', '聯賽', `8 隊單循環 · 例行賽 7 週 · 前 <b>4</b> 名進季後賽 · 勝 3 分、平 1 分，同分比對位勝場差`)}
+  return `${head('LEAGUE // 新創聯賽', '聯賽', `8 隊單循環 · 例行賽 7 週 · 前 <b>4</b> 名進季後賽 · 勝 3 分、平 1 分，同分比比分差（贏的回合 − 輸的回合）`)}
     <section class="body s-league">
       <div class="tl in">${tl}</div>
       <div class="pn tbl in">${pt('01', '積分榜', started ? `第 ${Math.min(7, v.phase === 'season' ? v.week - 1 : 7)} 週後` : '尚未開賽', 'STANDINGS')}
-        <div class="rows"><div class="row hd"><span>#</span><span></span><span>戰隊</span><span>勝-平-敗</span><span>勝場差</span><span>近況</span><span style="text-align:right">積分</span></div>${rows}</div>
+        <div class="rows"><div class="row hd"><span>#</span><span></span><span>戰隊</span><span>勝-平-敗</span><span>比分差</span><span>近況</span><span style="text-align:right">積分</span></div>${rows}</div>
         <div class="note"><span>虛線以上進季後賽</span><span>名次獎金 1 名 ${wan(ctx.c.economy.seasonPrizes[0])} 萬 … 8 名 ${wan(ctx.c.economy.seasonPrizes[7])} 萬</span></div></div>
       <div class="pn wkm in">${pt('02', '賽程', sel === 0 ? '休賽期' : sel <= 7 ? `第 ${sel} 週` : sel === 8 ? '準決賽' : '決賽', `W${String(sel).padStart(2, '0')}`)}
         <div class="scroll">${fx.map((f) => fixtureRow(ctx, f)).join('') || '<p class="dim">這週還沒有對戰組合。</p>'}</div></div>

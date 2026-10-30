@@ -56,14 +56,15 @@ export function rosterOf(ctx: Ctx, teamId: string): KnownPlayer[] {
   return ids.map((id) => ctx.pm.get(id) as KnownPlayer);
 }
 
-/** 目前的出賽名單；沒排或無效時是「自動」＝公開 Elo 最高的 3 人（與引擎補名單的規則相同） */
+/** 目前的出賽名單；沒排或無效時是「自動」＝公開 Elo 最高的 lineupSize 人（與引擎補名單的規則相同） */
 export function lineupOf(ctx: Ctx): { ids: string[]; auto: boolean } {
   const { v } = ctx;
+  const n = ctx.c.lineupSize;
   const mine = new Set(v.me.roster);
-  if (v.me.lineup.length === 3 && new Set(v.me.lineup).size === 3 && v.me.lineup.every((id) => mine.has(id))) return { ids: [...v.me.lineup], auto: false };
+  if (v.me.lineup.length === n && new Set(v.me.lineup).size === n && v.me.lineup.every((id) => mine.has(id))) return { ids: [...v.me.lineup], auto: false };
   const top = rosterOf(ctx, v.me.teamId)
     .sort((a, b) => b.elo - a.elo || (a.id < b.id ? -1 : 1))
-    .slice(0, 3)
+    .slice(0, n)
     .map((p) => p.id);
   return { ids: top, auto: true };
 }
@@ -80,10 +81,11 @@ export function publicRating(ctx: Ctx, teamId: string): number {
   const elos = rosterOf(ctx, teamId)
     .map((p) => p.elo)
     .sort((a, b) => b - a)
-    .slice(0, 3);
+    .slice(0, ctx.c.lineupSize);
   return elos.length ? Math.round(elos.reduce((s, x) => s + x, 0) / elos.length) : 0;
 }
 
+/** 每位選手出賽的隊伍戰績（名單上的人都算這場的勝負；平手不計） */
 export function playerRecords(v: KnownView): Map<string, { w: number; l: number }> {
   const m = new Map<string, { w: number; l: number }>();
   const add = (id: string, win: boolean): void => {
@@ -93,13 +95,22 @@ export function playerRecords(v: KnownView): Map<string, { w: number; l: number 
     m.set(id, r);
   };
   for (const f of v.fixtures) {
-    for (const s of f.slots) {
-      if (s.winner === 'draw') continue;
-      add(s.home, s.winner === 'a');
-      add(s.away, s.winner === 'b');
-    }
+    const x = f.match;
+    if (!x || x.winner === null) continue;
+    for (const id of x.home) add(id, x.winner === f.home);
+    for (const id of x.away) add(id, x.winner === f.away);
   }
   return m;
+}
+
+/** 已打完的比賽：雙方名單依隊內序號兩兩並排（給舊介面的對位版面用）；won＝我方這場的勝負 */
+export function lineupPairs(f: KnownFixture, home: boolean): { mine: string; theirs: string; won: boolean | null }[] {
+  const x = f.match;
+  if (!x) return [];
+  const mine = home ? x.home : x.away;
+  const theirs = home ? x.away : x.home;
+  const won = x.winner === null ? null : (x.winner === f.home) === home;
+  return mine.map((id, i) => ({ mine: id, theirs: theirs[i], won }));
 }
 
 /** 最近幾場的勝負（W／D／L），由舊到新 */

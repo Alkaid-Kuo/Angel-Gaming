@@ -109,14 +109,11 @@ function scoreLine(f: KnownFixture, v: KnownView): string {
 }
 
 function slotLines(f: KnownFixture, pm: Map<string, KnownPlayer>): string {
-  if (f.slots.length === 0) return '';
-  return `<div class="mg-slots">${f.slots
-    .map((s, i) => {
-      const h = esc(pm.get(s.home)?.name ?? s.home);
-      const a = esc(pm.get(s.away)?.name ?? s.away);
-      return `<span class="mg-slot ${s.winner === 'a' ? 'hw' : s.winner === 'b' ? 'aw' : ''}">第 ${i + 1} 位 ${h} ${s.winner === 'a' ? '勝' : s.winner === 'b' ? '敗' : '平'} ${a}</span>`;
-    })
-    .join('')}</div>`;
+  const x = f.match;
+  if (!x) return '';
+  const names = (ids: string[]): string => ids.map((id) => esc(pm.get(id)?.name ?? id)).join('、');
+  const cls = x.winner === f.home ? 'hw' : x.winner === f.away ? 'aw' : '';
+  return `<div class="mg-slots"><span class="mg-slot ${cls}">${names(x.home)}</span><span class="mg-slot ${cls}">對 ${names(x.away)}</span></div>`;
 }
 
 function runwayText(v: KnownView): string {
@@ -229,7 +226,7 @@ function schedule(ctx: Ctx): string {
   const rows = v.standings
     .map((r, i) => {
       const name = teamName(v, r.teamId);
-      return `<tr class="${r.teamId === v.me.teamId ? 'me' : ''} ${i === 3 ? 'cut' : ''}"><td class="num">${i + 1}</td><td>${name}</td><td class="num">${r.played}</td><td class="num">${r.wins}-${r.draws}-${r.losses}</td><td class="num"><b>${r.points}</b></td><td class="num">${r.slotDiff >= 0 ? '+' : ''}${r.slotDiff}</td></tr>`;
+      return `<tr class="${r.teamId === v.me.teamId ? 'me' : ''} ${i === 3 ? 'cut' : ''}"><td class="num">${i + 1}</td><td>${name}</td><td class="num">${r.played}</td><td class="num">${r.wins}-${r.draws}-${r.losses}</td><td class="num"><b>${r.points}</b></td><td class="num">${r.scoreDiff >= 0 ? '+' : ''}${r.scoreDiff}</td></tr>`;
     })
     .join('');
   const chips = weeks.map((w) => `<button class="${w === selWeek ? 'active' : ''}" data-act="week" data-week="${w}">${w <= 7 ? w : w === 8 ? '準決' : '決賽'}${w === v.week && v.phase === 'season' ? '·' : ''}</button>`).join('');
@@ -295,10 +292,10 @@ function training(ctx: Ctx): string {
   const myOpt = (p: KnownPlayer, sel: string): string => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${pdesc(c, p)}</option>`;
   const queue = v.jobs
     .map((j) => {
+      if (j.kind === 'scrim') return `<li>練習賽：對 ${esc(teamName(v, j.opponentTeamId))}，${j.games} 場</li>`;
       const p = pm.get(j.playerId);
       const who = p ? esc(p.name) : j.playerId;
       if (j.kind === 'scout') return `<li>球探：${who}</li>`;
-      if (j.kind === 'scrim') return `<li>練習賽：${who} 對 ${esc(pm.get(j.opponentId)?.name ?? j.opponentId)}，${j.games} 場</li>`;
       return `<li>研發：${who} 的${j.target === 'generic' ? '泛用' : `對${lineageName(c, j.target)}`}戰術預設，${j.games} 場</li>`;
     })
     .join('');
@@ -328,7 +325,7 @@ function training(ctx: Ctx): string {
       <button data-act="research" ${!canAct || v.me.capacityLeft < 1 ? 'disabled' : ''}>排入</button></div></section>
     <section class="card"><h2>本週已排的工作</h2>${queue ? `<ul class="mg-todo">${queue}</ul>` : '<p class="muted">沒有</p>'}</section>
     <section class="card"><h2>報告</h2>
-      <h3>練習賽</h3>${scrims.length ? `<ul class="mg-todo">${scrims.map((s) => `<li>${weekLabel(s.week)}：${esc(pm.get(s.playerId)?.name ?? '?')} 對 ${esc(pm.get(s.opponentId)?.name ?? '?')}　${s.wins}/${s.games} 勝（${pct(s.wins, s.games)}，${ci(s.wins, s.games)}）</li>`).join('')}</ul>` : '<p class="muted">還沒有</p>'}
+      <h3>練習賽</h3>${scrims.length ? `<ul class="mg-todo">${scrims.map((s) => `<li>${weekLabel(s.week)}：對 ${esc(teamName(v, s.opponentTeamId))}　${s.wins}/${s.games} 勝（${pct(s.wins, s.games)}，${ci(s.wins, s.games)}）</li>`).join('')}</ul>` : '<p class="muted">還沒有</p>'}
       <h3>戰術預設</h3>${presets.length ? `<ul class="mg-todo">${presets.map((p) => `<li>${esc(pm.get(p.playerId)?.name ?? '?')}：${p.target === 'generic' ? '泛用' : `對${lineageName(c, p.target)}`}，估計加成約 +${p.reportedBonus}${p.valid ? '' : '（已失效）'}</li>`).join('')}</ul>` : '<p class="muted">還沒有</p>'}
       <h3>球探情報</h3>${intel.length ? `<ul class="mg-todo">${intel.map((i) => `<li>${weekLabel(i.week)}：${esc(pm.get(i.playerId)?.name ?? '?')} 真實強度約 ${i.estPower}（±${i.sd}）</li>`).join('')}</ul>` : '<p class="muted">還沒有</p>'}</section>`;
 }

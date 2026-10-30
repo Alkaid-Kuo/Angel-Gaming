@@ -59,11 +59,11 @@ const splurge: Policy = (view, content) => {
   return ownBet(view, content, 0.1);
 };
 
-/** 穩健：休賽期補 1 名公開 Elo 最高的自由選手（保留 4 週固定支出當緩衝），每週押自己 5% */
+/** 穩健：休賽期補 1 名公開 Elo 最高的自由選手當替補（保留 4 週固定支出當緩衝），每週押自己 5% */
 const steady: Policy = (view, content) => {
   const e = content.economy;
   if (view.phase === 'offseason') {
-    if (view.me.roster.length >= 4) return [];
+    if (view.me.roster.length > content.lineupSize) return [];
     const pool = view.players.filter((p) => p.teamId === null).sort((a, b) => b.elo - a.elo || a.weeklySalary - b.weeklySalary);
     for (const p of pool) {
       const fee = p.weeklySalary * e.signingFeeWeeks;
@@ -95,12 +95,12 @@ function estStrength(view: KnownView, p: KnownPlayer): number {
   return intel ? intel.estPower : p.elo;
 }
 
-function teamEst(view: KnownView, teamId: TeamId, players: Map<string, KnownPlayer>): number {
+function teamEst(view: KnownView, size: number, teamId: TeamId, players: Map<string, KnownPlayer>): number {
   const ids = view.teams.find((t) => t.id === teamId)?.roster ?? [];
   const ests = ids
     .map((id) => estStrength(view, players.get(id) as KnownPlayer))
     .sort((a, b) => b - a)
-    .slice(0, 3);
+    .slice(0, size);
   return ests.reduce((s, x) => s + x, 0) / Math.max(1, ests.length);
 }
 
@@ -116,7 +116,7 @@ const scoutBettor: Policy = (view, content) => {
   for (const f of others) {
     const odds = view.odds.find((o) => o.fixtureId === f.id);
     if (!odds) continue;
-    const p = homeWinPermille(teamEst(view, f.home, players), teamEst(view, f.away, players));
+    const p = homeWinPermille(teamEst(view, content.lineupSize, f.home, players), teamEst(view, content.lineupSize, f.away, players));
     const evHome = (p * odds.homeX100) / 1000 / 100;
     const evAway = ((1000 - p) * odds.awayX100) / 1000 / 100;
     const best = evHome >= evAway ? { side: 'home' as const, ev: evHome } : { side: 'away' as const, ev: evAway };
@@ -135,7 +135,7 @@ const scoutBettor: Policy = (view, content) => {
       const top = ids
         .map((id) => players.get(id) as KnownPlayer)
         .sort((a, b) => b.elo - a.elo)
-        .slice(0, 3);
+        .slice(0, content.lineupSize);
       for (const p of top) {
         if (view.intel.some((i) => i.playerId === p.id) || cash < 400) continue;
         cmds.push({ type: 'scout', playerId: p.id });

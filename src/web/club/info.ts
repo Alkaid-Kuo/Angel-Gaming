@@ -19,7 +19,7 @@ function matchRow(ctx: Ctx, f: KnownFixture): string {
     const theirs = f.home === id ? s.away : s.home;
     return mine > theirs ? 'win' : mine < theirs ? 'lose' : '';
   };
-  const dots = f.slots.map((x) => `<i class="${x.winner === 'a' ? 'h' : x.winner === 'b' ? 'a' : ''}"></i>`).join('');
+  const dots = '';
   return `<div class="mrow ${f.home === me || f.away === me ? 'mine' : ''}">
     <span class="mr-t ${res(f.home)}">${esc(teamName(ctx, f.home))}${crest(ctx, f.home, 24)}</span>
     <span class="mr-s">${s ? `<b>${s.home}</b><em>:</em><b>${s.away}</b>` : '<em>VS</em>'}${dots ? `<span class="mr-dots">${dots}</span>` : ''}</span>
@@ -53,7 +53,7 @@ export function leagueScreen(ctx: Ctx): string {
       const form = teamForm(v, r.teamId)
         .map((x) => `<i class="${x}">${x === 'W' ? '勝' : x === 'L' ? '敗' : '和'}</i>`)
         .join('');
-      return `<tr class="${r.teamId === v.me.teamId ? 'me' : ''} ${i < 4 ? 'po' : ''}"><td class="rk">${i + 1}</td><td class="tm"><span class="tm-in">${crest(ctx, r.teamId, 26)}<span>${esc(teamName(ctx, r.teamId))}</span></span></td><td>${r.played}</td><td>${r.wins}-${r.draws}-${r.losses}</td><td>${r.slotDiff >= 0 ? '+' : ''}${r.slotDiff}</td><td class="form">${form || '—'}</td><td class="pts">${started ? r.points : '—'}</td></tr>`;
+      return `<tr class="${r.teamId === v.me.teamId ? 'me' : ''} ${i < 4 ? 'po' : ''}"><td class="rk">${i + 1}</td><td class="tm"><span class="tm-in">${crest(ctx, r.teamId, 26)}<span>${esc(teamName(ctx, r.teamId))}</span></span></td><td>${r.played}</td><td>${r.wins}-${r.draws}-${r.losses}</td><td>${r.scoreDiff >= 0 ? '+' : ''}${r.scoreDiff}</td><td class="form">${form || '—'}</td><td class="pts">${started ? r.points : '—'}</td></tr>`;
     })
     .join('');
   const weeks = [...new Set(v.fixtures.map((f) => f.week))].sort((a, b) => a - b);

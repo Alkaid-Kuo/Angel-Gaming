@@ -218,6 +218,12 @@ export const LINEAGE_LOOK: Record<string, { color: string; glyph: string }> = {
   swarm: { color: '#ec4899', glyph: '<circle cx="7" cy="8" r="3"/><circle cx="17" cy="8" r="3"/><circle cx="12" cy="15" r="3.4"/><circle cx="5" cy="17" r="2.3"/><circle cx="19" cy="17" r="2.3"/>' },
   turtle: { color: '#14b8a6', glyph: '<path d="M12 3 L19.5 7.5 V16.5 L12 21 L4.5 16.5 V7.5 Z"/><path d="M12 8 L15.5 10 V14 L12 16 L8.5 14 V10 Z" fill="#000" fill-opacity=".35"/>' },
   balance: { color: '#cbd5e1', glyph: '<path d="M12 3 V20 M7 20 H17 M4 7 H20" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 7 L1.8 13 H6.2 Z M20 7 L17.8 13 H22.2 Z"/>' },
+  // 攻防戰的五個角色（流派 id ＝ 角色）
+  entry: { color: '#ef4444', glyph: '<path d="M3 12 H15 M11 6 L17 12 L11 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><path d="M19 5 V19" stroke="currentColor" stroke-width="2.6"/>' },
+  awp: { color: '#22c55e', glyph: '<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1.5 V7 M12 17 V22.5 M1.5 12 H7 M17 12 H22.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="1.8"/>' },
+  support: { color: '#3b82f6', glyph: '<circle cx="8" cy="13" r="5"/><circle cx="15.5" cy="10.5" r="5.5"/><circle cx="16" cy="16" r="4"/>' },
+  anchor: { color: '#14b8a6', glyph: '<circle cx="12" cy="5" r="2.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5 V20.5 M7.5 11 H16.5 M4.5 14 C5 18.5 8.5 20.5 12 20.5 C15.5 20.5 19 18.5 19.5 14" fill="none" stroke="currentColor" stroke-width="2"/>' },
+  lurk: { color: '#a855f7', glyph: '<path d="M2.5 12 C6 6.5 18 6.5 21.5 12 C18 17.5 6 17.5 2.5 12 Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8.6 A3.4 3.4 0 1 0 12 15.4 A2.2 3.4 0 0 1 12 8.6 Z"/>' },
 };
 
 export function lineageGlyph(id: string, size = 18): string {
