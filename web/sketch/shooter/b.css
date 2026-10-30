@@ -1,0 +1,75 @@
+/* 方向 B 的 HUD：墨線＋平塗的漫畫格。粗外框、硬邊偏移陰影、微微歪斜，數字用 Bangers */
+#stage.dir-b {
+  --ink: #1f1536; --paper: #fffdf6; --cream: #f8ead0; --gold: #ffc22e; --cyan: #19b9ee; --red: #ee3350; --violet: #6346a0; --grey: #8d84a3;
+  --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --en: "Bangers", "Barlow Condensed", sans-serif;
+  --frame: 4px solid var(--ink); --drop: 6px 7px 0 var(--ink);
+  color: var(--ink); font-family: var(--zh); background: var(--ink);
+}
+.dir-b .h-radar { width: 278px; padding: 0; background: var(--paper); border: var(--frame); box-shadow: var(--drop); transform: rotate(-0.6deg); }
+.dir-b .h-radar .rz { padding: 4px 10px 4px; border-top: var(--frame); }
+.dir-b .h-radar .rz b { font-size: 19px; font-weight: 900; }
+.dir-b .h-radar .rz span { font-size: 13px; font-weight: 700; color: var(--violet); }
+
+.dir-b .h-top { top: 18px; gap: 0; }
+.dir-b .h-top .tm { gap: 12px; height: 82px; padding: 0 20px; background: var(--paper); border: var(--frame); box-shadow: var(--drop); }
+.dir-b .h-top .tm.us { background: var(--gold); transform: rotate(-1deg); }
+.dir-b .h-top .tm.them { background: var(--cyan); transform: rotate(1deg); }
+.dir-b .h-top .n { font-size: 28px; font-weight: 900; }
+.dir-b .h-top small { font-family: var(--en); font-size: 18px; }
+.dir-b .h-top .sc { font-family: var(--en); font-size: 74px; line-height: 1; min-width: 46px; text-align: center; color: var(--paper); -webkit-text-stroke: 2px var(--ink); paint-order: stroke fill; }
+.dir-b .h-top .pips { gap: 4px; }
+.dir-b .h-top .pips i { width: 12px; height: 26px; border: 3px solid var(--ink); background: transparent; transform: skewX(-10deg); }
+.dir-b .h-top .pips i.on { background: var(--ink); }
+.dir-b .h-top .mid { z-index: 1; width: 158px; margin: -6px -8px 0; background: var(--ink); color: var(--paper); clip-path: polygon(0 0, 100% 0, 92% 100%, 8% 100%); padding: 6px 0 8px; }
+.dir-b .h-top .clock { font-family: var(--en); font-size: 54px; line-height: 1; letter-spacing: 0.02em; color: var(--paper); }
+.dir-b .h-top .rd { font-size: 12px; font-weight: 700; color: var(--gold); }
+
+.dir-b .h-feed .k { gap: 10px; padding: 6px 14px; background: var(--paper); border: var(--frame); box-shadow: 4px 5px 0 var(--ink); font-size: 18px; font-weight: 900; transform: rotate(0.6deg); }
+.dir-b .h-feed .us { color: #b76a00; }
+.dir-b .h-feed .them { color: #0c7fc4; }
+.dir-b .h-feed .w { font-family: var(--en); font-size: 21px; padding: 0 8px; background: var(--ink); color: var(--paper); }
+
+.dir-b .h-hint { top: 124px; padding: 4px 18px; font-size: 16px; font-weight: 900; background: var(--paper); border: 3px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); }
+
+.dir-b .h-vitals { gap: 14px; }
+.dir-b .h-vitals .stat { padding: 2px 14px 8px; min-width: 140px; background: var(--paper); border: var(--frame); box-shadow: var(--drop); }
+.dir-b .h-vitals .stat.hp { background: var(--gold); transform: rotate(-1.2deg); }
+.dir-b .h-vitals .stat.ar { transform: rotate(0.8deg); }
+.dir-b .h-vitals .stat.mo { min-width: 0; transform: rotate(-0.6deg); }
+.dir-b .h-vitals .lb { display: block; font-size: 14px; font-weight: 900; }
+.dir-b .h-vitals b { display: block; font-family: var(--en); font-weight: 400; font-size: 70px; line-height: 0.92; }
+.dir-b .h-vitals .stat.mo b { font-size: 50px; line-height: 1.2; }
+.dir-b .h-vitals .bar { height: 12px; margin-top: 4px; border: 3px solid var(--ink); background: var(--paper); }
+.dir-b .h-vitals .bar u { background: var(--ink); }
+
+.dir-b .h-wpn { gap: 12px; }
+.dir-b .h-wpn .am { gap: 12px; padding: 0 20px 4px; background: var(--paper); border: var(--frame); box-shadow: var(--drop); transform: rotate(1deg); }
+.dir-b .h-wpn .wn { font-family: var(--en); font-size: 30px; }
+.dir-b .h-wpn .am b { font-family: var(--en); font-weight: 400; font-size: 84px; line-height: 1; color: var(--red); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; }
+.dir-b .h-wpn .res { font-family: var(--en); font-size: 34px; color: var(--violet); }
+.dir-b .h-wpn .wbar { gap: 8px; }
+.dir-b .h-wpn .ws { gap: 8px; height: 44px; padding: 0 12px 0 8px; font-size: 15px; font-weight: 900; background: var(--paper); border: 3px solid var(--ink); box-shadow: 3px 4px 0 var(--ink); }
+.dir-b .h-wpn .ws kbd { display: grid; place-items: center; width: 22px; height: 22px; font-family: var(--en); font-size: 17px; background: var(--ink); color: var(--paper); }
+.dir-b .h-wpn .ws.sel { background: var(--gold); transform: translateY(-5px); }
+.dir-b .h-wpn .ws.empty { background: #d9cdea; color: var(--grey); }
+
+.dir-b .sheet { background: rgba(31, 21, 54, 0.5); }
+.dir-b .sheet .box { width: 1280px; padding: 22px 30px 26px; background: var(--paper); border: 5px solid var(--ink); box-shadow: 10px 12px 0 var(--ink); transform: rotate(-0.4deg); }
+.dir-b .sheet h2 { display: flex; justify-content: space-between; align-items: center; margin: 0 0 12px; font-size: 34px; font-weight: 900; }
+.dir-b .sheet h2 em { font-family: var(--en); font-style: normal; font-size: 62px; font-weight: 400; color: var(--red); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; }
+.dir-b .sheet .cols { gap: 24px; }
+.dir-b .sheet table { border: var(--frame); }
+.dir-b .sheet th { padding: 6px 10px; font-size: 13px; font-weight: 900; background: var(--ink); color: var(--paper); }
+.dir-b .sheet .us th.pn { background: var(--gold); color: var(--ink); font-size: 22px; }
+.dir-b .sheet .them th.pn { background: var(--cyan); color: var(--ink); font-size: 22px; }
+.dir-b .sheet th.pn small { margin-left: 10px; font-family: var(--en); font-size: 16px; font-weight: 400; }
+.dir-b .sheet td { padding: 7px 10px; font-family: var(--en); font-size: 25px; border-top: 2px solid var(--ink); }
+.dir-b .sheet td.pn { font-family: var(--zh); font-size: 17px; }
+.dir-b .sheet td.pn b { font-weight: 900; }
+.dir-b .sheet td.pn small { margin-left: 8px; font-size: 12px; color: var(--violet); font-weight: 700; }
+.dir-b .sheet tr.me td { background: #ffe9a8; }
+.dir-b .sheet tr.dead td { color: var(--grey); text-decoration: line-through; }
+.dir-b .sheet .hist { gap: 6px; margin-top: 20px; }
+.dir-b .sheet .hist i { width: 42px; height: 32px; font-size: 14px; font-weight: 900; border: 3px solid var(--ink); }
+.dir-b .sheet .hist .us { background: var(--gold); }
+.dir-b .sheet .hist .them { background: var(--cyan); }

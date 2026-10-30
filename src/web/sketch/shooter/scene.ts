@@ -60,8 +60,8 @@ export const SCENE = {
 
 /** 畫面上標的區域名（挑鏡頭內夠大的區塊；座標＝文字中心） */
 export const CALLOUTS: readonly { readonly name: string; readonly x: number; readonly y: number }[] = [
-  { name: '地窖西口', x: 14, y: 37.2 },
-  { name: '地窖東口', x: 28, y: 37.2 },
+  { name: '地窖西口', x: 12.4, y: 37.2 },
+  { name: '地窖東口', x: 24.6, y: 37.2 },
   { name: '地窖大廳', x: 22, y: 50.5 },
   { name: 'B 西門', x: 41, y: 25.4 },
   { name: '北街', x: 56, y: 28 },
