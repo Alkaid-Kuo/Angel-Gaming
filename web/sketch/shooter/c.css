@@ -1,0 +1,77 @@
+/* 方向 C 的 HUD：白卡＋細墨線，沒有陰影、沒有圓角、沒有斜切。層次只靠字級、線寬與留白；顏色職責同世界（金＝我方、藍＝對手、紅＝危險） */
+#stage.dir-c {
+  --ink: #2a2d34; --paper: #f7f4ec; --tone: #e3ded2; --stone: #b7b2a6; --gold: #eca61f; --blue: #1f6fc4; --red: #dd4148; --white: #ffffff;
+  --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --en: "Barlow Condensed", "Noto Sans TC", sans-serif;
+  --hair: 1.5px solid var(--ink);
+  color: var(--ink); font-family: var(--zh); font-weight: 500; background: var(--ink);
+}
+.dir-c .h-radar { width: 272px; background: var(--white); border: var(--hair); }
+.dir-c .h-radar .rz { padding: 6px 10px; border-top: var(--hair); }
+.dir-c .h-radar .rz b { font-size: 16px; font-weight: 700; letter-spacing: 0.08em; }
+.dir-c .h-radar .rz span { font-size: 12px; color: #7c7a74; }
+
+.dir-c .h-top { top: 28px; background: var(--white); border: var(--hair); }
+.dir-c .h-top .tm { gap: 14px; height: 64px; padding: 0 20px; }
+.dir-c .h-top .tm.us { border-bottom: 5px solid var(--gold); }
+.dir-c .h-top .tm.them { border-bottom: 5px solid var(--blue); }
+.dir-c .h-top .n { font-size: 20px; font-weight: 700; letter-spacing: 0.12em; }
+.dir-c .h-top small { font-family: var(--en); font-size: 15px; font-weight: 600; color: #7c7a74; }
+.dir-c .h-top .sc { font-family: var(--en); font-weight: 600; font-size: 56px; line-height: 1; min-width: 36px; text-align: center; }
+.dir-c .h-top .pips { gap: 4px; }
+.dir-c .h-top .pips i { width: 10px; height: 10px; border: 1.5px solid var(--ink); }
+.dir-c .h-top .us .pips i { border-radius: 50%; }
+.dir-c .h-top .them .pips i { transform: rotate(45deg); }
+.dir-c .h-top .us .pips i.on { background: var(--gold); }
+.dir-c .h-top .them .pips i.on { background: var(--blue); }
+.dir-c .h-top .mid { width: 136px; border-left: var(--hair); border-right: var(--hair); }
+.dir-c .h-top .clock { font-family: var(--en); font-weight: 600; font-size: 42px; line-height: 1; }
+.dir-c .h-top .rd { font-size: 11px; color: #7c7a74; margin-top: 2px; }
+
+.dir-c .h-feed .k { gap: 10px; padding: 6px 12px; background: var(--white); border: var(--hair); font-size: 15px; }
+.dir-c .h-feed b { font-weight: 700; }
+.dir-c .h-feed .us { box-shadow: inset 0 -3px 0 var(--gold); }
+.dir-c .h-feed .them { box-shadow: inset 0 -3px 0 var(--blue); }
+.dir-c .h-feed .w { font-family: var(--en); font-weight: 600; font-size: 16px; color: #7c7a74; }
+
+.dir-c .h-hint { top: 108px; padding: 3px 14px; font-size: 13px; background: var(--white); border: var(--hair); border-top: none; }
+
+.dir-c .h-vitals { background: var(--white); border: var(--hair); }
+.dir-c .h-vitals .stat { width: 150px; padding: 8px 14px 10px; border-right: var(--hair); }
+.dir-c .h-vitals .stat.mo { width: auto; border-right: none; }
+.dir-c .h-vitals .lb { display: block; font-size: 12px; color: #7c7a74; letter-spacing: 0.12em; }
+.dir-c .h-vitals b { display: block; font-family: var(--en); font-weight: 600; font-size: 54px; line-height: 1; }
+.dir-c .h-vitals .bar { height: 4px; margin-top: 6px; background: var(--tone); }
+.dir-c .h-vitals .bar u { background: var(--ink); }
+.dir-c .h-vitals .stat.mo b { font-size: 40px; line-height: 1.35; color: var(--ink); }
+
+.dir-c .h-wpn { background: var(--white); border: var(--hair); align-items: stretch; }
+.dir-c .h-wpn .am { gap: 12px; justify-content: flex-end; padding: 6px 16px 6px; border-bottom: var(--hair); }
+.dir-c .h-wpn .wn { font-family: var(--en); font-weight: 600; font-size: 22px; margin-right: auto; }
+.dir-c .h-wpn .am b { font-family: var(--en); font-weight: 600; font-size: 66px; line-height: 1; }
+.dir-c .h-wpn .res { font-family: var(--en); font-weight: 600; font-size: 26px; color: #7c7a74; }
+.dir-c .h-wpn .ws { gap: 6px; height: 38px; padding: 0 12px; font-size: 13px; border-right: 1px solid var(--tone); }
+.dir-c .h-wpn .ws:last-child { border-right: none; }
+.dir-c .h-wpn .ws kbd { font-family: var(--en); font-weight: 600; font-size: 15px; color: #7c7a74; }
+.dir-c .h-wpn .ws.sel { box-shadow: inset 0 -5px 0 var(--gold); font-weight: 700; }
+.dir-c .h-wpn .ws.empty { color: var(--stone); }
+
+.dir-c .sheet { background: rgba(247, 244, 236, 0.78); }
+.dir-c .sheet .box { width: 1200px; padding: 28px 36px 30px; background: var(--white); border: 2.5px solid var(--ink); }
+.dir-c .sheet h2 { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 18px; font-size: 22px; font-weight: 700; letter-spacing: 0.14em; }
+.dir-c .sheet h2 em { font-family: var(--en); font-style: normal; font-weight: 600; font-size: 54px; letter-spacing: 0.02em; }
+.dir-c .sheet .cols { gap: 40px; }
+.dir-c .sheet th { padding: 6px 8px; font-size: 12px; font-weight: 500; color: #7c7a74; border-bottom: var(--hair); }
+.dir-c .sheet th.pn { font-size: 18px; font-weight: 700; color: var(--ink); }
+.dir-c .sheet .us th.pn { box-shadow: inset 5px 0 0 var(--gold); padding-left: 14px; }
+.dir-c .sheet .them th.pn { box-shadow: inset 5px 0 0 var(--blue); padding-left: 14px; }
+.dir-c .sheet th.pn small { margin-left: 8px; font-family: var(--en); font-size: 15px; color: #7c7a74; font-weight: 600; }
+.dir-c .sheet td { padding: 8px; font-family: var(--en); font-weight: 600; font-size: 22px; border-bottom: 1px solid var(--tone); }
+.dir-c .sheet td.pn { font-family: var(--zh); font-size: 15px; font-weight: 500; }
+.dir-c .sheet td.pn b { font-weight: 700; }
+.dir-c .sheet td.pn small { margin-left: 8px; font-size: 11px; color: #7c7a74; }
+.dir-c .sheet tr.me td { box-shadow: inset 0 -2px 0 var(--ink); }
+.dir-c .sheet tr.dead td { color: var(--stone); }
+.dir-c .sheet .hist { gap: 4px; margin-top: 24px; }
+.dir-c .sheet .hist i { width: 34px; height: 34px; font-size: 12px; font-weight: 700; color: var(--white); }
+.dir-c .sheet .hist .us { background: var(--gold); border-radius: 50%; }
+.dir-c .sheet .hist .them { background: var(--blue); }

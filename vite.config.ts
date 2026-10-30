@@ -8,7 +8,7 @@ export default defineConfig({
     outDir: 'dist-web',
     emptyOutDir: true,
     target: 'es2022',
-    rollupOptions: { input: { main: 'web/index.html', legion: 'web/legion.html', manage: 'web/manage.html', club: 'web/club.html', game: 'web/game.html', shooter: 'web/shooter.html', sketchShooterA: 'web/sketch/shooter/a-diorama.html', sketchShooterB: 'web/sketch/shooter/b-comic.html' } },
+    rollupOptions: { input: { main: 'web/index.html', legion: 'web/legion.html', manage: 'web/manage.html', club: 'web/club.html', game: 'web/game.html', shooter: 'web/shooter.html', sketchShooterA: 'web/sketch/shooter/a-diorama.html', sketchShooterB: 'web/sketch/shooter/b-comic.html', sketchShooterC: 'web/sketch/shooter/c-minimal.html' } },
   },
   worker: {
     format: 'es',
