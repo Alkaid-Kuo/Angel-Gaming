@@ -3,7 +3,7 @@
 // 圖層：地面烘焙 → 記憶圖遮罩 → 牆烘焙 → 單位 → 煙 → 彈道與回饋。烘焙層只在地圖變動時重畫。
 import { CALLOUTS, SCENE, UNITS, camRect, makeCanvas, toScreen, worldTransform, type Cam, type Unit } from './scene.ts';
 import { mountPage, radarBase, type Direction } from './shell.ts';
-import { LOW_RECTS, MAP, hash2, isWall, regionLabels, rng, wallPath, zoneAt, zonePath, type Pt, type Zone } from './world.ts';
+import { DRAFT, LOW_RECTS, MAP, TARPS, WELL, hash2, isWall, regionLabels, rng, wallPath, zoneAt, zonePath, type Pt, type Zone } from './world.ts';
 
 /** 調色盤：世界全部在暖土色內，隊色才有飽和度；陰影是偏紫的暖灰，不用黑 */
 const PAL = {
@@ -142,13 +142,7 @@ function paintSlabs(g: CanvasRenderingContext2D, r: Rc, tones: readonly string[]
 function paintMarket(g: CanvasRenderingContext2D, r: Rc): void {
   paintDirt(g, r);
   // 市集的帆布攤：平鋪在地上的布，不是棚頂，才不會蓋住人
-  const tarps: readonly (readonly [number, number, number, number])[] = [
-    [22, 97, 6, 4],
-    [31, 100, 5, 5],
-    [16, 105, 7, 4],
-    [27, 107, 8, 3],
-  ];
-  for (const [x, y, w, h] of tarps) {
+  for (const [x, y, w, h] of TARPS) {
     g.fillStyle = 'rgba(120, 90, 90, 0.25)';
     g.fillRect(x + 0.15, y + 0.2, w, h);
     g.fillStyle = '#e7dcc8';
@@ -207,8 +201,8 @@ function paintSites(g: CanvasRenderingContext2D, cam: Cam): void {
     const w = s.x1 - s.x0;
     const h = s.y1 - s.y0;
     // 圓環避開井與石柱
-    const cx = s.x0 + w / 2 + (s.id === 'B' ? 3 : -2);
-    const cy = s.y0 + h / 2 + (s.id === 'B' ? 2 : 2);
+    const cx = s.x0 + w / 2 + (DRAFT ? (s.id === 'B' ? 3.5 : 3) : s.id === 'B' ? 3 : -2);
+    const cy = s.y0 + h / 2 + (DRAFT ? (s.id === 'B' ? 3 : -2) : 2);
     p.lineWidth = 0.28;
     p.strokeRect(s.x0, s.y0, w, h);
     p.lineWidth = 0.09;
@@ -232,13 +226,13 @@ function paintSites(g: CanvasRenderingContext2D, cam: Cam): void {
     }
     p.lineWidth = 0.42;
     p.beginPath();
-    p.arc(cx, cy, 6.4, 0, Math.PI * 2);
+    p.arc(cx, cy, DRAFT ? 5.2 : 6.4, 0, Math.PI * 2);
     p.stroke();
     p.lineWidth = 0.12;
     p.beginPath();
-    p.arc(cx, cy, 5.7, 0, Math.PI * 2);
+    p.arc(cx, cy, DRAFT ? 4.6 : 5.7, 0, Math.PI * 2);
     p.stroke();
-    p.font = '900 8.4px "Barlow Condensed", "Noto Sans TC", sans-serif';
+    p.font = `900 ${DRAFT ? 6.6 : 8.4}px "Barlow Condensed", "Noto Sans TC", sans-serif`;
     p.textAlign = 'center';
     p.textBaseline = 'middle';
     p.fillText(s.id, cx, cy + 0.3);
@@ -445,7 +439,7 @@ function barrels(g: CanvasRenderingContext2D, x: number, y: number, w: number, h
 /** 矮牆：依位置固定配成箱、沙袋、桶；形狀就是碰撞矩形 */
 function paintLow(g: CanvasRenderingContext2D): void {
   LOW_RECTS.forEach((r, i) => {
-    const kind = ['crate', 'sand', 'crate', 'barrel', 'sand', 'crate', 'sand', 'crate', 'barrel', 'sand'][i];
+    const kind = ['crate', 'sand', 'crate', 'barrel', 'sand', 'crate', 'sand', 'crate', 'barrel', 'sand'][i % 10];
     const w = r.x1 - r.x0;
     const h = r.y1 - r.y0;
     if (kind === 'crate') {
@@ -472,8 +466,7 @@ function paintWallProps(g: CanvasRenderingContext2D, r: Rc): void {
 
 /** B 包點的井：碰撞是 3×3 的方塊，畫成方形石台裡的圓井 */
 function paintWell(g: CanvasRenderingContext2D): void {
-  const x = 16;
-  const y = 18;
+  const { x, y } = WELL;
   g.fillStyle = '#c9bca9';
   strip(g, x, y, 3, 3 - WALL_H * 0.6, 0.25);
   g.fillStyle = '#e3d9c9';

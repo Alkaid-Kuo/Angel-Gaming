@@ -1,10 +1,25 @@
 // 攻防戰美術樣張共用：只讀 MAPS.redrock() 的幾何，轉成繪製要用的形狀（牆輪廓、區域材質、視線多邊形、固定種子雜訊）。
 // 全部以格為單位；繪製時由各方向自己乘上鏡頭比例。不用 Math.random，之後正式版可以直接搬。
-import { MAPS, REDROCK_LAYOUT, type Rect } from '../../../shooter/map.ts';
+import { REDROCK_LAYOUT, buildMap, type Rect } from '../../../shooter/map.ts';
+import { DRAFT_LAYOUT, DRAFT_TARPS, DRAFT_WELL } from './map-draft.ts';
 
 export type Pt = readonly [number, number];
-export const MAP = MAPS.redrock();
-export const LOW_RECTS: readonly Rect[] = REDROCK_LAYOUT.low ?? [];
+/** 網址帶 ?draft 時畫新地圖草案（只有全圖用得上，對局場景的擺位是照赤岩鎮排的） */
+export const DRAFT = new URLSearchParams(location.search).has('draft');
+const LAYOUT = DRAFT ? DRAFT_LAYOUT : REDROCK_LAYOUT;
+export const MAP = buildMap(LAYOUT);
+export const LOW_RECTS: readonly Rect[] = LAYOUT.low ?? [];
+/** B 包點的井（3×3 方塊的左上角） */
+export const WELL = DRAFT ? DRAFT_WELL : { x: 16, y: 18 };
+/** 平鋪在市集地上的帆布 */
+export const TARPS: readonly (readonly [number, number, number, number])[] = DRAFT
+  ? DRAFT_TARPS
+  : [
+      [22, 97, 6, 4],
+      [31, 100, 5, 5],
+      [16, 105, 7, 4],
+      [27, 107, 8, 3],
+    ];
 
 export const isWall = (x: number, y: number): boolean => x < 0 || y < 0 || x >= MAP.width || y >= MAP.height || MAP.solid[y * MAP.width + x] === 1;
 export const isLow = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < MAP.width && y < MAP.height && MAP.solid[y * MAP.width + x] === 2;
@@ -165,6 +180,35 @@ const ZONE_OF: Readonly<Record<string, Zone>> = {
   bGate: 'stone',
   aSite: 'site',
   bSite: 'site',
+  // 草案新增的區域
+  eastRise: 'dirt',
+  barn: 'wood',
+  barnDoor: 'wood',
+  wineRoom: 'wood',
+  wineDoor: 'wood',
+  cellarBend: 'wood',
+  cellarRise: 'wood',
+  cellarMouth: 'wood',
+  mason: 'wood',
+  masonDoor: 'wood',
+  shopW: 'wood',
+  shopWDoor: 'wood',
+  shopE: 'wood',
+  shopEDoor: 'wood',
+  apothecary: 'wood',
+  apothecaryDoor: 'wood',
+  plaza: 'plaza',
+  yard: 'plaza',
+  yardDoor: 'plaza',
+  belfryEast: 'stone',
+  aMouth: 'dirt',
+  aGate: 'stone',
+  ctWest: 'stone',
+  ctWestBend: 'stone',
+  ctEast: 'stone',
+  ctEastBend: 'stone',
+  ctRampW: 'stone',
+  ctRampE: 'stone',
 };
 export const ZONES: readonly Zone[] = ['stone', 'dirt', 'wood', 'market', 'plaza', 'site'];
 
@@ -201,7 +245,7 @@ export function zonePath(z: Zone): Path2D {
 export function regionLabels(): { name: string; x: number; y: number }[] {
   const seen = new Set<string>();
   return MAP.regions
-    .filter((r) => r.id !== 'aSite' && r.id !== 'bSite' && !seen.has(r.name) && seen.add(r.name) !== null)
+    .filter((r) => r.id !== 'aSite' && r.id !== 'bSite' && !r.id.endsWith('Door') && !r.id.endsWith('Bend') && !seen.has(r.name) && seen.add(r.name) !== null)
     .map((r) => ({ name: r.name, x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2 }));
 }
 
