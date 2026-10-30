@@ -19,10 +19,10 @@ export function trainingScreen(ctx: Ctx): string {
   const usedLen = (used / cap) * L;
   const upCost = lvl < maxLvl ? e.facilityUpgradeCost[lvl - 1] : 0;
   const jobs = v.jobs.map((j) => {
+    if (j.kind === 'scrim') return `<div class="job"><span class="ic2 w">${icon('swords', 24)}</span><b>練習賽<small>對 ${esc(teamName(v, j.opponentTeamId))}</small></b><span class="num">${j.games}</span><div class="meter" style="--v:${Math.round((j.games / cap) * 100)}%"><i></i></div></div>`;
     const p = ctx.pm.get(j.playerId);
     const who = esc(p?.name ?? '?');
     if (j.kind === 'scout') return `<div class="job"><span class="ic2 w">${icon('search', 24)}</span><b>球探<small>${who} · ${esc(teamName(v, p?.teamId ?? null))}</small></b><span class="num sm">${wan(e.scoutCost)}萬</span><div class="meter" style="--v:100%"><i></i></div></div>`;
-    if (j.kind === 'scrim') return `<div class="job"><span class="ic2 w">${icon('swords', 24)}</span><b>練習賽<small>${who} vs ${esc(ctx.pm.get(j.opponentId)?.name ?? '?')}</small></b><span class="num">${j.games}</span><div class="meter" style="--v:${Math.round((j.games / cap) * 100)}%"><i></i></div></div>`;
     return `<div class="job"><span class="ic2">${icon('flask', 24)}</span><b>戰術研發<small>${who} · ${j.target === 'generic' ? '泛用' : `針對${esc(lineageName(c, j.target))}`}</small></b><span class="num">${j.games}</span><div class="meter g" style="--v:${Math.round((j.games / cap) * 100)}%"><i></i></div></div>`;
   });
   const pid = ui.trainMode === 'scrim' ? ui.scrim.playerId : ui.research.playerId;
@@ -72,7 +72,7 @@ export function trainingScreen(ctx: Ctx): string {
       <div class="pn rep in">${pt('04', '報告', '最近的工作成果')}
         <div class="cols">
           <div class="col"><h4>${icon('search', 18)}球探報告<small>誤差 ±${e.scoutSd}</small></h4>${intel.length ? intel.map((i) => { const p = ctx.pm.get(i.playerId); const d = p ? i.estPower - p.elo : 0; return `<div class="it" data-act="player" data-pid="${i.playerId}"><b>${esc(p?.name ?? '?')}</b>（${esc(teamName(v, p?.teamId ?? null))}）真實約 <span class="num">${i.estPower}</span>，比評分${d >= 0 ? '高' : '低'} <b>${Math.abs(d)}</b></div>`; }).join('') : '<p class="dim">到轉會市場派球探。</p>'}</div>
-          <div class="col"><h4>${icon('swords', 18)}練習賽報告<small>樣本越多越準</small></h4>${scrims.length ? scrims.map((s) => `<div class="it"><b>${esc(ctx.pm.get(s.playerId)?.name ?? '?')} vs ${esc(ctx.pm.get(s.opponentId)?.name ?? '?')}</b> ${s.games} 場 ${s.wins} 勝：估計勝率 <span class="num">${Math.round((s.wins * 100) / s.games)}%</span> ± ${ci(s.wins, s.games)}%</div>`).join('') : '<p class="dim">還沒有報告。</p>'}</div>
+          <div class="col"><h4>${icon('swords', 18)}練習賽報告<small>樣本越多越準</small></h4>${scrims.length ? scrims.map((s) => `<div class="it"><b>對 ${esc(teamName(v, s.opponentTeamId))}</b> ${s.games} 場 ${s.wins} 勝：估計勝率 <span class="num">${Math.round((s.wins * 100) / s.games)}%</span> ± ${ci(s.wins, s.games)}%</div>`).join('') : '<p class="dim">還沒有報告。</p>'}</div>
           <div class="col"><h4>${icon('flask', 18)}戰術預設<small>升版後失效</small></h4>${presets.length ? presets.map((x) => `<div class="it ${x.valid ? '' : 'off'}"><b>${esc(ctx.pm.get(x.playerId)?.name ?? '?')} · ${x.target === 'generic' ? '泛用' : `針對${esc(lineageName(c, x.target))}`}</b> 估計加成 <span class="num">+${x.reportedBonus}</span>${x.valid ? '' : '（已失效）'}</div>`).join('') : '<p class="dim">還沒有預設。</p>'}</div>
         </div></div>
     </section>`;

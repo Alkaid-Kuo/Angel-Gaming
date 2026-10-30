@@ -3,7 +3,6 @@ import type { ContentPack, PersonaSpec } from './content.ts';
 import type { Prng } from '../shared/prng.ts';
 import type { KnownPlayer, KnownView } from './view.ts';
 import type { Command, Persona } from './types.ts';
-import { LINEUP_SIZE } from './types.ts';
 
 function myPlayers(view: KnownView): KnownPlayer[] {
   const mine = new Set(view.me.roster);
@@ -42,11 +41,11 @@ export function npcOffseason(view: KnownView, persona: Persona, spec: PersonaSpe
   return cmds;
 }
 
-/** 每週出賽名單：取公開 Elo 最高的 3 人，再依個性決定對位順序 */
-export function npcLineup(view: KnownView, spec: PersonaSpec, rng: Prng): Command[] {
+/** 每週出賽名單：取公開 Elo 最高的 size 人，再依個性決定出賽順序 */
+export function npcLineup(view: KnownView, spec: PersonaSpec, size: number, rng: Prng): Command[] {
   const top = myPlayers(view)
     .sort((a, b) => b.elo - a.elo || (a.id < b.id ? -1 : 1))
-    .slice(0, LINEUP_SIZE)
+    .slice(0, size)
     .map((p) => p.id);
   if (spec.lineup === 'ace-last') top.reverse();
   else if (spec.lineup === 'random') rng.shuffle(top);

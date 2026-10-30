@@ -3,15 +3,30 @@
 import type { ContentPack } from './content.ts';
 import type { BattleGateway, MatchRequest } from './gateway.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
-import { buildSide, findPlayer, lineageOf, notify, teamOf, truePower } from './state.ts';
+import { buildSide, effectiveLineup, findPlayer, lineageOf, notify, playerOf, teamOf, truePower } from './state.ts';
 import type { GameState } from './types.ts';
 
-export async function processJobs(state: GameState, content: ContentPack, gateway: BattleGateway): Promise<void> {
+export async function processJobs(state: GameState, content: ContentPack, gateway: BattleGateway, onProgress?: (done: number, total: number) => void): Promise<void> {
   const jobs = state.jobs;
   state.jobs = [];
   const e = content.economy;
   for (const job of jobs) {
     const team = teamOf(state, job.teamId);
+    if (job.kind === 'scrim') {
+      // 隊對隊：雙方目前的出賽名單（無效時照開賽前補名單的規則補齊，不改存檔裡的名單）
+      const opp = teamOf(state, job.opponentTeamId);
+      const mine = effectiveLineup(state, content, team).map((id) => playerOf(state, id));
+      const theirs = effectiveLineup(state, content, opp).map((id) => playerOf(state, id));
+      const reqs: MatchRequest[] = [];
+      for (let i = 0; i < job.games; i++) {
+        reqs.push({ formatId: state.formatId, a: buildSide(mine, theirs), b: buildSide(theirs, mine), seed: rngFor(state.seed, STREAM.scrim, job.id, i).nextU32() });
+      }
+      const outs = await gateway.simulateBatch(reqs, onProgress);
+      const wins = outs.filter((o) => o.winner === 'a').length;
+      team.scrims.push({ week: state.week, opponentTeamId: opp.id, games: job.games, wins });
+      notify(state, team.id, 'report', `練習賽報告：對 ${opp.name} ${job.games} 場 ${wins} 勝（${Math.round((wins * 100) / job.games)}%）`);
+      continue;
+    }
     const p = findPlayer(state, job.playerId);
     if (!p) continue;
     if (job.kind !== 'scout' && p.teamId !== team.id) {
@@ -25,17 +40,6 @@ export async function processJobs(state: GameState, content: ContentPack, gatewa
       team.intel = team.intel.filter((i) => i.playerId !== p.id);
       team.intel.push({ playerId: p.id, week: state.week, estPower: est, sd: e.scoutSd });
       notify(state, team.id, 'report', `球探報告：${p.name}（${lineageOf(content, p.lineageId).name} v${p.version}）真實強度約 ${est}（誤差 ±${e.scoutSd}）`);
-    } else if (job.kind === 'scrim') {
-      const opp = findPlayer(state, job.opponentId);
-      if (!opp) continue;
-      const reqs: MatchRequest[] = [];
-      for (let i = 0; i < job.games; i++) {
-        reqs.push({ formatId: state.formatId, a: buildSide(p, opp), b: buildSide(opp, p), seed: rngFor(state.seed, STREAM.scrim, job.id, i).nextU32() });
-      }
-      const outs = await gateway.simulateBatch(reqs);
-      const wins = outs.filter((o) => o.winner === 'a').length;
-      team.scrims.push({ week: state.week, playerId: p.id, opponentId: opp.id, games: job.games, wins });
-      notify(state, team.id, 'report', `練習賽報告：${p.name} 對 ${opp.name} ${job.games} 場 ${wins} 勝（${Math.round((wins * 100) / job.games)}%）`);
     } else {
       const rng = rngFor(state.seed, STREAM.research, job.id);
       const cap = job.target === 'generic' ? e.researchCapGeneric : e.researchCapSpecific;

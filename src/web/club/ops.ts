@@ -53,10 +53,10 @@ export function trainingScreen(ctx: Ctx): string {
     `<div class="range"><input type="range" min="10" max="${Math.max(10, left)}" step="10" value="${Math.min(val, Math.max(10, left))}" data-field="${field}" ${left < 10 ? 'disabled' : ''}><output data-out="${field}">${Math.min(val, Math.max(10, left))}</output><span>場</span></div>`;
   const targets = [{ id: 'generic', name: '泛用', color: '#e2e8f0' }, ...c.lineages.map((l) => ({ id: l.id, name: `剋${l.name}`, color: lineageColor(l.id) }))];
   const queue = v.jobs.map((j) => {
+    if (j.kind === 'scrim') return `<li>${icon('swords', 16)}<span>練習賽：對 <b>${esc(teamName(ctx, j.opponentTeamId))}</b></span><em>${j.games} 場</em></li>`;
     const p = ctx.pm.get(j.playerId);
     const who = esc(p?.name ?? '?');
     if (j.kind === 'scout') return `<li>${icon('search', 16)}<span>球探出發：<b>${who}</b>（${esc(teamName(ctx, p?.teamId ?? null))}）</span></li>`;
-    if (j.kind === 'scrim') return `<li>${icon('swords', 16)}<span>練習賽：<b>${who}</b> 對 ${esc(ctx.pm.get(j.opponentId)?.name ?? '?')}</span><em>${j.games} 場</em></li>`;
     return `<li>${icon('flask', 16)}<span>研發：<b>${who}</b> 的${j.target === 'generic' ? '泛用' : `剋${lineageName(c, j.target)}`}戰術</span><em>${j.games} 場</em></li>`;
   });
   const scrims = [...v.scrims].reverse().slice(0, 6);
@@ -87,7 +87,7 @@ export function trainingScreen(ctx: Ctx): string {
     <section class="panel"><div class="panel-hd"><h2>${icon('hourglass', 18)}本週排程</h2><span>推進到下一週時一起完成</span></div>
       ${queue.length ? `<ul class="queue">${queue.join('')}</ul>` : '<p class="empty-note">還沒有排任何工作。</p>'}</section>
     <div class="three-col">
-      <section class="panel report"><h3>${icon('swords', 16)}練習賽報告</h3>${scrims.length ? scrims.map((s) => `<div class="rp"><b>${esc(ctx.pm.get(s.playerId)?.name ?? '?')}</b> 對 ${esc(ctx.pm.get(s.opponentId)?.name ?? '?')}<div class="rp-bar"><i style="width:${Math.round((s.wins * 100) / s.games)}%"></i></div><span>${s.wins}/${s.games} 勝・<b>${Math.round((s.wins * 100) / s.games)}%</b> ±${ci(s.wins, s.games)}%</span></div>`).join('') : '<p class="empty-note">還沒有報告</p>'}</section>
+      <section class="panel report"><h3>${icon('swords', 16)}練習賽報告</h3>${scrims.length ? scrims.map((s) => `<div class="rp">對 <b>${esc(teamName(ctx, s.opponentTeamId))}</b><div class="rp-bar"><i style="width:${Math.round((s.wins * 100) / s.games)}%"></i></div><span>${s.wins}/${s.games} 勝・<b>${Math.round((s.wins * 100) / s.games)}%</b> ±${ci(s.wins, s.games)}%</span></div>`).join('') : '<p class="empty-note">還沒有報告</p>'}</section>
       <section class="panel report"><h3>${icon('flask', 16)}戰術預設</h3>${presets.length ? presets.map((x) => `<div class="rp ${x.valid ? '' : 'off'}"><b>${esc(ctx.pm.get(x.playerId)?.name ?? '?')}</b>・${x.target === 'generic' ? '泛用' : `剋${lineageName(c, x.target)}`}<span>估計加成 <b>+${x.reportedBonus}</b>${x.valid ? '' : '（升版後失效）'}</span></div>`).join('') : '<p class="empty-note">還沒有預設</p>'}</section>
       <section class="panel report"><h3>${icon('search', 16)}球探情報</h3>${intel.length ? intel.map((i) => { const p = ctx.pm.get(i.playerId); const d = p ? i.estPower - p.elo : 0; return `<div class="rp"><b>${esc(p?.name ?? '?')}</b>（${esc(teamName(ctx, p?.teamId ?? null))}）<span>真實強度約 <b>${i.estPower}</b> ±${i.sd}・<i class="${d >= 0 ? 'up' : 'dn'}">比評分${d >= 0 ? '高' : '低'} ${Math.abs(d)}</i></span></div>`; }).join('') : '<p class="empty-note">到轉會市場派球探</p>'}</section>
     </div>`;

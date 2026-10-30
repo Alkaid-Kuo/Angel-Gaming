@@ -27,10 +27,15 @@ export interface KnownFixture {
   stage: Stage;
   home: TeamId;
   away: TeamId;
-  /** 打完才有 */
+  /** 最終比分，打完才有 */
   score: { home: number; away: number } | null;
-  /** 各對位結果（公開戰績），打完才有 */
-  slots: { home: PlayerId; away: PlayerId; winner: Winner }[];
+  /** 比賽內容（公開戰績）：雙方出賽名單、勝方（null＝平手）、逐回合累計比分（a＝主隊）；打完才有 */
+  match: {
+    home: PlayerId[];
+    away: PlayerId[];
+    winner: TeamId | null;
+    rounds: { label: string; winner: Winner; home: number; away: number }[];
+  } | null;
 }
 
 export interface KnownPreset {
@@ -118,8 +123,15 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       stage: f.stage,
       home: f.home,
       away: f.away,
-      score: f.result ? { home: f.result.homeWins, away: f.result.awayWins } : null,
-      slots: f.result ? f.result.slots.map((x) => ({ home: x.a, away: x.b, winner: x.winner })) : [],
+      score: f.result ? { home: f.result.scoreA, away: f.result.scoreB } : null,
+      match: f.result
+        ? {
+            home: [...f.result.lineupA],
+            away: [...f.result.lineupB],
+            winner: f.result.winner,
+            rounds: f.result.rounds.map((r) => ({ label: r.label, winner: r.winner, home: r.scoreA, away: r.scoreB })),
+          }
+        : null,
     })),
     odds: state.fixtures
       .filter((f) => f.week === state.week && f.result === null)

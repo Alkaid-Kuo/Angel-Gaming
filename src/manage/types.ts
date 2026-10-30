@@ -1,9 +1,7 @@
 // M4 經營層：狀態與指令型別。
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
 
-export const SAVE_VERSION = 1;
-/** 每場戰隊賽的對位數（出賽名單人數） */
-export const LINEUP_SIZE = 3;
+export const SAVE_VERSION = 2;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -68,10 +66,10 @@ export interface IntelReport {
   sd: number;
 }
 
+/** 練習賽報告：雙方當週的出賽名單隊對隊 */
 export interface ScrimReport {
   week: number;
-  playerId: PlayerId;
-  opponentId: PlayerId;
+  opponentTeamId: TeamId;
   games: number;
   wins: number;
 }
@@ -85,7 +83,7 @@ export interface Team {
   cash: number;
   fame: number;
   trainingLevel: number;
-  /** 出賽名單（依對位順序）；空或無效時開賽前自動補 */
+  /** 出賽名單（依隊內序號，人數＝內容包的 lineupSize）；空或無效時開賽前自動補 */
   lineup: PlayerId[];
   ledger: LedgerEntry[];
   intel: IntelReport[];
@@ -99,19 +97,17 @@ export interface RoundResult {
   scoreB: number;
 }
 
-export interface SlotResult {
-  a: PlayerId;
-  b: PlayerId;
-  winner: Winner;
-  rounds: RoundResult[];
-}
-
+/** 一場戰隊賽（名單對名單一場比賽）。A＝主隊、B＝客隊 */
 export interface FixtureResult {
-  slots: SlotResult[];
-  homeWins: number;
-  awayWins: number;
+  lineupA: PlayerId[];
+  lineupB: PlayerId[];
   /** null＝平手 */
   winner: TeamId | null;
+  /** 最終比分 */
+  scoreA: number;
+  scoreB: number;
+  /** 逐回合（累計比分，只供顯示） */
+  rounds: RoundResult[];
 }
 
 export interface Fixture {
@@ -135,7 +131,7 @@ export interface Bet {
 }
 
 export type Job =
-  | { kind: 'scrim'; id: number; teamId: TeamId; playerId: PlayerId; opponentId: PlayerId; games: number }
+  | { kind: 'scrim'; id: number; teamId: TeamId; opponentTeamId: TeamId; games: number }
   | { kind: 'research'; id: number; teamId: TeamId; playerId: PlayerId; target: string; games: number }
   | { kind: 'scout'; id: number; teamId: TeamId; playerId: PlayerId };
 
@@ -178,7 +174,7 @@ export type Command =
   | { type: 'upgradeTraining' }
   | { type: 'upgradeVersion'; playerId: PlayerId }
   | { type: 'bet'; fixtureId: FixtureId; side: Side; stake: number }
-  | { type: 'queueScrim'; playerId: PlayerId; opponentId: PlayerId; games: number }
+  | { type: 'queueScrim'; opponentTeamId: TeamId; games: number }
   | { type: 'queueResearch'; playerId: PlayerId; target: string; games: number }
   | { type: 'scout'; playerId: PlayerId };
 

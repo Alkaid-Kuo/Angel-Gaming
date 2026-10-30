@@ -2,7 +2,6 @@
 import type { ContentPack, Lineage } from './content.ts';
 import type { SideSpec } from './gateway.ts';
 import type { GameState, LedgerCategory, Message, Player, PlayerId, Team, TeamId } from './types.ts';
-import { LINEUP_SIZE } from './types.ts';
 
 export function findPlayer(state: GameState, id: PlayerId): Player | undefined {
   return state.players.find((p) => p.id === id);
@@ -60,12 +59,12 @@ export function salaryForVersion(content: ContentPack, version: number): number 
   return s;
 }
 
-/** 公開戰隊評分：陣容裡 Elo 最高的 LINEUP_SIZE 人平均 */
-export function publicTeamRating(state: GameState, teamId: TeamId): number {
+/** 公開戰隊評分：陣容裡 Elo 最高的 lineupSize 人平均 */
+export function publicTeamRating(state: GameState, content: ContentPack, teamId: TeamId): number {
   const elos = rosterOf(state, teamId)
     .map((p) => p.elo)
     .sort((a, b) => b - a)
-    .slice(0, LINEUP_SIZE);
+    .slice(0, content.lineupSize);
   if (elos.length === 0) return 0;
   return Math.round(elos.reduce((s, x) => s + x, 0) / elos.length);
 }
@@ -88,14 +87,38 @@ export function capacityLeft(state: GameState, content: ContentPack, team: Team)
   return content.economy.scrimCapacity[team.trainingLevel - 1] - used;
 }
 
-/** 組出送給對戰閘道的一方資料。config 內容是「習慣」與「本場可用的戰術預設加成」。 */
-export function buildSide(player: Player, opponent: Player): SideSpec {
-  let best = 0;
-  for (const pr of player.presets) {
-    if (pr.version !== player.version) continue;
-    if (pr.target === 'generic' || pr.target === opponent.lineageId) best = Math.max(best, pr.bonus);
-  }
-  return { lineageId: player.lineageId, version: player.version, config: { habit: player.habit, presetBonus: best } };
+/** 出賽名單是否有效：人數＝lineupSize、不重複、都是自己的人 */
+export function lineupValid(state: GameState, content: ContentPack, team: Team): boolean {
+  const l = team.lineup;
+  if (l.length !== content.lineupSize || new Set(l).size !== content.lineupSize) return false;
+  return l.every((id) => findPlayer(state, id)?.teamId === team.id);
+}
+
+/** 實際會出賽的名單：存檔裡的名單有效就用它，否則是公開 Elo 最高的 lineupSize 人（不改存檔） */
+export function effectiveLineup(state: GameState, content: ContentPack, team: Team): PlayerId[] {
+  if (lineupValid(state, content, team)) return [...team.lineup];
+  return rosterOf(state, team.id)
+    .sort((a, b) => b.elo - a.elo || (a.id < b.id ? -1 : 1))
+    .slice(0, content.lineupSize)
+    .map((p) => p.id);
+}
+
+/**
+ * 組出送給對戰閘道的一方名單。每人的 config 是「習慣」與「本場可用的戰術預設加成」：
+ * 泛用預設一律可用；針對某流派的預設在對方名單裡有任何人是該流派時可用；取最高的一個。
+ */
+export function buildSide(players: readonly Player[], opponents: readonly Player[]): SideSpec {
+  const foes = new Set(opponents.map((o) => o.lineageId));
+  return {
+    players: players.map((p) => {
+      let best = 0;
+      for (const pr of p.presets) {
+        if (pr.version !== p.version) continue;
+        if (pr.target === 'generic' || foes.has(pr.target)) best = Math.max(best, pr.bonus);
+      }
+      return { lineageId: p.lineageId, version: p.version, config: { habit: p.habit, presetBonus: best } };
+    }),
+  };
 }
 
 /** 記帳：所有資金進出都走這裡，team.cash ＝ 起始資金 ＋ 帳本總和 */

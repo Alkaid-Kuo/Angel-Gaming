@@ -24,7 +24,7 @@ function fixtureRow(ctx: Ctx, f: KnownFixture): string {
   const me = v.me.teamId;
   const s = f.score;
   const won = (id: string): boolean => !!s && (f.home === id ? s.home > s.away : s.away > s.home);
-  const dots = f.slots.map((x) => `<i class="${x.winner === 'a' ? 'h' : x.winner === 'b' ? 'a' : ''}"></i>`).join('');
+  const dots = '';
   return `<div class="mt ${f.home === me || f.away === me ? 'me' : ''}"><span class="t ${won(f.home) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.home, 28)}${esc(teamName(v, f.home))}</span>
     <span class="vs">${s ? `<b>${s.home}</b>:<b>${s.away}</b>` : 'VS'}${dots ? `<span class="dots">${dots}</span>` : ''}</span>
     <span class="t r ${won(f.away) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.away, 28)}${esc(teamName(v, f.away))}</span></div>`;
@@ -46,7 +46,7 @@ export function leagueScreen(ctx: Ctx): string {
       const form = teamForm(v, r.teamId, 3).map((x) => `<i class="${x === 'W' ? 'w' : 'l'}">${x}</i>`).join('');
       const me = r.teamId === v.me.teamId;
       return `<div class="row ${me ? 'me' : ''} ${r.teamId === foe ? 'foe' : ''} ${i < 4 ? 'top4' : ''} ${i === 3 ? 'cut' : ''}"><span class="rk">${i + 1}</span>${crest(ctx, r.teamId, 30)}<span class="nm ${r.teamId === foe ? 'rd' : ''}">${esc(teamName(v, r.teamId))}${me ? '<small>我方</small>' : r.teamId === foe ? '<small>本週對手</small>' : ''}</span>
-        <span class="num">${r.wins}-${r.draws}-${r.losses}</span><span class="num">${r.slotDiff >= 0 ? '+' : '−'}${Math.abs(r.slotDiff)}</span><span class="form">${form || '—'}</span><span class="num pts">${started ? r.points : '—'}</span></div>`;
+        <span class="num">${r.wins}-${r.draws}-${r.losses}</span><span class="num">${r.scoreDiff >= 0 ? '+' : '−'}${Math.abs(r.scoreDiff)}</span><span class="form">${form || '—'}</span><span class="num pts">${started ? r.points : '—'}</span></div>`;
     })
     .join('');
   const fx = v.fixtures.filter((f) => f.week === sel);

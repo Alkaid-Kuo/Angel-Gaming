@@ -5,10 +5,9 @@ import { expectedPermille } from './rating.ts';
 import { notify, post, publicTeamRating, teamOf } from './state.ts';
 import type { Fixture, GameState } from './types.ts';
 
-/** 主隊勝率（千分比）：對位勝率換成三對位先勝兩場的勝率 */
+/** 主隊勝率（千分比）：一場戰隊賽就是一場比賽，直接用兩隊公開評分差（夾在 2%～98%） */
 export function homeWinPermille(homeRating: number, awayRating: number): number {
-  const ps = expectedPermille(homeRating - awayRating);
-  return Math.max(20, Math.min(980, Math.round((ps * ps * (3000 - 2 * ps)) / 1e6)));
+  return Math.max(20, Math.min(980, expectedPermille(homeRating - awayRating)));
 }
 
 /** 賠率 ×100：(1 − 抽成) ÷ 勝率 */
@@ -23,7 +22,7 @@ export interface FixtureOdds {
 }
 
 export function fixtureOdds(state: GameState, content: ContentPack, f: Fixture): FixtureOdds {
-  const p = homeWinPermille(publicTeamRating(state, f.home), publicTeamRating(state, f.away));
+  const p = homeWinPermille(publicTeamRating(state, content, f.home), publicTeamRating(state, content, f.away));
   const m = content.economy.betMarginPermille;
   return { homeWinPermille: p, homeX100: oddsX100(p, m), awayX100: oddsX100(1000 - p, m) };
 }

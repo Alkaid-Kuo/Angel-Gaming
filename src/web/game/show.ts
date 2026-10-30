@@ -2,7 +2,7 @@
 // → 其他賽場 → 週結算 →（賽段結束時）頒獎典禮或破產。結果在推進時就算好了（確定性），這裡只負責怎麼揭曉。
 import type { AdvanceSummary, KnownFixture, KnownPlayer } from '../../manage/index.ts';
 import { CATEGORY_NAME, lineageName } from '../manage/format.ts';
-import { rankOf, weekBreakdown } from '../club/model.ts';
+import { lineupPairs, rankOf, weekBreakdown } from '../club/model.ts';
 import { avatarSvg } from '../club/art.ts';
 import type { Ctx } from './kit.ts';
 import { avatar, crest, crestRing, esc, glyph, icon, teamName, wan } from './kit.ts';
@@ -67,7 +67,7 @@ function matchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scene {
   const home = f.home === me;
   const opp = home ? f.away : f.home;
   const s = f.score as { home: number; away: number };
-  const slots = f.slots.map((x) => ({ mine: home ? x.home : x.away, theirs: home ? x.away : x.home, won: x.winner === 'draw' ? null : (x.winner === 'a') === home }));
+  const slots = lineupPairs(f, home);
   const de = (id: string): string => {
     const b = before.elo.get(id);
     const a = ctx.pm.get(id)?.elo;
@@ -139,7 +139,7 @@ function resultScene(ctx: Ctx, f: KnownFixture, before: Snapshot, summaryWeek: n
   const my = home ? s.home : s.away;
   const their = home ? s.away : s.home;
   const res = my > their ? 'win' : my < their ? 'lose' : 'draw';
-  const slots = f.slots.map((x) => ({ mine: home ? x.home : x.away, theirs: home ? x.away : x.home, won: x.winner === 'draw' ? null : (x.winner === 'a') === home }));
+  const slots = lineupPairs(f, home);
   const prize = v.ledger.filter((x) => x.week === summaryWeek && x.category === 'prize').reduce((t, x) => t + x.amount, 0);
   const bets = v.ledger.filter((x) => x.week === summaryWeek && x.category === 'bet' && x.amount > 0).reduce((t, x) => t + x.amount, 0);
   const rows = slots
@@ -158,7 +158,7 @@ function resultScene(ctx: Ctx, f: KnownFixture, before: Snapshot, summaryWeek: n
       <section class="vsrow"><div class="t">${crestRing(ctx, me, 80)}${esc(teamName(v, me))}</div><div class="sc"><b>${my}</b><i>:</i>${their}</div><div class="t r">${crestRing(ctx, opp, 80, opp)}<span class="rd">${esc(teamName(v, opp))}</span></div></section>
       <section class="bouts">${rows}</section>
       <section class="gains">
-        <div class="gn ${prize > 0 ? 'g' : ''}"><small>比賽收入</small><div class="v"><span class="num up">+${wan(prize)}</span><span>萬</span></div><p>${res === 'win' ? `勝 ${wan(e.matchWinPrize)}` : `${res === 'lose' ? '敗' : '平'} ${wan(e.matchLossPrize)}`} ＋ 對位勝 ${slots.filter((x) => x.won).length} 場 × ${wan(e.slotWinBonus)}</p></div>
+        <div class="gn ${prize > 0 ? 'g' : ''}"><small>比賽收入</small><div class="v"><span class="num up">+${wan(prize)}</span><span>萬</span></div><p>${res === 'win' ? `勝 ${wan(e.matchWinPrize)}` : `${res === 'lose' ? '敗' : '平'} ${wan(e.matchLossPrize)}`} ＋ 贏 ${my} 回合 × ${wan(e.roundWinBonus)}</p></div>
         <div class="gn ${bets > 0 ? 'g' : ''}"><small>下注開獎</small><div class="v"><span class="num ${bets > 0 ? 'up' : ''}">${bets > 0 ? `+${wan(bets)}` : '0'}</span><span>萬</span></div><p>${bets > 0 ? '押中的彩券已入帳' : '這週沒有押中'}</p></div>
         <div class="gn"><small>名氣</small><div class="v"><span class="num">${before.fame}</span><span>→</span><span class="num ${fameD >= 0 ? 'up' : ''}">${v.me.fame}</span></div><p>每週贊助 ${wan(v.me.weeklySponsor)} 萬</p></div>
         <div class="gn"><small>名次</small><div class="v"><span class="num">${before.rank || '—'}</span><span>→</span><span class="num up">${rankOf(v, me)}</span></div><p>${f.stage === 'regular' ? '例行賽積分榜' : '季後賽'}</p></div>

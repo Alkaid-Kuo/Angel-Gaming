@@ -81,13 +81,14 @@ function history(ctx: Ctx, p: KnownPlayer): string {
   const { v } = ctx;
   const games: { week: number; opp: string; won: boolean | null; slot: number }[] = [];
   for (const f of v.fixtures) {
-    f.slots.forEach((s, i) => {
-      if (s.home !== p.id && s.away !== p.id) return;
-      const home = s.home === p.id;
-      const opp = home ? s.away : s.home;
-      const won = s.winner === 'draw' ? null : (s.winner === 'a') === home;
-      games.push({ week: f.week, opp, won, slot: i });
-    });
+    const x = f.match;
+    if (!x) continue;
+    const home = x.home.includes(p.id);
+    const i = (home ? x.home : x.away).indexOf(p.id);
+    if (i < 0) continue;
+    const opp = (home ? x.away : x.home)[i];
+    const won = x.winner === null ? null : (x.winner === f.home) === home;
+    games.push({ week: f.week, opp, won, slot: i });
   }
   if (!games.length) return '<p class="dim">還沒有出賽紀錄。</p>';
   return `<div class="hist">${games

@@ -3,14 +3,14 @@ import { POLICIES, runSeason } from '../src/manage/autoplayer.ts';
 import { applyCommand } from '../src/manage/commands.ts';
 import { STUB_CONTENT } from '../src/manage/content.ts';
 import { advance, newGame } from '../src/manage/game.ts';
-import type { MatchRequest } from '../src/manage/gateway.ts';
+import type { BattleGateway, MatchRequest, SideSpec } from '../src/manage/gateway.ts';
 import { FakeGateway } from '../src/manage/gateway-fake.ts';
 import { roundRobin, standings } from '../src/manage/league.ts';
 import { expectedPermille, updateElo } from '../src/manage/rating.ts';
 import { deserialize, serialize } from '../src/manage/save.ts';
 import { humanTeam, rosterOf } from '../src/manage/state.ts';
 import type { GameState } from '../src/manage/types.ts';
-import { LINEUP_SIZE, REGULAR_WEEKS, TOTAL_WEEKS } from '../src/manage/types.ts';
+import { REGULAR_WEEKS, TOTAL_WEEKS } from '../src/manage/types.ts';
 import { knownView } from '../src/manage/view.ts';
 
 const content = STUB_CONTENT;
@@ -34,21 +34,42 @@ describe('評分', () => {
 });
 
 describe('對戰閘道（假比賽）', () => {
-  const side = (lineageId: string, version: number, habit = 0): MatchRequest['a'] => ({ lineageId, version, config: { habit, presetBonus: 0 } });
+  /** 3 人名單：[流派, 版本, 習慣] */
+  const side = (...ps: [string, number, number?][]): SideSpec => ({ players: ps.map(([lineageId, version, habit = 0]) => ({ lineageId, version, config: { habit, presetBonus: 0 } })) });
+
+  it('賽制自報名單人數＝內容包的 lineupSize', () => {
+    expect(gateway.formats[0].lineupSize).toBe(content.lineupSize);
+    expect(content.slotNames).toHaveLength(content.lineupSize);
+  });
 
   it('同一張請求單永遠得到同一張成績單', async () => {
-    const req: MatchRequest = { formatId: 'stub-bo1', a: side('ambush', 3), b: side('push', 2), seed: 12345 };
+    const req: MatchRequest = { formatId: 'stub-bo1', a: side(['ambush', 3], ['push', 2], ['shield', 1]), b: side(['push', 2], ['turtle', 4], ['swarm', 3]), seed: 12345 };
     const [x] = await gateway.simulateBatch([req]);
     const [y] = await gateway.simulateBatch([req]);
     expect(y).toEqual(x);
   });
 
-  it('強的一方勝率接近表上的值', async () => {
+  it('強的一方勝率接近表上的值（3 人名單取平均）', async () => {
     const reqs: MatchRequest[] = [];
-    for (let i = 0; i < 4000; i++) reqs.push({ formatId: 'stub-bo1', a: side('balance', 1, 100), b: side('balance', 1, 0), seed: i + 1 });
-    const outs = await gateway.simulateBatch(reqs);
+    // A 三人習慣 +150、+100、+50（平均 +100），B 全 0
+    for (let i = 0; i < 4000; i++) reqs.push({ formatId: 'stub-bo1', a: side(['balance', 1, 150], ['balance', 1, 100], ['balance', 1, 50]), b: side(['balance', 1], ['balance', 1], ['balance', 1]), seed: i + 1 });
+    let calls = 0;
+    const outs = await gateway.simulateBatch(reqs, (done, total) => {
+      calls++;
+      expect(done).toBeLessThanOrEqual(total);
+    });
+    expect(calls).toBeGreaterThan(0);
     const rate = outs.filter((o) => o.winner === 'a').length / outs.length;
     expect(Math.abs(rate - expectedPermille(100) / 1000)).toBeLessThan(0.03);
+  });
+
+  it('名單人數與賽制不符：拒絕開局與推進', async () => {
+    const wrong: BattleGateway = { formats: [{ ...gateway.formats[0], lineupSize: 5 }], simulateBatch: (r) => gateway.simulateBatch(r) };
+    expect(() => newGame(1, content, { gateway: wrong })).toThrow(/5 人/);
+    const s = newGame(1, content, { gateway });
+    await expect(advance(s, content, wrong)).rejects.toThrow(/5 人/);
+    const noFormat: BattleGateway = { formats: [{ ...gateway.formats[0], id: 'other' }], simulateBatch: (r) => gateway.simulateBatch(r) };
+    await expect(advance(s, content, noFormat)).rejects.toThrow(/stub-bo1/);
   });
 });
 
@@ -71,11 +92,11 @@ describe('賽程', () => {
 });
 
 describe('開新局', () => {
-  it('8 隊、1 位玩家、各隊 3 人、10 名自由選手、28 場例行賽，同種子結果相同', () => {
+  it('8 隊、1 位玩家、各隊 lineupSize 人、10 名自由選手、28 場例行賽，同種子結果相同', () => {
     const s = newGame(7, content);
     expect(s.teams).toHaveLength(8);
     expect(s.teams.filter((t) => t.human)).toHaveLength(1);
-    for (const t of s.teams) expect(rosterOf(s, t.id)).toHaveLength(LINEUP_SIZE);
+    for (const t of s.teams) expect(rosterOf(s, t.id)).toHaveLength(content.lineupSize);
     expect(s.players.filter((p) => p.teamId === null)).toHaveLength(content.economy.freeAgentCount);
     expect(s.fixtures).toHaveLength(28);
     expect(serialize(newGame(7, content))).toBe(serialize(s));
@@ -103,12 +124,13 @@ describe('指令', () => {
     expect(applyCommand(s2, content, s2.humanTeamId, { type: 'sign', playerId: fa[3].id })).toEqual({ ok: false, reason: '資金不足以支付簽約金' });
   });
 
-  it('解約：陣容不可低於 3 人；出賽名單需 3 人不重複且都是自己的', () => {
+  it('解約：陣容不可低於 lineupSize 人；出賽名單需 lineupSize 人不重複且都是自己的', () => {
     const s = newGame(3, content);
     const me = humanTeam(s);
     const mine = rosterOf(s, me.id);
     expect(applyCommand(s, content, me.id, { type: 'release', playerId: mine[0].id }).ok).toBe(false);
     expect(applyCommand(s, content, me.id, { type: 'setLineup', lineup: mine.map((p) => p.id) }).ok).toBe(true);
+    expect(applyCommand(s, content, me.id, { type: 'setLineup', lineup: [mine[0].id, mine[1].id] }).ok).toBe(false);
     expect(applyCommand(s, content, me.id, { type: 'setLineup', lineup: [mine[0].id, mine[0].id, mine[1].id] }).ok).toBe(false);
     const other = s.players.find((p) => p.teamId !== me.id) as GameState['players'][number];
     expect(applyCommand(s, content, me.id, { type: 'setLineup', lineup: [mine[0].id, mine[1].id, other.id] }).ok).toBe(false);
@@ -129,12 +151,14 @@ describe('指令', () => {
     expect(applyCommand(s, content, me.id, { type: 'bet', fixtureId: own.id, side: rightSide, stake: 5 }).ok).toBe(false);
   });
 
-  it('練習賽與研發共用訓練中心每週場數；球探要付費', () => {
+  it('練習賽與研發共用訓練中心每週場數；練習賽對手是別隊；球探要付費', () => {
     const s = newGame(5, content);
     const me = humanTeam(s);
     const mine = rosterOf(s, me.id)[0];
     const foe = s.players.find((p) => p.teamId !== null && p.teamId !== me.id) as GameState['players'][number];
-    expect(applyCommand(s, content, me.id, { type: 'queueScrim', playerId: mine.id, opponentId: foe.id, games: 150 }).ok).toBe(true);
+    expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: me.id, games: 10 }).ok).toBe(false);
+    expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: 'nope', games: 10 }).ok).toBe(false);
+    expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: foe.teamId as string, games: 150 }).ok).toBe(true);
     expect(applyCommand(s, content, me.id, { type: 'queueResearch', playerId: mine.id, target: 'generic', games: 60 }).ok).toBe(false);
     expect(applyCommand(s, content, me.id, { type: 'queueResearch', playerId: mine.id, target: 'generic', games: 50 }).ok).toBe(true);
     const before = me.cash;
@@ -152,7 +176,13 @@ describe('完整賽段', () => {
     await runSeason(s, content, gateway, null);
     expect(['ended', 'bankrupt']).toContain(s.phase);
     expect(s.fixtures).toHaveLength(28 + 4);
-    expect(s.fixtures.every((f) => f.result !== null && f.result.slots.length === LINEUP_SIZE)).toBe(true);
+    expect(s.fixtures.every((f) => f.result !== null && f.result.lineupA.length === content.lineupSize && f.result.lineupB.length === content.lineupSize)).toBe(true);
+    // 比分與勝方一致（假比賽 1:0）
+    for (const f of s.fixtures) {
+      const r = f.result as NonNullable<typeof f.result>;
+      expect(r.winner).toBe(r.scoreA > r.scoreB ? f.home : r.scoreB > r.scoreA ? f.away : null);
+      expect(r.rounds.length).toBeGreaterThan(0);
+    }
     expect(s.seasonResult?.ranks).toHaveLength(8);
     expect(new Set(s.seasonResult?.ranks).size).toBe(8);
     for (const t of s.teams) expect(t.cash).toBe((start.get(t.id) as number) + t.ledger.reduce((x, e) => x + e.amount, 0));
@@ -203,7 +233,42 @@ describe('完整賽段', () => {
   });
 });
 
+describe('Elo（名單平均）', () => {
+  it('同一場的名單每人同一個 delta，正負對稱；games 各 +1', async () => {
+    const s = newGame(61, content);
+    await advance(s, content, gateway); // 進入第 1 週
+    const before = new Map(s.players.map((p) => [p.id, { elo: p.elo, games: p.games }]));
+    await advance(s, content, gateway); // 打第 1 週
+    for (const f of s.fixtures.filter((x) => x.week === 1)) {
+      const r = f.result as NonNullable<typeof f.result>;
+      const d = (id: string): number => (s.players.find((p) => p.id === id)?.elo as number) - (before.get(id)?.elo as number);
+      const dh = r.lineupA.map(d);
+      const da = r.lineupB.map(d);
+      expect(new Set(dh).size).toBe(1);
+      expect(new Set(da).size).toBe(1);
+      expect(dh[0]).toBe(-da[0]);
+      if (r.winner === f.home) expect(dh[0]).toBeGreaterThan(0);
+      for (const id of [...r.lineupA, ...r.lineupB]) expect(s.players.find((p) => p.id === id)?.games).toBe((before.get(id)?.games as number) + 1);
+    }
+  });
+});
+
 describe('背景工作與升版', () => {
+  it('練習賽：隊對隊打排定的場數，報告勝場；不改存檔裡的出賽名單', async () => {
+    const s = newGame(43, content);
+    const me = humanTeam(s);
+    const foe = s.teams.find((t) => t.id !== me.id) as GameState['teams'][number];
+    expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: foe.id, games: 40 }).ok).toBe(true);
+    const lineups = s.teams.map((t) => [...t.lineup]);
+    await advance(s, content, gateway);
+    expect(me.scrims).toHaveLength(1);
+    expect(me.scrims[0]).toMatchObject({ opponentTeamId: foe.id, games: 40 });
+    expect(me.scrims[0].wins).toBeGreaterThanOrEqual(0);
+    expect(me.scrims[0].wins).toBeLessThanOrEqual(40);
+    expect(s.teams.map((t) => t.lineup)).toEqual(lineups);
+    expect(knownView(s, content, me.id).scrims).toHaveLength(1);
+  });
+
   it('球探報告在推進後出現，估計值接近真實強度；情報不會出現在別隊的已知視圖', async () => {
     const s = newGame(41, content);
     const me = humanTeam(s);
