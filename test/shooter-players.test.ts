@@ -162,6 +162,14 @@ describe('射擊內容包 SHOOTER_CONTENT', () => {
     expect(e).toBeGreaterThan(500);
     expect(e).toBeLessThanOrEqual(995);
     expect(SHOOTER_CONTENT.teamNames.length).toBe(7);
-    expect(SHOOTER_CONTENT.economy).toBe(STUB_CONTENT.economy);
+    // 步驟 8：5 人名單、經濟從暫代包放大（陣容上限容得下名單＋替補、NPC 陣容目標 6～7）
+    expect(SHOOTER_CONTENT.lineupSize).toBe(5);
+    expect(SHOOTER_CONTENT.slotNames).toHaveLength(5);
+    expect(SHOOTER_CONTENT.economy.rosterMax).toBeGreaterThan(SHOOTER_CONTENT.lineupSize);
+    for (const p of Object.values(SHOOTER_CONTENT.personas)) {
+      expect(p.rosterTarget).toBeGreaterThanOrEqual(6);
+      expect(p.rosterTarget).toBeLessThanOrEqual(SHOOTER_CONTENT.economy.rosterMax);
+    }
+    expect(SHOOTER_CONTENT.economy.humanStartCash).toBeGreaterThan(STUB_CONTENT.economy.humanStartCash);
   });
 });
