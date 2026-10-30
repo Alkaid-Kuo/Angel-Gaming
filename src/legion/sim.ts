@@ -366,6 +366,8 @@ export interface LegionSetup {
   /** 依 playerId：選手 deploy() 的原始回傳 */
   readonly deployments: readonly unknown[];
   readonly timeLimitTicks?: number;
+  /** 沙盒（觀戰網頁的自訂對戰）：不限點數、可以擺在地圖上任何可通行的位置；正式比賽不用 */
+  readonly sandbox?: boolean;
 }
 
 const FLANK_PCT: Readonly<Record<Flank, number>> = { front: 100, side: RULES.flank.side, rear: RULES.flank.rear };
@@ -422,6 +424,8 @@ export class LegionMatch {
   readonly seed: number;
   /** 時間上限（攻城戰佔下 A 旗會延長） */
   timeLimitTicks: number;
+  /** 沙盒：布陣不限點數與布陣區 */
+  readonly sandbox: boolean;
   tick = 0;
   readonly rng: Prng;
   readonly soldiers: Soldier[] = [];
@@ -476,6 +480,7 @@ export class LegionMatch {
     this.mode = setup.mode;
     this.seed = setup.seed;
     this.timeLimitTicks = setup.timeLimitTicks ?? defaultTimeLimit(setup.mode);
+    this.sandbox = setup.sandbox === true;
     this.rng = Prng.fromInts(setup.seed, 0x1e9);
     this.grid = new Grid(this.map.width, this.map.height);
     this.gateMask = new Uint8Array(this.map.width * this.map.height);
@@ -527,8 +532,8 @@ export class LegionMatch {
     const base = this.soldiers.length;
     const regBase = this.regiments.length;
     const capture = this.reservesAllowed(p);
-    const budget = this.budgetOf(p);
-    const cap = this.fieldCapOf();
+    const budget = this.sandbox ? Infinity : this.budgetOf(p);
+    const cap = this.sandbox ? Infinity : this.fieldCapOf();
     let spent = 0;
     let onField = 0;
     const placed: Regiment[] = [];
@@ -559,10 +564,15 @@ export class LegionMatch {
       const x = roundHalfEven(o.x);
       const y = roundHalfEven(o.y);
       const [tx, ty] = tileXY(x, y, this.map.width, this.map.height);
-      if (tx < zone.x0 || tx >= zone.x1 || ty < zone.y0 || ty >= zone.y1) return reject(i, '不在布陣區內');
-      // 不是矩形的布陣區（攻城圖的城內）：還要落在遮罩裡
-      const mask = this.map.deployMask?.[p];
-      if (mask !== undefined && mask !== null && mask[ty * this.map.width + tx] !== 1) return reject(i, '不在布陣區內');
+      if (this.sandbox) {
+        // 沙盒：整張地圖都能擺，只留邊緣 1 格
+        if (x < TILE || y < TILE || x > (this.map.width - 1) * TILE || y > (this.map.height - 1) * TILE) return reject(i, '超出地圖');
+      } else {
+        if (tx < zone.x0 || tx >= zone.x1 || ty < zone.y0 || ty >= zone.y1) return reject(i, '不在布陣區內');
+        // 不是矩形的布陣區（攻城圖的城內）：還要落在遮罩裡
+        const mask = this.map.deployMask?.[p];
+        if (mask !== undefined && mask !== null && mask[ty * this.map.width + tx] !== 1) return reject(i, '不在布陣區內');
+      }
       // 層（選填，預設地面）：牆頂只有城牆、門樓、樓梯格可布陣，而且騎兵不能上牆
       const layer = o.layer === undefined ? 0 : o.layer;
       if (layer !== 0 && layer !== WALL_LAYER) return reject(i, '層只能是 0（地面）或 1（牆頂）');

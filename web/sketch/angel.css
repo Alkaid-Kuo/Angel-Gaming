@@ -1,0 +1,52 @@
+/* 天使戰隊 UI 規格（設計稿 E、A 共用，2026-10-27 定案）
+   配色：墨黑中性色占九成；天使金是唯一主色，只給我方、選中、主要行動（開戰）；紅只給對手與警示；細線與次要資訊一律白／灰。
+   字型：中文 Noto Sans TC，標題用 900 並微斜 -7°；數字與英文用 Barlow Condensed 斜體 800；小標籤用 Share Tech Mono、字距拉開。
+   材質：卡片左緣一條金（或白）色粗邊、右下角切角；深色面板是由左上往右下的深藍灰漸層，加一層細斜紋。 */
+#stage {
+  --ink: #0b0e14; --ink-rgb: 11, 14, 20; --ink2: #131823; --ink3: #1c2535;
+  --white: #eef2f6; --white-rgb: 238, 242, 246; --paper: #e9edf2; --grey: #8b95a4; --grey2: #5b6574;
+  --gold: #f0b54a; --gold-rgb: 240, 181, 74; --gold2: #ffd98a; --gold3: #b9832a;
+  --red: #ff5d5d; --red-rgb: 255, 93, 93; --red2: #ffa3a3; --red3: #2a1416;
+  --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --en: "Barlow Condensed", "Noto Sans TC", sans-serif; --mono: "Share Tech Mono", monospace;
+  /* 深色面板材質、頭像染金 */
+  --panel: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 12px), linear-gradient(150deg, #222a39, #0d1118);
+  --tint: linear-gradient(165deg, #f3d29a 0%, #b98a45 45%, #1b2230 100%);
+  color: var(--white); font-family: var(--zh);
+}
+
+/* ── 頂列（兩稿共用同一個元件） ── */
+.top { position: absolute; left: 0; right: 0; top: 0; height: 112px; display: flex; align-items: center; padding: 0 56px; gap: 22px; background: linear-gradient(180deg, rgba(5, 7, 10, 0.85), transparent); }
+.top .team { display: flex; align-items: center; gap: 16px; }
+.top .team .crest { filter: drop-shadow(0 0 16px rgba(var(--gold-rgb), 0.45)); }
+.top .team b { display: block; font-size: 36px; font-weight: 900; letter-spacing: 0.14em; line-height: 1.1; }
+.top .team small { font-family: var(--mono); font-size: 13px; letter-spacing: 0.28em; color: var(--grey); }
+.top .slash { width: 3px; height: 56px; background: linear-gradient(var(--gold), transparent); transform: skewX(-22deg); margin: 0 6px; }
+.top .wk { display: flex; align-items: baseline; gap: 10px; }
+.top .wk b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 56px; line-height: 1; color: var(--gold); }
+.top .wk span { font-family: var(--en); font-weight: 600; font-size: 21px; letter-spacing: 0.2em; color: var(--grey); }
+.top .res { margin-left: auto; display: flex; align-items: center; gap: 28px; }
+.top .funds { text-align: right; }
+.top .funds .lb { font-family: var(--mono); font-size: 12px; letter-spacing: 0.3em; color: var(--grey); }
+.top .funds b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 52px; line-height: 0.9; }
+.top .funds b small { font-family: var(--zh); font-style: normal; font-size: 18px; color: var(--grey); margin-left: 4px; }
+.top .funds .dl { font-family: var(--mono); font-size: 13px; color: var(--red); letter-spacing: 0.1em; }
+.top .gauge { position: relative; width: 70px; height: 70px; }
+.top .gauge svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.top .gauge b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 27px; }
+.top .gl { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: var(--grey); line-height: 1.5; }
+.top .gl b { display: block; font-family: var(--zh); font-size: 16px; letter-spacing: 0.1em; color: var(--white); }
+.top .icon-btn { position: relative; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; border: 2px solid rgba(255, 255, 255, 0.25); color: var(--white); }
+.top .icon-btn em { position: absolute; right: -4px; top: -4px; min-width: 24px; height: 24px; border-radius: 12px; background: var(--red); font-style: normal; font-family: var(--en); font-weight: 700; font-size: 16px; display: grid; place-items: center; }
+
+/* ── 斜切標籤（身分、流派、焦點） ── */
+.tags { display: flex; gap: 6px; }
+.tags span { padding: 5px 18px; font-weight: 900; font-size: 16px; letter-spacing: 0.18em; transform: skewX(-14deg); }
+.tags span > i { display: inline-block; font-style: normal; transform: skewX(14deg); }
+.tags .g { background: var(--gold); color: var(--ink); }
+.tags .w { background: var(--white); color: var(--ink); }
+.tags .o { border: 2px solid var(--gold); color: var(--gold2); padding: 3px 16px; }
+
+/* ── 頭像染金（灰階後疊一層金色漸層） ── */
+.tinted { position: relative; overflow: hidden; }
+.tinted .avatar { filter: grayscale(1) contrast(1.15) brightness(1.05); }
+.tinted::after { content: ""; position: absolute; inset: 0; background: var(--tint); mix-blend-mode: color; opacity: 0.88; pointer-events: none; }

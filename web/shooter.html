@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天使戰隊 攻防戰</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=Barlow+Condensed:ital,wght@1,700;1,800&family=Share+Tech+Mono&display=swap">
+<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./shooter.css">
+</head>
+<body>
+<div id="setup" class="setup">
+  <section class="hero sg-hero">
+    <h1>天使戰隊 攻防戰<small>試玩版</small></h1>
+    <p>5 對 5 攻防射擊（參照 CS）：T 帶炸彈打 A／B 點、CT 防守；不重生、回合制、12 回合後換邊、先贏 13 回合獲勝。你和 9 隻陪練 Bot 一起打，地圖「赤岩鎮」。視野公平：視錐外、30 格外（開鏡不限）、牆後、煙後一律看不見，蹲在箱子後面也看不見，靜步沒有聲音。</p>
+    <div class="row"><a class="muted small" href="./index.html">← 回到首頁</a></div>
+  </section>
+  <section class="card">
+    <h2>開始比賽</h2>
+    <div class="sg-teams">
+      <label class="sg-team t"><input type="radio" name="team" value="T" checked><span class="t">T（攻方）</span><span class="d">帶炸彈進 A 或 B 點下包；炸彈引爆或殲滅 CT 就贏</span></label>
+      <label class="sg-team ct"><input type="radio" name="team" value="CT"><span class="t">CT（守方）</span><span class="d">守住兩個炸彈點；時間到、拆彈成功或殲滅 T 就贏</span></label>
+    </div>
+    <div class="row">
+      <label>種子 <input id="seed" type="number" min="0" step="1"></label>
+      <button id="reroll" type="button">隨機</button>
+      <span class="muted small">隊友與對手固定為陪練 Bot v4；同一個種子＋同樣的操作，結果一樣</span>
+    </div>
+    <label class="sg-spectate"><input id="spectate" type="checkbox"> <b>觀戰模式</b>（不參賽：看 10 隻陪練 Bot 互打；畫面讀引擎全狀態、可開「全圖透視」——<span class="hint">除錯用，不是玩家視角</span>）</label>
+    <label class="sg-spectate"><input id="fullscreen" type="checkbox" checked> <b>全螢幕開始</b>（建議：Chrome／Edge 全螢幕時會鎖住鍵盤，Ctrl＋W 等快捷鍵不會關掉分頁；按住 Esc 離開全螢幕）</label>
+    <button id="start" class="primary" type="button">開始</button>
+  </section>
+  <section class="card">
+    <h2>按鍵</h2>
+    <div class="sg-keys">
+      <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移動（畫面方向）</div>
+      <div>滑鼠 瞄準・<b>左鍵</b> 開火（按住連射）</div>
+      <div><b>按住右鍵</b> 開鏡（狙擊槍：看得更遠、最多 60 格，視角變窄）</div>
+      <div><kbd>R</kbd> 換彈・<kbd>G</kbd> 丟槍</div>
+      <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 主武器／手槍／刀・滾輪切換</div>
+      <div><kbd>4</kbd> 道具（再按換下一種）→ 按住左鍵蓄力、放開丟出</div>
+      <div><kbd>5</kbd> 炸彈（在包點按住左鍵下包）</div>
+      <div><kbd>Shift</kbd> 靜步（無聲）・<kbd>Ctrl</kbd>／<kbd>C</kbd> 蹲（躲在箱子後面）</div>
+      <div><kbd>E</kbd> 按住下包／拆包，或撿起腳邊的東西</div>
+      <div><kbd>B</kbd> 購買選單・<kbd>Tab</kbd> 按住看計分板</div>
+      <div><kbd>-</kbd><kbd>=</kbd> 縮放・<kbd>F</kbd> 全螢幕・<kbd>Esc</kbd> 暫停選單（可離開比賽）</div>
+      <div>陣亡後 <kbd>←</kbd><kbd>→</kbd> 或滑鼠左右鍵切換隊友視角</div>
+    </div>
+  </section>
+</div>
+<div id="game" class="sg hidden"></div>
+<script type="module" src="../src/web/shooter/main.ts"></script>
+</body>
+</html>

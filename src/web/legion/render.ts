@@ -34,6 +34,8 @@ export interface DrawOptions {
   readonly aim?: { ids: readonly number[]; to: { x: number; y: number } } | null;
   /** 按住 L 架梯瞄準中：附近牆格能不能架、吸附到的牆格、滑鼠指的那格不能架的原因（2D 只標牆格） */
   readonly ladder?: { spots: readonly LadderSpot[]; snap: LadderSpot | null; why: string; at: { x: number; y: number } | null } | null;
+  /** 沙盒布陣：拖曳中的團放開後的位置預覽（世界座標；半寬沿正面、半深沿前後） */
+  readonly ghost?: { x: number; y: number; facing: number; halfW: number; halfD: number; color: string } | null;
 }
 
 interface Effect {
@@ -674,9 +676,34 @@ export class LegionRenderer {
     this.effects.push({ kind: 'ring', x, y, t0: performance.now(), life: 600, color, size: 1.6 });
   }
 
-  /** 框選框、右鍵拖曳的移動方向 */
+  /** 框選框、右鍵拖曳的移動方向、沙盒布陣的拖曳預覽 */
   private drawOrders(opt: DrawOptions): void {
     const ctx = this.ctx;
+    if (opt.ghost) {
+      const g = opt.ghost;
+      const a = (g.facing * Math.PI) / 180;
+      const fx = Math.cos(a);
+      const fy = Math.sin(a);
+      const corner = (f: number, l: number): [number, number] => [this.sx(g.x + fx * f * g.halfD - fy * l * g.halfW), this.sy(g.y + fy * f * g.halfD + fx * l * g.halfW)];
+      const pts = [corner(1, 1), corner(1, -1), corner(-1, -1), corner(-1, 1)];
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = g.color;
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 朝向箭頭
+      const [cx, cy] = [this.sx(g.x), this.sy(g.y)];
+      const [hx, hy] = [this.sx(g.x + fx * (g.halfD + 1500)), this.sy(g.y + fy * (g.halfD + 1500))];
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(hx, hy);
+      ctx.stroke();
+    }
     if (opt.box) {
       const b = opt.box;
       ctx.fillStyle = 'rgba(147,197,253,0.12)';
@@ -836,17 +863,16 @@ export class LegionRenderer {
         ctx.stroke();
         label(tx, ty - (RULES.volley.radius / TILE) * s, cd ? `冷卻 ${Math.ceil(r.skillCd / 10)} 秒` : ok ? '齊射' : '超出射程', c);
       } else if (kind === 'spear') {
-        const R = ((r.halfD + UNITS.spear.reach) / TILE) * s;
-        const half = (RULES.flank.frontHalf * Math.PI) / 180;
-        ctx.fillStyle = cd ? 'rgba(148,163,184,0.15)' : 'rgba(253,230,138,0.18)';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.arc(cx, cy, R, ang - half, ang + half);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        // 架槍林會先轉向瞄準的方向：範圍照轉過去之後的陣形畫（圓陣不轉、是一整圈）
+        const deg = (ang * 180) / Math.PI;
+        this.braceZone(r, cx, cy, r.formation === 'circle' ? r.facing : deg, deg, () => {
+          ctx.fillStyle = cd ? 'rgba(148,163,184,0.15)' : 'rgba(253,230,138,0.18)';
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.fill();
+          ctx.stroke();
+        });
+        const R = (((r.formation === 'circle' ? r.rad : r.halfD) + UNITS.spear.reach) / TILE) * s;
         label(cx + Math.cos(ang) * R, cy + Math.sin(ang) * R, r.status === 'braced' || r.status === 'bracing' ? '收槍林' : '槍林', color);
       } else if (kind === 'shield') {
         label(cx, cy - 10, r.status === 'walled' || r.status === 'walling' ? '收盾牆' : '盾牆', color);
@@ -1104,8 +1130,11 @@ export class LegionRenderer {
         g = [];
         groups.set(key, g);
       }
-      g.push(x, y, r?.facing ?? 0);
-      if ((sol[i + 3] & ATTACKED_BIT) !== 0) sparks.push(x, y, r?.facing ?? 0);
+      // 圓陣沒有正面：每個人朝自己所在的方向（從陣中心往外），長槍就是四面架出去
+      let face = r?.facing ?? 0;
+      if (r !== undefined && r.formation === 'circle' && (x !== r.x || y !== r.y)) face = (Math.atan2(y - r.y, x - r.x) * 180) / Math.PI;
+      g.push(x, y, face);
+      if ((sol[i + 3] & ATTACKED_BIT) !== 0) sparks.push(x, y, face);
     }
     for (const [key, pts] of groups) {
       const [ownerS, kind, routedS, concS, downS, ghostS] = key.split('|');
@@ -1339,40 +1368,73 @@ export class LegionRenderer {
     ctx.setLineDash([]);
   }
 
-  /** 槍林：朝槍林方向的扇形（正面 ±60°），邊上一排槍尖；圓陣是一整圈（效果打折） */
+  /**
+   * 槍林的實際範圍（每個長槍兵刺 2.5 格內最近的敵兵）：圓陣是最外圈士兵再往外一個觸及距離的圓；
+   * 其他陣形是陣形外框往外擴一個觸及距離（圓角），只畫正面 ±60°（槍林的加成只算正面）。
+   * 建好路徑後在裁切範圍內呼叫 paint（填色、描邊）；face 是陣形朝向、ang 是槍林朝向（度）
+   */
+  private braceZone(r: RegFrame, x: number, y: number, face: number, ang: number, paint: () => void): void {
+    const ctx = this.ctx;
+    const s = this.cam.scale;
+    const reach = UNITS.spear.reach;
+    ctx.save();
+    ctx.beginPath();
+    if (r.formation === 'circle') ctx.arc(x, y, ((r.rad + reach) / TILE) * s, 0, Math.PI * 2);
+    else {
+      const a = (ang * Math.PI) / 180;
+      const half = (RULES.flank.frontHalf * Math.PI) / 180;
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, ((r.rad + reach) / TILE) * s * 2, a - half, a + half);
+      ctx.closePath();
+      ctx.clip();
+      ctx.beginPath();
+      ctx.translate(x, y);
+      ctx.rotate((face * Math.PI) / 180);
+      const hd = ((r.halfD + reach) / TILE) * s;
+      const hw = ((r.halfW + reach) / TILE) * s;
+      ctx.roundRect(-hd, -hw, 2 * hd, 2 * hw, (reach / TILE) * s);
+    }
+    paint();
+    ctx.restore();
+  }
+
+  /** 架好（或正在架）的槍林：實際範圍，架好後邊上一排往外的槍尖；圓陣是一整圈（效果打折） */
   private drawBrace(r: RegFrame, x: number, y: number, owner: number): void {
     const ctx = this.ctx;
     const s = this.cam.scale;
     const ready = r.status === 'braced';
     const circle = r.formation === 'circle';
-    const R = ((Math.hypot(r.halfW, r.halfD) + UNITS.spear.reach + 600) / TILE) * s;
-    const a0 = (r.braceFacing * Math.PI) / 180;
-    const half = circle ? Math.PI : (RULES.flank.frontHalf * Math.PI) / 180;
-    ctx.beginPath();
-    if (circle) ctx.arc(x, y, R, 0, Math.PI * 2);
-    else {
-      ctx.moveTo(x, y);
-      ctx.arc(x, y, R, a0 - half, a0 + half);
-      ctx.closePath();
-    }
-    ctx.fillStyle = owner === 0 ? `rgba(147,197,253,${ready ? 0.16 : 0.07})` : `rgba(252,165,165,${ready ? 0.16 : 0.07})`;
-    ctx.fill();
-    if (!ready) ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = ready ? 'rgba(226,232,240,0.75)' : 'rgba(226,232,240,0.4)';
-    ctx.lineWidth = 1.3;
-    ctx.stroke();
-    ctx.setLineDash([]);
-    if (!ready || s < 4) return;
-    // 槍尖：沿弧線每 8° 一根往外的短線
-    const step = (8 * Math.PI) / 180;
-    ctx.beginPath();
-    for (let a = a0 - half + step / 2; a < a0 + half; a += step) {
-      ctx.moveTo(x + Math.cos(a) * R, y + Math.sin(a) * R);
-      ctx.lineTo(x + Math.cos(a) * (R + s * 0.55), y + Math.sin(a) * (R + s * 0.55));
-    }
-    ctx.strokeStyle = 'rgba(241,245,249,0.85)';
-    ctx.lineWidth = Math.max(1, s * 0.08);
-    ctx.stroke();
+    this.braceZone(r, x, y, r.facing, r.braceFacing, () => {
+      ctx.fillStyle = owner === 0 ? `rgba(147,197,253,${ready ? 0.16 : 0.07})` : `rgba(252,165,165,${ready ? 0.16 : 0.07})`;
+      ctx.fill();
+      if (!ready) ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = ready ? 'rgba(226,232,240,0.75)' : 'rgba(226,232,240,0.4)';
+      ctx.lineWidth = 1.3;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (!ready || s < 4) return;
+      ctx.beginPath();
+      const tip = s * 0.55;
+      if (circle) {
+        // 圓陣：沿圓周每 8° 一根往外的槍尖
+        const R = ((r.rad + UNITS.spear.reach) / TILE) * s;
+        for (let a = 0; a < Math.PI * 2; a += (8 * Math.PI) / 180) {
+          ctx.moveTo(x + Math.cos(a) * R, y + Math.sin(a) * R);
+          ctx.lineTo(x + Math.cos(a) * (R + tip), y + Math.sin(a) * (R + tip));
+        }
+      } else {
+        // 其他陣形：沿正面邊緣每 0.8 格一根往前的槍尖（座標已轉到陣形朝向，裁切掉正面以外的）
+        const hd = ((r.halfD + UNITS.spear.reach) / TILE) * s;
+        const hw = (r.halfW / TILE) * s;
+        for (let l = -hw; l <= hw + 0.01; l += 0.8 * s) {
+          ctx.moveTo(hd, l);
+          ctx.lineTo(hd + tip, l);
+        }
+      }
+      ctx.strokeStyle = 'rgba(241,245,249,0.85)';
+      ctx.lineWidth = Math.max(1, s * 0.08);
+      ctx.stroke();
+    });
   }
 
   /** 盾兵：正後方的掩護區（持盾淡、舉盾與盾牆較明顯）；盾牆在正面畫一道牆 */
@@ -1622,8 +1684,8 @@ export class LegionRenderer {
         ctx.lineTo(x, y0 + h / 2);
         ctx.stroke();
       }
-      // 朝向箭頭（陣型前方）
-      if (s >= 4 && r.status !== 'routed') {
+      // 朝向箭頭（陣型前方；圓陣沒有正面不畫）
+      if (s >= 4 && r.status !== 'routed' && r.formation !== 'circle') {
         const a = (p.facing * Math.PI) / 180;
         const d = (r.halfD / TILE) * s + 5;
         const fx = this.sx(p.x) + Math.cos(a) * d;

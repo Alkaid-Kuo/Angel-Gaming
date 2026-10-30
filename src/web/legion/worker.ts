@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
-// 軍團戰觀戰 Worker：執行比賽（三隻基準 AI）、產生解說，依播放速度把每個 tick 的畫面資料送回主執行緒。
+// 軍團戰觀戰 Worker：執行所選 AI 的比賽、產生解說，依播放速度把每個 tick 的畫面資料送回主執行緒。
 import ambushSource from '../../../bots/legion-ambush.js?raw';
+import baselineV168Source from '../../../bots/legion-baseline-v1.68.js?raw';
+import baselineV114Source from '../../../bots/legion-baseline-v1.114.js?raw';
 import commanderSource from '../../../bots/legion-commander.js?raw';
 import generalV2Source from '../../../bots/legion-general-v2.js?raw';
 import marshalSource from '../../../bots/legion-marshal.js?raw';
@@ -10,6 +12,7 @@ import rangedSource from '../../../bots/legion-ranged.js?raw';
 import siegeSource from '../../../bots/legion-siege.js?raw';
 import type { LegionEvent } from '../../legion/api.ts';
 import { TPS, UNITS } from '../../legion/config.ts';
+import { normDeg } from '../../legion/geom.ts';
 import { MAPS, defaultMapId } from '../../legion/map.ts';
 import { LegionBatchController, LegionDriver, LegionReplayCursor, type LegionController, type LegionReplay } from '../../legion/runner.ts';
 import type { LegionMatch } from '../../legion/sim.ts';
@@ -17,7 +20,8 @@ import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
 import { resolveKnobs } from '../../sandbox/controller.ts';
 import { LegionCommentator } from './commentary.ts';
 import { PlayerController } from './player.ts';
-import type { BotKey, Caption, FromLegionWorker, LegionFrame, LegionMeta, LegionSetup, PlayerMeta, RegFrame, RegStatic, ToLegionWorker } from './protocol.ts';
+import type { BotKey, Caption, FromLegionWorker, LegionFrame, LegionMeta, LegionSetup, PlayerMeta, RegFrame, RegStatic, SandboxSetup, SandboxUnit, ToLegionWorker } from './protocol.ts';
+import { AttackController, IdleController, SANDBOX_MAP, SANDBOX_TICKS, SquadController, checkPlacement, faceOff, toDeployment } from './sandbox.ts';
 import { ATTACKED_BIT, DOWN_BIT, LAYER_SHIFT } from './protocol.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -31,6 +35,8 @@ const compiled: Record<BotKey, CompiledBot> = {
   marshal: compileBot(marshalSource, 'legion-marshal.js'),
   general2: compileBot(generalV2Source, 'legion-general-v2.js'),
   marshal2: compileBot(marshalV2Source, 'legion-marshal-v2.js'),
+  baseline168: compileBot(baselineV168Source, 'legion-baseline-v1.68.js'),
+  baseline114: compileBot(baselineV114Source, 'legion-baseline-v1.114.js'),
   siege: compileBot(siegeSource, 'legion-siege.js'),
 };
 const SIDES = ['藍方', '紅方'];
@@ -45,6 +51,8 @@ const SKIP_MIN = 30;
 let setup: LegionSetup | null = null;
 /** 玩家指揮時的控制器 */
 let player: PlayerController | null = null;
+/** 依 playerId：玩家可以下指令的控制器（一般對戰只有玩家那一方；自訂對戰另有「待命」的一方） */
+let manual: ({ push(cmds: readonly unknown[]): void } | null)[] = [null, null];
 /** 玩家指揮哪一方（-1 = 純觀戰） */
 let playerSide = -1;
 /** 正在跑的比賽：AI／玩家對戰是 LegionDriver，重播是 LegionReplayCursor */
@@ -52,6 +60,8 @@ let driver: { readonly match: LegionMatch; step(): void; readonly replay: Legion
 /** 玩家剛打完（或正在打）的那一場的紀錄：「重看」照這份重播，不是重開一局 */
 let playerReplay: LegionReplay | null = null;
 let comm: LegionCommentator | null = null;
+/** 沙盒：布陣中每次調整都會重建整場，解說等開戰才開始（不然開場白會重複） */
+let introPending = false;
 let speed = 1;
 let paused = true;
 let acc = 0;
@@ -72,11 +82,44 @@ function regName(m: LegionMatch): RegStatic[] {
   });
 }
 
+/** 自訂對戰（沙盒）：平地測試場、不限點數；每一方是玩家、待命不動、直接進攻，或用現有 AI 指揮指定的兵團 */
+function buildSandbox(s: SandboxSetup & { readonly placement: readonly [readonly SandboxUnit[], readonly SandboxUnit[]] }): { driver: LegionDriver; players: PlayerMeta[] } {
+  const map = MAPS[SANDBOX_MAP]();
+  const center = (us: readonly SandboxUnit[]): { x: number; y: number } =>
+    us.length === 0 ? { x: (map.width * 1000) / 2, y: (map.height * 1000) / 2 } : { x: us.reduce((t, u) => t + u.x, 0) / us.length, y: us.reduce((t, u) => t + u.y, 0) / us.length };
+  const ctrls: LegionController[] = s.roles.map((role, i) => {
+    const units = toDeployment(s.placement[i]);
+    if (role === 'player') {
+      player = new PlayerController({ field: [...s.armies[i]], reserve: [] }, units);
+      manual[i] = player;
+      return player;
+    }
+    if (role === 'idle') {
+      const idle = new IdleController(units);
+      manual[i] = idle;
+      return idle;
+    }
+    if (role === 'attack') return new AttackController(units, center(s.placement[1 - i]));
+    return new SquadController(new LegionBatchController(compiled[role], `legion-${role}.js`, map, s.seed, i), units);
+  });
+  const knobs = ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label));
+  const d = new LegionDriver({ seed: s.seed, mode: 'annihilation', mapId: SANDBOX_MAP, controllers: ctrls, knobs, record: true, timeLimitTicks: SANDBOX_TICKS, sandbox: true });
+  const players = ctrls.map((c, i) => {
+    const ai = s.roles[i] !== 'player' && s.roles[i] !== 'idle' && s.roles[i] !== 'attack';
+    return { id: i, side: SIDES[i], color: COLORS[i], bot: c.declaration.name, style: ai ? `（指揮你指定的兵團）${c.declaration.style}` : c.declaration.style, cost: d.match.players[i].cost, knobs: knobs[i] };
+  });
+  return { driver: d, players };
+}
+
 /** 開一場：replay 有值時照紀錄重播（玩家打過的那一場，上帝視角） */
-function begin(s: LegionSetup, replay: LegionReplay | null = null): void {
+function begin(s0: LegionSetup, replay: LegionReplay | null = null): void {
+  // 沙盒沒指定布陣就自動面對面，並記下來（之後拖曳調整、重來都從這份開始）
+  const s: LegionSetup = s0.kind === 'sandbox' && s0.placement === undefined ? { ...s0, placement: faceOff(s0.armies, s0.distance, MAPS[SANDBOX_MAP]()) } : s0;
   setup = s;
   player = null;
-  playerSide = replay !== null ? -1 : s.bots.indexOf('player');
+  manual = [null, null];
+  // 自訂對戰一律上帝視角（不藏對方的意圖與位置）
+  playerSide = replay !== null || s.kind === 'sandbox' ? -1 : s.bots.indexOf('player');
   const rejected: { player: number; reason: string }[] = [];
   let players: PlayerMeta[];
   let m: LegionMatch;
@@ -85,12 +128,19 @@ function begin(s: LegionSetup, replay: LegionReplay | null = null): void {
     driver = cursor;
     m = cursor.match;
     players = replay.header.players.map((p, i) => ({ id: i, side: SIDES[i], color: COLORS[i], bot: p.bot, style: '（重播）', cost: m.players[i].cost, knobs: p.knobs }));
+  } else if (s.kind === 'sandbox') {
+    const built = buildSandbox({ ...s, placement: s.placement! });
+    driver = built.driver;
+    m = built.driver.match;
+    if (playerSide >= 0) playerReplay = built.driver.replay;
+    players = built.players;
   } else {
     const mapId = s.mapId ?? defaultMapId(s.mode);
     const map = MAPS[mapId]();
     const ctrls: LegionController[] = s.bots.map((b, i) => {
       if (b !== 'player') return new LegionBatchController(compiled[b], `legion-${b}.js`, map, s.seed, i);
       player = new PlayerController(s.army ?? { field: ['spear', 'spear', 'spear', 'sword', 'sword', 'archer', 'archer', 'shield', 'shield', 'heavyCav', 'light'], reserve: [] });
+      manual[i] = player;
       return player;
     });
     const knobs = ctrls.map((c) => resolveKnobs(c.declaration, undefined, c.label));
@@ -110,8 +160,8 @@ function begin(s: LegionSetup, replay: LegionReplay | null = null): void {
     terrain: m.map.terrain,
     heights: m.map.heights,
     flags: m.map.flags,
-    deploy: m.map.deploy,
-    deployMask: m.map.deploy.map((_, p) => m.map.deployMask?.[p] ?? null),
+    deploy: s.kind === 'sandbox' ? [] : m.map.deploy,
+    deployMask: s.kind === 'sandbox' ? [] : m.map.deploy.map((_, p) => m.map.deployMask?.[p] ?? null),
     spawns: m.mode === 'capture' ? m.map.spawns : [],
     supplies: m.mode === 'capture' ? m.map.supplies : [],
     gates: m.map.gates,
@@ -124,10 +174,13 @@ function begin(s: LegionSetup, replay: LegionReplay | null = null): void {
     soldierCount: m.soldiers.length,
     rejected,
     playerSide,
+    controlSides: replay !== null ? [] : [0, 1].filter((p) => manual[p] !== null),
     replay: replay !== null,
+    sandbox: s.kind === 'sandbox' && replay === null,
   };
   comm = new LegionCommentator(regs, players, meta.playerSide);
-  comm.start(m);
+  introPending = meta.sandbox;
+  if (!introPending) comm.start(m);
   events = [];
   m.eventTap = (ev) => {
     events.push(ev);
@@ -281,6 +334,52 @@ function skip(): void {
   if (hit !== null) post({ type: 'skipped', x: (hit as { x: number; y: number }).x, y: (hit as { x: number; y: number }).y });
 }
 
+/** 玩家的指令依軍團所屬的一方，交給那一方的控制器（自訂對戰可以同時指揮雙方） */
+function command(cmds: readonly unknown[]): void {
+  const m = driver?.match;
+  if (!m) return;
+  const by: unknown[][] = [[], []];
+  for (const c of cmds) {
+    const id = (c as { id?: unknown }).id;
+    const owner = typeof id === 'number' ? m.regiments[id]?.owner : undefined;
+    if (owner !== undefined && manual[owner] !== null) by[owner].push(c);
+  }
+  by.forEach((list, p) => {
+    if (list.length > 0) manual[p]?.push(list);
+  });
+}
+
+/** 沙盒開戰：補上延後的開場解說 */
+function startIntro(): void {
+  if (!introPending || driver === null || comm === null) return;
+  introPending = false;
+  comm.start(driver.match);
+}
+
+/** 沙盒布陣：把一團擺到新的位置、朝向、陣形，整場用新布陣重建（開戰前才行）；擺不下就提示並維持原樣 */
+function place(id: number, x: number, y: number, facing: number, formation: SandboxUnit['formation']): void {
+  const s = setup;
+  if (s?.kind !== 'sandbox' || s.placement === undefined || driver === null || driver.match.tick > 0) return;
+  const pl = s.placement;
+  if (driver.match.regiments.length !== pl[0].length + pl[1].length) {
+    post({ type: 'toast', text: '有軍團沒擺上去（地方不夠），請減少兵力或拉開距離後重開' });
+    return;
+  }
+  const side = id < pl[0].length ? 0 : 1;
+  const idx = side === 0 ? id : id - pl[0].length;
+  const u = pl[side][idx];
+  if (u === undefined) return;
+  const next: [SandboxUnit[], SandboxUnit[]] = [pl[0].slice(), pl[1].slice()];
+  next[side][idx] = { ...u, x: Math.round(x), y: Math.round(y), facing: normDeg(Math.round(facing)), formation: UNITS[u.kind].formations.includes(formation) ? formation : u.formation };
+  const bad = checkPlacement(next, MAPS[SANDBOX_MAP]());
+  if (bad !== '') {
+    post({ type: 'toast', text: `不能擺在那裡：${bad}` });
+    sendFrame();
+    return;
+  }
+  begin({ ...s, placement: next });
+}
+
 setInterval(loop, 16);
 last = performance.now();
 
@@ -292,6 +391,7 @@ ctx.onmessage = (ev: MessageEvent<ToLegionWorker>) => {
         begin(msg.setup);
         break;
       case 'play':
+        startIntro();
         paused = false;
         last = performance.now();
         break;
@@ -305,6 +405,13 @@ ctx.onmessage = (ev: MessageEvent<ToLegionWorker>) => {
         skip();
         break;
       case 'restart':
+        // 沙盒：同一組布陣重新開打（edit = 回到布陣階段，暫停等開戰）
+        if (setup?.kind === 'sandbox') {
+          begin(setup);
+          paused = msg.edit === true;
+          if (!paused) startIntro();
+          break;
+        }
         // 玩家打的那一場：照錄下來的指令重播；AI 對戰：同一組合、同一個種子重跑（結果一樣）
         if (setup !== null) {
           const s = setup;
@@ -318,7 +425,13 @@ ctx.onmessage = (ev: MessageEvent<ToLegionWorker>) => {
         if (driver?.replay) post({ type: 'replayFile', json: JSON.stringify(driver.replay) });
         break;
       case 'command':
-        player?.push(msg.cmds);
+        command(msg.cmds);
+        break;
+      case 'place':
+        place(msg.id, msg.x, msg.y, msg.facing, msg.formation);
+        break;
+      case 'autoPlace':
+        if (setup?.kind === 'sandbox' && driver !== null && driver.match.tick === 0) begin({ ...setup, placement: undefined });
         break;
     }
   } catch (e) {

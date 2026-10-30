@@ -21,6 +21,8 @@ export interface LegionReplay {
     readonly mode: LegionMode;
     readonly mapId: string;
     readonly timeLimitTicks: number;
+    /** 沙盒（觀戰網頁的自訂對戰）才有 */
+    readonly sandbox?: boolean;
     readonly players: readonly { readonly playerId: number; readonly bot: string; readonly version: string; readonly knobs: KnobValues }[];
     /** 依 playerId：deploy() 的回傳（JSON 安全副本） */
     readonly deployments: readonly unknown[];
@@ -145,6 +147,8 @@ export interface LegionRunOptions {
   readonly knobs: readonly KnobValues[];
   readonly record: boolean;
   readonly timeLimitTicks?: number;
+  /** 沙盒：布陣不限點數與布陣區（觀戰網頁的自訂對戰） */
+  readonly sandbox?: boolean;
 }
 
 export class LegionDriver {
@@ -170,7 +174,7 @@ export class LegionDriver {
       if (d !== null) this.note(pid, d, 'deploy');
       deployments.push(d === null || d.killed ? [] : d.value);
     });
-    this.match = new LegionMatch({ seed: opts.seed, mode: opts.mode, mapId, deployments, timeLimitTicks: limit });
+    this.match = new LegionMatch({ seed: opts.seed, mode: opts.mode, mapId, deployments, timeLimitTicks: limit, sandbox: opts.sandbox });
     this.replay = opts.record
       ? {
           format: 1,
@@ -181,6 +185,7 @@ export class LegionDriver {
             mode: opts.mode,
             mapId,
             timeLimitTicks: limit,
+            ...(opts.sandbox === true ? { sandbox: true } : {}),
             players: opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: opts.knobs[i] })),
             deployments,
           },
@@ -260,7 +265,7 @@ export class LegionReplayCursor {
   constructor(replay: LegionReplay) {
     this.replay = replay;
     const h = replay.header;
-    this.match = new LegionMatch({ seed: h.seed, mode: h.mode, mapId: h.mapId, deployments: h.deployments, timeLimitTicks: h.timeLimitTicks });
+    this.match = new LegionMatch({ seed: h.seed, mode: h.mode, mapId: h.mapId, deployments: h.deployments, timeLimitTicks: h.timeLimitTicks, sandbox: h.sandbox });
   }
 
   step(): void {

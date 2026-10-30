@@ -28,7 +28,7 @@ const deterministicRules = {
 };
 
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'dist/**', 'dist-web/**', 'out/**', 'arms-race/**', 'marshal/**', 'bots/legion-marshal.js', 'bots/legion-general-v2.js', 'bots/legion-marshal-v2.js'] },
+  { ignores: ['node_modules/**', 'dist/**', 'dist-web/**', 'out/**', 'arms-race/**', 'marshal/**', 'bots/legion-marshal.js', 'bots/legion-general-v2.js', 'bots/legion-marshal-v2.js', 'bots/legion-baseline-v1.68.js', 'bots/legion-baseline-v1.114.js'] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
@@ -48,8 +48,8 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/core/**', 'src/mapgen/**', 'src/path/**', 'src/replay/**', 'src/shared/**', 'src/config/**', 'src/legion/**', 'bots/**'],
-    ignores: ['src/legion/runner.ts'],
+    files: ['src/core/**', 'src/mapgen/**', 'src/path/**', 'src/replay/**', 'src/shared/**', 'src/config/**', 'src/legion/**', 'src/shooter/**', 'src/manage/**', 'bots/**'],
+    ignores: ['src/legion/runner.ts', 'src/shooter/runner.ts'],
     rules: deterministicRules,
   },
   {

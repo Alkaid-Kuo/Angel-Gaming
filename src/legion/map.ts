@@ -1071,6 +1071,79 @@ export function grassland(): LegionMap {
   });
 }
 
+/**
+ * 沙盒地圖「平地測試場」：160 × 100 格，只給觀戰網頁的自訂對戰用（不對稱，正式比賽不用）。
+ * 中央（x 20～140、y 34～66）是一整片高度 1 的平地；北側由西到東：高地（3，頂 4）、樹林、一段有橋與淺灘渡口的河；
+ * 南側由西到東：有房舍擋視線的村莊、緩坡（高度 2，只差 1 階）、淺水池
+ */
+export function testField(): LegionMap {
+  const w = 160;
+  const h = 100;
+  const terrain = new Uint8Array(w * h);
+  const heights = new Uint8Array(w * h).fill(1);
+  const hill = ellipse(36, 18, 13, 9, 11);
+  const top = ellipse(36, 18, 6, 4, 12);
+  const slope = ellipse(80, 84, 13, 8, 13);
+  paint(terrain, w, h, T.Hill, hill);
+  paint(terrain, w, h, T.Forest, ellipse(78, 17, 12, 8, 14));
+  paint(terrain, w, h, T.Shallow, ellipse(122, 83, 11, 7, 15));
+  // 村莊：一條村道穿過，兩旁幾棟房舍
+  paint(terrain, w, h, T.Road, polyline([[12, 83], [54, 83]], 4));
+  for (const [x0, y0, x1, y1] of [[27, 77, 31, 80], [35, 77, 39, 80], [29, 86, 33, 89], [38, 86, 42, 89], [46, 78, 49, 80]]) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) terrain[y * w + x] = T.Building;
+  }
+  // 東北：一段南北向的河（寬 6 格），北邊一座 3 格寬的橋、南邊一處淺灘渡口；河的南端在 y 31，可以從下方繞過
+  for (let y = 2; y <= 31; y++) {
+    for (let x = 117; x <= 122; x++) terrain[y * w + x] = y >= 8 && y <= 10 ? T.Bridge : y >= 20 && y <= 25 ? T.Shallow : T.River;
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const t = terrain[i];
+      if (t === T.River || t === T.Shallow) heights[i] = 0;
+      else if (t === T.Hill) heights[i] = top(x, y) ? 4 : 3;
+      else if (t === T.Plain && slope(x, y)) heights[i] = 2;
+    }
+  }
+  const depth = RULES.deployDepthTiles;
+  return finishMap({
+    id: 'test-field',
+    name: '平地測試場',
+    description: '中央一整片平地；北側有高地、樹林、一段有橋與淺灘的河，南側有村莊、緩坡與淺水池，用來測試兵種對抗與地形效果。',
+    width: w,
+    height: h,
+    terrain,
+    heights,
+    deploy: [
+      { x0: 0, y0: 0, x1: depth, y1: h },
+      { x0: w - depth, y0: 0, x1: w, y1: h },
+    ],
+    rearX: [0, w * TILE],
+    spawns: [
+      { x: 10000, y: (h * TILE) / 2 },
+      { x: w * TILE - 10000, y: (h * TILE) / 2 },
+    ],
+    supplies: [],
+    flags: [
+      { name: '西北高地', x: 36500, y: 18500, points: 1 },
+      { name: '中央平原', x: 80000, y: 50000, points: 2 },
+      { name: '南方緩坡', x: 80500, y: 84500, points: 1 },
+    ],
+    landmarks: [
+      { name: '中央平原', x: 80000, y: 50000 },
+      { name: '西北高地', x: 36500, y: 18500 },
+      { name: '北方樹林', x: 78500, y: 17500 },
+      { name: '東北的橋', x: 120000, y: 9500 },
+      { name: '東北的淺灘渡口', x: 120000, y: 23000 },
+      { name: '西南村莊', x: 34500, y: 83500 },
+      { name: '南方緩坡', x: 80500, y: 84500 },
+      { name: '東南淺水池', x: 122500, y: 83500 },
+    ],
+    gates: [],
+    defender: -1,
+  });
+}
+
 /** 各模式預設的地圖：殲滅戰用「河谷」，佔點用「大河谷」，攻城戰用「石關城」 */
 export function defaultMapId(mode: string): string {
   return mode === 'capture' ? 'grand-valley' : mode === 'siege' ? 'stone-pass' : 'river-valley';
@@ -1092,6 +1165,7 @@ export const MAPS: Record<string, () => LegionMap> = {
   'grand-valley': once(grandValley),
   'stone-pass': once(stonePass),
   grassland: once(grassland),
+  'test-field': once(testField),
 };
 
 /** 聯賽與觀戰用的地圖：攻城戰一張、佔點兩張（三場制第三場輪替） */

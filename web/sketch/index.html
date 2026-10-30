@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>經營介面設計稿</title>
+<style>
+body { margin: 0; padding: 28px; background: #0d0f14; color: #e8e8e8; font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+h1 { margin: 0 0 6px; font-size: 26px; }
+p { color: #a0a3aa; margin: 0 0 22px; line-height: 1.6; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)); gap: 24px; }
+a.card { display: block; text-decoration: none; color: inherit; background: #181a20; border: 1px solid #2c2e34; border-radius: 12px; overflow: hidden; }
+a.card:hover { border-color: #f0b54a; }
+.thumb { position: relative; width: 100%; aspect-ratio: 1920 / 1080; overflow: hidden; background: #000; }
+.thumb iframe { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; pointer-events: none; }
+.info { padding: 12px 16px 16px; }
+.info b { font-size: 18px; }
+.info span { display: block; color: #a0a3aa; font-size: 13px; margin-top: 4px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h1>經營介面設計稿</h1>
+<p style="margin:0 0 14px"><a href="./ui/index.html" style="color:#f0b54a;font-weight:700;text-decoration:none">→ 完整 UI 設計稿（E＋A 統一規格，15 張畫面）</a></p>
+<p>已定案：E 當介面骨架、A 當基地首頁，兩張共用 angel.css 的統一規格。同一個「基地」畫面、同一組假資料，四張各自不同的構圖，設計等級相同：1920×1080 等比縮放、透視與廣角、圓形元素、滑鼠視差、進場與待機動畫。縮圖是靜態截圖模式，點進去全螢幕看動態。說明見 docs/2026-10-27_經營介面風格草圖.md。</p>
+<div class="grid">
+  <a class="card" href="./apex.html"><div class="thumb"><iframe src="./apex.html?still" loading="lazy"></iframe></div><div class="info"><b>E　環形競技台（定案：介面骨架）</b><span>墨黑＋白＋天使金，紅只給對手與警示。王牌選手的圓形鏡頭在中央，選單磚沿地上的透視金環排成半圓劇場；左下名牌、右下比賽日與開戰圓鈕。</span></div></a>
+  <a class="card" href="./cyber.html"><div class="thumb"><iframe src="./cyber.html?still" loading="lazy"></iframe></div><div class="info"><b>A　夜城天台（定案：基地首頁）</b><span>和 E 同一套規格（墨黑＋天使金＋紅）。無人機視角從我方頂樓俯看整座城：選單是釘在建築上的 AR 標籤，中央競技場有地環與探照燈；屋頂上左是我方名單、右是對手情報，中間是金色開戰鈕。</span></div></a>
+  <a class="card" href="./pixel.html"><div class="thumb"><iframe src="./pixel.html?still" loading="lazy"></iframe></div><div class="info"><b>B　霓虹雨巷（留作特別場景）</b><span>深靛底＋霓虹粉＋青（雙主色），480×270 放大 4 倍。一點透視看向巷底：選單是兩側樓上的直式霓虹招牌，競技場上空的光環裡浮著全像比賽日；我方三人站在濕亮的路上，路面映著霓虹倒影。</span></div></a>
+  <a class="card" href="./table.html"><div class="thumb"><iframe src="./table.html?still" loading="lazy"></iframe></div><div class="info"><b>D　戰術室</b><span>斜俯視的教練木桌：中央是會轉的圓形微縮沙盤，選單是立在桌上的木製圓徽牌，選手卡斜立在前景；牆上是黃銅錶盤與軟木積分板。</span></div></a>
+</div>
+<script>
+  const fit = () => document.querySelectorAll('.thumb').forEach((t) => { t.querySelector('iframe').style.transform = `scale(${t.clientWidth / 1920})`; });
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>

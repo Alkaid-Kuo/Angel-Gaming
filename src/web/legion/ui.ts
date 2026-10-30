@@ -1,6 +1,6 @@
 // 軍團戰觀戰畫面：電競轉播風的計分條、雙方兵力名冊、解說字幕、開戰前陣容、結算、自動導播與操作。
 import type { RegimentStatus } from '../../legion/api.ts';
-import { BOMBARD, DASH, FORMATION_NAMES, MODE_NAMES, RAM, RULES, SIEGE, T, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type SkillKind, type UnitKind } from '../../legion/config.ts';
+import { BOMBARD, DASH, FORMATION_NAMES, MODE_NAMES, RAM, RULES, SIEGE, T, TERRAIN_NAMES, TILE, TPS, UNITS, VERSUS, dashDefOf, type FormationKind, type SkillKind, type UnitKind } from '../../legion/config.ts';
 import { unitSvg } from './icons.ts';
 import { mapByName } from './maps.ts';
 import type { Caption, FromLegionWorker, LegionFrame, LegionMeta, ToLegionWorker } from './protocol.ts';
@@ -119,34 +119,45 @@ export class LegionScreen {
   private readonly keysDown = new Set<string>();
   private lastTick = 0;
   private toastUntil = 0;
+  /** 沙盒布陣中（開戰前）；拖曳中的團（滑鼠相對團中心的偏移、預覽位置，世界座標） */
+  private placing = false;
+  private pdrag: { id: number; dx: number; dy: number; at: Pt; moved: boolean } | null = null;
+  private placeSig = '';
+  /** 布陣：已送出、畫面還沒回來的調整（連按轉向時要以它為準，不然會吃掉一下） */
+  private pend: { id: number; x: number; y: number; facing: number; formation: FormationKind } | null = null;
 
   constructor(root: HTMLElement, worker: Worker, meta: LegionMeta, onExit: () => void) {
     this.root = root;
     this.worker = worker;
     this.meta = meta;
     this.onExit = onExit;
-    this.speeds = meta.playerSide >= 0 ? PLAYER_SPEEDS : SPEEDS;
+    this.speeds = meta.controlSides.length > 0 ? PLAYER_SPEEDS : SPEEDS;
     root.innerHTML = this.layout();
     for (const n of root.querySelectorAll<HTMLElement>('[data-el]')) this.el[n.dataset.el!] = n;
     this.r2d = new LegionRenderer(this.el.canvas as HTMLCanvasElement, meta);
     this.r = this.r2d;
-    if (meta.playerSide >= 0) {
-      this.control = new PlayerControl(this.r, meta.playerSide, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t), mapByName(meta.mapName));
+    if (meta.controlSides.length > 0) {
+      this.control = new PlayerControl(this.r, meta.controlSides, (cmds) => this.send({ type: 'command', cmds }), (t) => this.toast(t), mapByName(meta.mapName));
       this.viewer = meta.playerSide;
       this.director = false;
     }
+    this.placing = meta.sandbox;
     root.classList.remove('hidden');
     requestAnimationFrame(() => {
       this.r.fit();
-      if (!this.started) this.showLineup();
+      if (!this.started) {
+        if (this.placing) this.showPlacement();
+        else this.showLineup();
+      }
     });
     this.bind();
     this.raf = requestAnimationFrame(this.tick);
-    if (prefers3D()) void this.set3D(true);
+    // 沙盒布陣只在 2D 做（2D 是測試工具），開戰後才能切 3D
+    if (prefers3D() && !meta.sandbox) void this.set3D(true);
   }
 
   /** 切換 2D／3D：鏡頭位置帶過去，兩邊都一直收狀態流 */
-  private async set3D(on: boolean): Promise<void> {
+  private async set3D(on: boolean, remember = true): Promise<void> {
     if (on && this.r3d === null) {
       this.el.view3d.textContent = '載入中…';
       const { Legion3DView } = await import('./three/view3d.ts');
@@ -167,6 +178,7 @@ export class LegionScreen {
     next.clamp();
     this.el.view3d.textContent = on ? '2D' : '3D';
     this.el.view3d.title = on ? '切回 2D 俯視（M）' : '切到 3D 沙盤（M）；Alt＋拖曳、右鍵拖曳或 [ ] 轉鏡頭';
+    if (!remember) return;
     try {
       localStorage.setItem('legion.view', on ? '3d' : '2d');
     } catch {
@@ -191,7 +203,7 @@ export class LegionScreen {
 
   private layout(): string {
     const p = this.meta.players;
-    const player = this.meta.playerSide >= 0;
+    const player = this.meta.controlSides.length > 0;
     const team = (i: number): string =>
       `<div class="team t${i}"><span class="sw" style="background:${p[i].color}"></span><span class="nm">${esc(p[i].side)}</span><span class="bot">${esc(p[i].bot)}</span></div>`;
     return `<div class="lg">
@@ -216,6 +228,7 @@ export class LegionScreen {
     <div class="lg-feed" data-el="feed"></div>
     <div class="lg-tip hidden" data-el="tip"></div>
     <div class="lg-toast hidden" data-el="toast"></div>
+    <div class="sb-place hidden" data-el="place"></div>
     <div class="lg-ctrl">
       <button data-act="play" data-el="play" title="播放／暫停（空白鍵）">▶</button>
       ${this.speeds.map((s) => `<button data-act="speed" data-speed="${s}" class="${s === 1 ? 'active' : ''}" title="播放速度（${this.speeds.indexOf(s) + 1}）">${s}×</button>`).join('')}
@@ -231,7 +244,11 @@ export class LegionScreen {
       <span class="sep"></span>
       <button data-act="help" title="規則說明（H）">說明</button>
       <button data-act="replay" title="下載這場比賽的回放檔">回放</button>
-      <button data-act="restart" title="${player || this.meta.replay ? '重播剛才玩家打的這一場' : '同一組合重看一次'}">重看</button>
+      ${
+        this.meta.sandbox
+          ? '<button data-act="restart" title="同一組布陣重新開打">重來</button><button data-act="replace" title="回到布陣階段重新擺">重新布陣</button>'
+          : `<button data-act="restart" title="${player || this.meta.replay ? '重播剛才玩家打的這一場' : '同一組合重看一次'}">重看</button>`
+      }
       <button data-act="exit" title="回到選單">返回</button>
     </div>
     <div class="lg-overlay hidden" data-el="lineup"></div>
@@ -274,7 +291,7 @@ export class LegionScreen {
       this.r.clamp();
     });
     on(canvas, 'contextmenu', (e) => {
-      if (this.control) e.preventDefault();
+      if (this.control || this.placing) e.preventDefault();
     });
     on(canvas, 'mousedown', (e) => {
       const me = e as MouseEvent;
@@ -287,6 +304,10 @@ export class LegionScreen {
         // 中鍵平移（擋掉 Windows 中鍵的自動捲動）
         me.preventDefault();
         this.pan = { at: this.r.toWorld(px, py), cx: this.r.cam.x, cy: this.r.cam.y };
+        return;
+      }
+      if (this.placing) {
+        if (me.button === 0) this.placeDown(px, py);
         return;
       }
       if (this.control) {
@@ -315,7 +336,14 @@ export class LegionScreen {
         if ((me.buttons & 4) === 4) this.panTo(this.mouse.x, this.mouse.y);
         else this.pan = null;
       }
-      if (this.control) {
+      if (this.pdrag !== null) {
+        const w = this.r.toWorld(this.mouse.x, this.mouse.y);
+        const at = { x: w.x - this.pdrag.dx, y: w.y - this.pdrag.dy };
+        if (Math.hypot(at.x - this.pdrag.at.x, at.y - this.pdrag.at.y) > 300) this.pdrag.moved = true;
+        if (this.pdrag.moved) this.pdrag.at = at;
+        return;
+      }
+      if (this.control && !this.placing) {
         if (this.boxStart && (me.buttons & 1) === 1 && Math.abs(this.mouse.x - this.boxStart.x) + Math.abs(this.mouse.y - this.boxStart.y) > 4) this.control.box = { x0: this.boxStart.x, y0: this.boxStart.y, x1: this.mouse.x, y1: this.mouse.y };
         if (this.rdrag) this.control.order = { from: this.rdrag.from, to: this.r.toWorld(this.mouse.x, this.mouse.y) };
         return;
@@ -328,7 +356,14 @@ export class LegionScreen {
     on(window, 'mouseup', (e) => {
       const me = e as MouseEvent;
       if (me.button === 1) this.pan = null;
-      const c = this.control;
+      if (this.pdrag !== null) {
+        const d = this.pdrag;
+        this.pdrag = null;
+        const r = this.r.reg(d.id);
+        if (d.moved && r) this.sendPlace(d.id, d.at.x, d.at.y, r.facing, r.formation);
+        return;
+      }
+      const c = this.placing ? null : this.control;
       if (c) {
         const rect = canvas.getBoundingClientRect();
         const px = me.clientX - rect.left;
@@ -384,7 +419,8 @@ export class LegionScreen {
     on(window, 'keydown', (e) => {
       const ke = e as KeyboardEvent;
       if ((ke.target as HTMLElement).tagName === 'SELECT' || (ke.target as HTMLElement).tagName === 'INPUT') return;
-      if (this.control && this.playerKey(ke)) return;
+      if (this.placing && this.placeKey(ke)) return;
+      if (this.control && !this.placing && this.playerKey(ke)) return;
       if (ke.key === ' ') {
         ke.preventDefault();
         this.action('play');
@@ -482,12 +518,47 @@ export class LegionScreen {
         this.toggleHelp();
         return;
       case 'view3d':
+        if (this.placing) {
+          this.toast('布陣在 2D 畫面做，開戰後可以切 3D');
+          return;
+        }
         void this.set3D(this.r === this.r2d);
         return;
       case 'replay':
         this.send({ type: 'replay' });
         return;
+      case 'replace':
+        // 沙盒：回到布陣階段（同一組布陣，暫停等開戰）
+        this.ended = false;
+        this.captions = [];
+        this.el.feed.innerHTML = '';
+        this.el.result.classList.add('hidden');
+        this.r2d.reset();
+        this.r3d?.reset();
+        // 布陣只在 2D 做
+        void this.set3D(false, false);
+        this.send({ type: 'restart', edit: true });
+        this.started = false;
+        this.paused = true;
+        this.el.play.textContent = '▶';
+        this.placing = true;
+        this.showPlacement();
+        return;
+      case 'autoPlace':
+        this.send({ type: 'autoPlace' });
+        return;
+      case 'rotL':
+      case 'rotR':
+        this.rotateSelected(act === 'rotL' ? -15 : 15);
+        return;
+      case 'fm': {
+        const r = this.placed(this.selected);
+        if (r && el?.dataset.fm) this.sendPlace(r.id, r.x, r.y, r.facing, el.dataset.fm as FormationKind);
+        return;
+      }
       case 'restart':
+        this.placing = false;
+        this.el.place.classList.add('hidden');
         this.ended = false;
         this.captions = [];
         this.el.feed.innerHTML = '';
@@ -590,9 +661,96 @@ export class LegionScreen {
     }, 1000);
   }
 
+  // ───────── 沙盒布陣 ─────────
+
+  private showPlacement(): void {
+    this.el.lineup.classList.add('hidden');
+    this.el.place.classList.remove('hidden');
+    this.placeSig = '';
+    this.renderPlacement();
+  }
+
+  /** 布陣面板：操作說明、選中的團（朝向、陣形按鈕）、擺回面對面、開戰 */
+  private renderPlacement(): void {
+    const r = this.selected >= 0 ? this.r.reg(this.selected) : undefined;
+    const sig = r ? `${r.id}:${r.facing}:${r.formation}` : '-';
+    if (sig === this.placeSig) return;
+    this.placeSig = sig;
+    let sel = '<span class="sel">點選一團後可以轉向、換陣形</span>';
+    if (r) {
+      const st = this.meta.regs.find((x) => x.id === r.id);
+      const kind = this.r.kindOf[r.id] as UnitKind;
+      const fms = UNITS[kind].formations.map((f) => `<button data-act="fm" data-fm="${f}" class="${f === r.formation ? 'active' : ''}">${FORMATION_NAMES[f]}</button>`).join('');
+      sel = `<div class="row"><span class="sel">${esc(this.meta.players[st?.owner ?? 0].side)}・${esc(st?.name ?? '')}・朝向 ${r.facing}°</span><button data-act="rotL" title="左轉 15°（Q）">⟲</button><button data-act="rotR" title="右轉 15°（E）">⟳</button>${fms}</div>`;
+    }
+    this.el.place.innerHTML = `<b>布陣</b><span class="small muted">拖曳軍團移動（雙方都能擺）・Q／E 轉向 15°・T 朝向滑鼠・Z X C V 換陣形・中鍵拖曳或 WASD 平移鏡頭</span>${sel}<div class="row"><button data-act="autoPlace">全部擺回面對面</button><button class="primary" data-act="start">開戰</button></div>`;
+  }
+
+  private placeDown(px: number, py: number): void {
+    const id = this.r.pick(px, py, -1, 1);
+    if (id >= 0) {
+      const r = this.r.reg(id);
+      if (!r) return;
+      const w = this.r.toWorld(px, py);
+      this.pdrag = { id, dx: w.x - r.x, dy: w.y - r.y, at: { x: r.x, y: r.y }, moved: false };
+      this.select(id, false);
+      return;
+    }
+    this.select(-1, false);
+  }
+
+  /** 布陣的按鍵：WASD 平移、Q／E 轉向、T 朝向滑鼠、Z X C V 換陣形；回傳 true 表示處理了 */
+  private placeKey(ke: KeyboardEvent): boolean {
+    const k = ke.key.toLowerCase();
+    if (k === 'w' || k === 's' || k === 'a' || k === 'd' || k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright') {
+      this.keysDown.add(k);
+      ke.preventDefault();
+      return true;
+    }
+    const r = this.placed(this.selected);
+    if (!r) return false;
+    if (k === 'q' || k === 'e') {
+      this.rotateSelected(k === 'q' ? -15 : 15);
+      return true;
+    }
+    if (k === 't' && this.mouse) {
+      const m = this.r.toWorld(this.mouse.x, this.mouse.y);
+      const f = Math.round(((Math.atan2(m.y - r.y, m.x - r.x) * 180) / Math.PI + 360) % 360);
+      this.sendPlace(r.id, r.x, r.y, f, r.formation);
+      return true;
+    }
+    const fm = ({ z: 'line', x: 'square', c: 'wedge', v: 'circle' } as Record<string, FormationKind>)[k];
+    if (fm !== undefined) {
+      if (UNITS[this.r.kindOf[r.id] as UnitKind].formations.includes(fm)) this.sendPlace(r.id, r.x, r.y, r.facing, fm);
+      else this.toast('這個兵種不能用這個陣形');
+      return true;
+    }
+    return false;
+  }
+
+  /** 布陣中某一團目前的位置、朝向、陣形（有送出還沒回來的調整就用那份） */
+  private placed(id: number): { id: number; x: number; y: number; facing: number; formation: FormationKind } | null {
+    if (this.pend !== null && this.pend.id === id) return this.pend;
+    const r = id >= 0 ? this.r.reg(id) : undefined;
+    return r ? { id: r.id, x: r.x, y: r.y, facing: r.facing, formation: r.formation } : null;
+  }
+
+  private rotateSelected(deg: number): void {
+    const r = this.placed(this.selected);
+    if (r) this.sendPlace(r.id, r.x, r.y, (r.facing + deg + 360) % 360, r.formation);
+  }
+
+  private sendPlace(id: number, x: number, y: number, facing: number, formation: FormationKind): void {
+    this.pend = { id, x: Math.round(x), y: Math.round(y), facing, formation };
+    this.send({ type: 'place', ...this.pend });
+  }
+
   private startBattle(): void {
     if (this.started) return;
     clearInterval(this.lineupTimer);
+    this.placing = false;
+    this.pdrag = null;
+    this.el.place.classList.add('hidden');
     this.started = true;
     this.paused = false;
     this.el.lineup.classList.add('hidden');
@@ -666,6 +824,7 @@ export class LegionScreen {
   handle(msg: FromLegionWorker): void {
     switch (msg.type) {
       case 'frame': {
+        this.pend = null;
         const now = performance.now();
         if (this.r.frame !== null) {
           const gap = now - this.frameAt;
@@ -684,6 +843,9 @@ export class LegionScreen {
           this.r.cam.scale = Math.max(this.r.cam.scale, this.r.fitScale * 2);
           this.r.clamp();
         }
+        return;
+      case 'toast':
+        this.toast(msg.text);
         return;
       case 'replayFile': {
         const blob = new Blob([msg.json], { type: 'application/json' });
@@ -734,7 +896,7 @@ export class LegionScreen {
     }
     for (const c of f.captions) this.caption(c);
     if (this.control) {
-      const rej = f.events.filter((e) => e.type === 'rejected' && e.player === this.control!.side);
+      const rej = f.events.filter((e) => e.type === 'rejected' && this.control!.sides.includes(e.player));
       const last = rej[rej.length - 1];
       if (last && last.type === 'rejected') this.toast(`${CMD_NAME[last.command] ?? last.command}：${last.reason}`);
     }
@@ -901,7 +1063,11 @@ export class LegionScreen {
     const c = this.control;
     const aim = c && c.aiming && this.mouse ? { ids: [...c.selection], to: this.r.toWorld(this.mouse.x, this.mouse.y) } : null;
     const ladder = c && c.ladderAim ? c.ladderPreview(this.mouse ? this.r.toWorld(this.mouse.x, this.mouse.y) : null) : null;
-    this.r.draw(a, now, { viewer: this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent, selection: c?.selection, box: c?.box, order: c?.order, aim, ladder });
+    const pd = this.pdrag;
+    const pr = pd !== null && pd.moved ? this.r.reg(pd.id) : undefined;
+    const ghost = pd !== null && pr ? { x: pd.at.x, y: pd.at.y, facing: pr.facing, halfW: pr.halfW, halfD: pr.halfD, color: this.meta.players[this.r.ownerOf[pd.id]].color } : null;
+    this.r.draw(a, now, { viewer: this.placing ? -1 : this.viewer, selected: this.selected, hovered: this.hovered, showRanges: true, showIntent: this.showIntent, selection: this.placing ? undefined : c?.selection, box: c?.box, order: c?.order, aim, ladder, ghost });
+    if (this.placing) this.renderPlacement();
     if (this.toastUntil > 0 && now > this.toastUntil) {
       this.toastUntil = 0;
       this.el.toast.classList.add('hidden');

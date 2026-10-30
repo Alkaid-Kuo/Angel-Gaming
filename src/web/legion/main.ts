@@ -2,14 +2,14 @@
 import { RULES, SIEGE, UNITS, type LegionMode, type UnitKind } from '../../legion/config.ts';
 import { LEAGUE_MAPS } from '../../legion/map.ts';
 import { unitSvg } from './icons.ts';
-import type { BotKey, FromLegionWorker, PlayerArmy, ToLegionWorker } from './protocol.ts';
+import type { BotKey, FromLegionWorker, PlayerArmy, SandboxRole, ToLegionWorker } from './protocol.ts';
 import { LegionScreen } from './ui.ts';
 
 const setupEl = document.getElementById('setup')!;
 const gameEl = document.getElementById('game')!;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
 // 「隨機」只抽一般陪練；攻城陪練（siege）只在攻城戰出現、不進隨機
-const BOT_KEYS: BotKey[] = ['push', 'ambush', 'ranged', 'commander', 'marshal', 'general2', 'marshal2'];
+const BOT_KEYS: BotKey[] = ['push', 'ambush', 'ranged', 'commander', 'marshal', 'general2', 'marshal2', 'baseline168', 'baseline114'];
 
 let worker: Worker | null = null;
 let screen: LegionScreen | null = null;
@@ -41,7 +41,12 @@ const totalEl = document.getElementById('army-total')!;
 const blueSel = document.querySelector('select[name=blue]') as HTMLSelectElement;
 const startBtn = document.getElementById('start') as HTMLButtonElement;
 
-const mode = (): LegionMode => (document.querySelector('input[name=mode]:checked') as HTMLInputElement).value as LegionMode;
+/** 設定頁選的模式：攻城戰、佔點，或自訂對戰（沙盒，引擎用殲滅戰） */
+const modeRaw = (): LegionMode | 'sandbox' => (document.querySelector('input[name=mode]:checked') as HTMLInputElement).value as LegionMode | 'sandbox';
+const mode = (): LegionMode => {
+  const m = modeRaw();
+  return m === 'sandbox' ? 'annihilation' : m;
+};
 const pts = (c: Record<UnitKind, number>): number => KINDS.reduce((t, k) => t + c[k] * UNITS[k].cost, 0);
 const mapSel = document.querySelector('select[name=map]') as HTMLSelectElement;
 /** 目前選的地圖：攻城戰固定石關城；佔點看選單 */
@@ -61,6 +66,11 @@ function armyProblem(): string {
 }
 
 function renderArmy(): void {
+  if (modeRaw() === 'sandbox') {
+    armyEl.classList.add('hidden');
+    renderSandbox();
+    return;
+  }
   const player = blueSel.value === 'player';
   armyEl.classList.toggle('hidden', !player);
   startBtn.textContent = player ? '開始指揮' : '開始觀戰';
@@ -102,7 +112,9 @@ rowsEl.addEventListener('click', (e) => {
   if (b === null) return;
   const side = b.dataset.side as 'field' | 'reserve';
   const k = b.dataset.kind as UnitKind;
-  army[side][k] = Math.max(0, Math.min(20, army[side][k] + Number(b.dataset.d)));
+  const lim = limits();
+  const maxCount = Math.floor((side === 'field' ? lim.field : lim.total) / UNITS[k].cost);
+  army[side][k] = Math.max(0, Math.min(maxCount, army[side][k] + Number(b.dataset.d)));
   renderArmy();
 });
 document.getElementById('army-reset')!.addEventListener('click', () => {
@@ -110,12 +122,60 @@ document.getElementById('army-reset')!.addEventListener('click', () => {
   army.reserve = { ...DEFAULT_RESERVE };
   renderArmy();
 });
+// ───── 自訂對戰（沙盒） ─────
+const sandboxEl = document.getElementById('sandbox')!;
+const pickEl = document.querySelector('.lg-pick') as HTMLElement;
+const sbRoleSel = [0, 1].map((i) => document.getElementById(`sb-role${i}`) as HTMLSelectElement);
+const sbDist = document.getElementById('sb-dist') as HTMLSelectElement;
+const SB_MAX = 20;
+const none = (): Record<UnitKind, number> => ({ spear: 0, sword: 0, shield: 0, archer: 0, light: 0, lightCav: 0, heavyCav: 0 });
+/** 預設：一團重騎兵對一團長槍 */
+const sbArmy: [Record<UnitKind, number>, Record<UnitKind, number>] = [{ ...none(), heavyCav: 1 }, { ...none(), spear: 1 }];
+// 指揮方式：藍方多一個「玩家」；現有 AI 沿用觀戰選單的名稱
+const aiOptions = [...blueSel.options].filter((o) => o.value !== 'player' && o.value !== 'random' && !o.hasAttribute('data-siege')).map((o) => `<option value="${o.value}">${o.text}（指揮指定兵團）</option>`).join('');
+const basicOptions = '<option value="idle">待命（自己不動，你可以替它下指令）</option><option value="attack">直接進攻（全軍打最近的敵人）</option>';
+sbRoleSel[0].innerHTML = `<option value="player">玩家（你來指揮）</option>${basicOptions}${aiOptions}`;
+sbRoleSel[1].innerHTML = `${basicOptions}${aiOptions}`;
+
+function renderSandbox(): void {
+  for (const i of [0, 1]) {
+    const a = sbArmy[i];
+    const cnt = (k: UnitKind): string => `<span class="cnt"><button type="button" data-sb="${i}" data-kind="${k}" data-d="-1">−</button><b>${a[k]}</b><button type="button" data-sb="${i}" data-kind="${k}" data-d="1">＋</button></span>`;
+    document.getElementById(`sb-rows${i}`)!.innerHTML = KINDS.map((k) => `<span class="u">${unitSvg(k, 20)}${UNITS[k].name}</span><span class="cost">${UNITS[k].cost} 點／${UNITS[k].men} 人</span>${cnt(k)}`).join('');
+    const n = KINDS.reduce((t, k) => t + a[k], 0);
+    document.getElementById(`sb-total${i}`)!.textContent = `${n} 團・${pts(a)} 點`;
+  }
+  const empty = [0, 1].some((i) => KINDS.every((k) => sbArmy[i][k] === 0));
+  startBtn.textContent = empty ? '雙方都至少要一團' : '開始布陣';
+  startBtn.disabled = launching || empty;
+}
+
+sandboxEl.addEventListener('click', (e) => {
+  const t = e.target as HTMLElement;
+  const clear = t.closest<HTMLButtonElement>('button[data-sb-clear]');
+  if (clear !== null) {
+    sbArmy[Number(clear.dataset.sbClear)] = none();
+    renderSandbox();
+    return;
+  }
+  const b = t.closest<HTMLButtonElement>('button[data-sb]');
+  if (b === null) return;
+  const a = sbArmy[Number(b.dataset.sb)];
+  const k = b.dataset.kind as UnitKind;
+  a[k] = Math.max(0, Math.min(SB_MAX, a[k] + Number(b.dataset.d)));
+  renderSandbox();
+});
+
 // 攻城戰的對手說明：插在雙方選單下面（HTML 不動，由這裡建立）
 const siegeNoteEl = document.createElement('p');
 siegeNoteEl.className = 'muted small';
 siegeNoteEl.textContent = '攻城戰只開放「玩家」與「攻城陪練」：其他 BOT 的布陣是照大河谷等佔點地圖寫的，在石關城會被判不在布陣區內，守方開場就少團甚至全沒。';
 document.querySelector('.lg-pick')!.after(siegeNoteEl);
-/** 地圖卡片跟著選的地圖換 */
+/** 地圖卡片跟著選的地圖換；自訂對戰固定平地測試場 */
+const SANDBOX_TEXT: [string, string] = [
+  '地圖：平地測試場',
+  '160 × 100 格（只有自訂對戰用）。中央一整片平地；北側由西到東是高地（高 3，頂 4）、樹林、一段有橋與淺灘渡口的河；南側是有房舍擋視線的村莊、緩坡（只高 1 階）與淺水池。布陣時可以把軍團拖到這些地形上測試。',
+];
 const MAP_TEXT: Record<string, [string, string]> = {
   'stone-pass': [
     '地圖：石關城',
@@ -131,6 +191,9 @@ const MAP_TEXT: Record<string, [string, string]> = {
   ],
 };
 function renderMode(): void {
+  const sandbox = modeRaw() === 'sandbox';
+  sandboxEl.classList.toggle('hidden', !sandbox);
+  pickEl.classList.toggle('hidden', sandbox);
   mapSel.closest('label')!.classList.toggle('hidden', mode() !== 'capture');
   const siege = mode() === 'siege';
   for (const sel of document.querySelectorAll<HTMLSelectElement>('.lg-pick select')) {
@@ -148,7 +211,7 @@ function renderMode(): void {
     if (sel.selectedOptions[0]?.disabled) sel.value = siege ? 'siege' : sel.name === 'blue' ? 'push' : 'ambush';
   }
   siegeNoteEl.classList.toggle('hidden', !siege);
-  const [name, desc] = MAP_TEXT[mapId()];
+  const [name, desc] = sandbox ? SANDBOX_TEXT : MAP_TEXT[mapId()];
   document.getElementById('map-name')!.textContent = name;
   document.getElementById('map-desc')!.textContent = desc;
   renderArmy();
@@ -175,9 +238,11 @@ function launch(): void {
     alert('Seed 必須是非負整數');
     return;
   }
+  const sandbox = modeRaw() === 'sandbox';
+  if (sandbox && startBtn.disabled) return;
   const m = mode();
   const blue = blueSel.value === 'player' ? 'player' : pick('blue');
-  if (blue === 'player' && armyProblem() !== '') return;
+  if (!sandbox && blue === 'player' && armyProblem() !== '') return;
   // 每次啟動都拆掉舊畫面與舊 Worker：否則第二次的 meta 會被當成「重看」而沿用綁著舊 Worker 的畫面
   screen?.dispose();
   screen = null;
@@ -207,7 +272,19 @@ function launch(): void {
     setLaunching(false);
     alert(`Worker 錯誤：${e.message}`);
   };
-  const start: ToLegionWorker = { type: 'start', setup: { bots: [blue, pick('red')], mode: m, mapId: mapId(), seed, army: blue === 'player' ? playerArmy() : undefined } };
+  const list = (c: Record<UnitKind, number>): UnitKind[] => KINDS.flatMap((k) => Array<UnitKind>(c[k]).fill(k));
+  const start: ToLegionWorker = sandbox
+    ? {
+        type: 'start',
+        setup: {
+          kind: 'sandbox',
+          seed,
+          roles: [sbRoleSel[0].value as SandboxRole, sbRoleSel[1].value as SandboxRole],
+          armies: [list(sbArmy[0]), list(sbArmy[1])],
+          distance: Number(sbDist.value),
+        },
+      }
+    : { type: 'start', setup: { bots: [blue, pick('red')], mode: m, mapId: mapId(), seed, army: blue === 'player' ? playerArmy() : undefined } };
   w.postMessage(start);
 }
 

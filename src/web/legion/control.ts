@@ -38,7 +38,8 @@ const deg = (a: Pt, b: Pt): number => {
 const FORMATION_KEYS: Record<string, FormationKind> = { z: 'line', x: 'square', c: 'wedge', v: 'circle' };
 
 export class PlayerControl {
-  readonly side: number;
+  /** 可以下指令的各方（自訂對戰可能雙方都是） */
+  readonly sides: readonly number[];
   readonly selection = new Set<number>();
   /** 框選（螢幕座標） */
   box: { x0: number; y0: number; x1: number; y1: number } | null = null;
@@ -55,9 +56,9 @@ export class PlayerControl {
   /** 地圖（架梯瞄準算能架的牆格用；沒有城的地圖也照算，全部不能架） */
   private readonly map: LegionMap | null;
 
-  constructor(r: BattleView, side: number, sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void, map: LegionMap | null = null) {
+  constructor(r: BattleView, sides: readonly number[], sendCmds: (cmds: unknown[]) => void, toast: (text: string) => void, map: LegionMap | null = null) {
     this.r = r;
-    this.side = side;
+    this.sides = sides;
     this.sendCmds = sendCmds;
     this.toast = toast;
     this.map = map;
@@ -71,7 +72,7 @@ export class PlayerControl {
   mine(): RegFrame[] {
     const f = this.frame;
     if (f === null) return [];
-    return f.regs.filter((r) => !r.reserve && this.r.ownerOf[r.id] === this.side);
+    return f.regs.filter((r) => !r.reserve && this.sides.includes(this.r.ownerOf[r.id]));
   }
 
   /** 選取中、還在場上的團 */
@@ -82,7 +83,7 @@ export class PlayerControl {
   }
 
   isMine(id: number): boolean {
-    return this.r.ownerOf[id] === this.side;
+    return this.sides.includes(this.r.ownerOf[id]);
   }
 
   /** 點選：自己的團加入選取（Shift 切換），點空地或敵軍清掉選取 */
@@ -122,12 +123,13 @@ export class PlayerControl {
     for (const r of this.mine()) this.selection.add(r.id);
   }
 
-  /** 右鍵：點到看得到的敵軍就攻擊；否則移動（拖曳超過 1.5 格就照拖曳方向決定朝向） */
+  /** 右鍵：點到不同陣營的團（看得到的）就攻擊；否則移動（拖曳超過 1.5 格就照拖曳方向決定朝向） */
   rightClick(target: number, from: Pt, to: Pt): void {
     const sel = this.selected();
     if (sel.length === 0) return;
-    if (target >= 0 && !this.isMine(target)) {
-      this.sendCmds(sel.map((r) => ({ type: 'attack', id: r.id, target, intent: '玩家：攻擊' })));
+    const foes = target >= 0 ? sel.filter((r) => this.r.ownerOf[r.id] !== this.r.ownerOf[target]) : [];
+    if (foes.length > 0) {
+      this.sendCmds(foes.map((r) => ({ type: 'attack', id: r.id, target, intent: '玩家：攻擊' })));
       this.r.ping(from.x, from.y, '#f87171');
       return;
     }
@@ -282,7 +284,7 @@ export class PlayerControl {
     return sel.map((r) => {
       const c = count.get(r.id) ?? [1, 0, 0];
       const layer = c[1] > c[0] && c[1] >= c[2] ? 1 : c[2] > c[0] ? 2 : 0;
-      return { id: r.id, owner: this.side, kind: this.r.kindOf[r.id], x: r.x, y: r.y, layer, building: r.status === 'laddering', manning: crew === r.id };
+      return { id: r.id, owner: this.r.ownerOf[r.id], kind: this.r.kindOf[r.id], x: r.x, y: r.y, layer, building: r.status === 'laddering', manning: crew === r.id };
     });
   }
 
