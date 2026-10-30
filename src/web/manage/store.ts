@@ -46,7 +46,7 @@ export interface GameKind {
 
 /** 可選的項目（內容包）；第一個是預設 */
 export const GAME_KINDS: readonly GameKind[] = [
-  { content: SHOOTER_CONTENT, name: '攻防戰', desc: '5v5 攻防射擊，基準 Bot 依角色、版本、習慣真打（一週約 1～2 分鐘模擬）' },
+  { content: SHOOTER_CONTENT, name: '攻防戰', desc: '5v5 攻防射擊，基準 Bot 依角色、版本、習慣真打（一週約 20～40 秒模擬，打完的比賽可以觀戰）' },
   { content: STUB_CONTENT, name: '軍團戰（暫代）', desc: '3 人名單，假比賽依隱藏強度擲骰（瞬間出結果）' },
 ];
 
@@ -242,13 +242,22 @@ export class ManageGame {
     }
   }
 
-  /** 這週比賽日要打幾場、估計多少毫秒（閘道自報的每回合耗時 × 回合數 ÷ 並行數） */
-  estimateWeekMs(): number {
-    const f = this.gateway.formats.find((x) => x.id === this.state.formatId);
-    if (!f) return 0;
-    const n = this.state.fixtures.filter((x) => x.week === this.state.week && x.result === null).length;
+  /**
+   * 一批 games 場估計多少毫秒：閘道自報的每回合耗時 × 回合數 × 輪數（場數 ÷ 並行數，進位）。
+   * 進位是因為一場只能在一個 Worker 裡跑（2 場、4 個 Worker 也要等一整場）。
+   */
+  estimateMs(games: number): number {
+    const f = this.format;
+    if (!f || games <= 0) return 0;
     const par = this.gateway instanceof WorkerShooterGateway ? this.gateway.size : 1;
-    return Math.round((n * f.rounds * f.estMsPerRound) / par);
+    return Math.round(Math.ceil(games / par) * f.rounds * f.estMsPerRound);
+  }
+
+  /** 推進這一週估計多少毫秒：比賽日一批＋已排的練習賽（每個工作一批，依序跑） */
+  estimateWeekMs(): number {
+    const n = this.state.fixtures.filter((x) => x.week === this.state.week && x.result === null).length;
+    const scrims = this.state.jobs.filter((j) => j.kind === 'scrim').reduce((s, j) => s + this.estimateMs(j.games), 0);
+    return this.estimateMs(n) + scrims;
   }
 
   exportJson(): string {

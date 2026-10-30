@@ -15,7 +15,7 @@ import { hubPanels, hubTags } from './hub.ts';
 import { financeScreen, inboxScreen, leagueScreen } from './info.ts';
 import type { Ctx, GameUi, Screen } from './kit.ts';
 import { STANDALONE, esc, icon, myCrest, newGameUi, runStep, slotName, teamName, wan } from './kit.ts';
-import { bettingScreen, trainingScreen } from './ops.ts';
+import { bettingScreen, scrimWaitText, trainingScreen } from './ops.ts';
 import { rail, topBar } from './shell.ts';
 import { buildScenes, snapshot, stageName, type Scene } from './show.ts';
 import { marketScreen, playerScreen, squadScreen } from './squad.ts';
@@ -63,7 +63,7 @@ function toast(msg: string, bad = false): void {
 function context(): Ctx {
   const g = game as ManageGame;
   const v = g.view();
-  const ctx: Ctx = { v, c: g.content, ui, prefs, pm: new Map(v.players.map((p) => [p.id, p])) };
+  const ctx: Ctx = { v, c: g.content, ui, prefs, pm: new Map(v.players.map((p) => [p.id, p])), estMs: (n) => g.estimateMs(n) };
   const mine = v.me.roster;
   // 練習賽對手是戰隊（ui.scrim.opponentId 存戰隊 id）：預設本週對手，沒有就第一支別隊
   const others = v.teams.filter((t) => t.id !== v.me.teamId).map((t) => t.id);
@@ -571,6 +571,10 @@ function setField(path: string, raw: string): void {
       const k = path === 'scrim.games' ? ui.scrim : ui.research;
       k.games = clampRuns(n);
       document.querySelectorAll(`[data-out="${path}"]`).forEach((x) => (x.textContent = String(k.games)));
+      if (path === 'scrim.games' && game) {
+        const t = scrimWaitText(k.games, game.estimateMs(k.games));
+        document.querySelectorAll('[data-out="scrim.wait"]').forEach((x) => (x.textContent = t));
+      }
       return;
     }
     case 'slip.stake': {

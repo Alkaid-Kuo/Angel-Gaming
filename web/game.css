@@ -966,11 +966,14 @@ p.big { font-size: 17px; line-height: 1.7; }
 .md-team .rc { width: 40px; height: 40px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); transform: skewX(-12deg); transition: background 0.2s, box-shadow 0.2s; }
 .md-team .rc.on.w { background: var(--gold); box-shadow: 0 0 16px rgba(var(--gold-rgb), 0.5); }
 .md-team .rc.on.l { background: rgba(var(--red-rgb), 0.18); box-shadow: inset 0 0 0 2px var(--red); }
-.md-team .cells .sep { width: 2px; height: 40px; margin: 0 6px; background: var(--gold2); }
+/* 賽段分隔（下半場、加時）：白灰，標籤在上方；金只給我方贏的回合 */
+.md-team .cells .sep { position: relative; width: 2px; height: 40px; margin: 0 10px; background: rgba(var(--white-rgb), 0.45); }
+.md-team .cells .sep::after { content: attr(data-ph); position: absolute; left: 50%; bottom: calc(100% + 4px); transform: translateX(-50%); font-size: 13px; letter-spacing: 0.12em; color: rgba(var(--white-rgb), 0.7); white-space: nowrap; }
 .md-result.md-team .strip2 { position: absolute; left: 200px; right: 200px; top: 620px; animation: fin calc(0.6s * var(--sp, 1)) both; animation-delay: calc(0.45s * var(--sp, 1)); }
 .md-result.md-team .strip2 .cells { justify-content: center; gap: 4px; margin: 0; }
 .md-result.md-team .strip2 .rc { width: 22px; height: 22px; }
 .md-result.md-team .strip2 .sep { height: 22px; }
+.md-result.md-team .strip2 .sep::after { bottom: auto; top: calc(100% + 3px); font-size: 11px; }
 .md-result.md-team .lineups { position: absolute; left: 160px; right: 160px; top: 662px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 .md-result.md-team .lineups .side { display: flex; gap: 8px; }
 .md-result.md-team .lineups .vs { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 28px; color: var(--grey2); }
@@ -982,6 +985,8 @@ p.big { font-size: 17px; line-height: 1.7; }
 .md-result.md-team .ch .c small { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--grey); white-space: nowrap; }
 .md-result.md-team .ch em { min-height: 16px; font-family: var(--en); font-style: italic; font-weight: 700; font-size: 15px; color: var(--grey); }
 .md-result.md-team .ch em.up { color: var(--gold2); }
+/* 對手的評分上升不用金（金只給我方） */
+.md-result.md-team .ch.foe em.up { color: var(--white); }
 .md-result.md-team .gains { top: 800px; }
 
 @media (prefers-reduced-motion: reduce) {

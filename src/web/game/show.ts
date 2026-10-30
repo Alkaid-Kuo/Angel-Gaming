@@ -60,8 +60,8 @@ interface MatchView {
   my: number;
   their: number;
   res: 'win' | 'lose' | 'draw';
-  /** 逐回合，我方視角：mine＝我方贏這回合 */
-  rounds: { label: string; mine: boolean; my: number; their: number }[];
+  /** 逐回合，我方視角：mine＝我方贏這回合；phase：賽段（閘道沒給時用「加時」與否分） */
+  rounds: { label: string; phase: string; mine: boolean; my: number; their: number }[];
 }
 
 function matchView(ctx: Ctx, f: KnownFixture): MatchView {
@@ -79,7 +79,7 @@ function matchView(ctx: Ctx, f: KnownFixture): MatchView {
     my,
     their,
     res: x.winner === null ? 'draw' : x.winner === me ? 'win' : 'lose',
-    rounds: x.rounds.map((r) => ({ label: r.label, mine: (r.winner === 'a') === home, my: home ? r.home : r.away, their: home ? r.away : r.home })),
+    rounds: x.rounds.map((r) => ({ label: r.label, phase: r.phase ?? (r.label.startsWith('加時') ? '加時' : ''), mine: (r.winner === 'a') === home, my: home ? r.home : r.away, their: home ? r.away : r.home })),
   };
 }
 
@@ -100,11 +100,11 @@ function rosterCol(ctx: Ctx, ids: string[], before: Snapshot, foe: boolean): str
     .join('');
 }
 
-/** 逐回合比分條：每回合一格（金＝我方贏、紅框＝對手贏），進加時處加分隔 */
+/** 逐回合比分條：每回合一格（金＝我方贏、紅框＝對手贏），賽段改變處（下半場、加時）加分隔與標籤 */
 function roundStrip(m: MatchView, live: boolean): string {
   return m.rounds
     .map((r, i) => {
-      const sep = i > 0 && r.label.startsWith('加時') !== m.rounds[i - 1].label.startsWith('加時') ? '<i class="sep"></i>' : '';
+      const sep = i > 0 && r.phase !== m.rounds[i - 1].phase ? `<i class="sep" data-ph="${esc(r.phase)}"></i>` : '';
       return `${sep}<span class="rc ${r.mine ? 'w' : 'l'} ${live ? '' : 'on'}" data-r="${i}" title="${esc(r.label)} ${r.my}:${r.their}"></span>`;
     })
     .join('');
@@ -138,7 +138,7 @@ function matchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scene {
             root.querySelector(`.rc[data-r="${i}"]`)?.classList.add('on');
             if (ea) ea.textContent = String(r.my);
             if (eb) eb.textContent = String(r.their);
-            if (rl) rl.textContent = r.label;
+            if (rl) rl.textContent = r.phase && !r.label.startsWith(r.phase) ? `${r.phase} · ${r.label}` : r.label;
             sc?.classList.remove('bump');
             void (sc as HTMLElement | null)?.offsetWidth;
             sc?.classList.add('bump');
@@ -174,7 +174,7 @@ function resultScene(ctx: Ctx, f: KnownFixture, before: Snapshot, summaryWeek: n
         <div class="gn ${prize > 0 ? 'g' : ''}"><small>比賽收入</small><div class="v"><span class="num up">+${wan(prize)}</span><span>萬</span></div><p>${m.res === 'win' ? `勝 ${wan(e.matchWinPrize)}` : `${m.res === 'lose' ? '敗' : '平'} ${wan(e.matchLossPrize)}`} ＋ 贏 ${m.my} 回合 × ${wan(e.roundWinBonus)}</p></div>
         <div class="gn ${bets > 0 ? 'g' : ''}"><small>下注開獎</small><div class="v"><span class="num ${bets > 0 ? 'up' : ''}">${bets > 0 ? `+${wan(bets)}` : '0'}</span><span>萬</span></div><p>${bets > 0 ? '押中的彩券已入帳' : '這週沒有押中'}</p></div>
         <div class="gn"><small>名氣</small><div class="v"><span class="num">${before.fame}</span><span>→</span><span class="num ${fameD >= 0 ? 'up' : ''}">${v.me.fame}</span></div><p>每週贊助 ${wan(v.me.weeklySponsor)} 萬</p></div>
-        <div class="gn"><small>名次</small><div class="v"><span class="num">${before.rank || '—'}</span><span>→</span><span class="num up">${rankOf(v, me)}</span></div><p>${f.stage === 'regular' ? '例行賽積分榜' : '季後賽'}</p></div>
+        <div class="gn"><small>名次</small><div class="v"><span class="num">${before.rank || '—'}</span><span>→</span><span class="num ${before.rank > 0 && rankOf(v, me) < before.rank ? 'up' : ''}">${rankOf(v, me)}</span></div><p>${f.stage === 'regular' ? '例行賽積分榜' : '季後賽'}</p></div>
       </section>
       <div class="ctl">${f.match?.watchable ? `<button class="btn ghost" data-act="watch" data-f="${esc(f.id)}"><b>觀戰</b><span>WATCH</span></button>` : ''}<button class="btn" data-act="cine-next"><b>繼續</b><span>NEXT</span></button></div></div>`,
     auto: 0,

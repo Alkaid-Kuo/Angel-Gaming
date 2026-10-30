@@ -3,7 +3,12 @@
 import { lineageName } from '../manage/format.ts';
 import { myFixture, publicRating, rankOf, rosterOf } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
-import { avatar, btn, canAct, crest, crestRing, esc, foeOf, glyph, head, icon, pt, runStep, teamName, wan } from './kit.ts';
+import { avatar, btn, canAct, crest, crestRing, esc, foeOf, glyph, head, icon, pt, runStep, teamName, waitText, wan } from './kit.ts';
+
+/** 練習賽的等待說明（滑桿拖動時 main.ts 也用它更新） */
+export function scrimWaitText(games: number, ms: number): string {
+  return `${games} 場推進時多等${waitText(ms)}`;
+}
 
 // ───── 訓練基地 ─────
 export function trainingScreen(ctx: Ctx): string {
@@ -42,9 +47,12 @@ export function trainingScreen(ctx: Ctx): string {
     ui.trainMode === 'scrim'
       ? `<div class="lbl">對手戰隊</div><select class="sel" data-field="scrim.opponentId">${oppOpts}</select>`
       : `<div class="lbl">針對流派</div><div class="styles">${targets.map((t) => `<button class="${ui.research.target === t.id ? 'on' : ''}" data-act="target" data-t="${t.id}">${t.id === 'generic' ? icon('star', 15) : glyph(t.id, 16)}${t.name}</button>`).join('')}</div>`;
+  // 練習賽真打（攻防戰）：推進時要多等的時間；假比賽是 0 不顯示
+  const scrimWait = ctx.estMs(g);
+  const queuedScrims = v.jobs.filter((j) => j.kind === 'scrim').reduce((s, j) => s + ctx.estMs(j.games), 0);
   const desc =
     ui.trainMode === 'scrim'
-      ? `我方出賽名單 vs ${esc(teamName(v, oppTeam))} 的出賽名單 · 估真實勝率`
+      ? `我方出賽名單 vs ${esc(teamName(v, oppTeam))} 的出賽名單 · 估真實勝率${scrimWait > 0 ? `<br><small class="wait">${icon('hourglass', 14)}<span data-out="scrim.wait">${scrimWaitText(g, scrimWait)}</span></small>` : ''}`
       : `${esc(ctx.pm.get(pid)?.name ?? '')} · ${ui.research.target === 'generic' ? '泛用（上限 +' + e.researchCapGeneric + '）' : `針對${esc(lineageName(c, ui.research.target))}（上限 +${e.researchCapSpecific}）`}`;
   const scrims = [...v.scrims].reverse().slice(0, 3);
   const presets = v.presets.slice(-3).reverse();
@@ -61,7 +69,7 @@ export function trainingScreen(ctx: Ctx): string {
           <div class="v"><span class="num">${left}</span><small>RUNS LEFT</small><span>本週剩餘場數 ／ ${cap}</span></div></div>
         <div class="lv"><div class="fl3">${[1, 2, 3].map((i) => `<i class="${i <= lvl ? 'on' : ''}"></i>`).join('')}</div><div class="t"><b>Lv${lvl}</b><span>維護 ${wan(e.facilityMaintenance[lvl - 1])} 萬／週</span></div>
           ${lvl < maxLvl ? btn(`升 Lv${lvl + 1} · ${wan(upCost)}萬`, `data-act="upfac" ${!active || v.me.cash < upCost ? 'disabled' : ''} title="每週 ${e.scrimCapacity[lvl]} 場，維護 ${wan(e.facilityMaintenance[lvl])} 萬"`, 'sm ghost') : '<span class="chip g">最高等級</span>'}</div></div>
-      <div class="pn sch in">${pt('02', '本週排程', `已排 <b>${used}</b>／${cap} 場`)}
+      <div class="pn sch in">${pt('02', '本週排程', `已排 <b>${used}</b>／${cap} 場${queuedScrims > 0 ? ` · 練習賽推進時多等${waitText(queuedScrims)}` : ''}`)}
         <div class="jobs scroll">${jobs.join('') || '<p class="dim">還沒有排任何工作。右邊選選手與項目排進來。</p>'}</div>
         <div class="sum"><span>研發半飽和約 <b>${e.researchHalfSat}</b> 場；越練越慢</span><span>泛用上限 <b>+${e.researchCapGeneric}</b> · 針對上限 <b>+${e.researchCapSpecific}</b></span></div></div>
       <div class="pn new in">${pt('03', '新增排程', '', 'SCHEDULE')}

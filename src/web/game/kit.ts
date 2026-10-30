@@ -33,6 +33,14 @@ export interface Ctx {
   ui: GameUi;
   prefs: Prefs;
   pm: Map<string, KnownPlayer>;
+  /** n 場比賽估計要等多少毫秒（閘道自報；假比賽是 0） */
+  estMs: (games: number) => number;
+}
+
+/** 等待時間（毫秒）→「約 40 秒」「約 2 分 10 秒」 */
+export function waitText(ms: number): string {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return s < 90 ? `約 ${s} 秒` : `約 ${Math.floor(s / 60)} 分${s % 60 ? ` ${s % 60} 秒` : ''}`;
 }
 
 export { esc, icon, wan };
