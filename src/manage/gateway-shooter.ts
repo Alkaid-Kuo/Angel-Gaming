@@ -9,9 +9,11 @@ export const SHOOTER_BOT_PATH = 'bots/shooter-baseline.js';
 
 export class ShooterGateway implements BattleGateway {
   readonly formats: readonly MatchFormat[] = SHOOTER_FORMATS;
-  /** 累計：打了幾場、引擎耗時（毫秒），給量測腳本用 */
+  /** 累計：打了幾場、幾回合、引擎耗時（毫秒）、Bot 例外次數，給量測腳本用 */
   matches = 0;
+  rounds = 0;
   wallMs = 0;
+  exceptions = 0;
   private readonly bot: CompiledBot;
 
   constructor(bot?: CompiledBot) {
@@ -25,7 +27,9 @@ export class ShooterGateway implements BattleGateway {
       const m = runGatewayMatch(r, this.bot);
       outs.push(m.outcome);
       this.matches++;
+      this.rounds += m.outcome.rounds.length;
       this.wallMs += m.wallMs;
+      this.exceptions += m.exceptions;
       onProgress?.(outs.length, requests.length);
     }
     return outs;
