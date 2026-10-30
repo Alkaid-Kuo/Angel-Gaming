@@ -4,14 +4,37 @@
     {
       "name": "web",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--port", "5173", "--strictPort"],
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5173",
+        "--strictPort"
+      ],
       "port": 5173
     },
     {
       "name": "lan",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["src/cli/main.ts", "viewer", "--host", "0.0.0.0", "--port", "8000"],
+      "runtimeArgs": [
+        "src/cli/main.ts",
+        "viewer",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
       "port": 8000
+    },
+    {
+      "name": "web-5179",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5179",
+        "--strictPort"
+      ],
+      "port": 5179
     }
   ]
 }

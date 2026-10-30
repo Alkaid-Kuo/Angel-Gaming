@@ -1,8 +1,9 @@
 // 訓練基地（場數環、本週排程、新增排程、三欄報告）與賭盤（注單、下注單、已下的注）。
+// 練習賽是隊對隊：我方本週出賽名單對選定戰隊的出賽名單；研發是每位選手一個預設。
 import { lineageName } from '../manage/format.ts';
 import { myFixture, publicRating, rankOf, rosterOf } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
-import { avatar, btn, canAct, crest, crestRing, esc, foeOf, glyph, head, icon, pt, teamName, wan } from './kit.ts';
+import { avatar, btn, canAct, crest, crestRing, esc, foeOf, glyph, head, icon, pt, runStep, teamName, wan } from './kit.ts';
 
 // ───── 訓練基地 ─────
 export function trainingScreen(ctx: Ctx): string {
@@ -25,25 +26,25 @@ export function trainingScreen(ctx: Ctx): string {
     if (j.kind === 'scout') return `<div class="job"><span class="ic2 w">${icon('search', 24)}</span><b>球探<small>${who} · ${esc(teamName(v, p?.teamId ?? null))}</small></b><span class="num sm">${wan(e.scoutCost)}萬</span><div class="meter" style="--v:100%"><i></i></div></div>`;
     return `<div class="job"><span class="ic2">${icon('flask', 24)}</span><b>戰術研發<small>${who} · ${j.target === 'generic' ? '泛用' : `針對${esc(lineageName(c, j.target))}`}</small></b><span class="num">${j.games}</span><div class="meter g" style="--v:${Math.round((j.games / cap) * 100)}%"><i></i></div></div>`;
   });
-  const pid = ui.trainMode === 'scrim' ? ui.scrim.playerId : ui.research.playerId;
+  const pid = ui.research.playerId;
   const picks = mine.map((p) => `<button class="pk ${p.id === pid ? 'on' : ''}" data-act="tpick" data-pid="${p.id}" title="${esc(p.name)}">${avatar(ctx, p, 52)}<small>${esc(p.name)}</small></button>`).join('');
+  const step = runStep(cap);
   const games = ui.trainMode === 'scrim' ? ui.scrim.games : ui.research.games;
-  const g = Math.min(games, Math.max(10, left));
+  const g = Math.max(step, Math.min(games, Math.max(step, left)));
   const field = ui.trainMode === 'scrim' ? 'scrim.games' : 'research.games';
-  const opp = ctx.pm.get(ui.scrim.opponentId);
+  const oppTeam = ui.scrim.opponentId;
   const oppOpts = v.teams
     .filter((t) => t.id !== v.me.teamId)
-    .map((t) => `<optgroup label="${esc(t.name)}">${rosterOf(ctx, t.id).map((p) => `<option value="${p.id}" ${p.id === ui.scrim.opponentId ? 'selected' : ''}>${esc(p.name)}（${esc(lineageName(c, p.lineageId))} v${p.version} · ${p.elo}）</option>`).join('')}</optgroup>`)
+    .map((t) => `<option value="${t.id}" ${t.id === oppTeam ? 'selected' : ''}>${esc(t.name)}（評分約 ${publicRating(ctx, t.id)} · 第 ${rankOf(v, t.id) || '—'} 名${t.id === foeOf(v) ? ' · 本週對手' : ''}）</option>`)
     .join('');
-  const freeOpts = v.players.filter((p) => p.teamId === null);
   const targets = [{ id: 'generic', name: '泛用' }, ...c.lineages.map((l) => ({ id: l.id, name: l.name }))];
   const form =
     ui.trainMode === 'scrim'
-      ? `<div class="lbl">對手</div><select class="sel" data-field="scrim.opponentId">${oppOpts}${freeOpts.length ? `<optgroup label="自由球員">${freeOpts.map((p) => `<option value="${p.id}" ${p.id === ui.scrim.opponentId ? 'selected' : ''}>${esc(p.name)}（${esc(lineageName(c, p.lineageId))} v${p.version}）</option>`).join('')}</optgroup>` : ''}</select>`
+      ? `<div class="lbl">對手戰隊</div><select class="sel" data-field="scrim.opponentId">${oppOpts}</select>`
       : `<div class="lbl">針對流派</div><div class="styles">${targets.map((t) => `<button class="${ui.research.target === t.id ? 'on' : ''}" data-act="target" data-t="${t.id}">${t.id === 'generic' ? icon('star', 15) : glyph(t.id, 16)}${t.name}</button>`).join('')}</div>`;
   const desc =
     ui.trainMode === 'scrim'
-      ? `${esc(ctx.pm.get(pid)?.name ?? '')} vs ${esc(opp?.name ?? '?')} · 估真實勝率`
+      ? `我方出賽名單 vs ${esc(teamName(v, oppTeam))} 的出賽名單 · 估真實勝率`
       : `${esc(ctx.pm.get(pid)?.name ?? '')} · ${ui.research.target === 'generic' ? '泛用（上限 +' + e.researchCapGeneric + '）' : `針對${esc(lineageName(c, ui.research.target))}（上限 +${e.researchCapSpecific}）`}`;
   const scrims = [...v.scrims].reverse().slice(0, 3);
   const presets = v.presets.slice(-3).reverse();
@@ -64,11 +65,11 @@ export function trainingScreen(ctx: Ctx): string {
         <div class="jobs scroll">${jobs.join('') || '<p class="dim">還沒有排任何工作。右邊選選手與項目排進來。</p>'}</div>
         <div class="sum"><span>研發半飽和約 <b>${e.researchHalfSat}</b> 場；越練越慢</span><span>泛用上限 <b>+${e.researchCapGeneric}</b> · 針對上限 <b>+${e.researchCapSpecific}</b></span></div></div>
       <div class="pn new in">${pt('03', '新增排程', '', 'SCHEDULE')}
-        <div class="lbl">選手</div><div class="pick">${picks}</div>
-        <div class="lbl">項目</div><div class="seg2"><button class="${ui.trainMode === 'scrim' ? 'on' : ''}" data-act="tmode" data-m="scrim">練習賽</button><button class="${ui.trainMode === 'research' ? 'on' : ''}" data-act="tmode" data-m="research">戰術研發</button></div>
+        <div class="lbl">項目</div><div class="seg2"><button class="${ui.trainMode === 'scrim' ? 'on' : ''}" data-act="tmode" data-m="scrim">練習賽（隊對隊）</button><button class="${ui.trainMode === 'research' ? 'on' : ''}" data-act="tmode" data-m="research">戰術研發</button></div>
+        ${ui.trainMode === 'research' ? `<div class="lbl">選手</div><div class="pick">${picks}</div>` : ''}
         ${form}
-        <div class="lbl">場數</div><div class="runs"><input type="range" min="10" max="${Math.max(10, left)}" step="10" value="${g}" data-field="${field}" ${left < 10 ? 'disabled' : ''}><span class="num" data-out="${field}">${g}</span></div>
-        <div class="go"><span>${desc}</span>${btn('排入', `data-act="${ui.trainMode === 'scrim' ? 'scrim' : 'research'}" ${!active || left < 10 ? 'disabled' : ''}`, 'sm')}</div></div>
+        <div class="lbl">場數</div><div class="runs"><input type="range" min="${step}" max="${Math.max(step, left)}" step="${step}" value="${g}" data-field="${field}" ${left < step ? 'disabled' : ''}><span class="num" data-out="${field}">${g}</span></div>
+        <div class="go"><span>${desc}</span>${btn('排入', `data-act="${ui.trainMode === 'scrim' ? 'scrim' : 'research'}" ${!active || left < step ? 'disabled' : ''}`, 'sm')}</div></div>
       <div class="pn rep in">${pt('04', '報告', '最近的工作成果')}
         <div class="cols">
           <div class="col"><h4>${icon('search', 18)}球探報告<small>誤差 ±${e.scoutSd}</small></h4>${intel.length ? intel.map((i) => { const p = ctx.pm.get(i.playerId); const d = p ? i.estPower - p.elo : 0; return `<div class="it" data-act="player" data-pid="${i.playerId}"><b>${esc(p?.name ?? '?')}</b>（${esc(teamName(v, p?.teamId ?? null))}）真實約 <span class="num">${i.estPower}</span>，比評分${d >= 0 ? '高' : '低'} <b>${Math.abs(d)}</b></div>`; }).join('') : '<p class="dim">到轉會市場派球探。</p>'}</div>

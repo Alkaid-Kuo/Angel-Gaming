@@ -3,7 +3,7 @@
 import { anchorOf } from '../sketch/city.ts';
 import { lineupOf, myFixture, publicRating, rankOf, teamForm } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
-import { avatar, crestRing, esc, foeOf, glyph, teamName, wan, weekLabel } from './kit.ts';
+import { avatar, crestRing, esc, foeOf, glyph, slotName, teamName, wan, weekLabel } from './kit.ts';
 
 function tag(id: string, side: 'L' | 'R', L: number, no: string, title: string, en: string, st: string, extra = ''): string {
   const a = anchorOf(id);
@@ -39,7 +39,7 @@ export function hubTags(ctx: Ctx): string {
     ${tag('rival', 'R', 70, foe ? 'TARGET' : 'RIVAL HQ', foe ? esc(teamName(v, foe)) : '對手總部', 'RIVAL HQ', foe ? `評分約 <i>${publicRating(ctx, foe)}</i> · 情報 ${foeIntel}` : '本週沒有對手', foe ? 'op' : 'idle')}`;
 }
 
-/** 屋頂上的三塊：我方出賽名單、比賽日按鈕、對手情報 */
+/** 屋頂上的三塊：我方出賽名單（人數依內容包）、比賽日按鈕、對手情報 */
 export function hubPanels(ctx: Ctx, busy: boolean): string {
   const { v } = ctx;
   const lu = lineupOf(ctx);
@@ -49,30 +49,31 @@ export function hubPanels(ctx: Ctx, busy: boolean): string {
   const myOdds = odds && f ? (f.home === v.me.teamId ? odds.homeX100 : odds.awayX100) : null;
   const over = v.phase === 'ended' || v.phase === 'bankrupt';
   const wl = weekLabel(v);
+  const n = ctx.c.lineupSize;
   const units = lu.ids
     .map((id, i) => {
       const p = ctx.pm.get(id);
-      return `<div class="u">${avatar(ctx, p, 74)}<div><span class="rl">${['先鋒', '中堅', '大將'][i]}</span><b>${esc(p?.name ?? '未指定')}</b><span class="rt">${p?.elo ?? '—'}<small>${p ? glyph(p.lineageId, 13) : ''}</small></span></div></div>`;
+      return `<div class="u">${avatar(ctx, p, n > 3 ? 52 : 74)}<div><span class="rl">${esc(slotName(ctx, i))}</span><b>${esc(p?.name ?? '未指定')}</b><span class="rt">${p?.elo ?? '—'}<small>${p ? glyph(p.lineageId, 13) : ''}</small></span></div></div>`;
     })
     .join('');
   const go = over
     ? `<button class="go" data-act="new-season"><b>新的賽季</b><span>NEW SEASON</span><span class="chev"><i></i><i></i><i></i></span></button>`
     : `<button class="go" data-act="advance" ${busy ? 'disabled' : ''}><b>${v.phase === 'offseason' ? '開幕' : '開戰'}</b><span>${v.phase === 'offseason' ? 'KICK OFF' : 'DEPLOY'}</span><span class="chev"><i></i><i></i><i></i></span></button>`;
   const cdLine = over ? (v.phase === 'bankrupt' ? '現金跌破零，戰隊解散' : '這個賽段結束了') : `${wl.long}${myOdds ? ` · 押我方贏 ×${(myOdds / 100).toFixed(2)}` : ''}`;
-  const lock = over ? '帶著經驗開一支新的戰隊' : lu.auto ? '名單是自動的：評分最高的 3 人' : '名單已排定 · 對手名單比賽日才公開';
+  const lock = over ? '帶著經驗開一支新的戰隊' : lu.auto ? `名單是自動的：評分最高的 ${n} 人` : '名單已排定 · 對手名單比賽日才公開';
   let target: string;
   if (foe) {
     const r = v.standings.find((x) => x.teamId === foe);
     const form = teamForm(v, foe).join('');
     target = `<section class="panel target"><div class="hd"><span class="no">TARGET</span><b>對手情報</b><span class="st">${myOdds ? `ODDS <b>×${(myOdds / 100).toFixed(2)}</b>` : ''}</span></div>
       <div class="tb">${crestRing(ctx, foe, 90)}<div><div class="nm">${esc(teamName(v, foe))}</div><div class="meta">評分約 <b>${publicRating(ctx, foe)}</b> · ${r ? `${r.wins} 勝 ${r.losses} 敗 · 第 ${rankOf(v, foe)} 名` : '尚未交手'}${form ? ` · 近況 ${form}` : ''}</div>
-        <div class="slots"><i>?</i><i>?</i><i>?</i><em>名單加密中</em></div></div></div></section>`;
+        <div class="slots">${'<i>?</i>'.repeat(n)}<em>名單加密中</em></div></div></div></section>`;
   } else {
     const top = v.standings.slice(0, 3);
     target = `<section class="panel target idle"><div class="hd"><span class="no">LEAGUE</span><b>${over ? '最終排名' : '聯賽前段'}</b></div>
       <div class="tb list">${top.map((r, i) => `<div class="tr"><span class="num">${i + 1}</span>${crestRing(ctx, r.teamId, 40)}<b>${esc(teamName(v, r.teamId))}</b><span class="num">${r.points}</span></div>`).join('')}</div></section>`;
   }
-  return `<section class="panel squad" data-act="go" data-to="squad"><div class="hd"><span class="no">01</span><b>戰隊</b><span class="en">SQUAD</span><span class="st">${v.me.roster.length}／${ctx.c.economy.rosterMax} · ${lu.auto ? '名單自動' : '名單已排'}</span></div><div class="units">${units}</div></section>
+  return `<section class="panel squad n${n}" data-act="go" data-to="squad"><div class="hd"><span class="no">01</span><b>戰隊</b><span class="en">SQUAD</span><span class="st">${v.me.roster.length}／${ctx.c.economy.rosterMax} · ${lu.auto ? '名單自動' : '名單已排'}</span></div><div class="units">${units}</div></section>
     <div class="glowline"></div>
     <section class="deploy"><div class="cd"><span>${cdLine}</span></div>${go}<div class="lock">${lock}</div></section>
     ${target}`;

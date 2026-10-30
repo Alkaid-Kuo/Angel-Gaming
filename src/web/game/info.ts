@@ -66,11 +66,11 @@ export function leagueScreen(ctx: Ctx): string {
   const myPts = v.standings.find((r) => r.teamId === v.me.teamId)?.points ?? 0;
   const fourth = v.standings[3]?.points ?? 0;
   const path = v.phase === 'ended' ? `最終第 <b>${v.seasonResult?.humanRank}</b> 名。` : myRank <= 4 ? `我方第 ${myRank}，目前在季後賽圈內。` : `我方第 ${myRank}，離第 4 差 <b>${Math.max(0, fourth - myPts)}</b> 分。`;
-  return `${head('LEAGUE // 新創聯賽', '聯賽', `8 隊單循環 · 例行賽 7 週 · 前 <b>4</b> 名進季後賽 · 勝 3 分、平 1 分，同分比對位勝場差`)}
+  return `${head('LEAGUE // 新創聯賽', '聯賽', `8 隊單循環 · 例行賽 7 週 · 前 <b>4</b> 名進季後賽 · 勝 3 分、平 1 分，同分比比分差（贏的回合 − 輸的回合）`)}
     <section class="body s-league">
       <div class="tl in">${tl}</div>
       <div class="pn tbl in">${pt('01', '積分榜', started ? `第 ${Math.min(7, v.phase === 'season' ? v.week - 1 : 7)} 週後` : '尚未開賽', 'STANDINGS')}
-        <div class="rows"><div class="row hd"><span>#</span><span></span><span>戰隊</span><span>勝-平-敗</span><span>勝場差</span><span>近況</span><span style="text-align:right">積分</span></div>${rows}</div>
+        <div class="rows"><div class="row hd"><span>#</span><span></span><span>戰隊</span><span>勝-平-敗</span><span>比分差</span><span>近況</span><span style="text-align:right">積分</span></div>${rows}</div>
         <div class="note"><span>虛線以上進季後賽</span><span>名次獎金 1 名 ${wan(ctx.c.economy.seasonPrizes[0])} 萬 … 8 名 ${wan(ctx.c.economy.seasonPrizes[7])} 萬</span></div></div>
       <div class="pn wkm in">${pt('02', '賽程', sel === 0 ? '休賽期' : sel <= 7 ? `第 ${sel} 週` : sel === 8 ? '準決賽' : '決賽', `W${String(sel).padStart(2, '0')}`)}
         <div class="scroll">${fx.map((f) => fixtureRow(ctx, f)).join('') || '<p class="dim">這週還沒有對戰組合。</p>'}</div></div>

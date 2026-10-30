@@ -112,7 +112,7 @@ export function tierName(version: number): { zh: string; en: string; idx: number
 }
 
 export interface CardOpts {
-  /** 出賽位（0～2） */
+  /** 出賽位（0～lineupSize−1） */
   slot?: number;
   sel?: boolean;
   act?: string;
@@ -130,7 +130,7 @@ export function pcard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
   return `<div class="pc t${t.idx + 1} ${o.sel ? 'sel' : ''} ${foe ? 'foe' : ''}" data-act="${o.act ?? 'player'}" data-pid="${p.id}" ${o.drag ? 'draggable="true"' : ''}>
     <div class="top2"><span class="ver">v${p.version}</span><span>${t.zh} · ${t.en}</span></div>
     <div class="por tinted ${p.teamId === ctx.v.me.teamId ? '' : 'grey'}">${avatarSvg(p.id + p.name, '#3a4458', 176)}</div>
-    ${o.slot !== undefined && o.slot >= 0 ? `<span class="slot"><i>${['先鋒', '中堅', '大將'][o.slot]}</i></span>` : ''}
+    ${o.slot !== undefined && o.slot >= 0 ? `<span class="slot"><i>${esc(slotName(ctx, o.slot))}</i></span>` : ''}
     ${p.upgrading ? '<span class="flag">升版中</span>' : ''}
     ${o.note ? `<div class="note">${o.note}</div>` : ''}
     <div class="nm"><b>${esc(p.name)}</b>${lineage(ctx, p.lineageId, 15)}</div>
@@ -164,6 +164,21 @@ export function ic(name: IconName, size = 20): string {
 }
 
 export const canAct = (v: KnownView): boolean => v.phase === 'offseason' || v.phase === 'season';
+
+/** 出賽位名稱（內容包的 slotNames；軍團戰暫代包是先鋒、中堅、大將，攻防戰是 1～5 號位） */
+export function slotName(ctx: Ctx, i: number): string {
+  return ctx.c.slotNames[i] ?? `${i + 1} 號位`;
+}
+
+const SLOT_EN_OF: Readonly<Record<string, string>> = { 先鋒: 'VANGUARD', 中堅: 'CENTER', 大將: 'CAPTAIN' };
+export function slotEn(ctx: Ctx, i: number): string {
+  return SLOT_EN_OF[slotName(ctx, i)] ?? `SLOT 0${i + 1}`;
+}
+
+/** 練習賽／研發場數滑桿的級距：容量大（暫代包每週數百場）以 10 場為單位，容量小（真引擎每週十幾場）以 1 場 */
+export function runStep(cap: number): number {
+  return Math.max(1, Math.round(cap / 20));
+}
 
 export function weekLabel(v: KnownView): { short: string; long: string; en: string } {
   if (v.phase === 'ended') return { short: 'END', long: '賽段結束', en: 'SEASON OVER' };

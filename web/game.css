@@ -891,6 +891,94 @@ p.big { font-size: 17px; line-height: 1.7; }
 .still *, .still *::before, .still *::after { animation-delay: 0s !important; animation-duration: 0s !important; transition-duration: 0s !important; }
 
 /* 系統設定減少動態：關掉動畫與轉場（元素直接停在完成狀態） */
+/* ═════ 步驟 8：名單人數泛化（攻防戰 5 人）、模擬進度、選項目、一場比賽的演出 ═════ */
+/* 戰隊：5 張出賽卡排成一列（卡片縮小） */
+.v-squad .lineup.n5 { display: flex; gap: 8px; padding: 74px 0 0 20px; box-sizing: border-box; perspective: none; }
+.v-squad .lineup.n5 .ls { position: relative; top: auto; left: auto; width: 148px; transform: none; }
+.v-squad .lineup.n5 .ls.s2, .v-squad .lineup.n5 .ls.s4 { margin-top: 26px; }
+.v-squad .lineup.n5 .ls .pc { zoom: 0.627; }
+.v-squad .lineup.n5 .ls .lb { gap: 6px; margin-bottom: 8px; }
+.v-squad .lineup.n5 .ls .lb b { font-size: 21px; letter-spacing: 0.04em; white-space: nowrap; }
+.v-squad .lineup.n5 .ls .lb .num { font-size: 20px; }
+.v-squad .lineup.n5 .ls .lb span { display: none; }
+.v-squad .lineup.n5 .ls .vsr { margin-top: 10px; padding: 6px 8px; }
+.v-squad .lineup.n5 .ls .vsr span { font-family: var(--zh); font-size: 13px; letter-spacing: 0.06em; color: var(--white); }
+.v-squad .lineup.n5 .ls .vsr b { font-size: 17px; }
+.v-squad .lineup .ls .vsr { background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+.v-squad .lineup .ls .vsr b { color: var(--gold2); }
+
+/* 基地：5 人名單直排頭像 */
+.v-hub .squad.n5 .units { gap: 8px; }
+.v-hub .squad.n5 .u { flex-direction: column; gap: 6px; text-align: center; }
+.v-hub .squad.n5 .u b { font-size: 17px; }
+.v-hub .squad.n5 .u .rl { font-size: 11px; letter-spacing: 0.1em; }
+.v-hub .squad.n5 .u .rt { font-size: 20px; }
+
+/* 推進中的模擬進度 */
+.sim-prog { position: absolute; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(5, 7, 10, 0.6); }
+.sim-prog .box { width: 640px; padding: 30px 40px 26px; background: var(--panel); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.5), 0 40px 90px rgba(0, 0, 0, 0.6); }
+.sim-prog .en { display: block; font-family: var(--mono); font-size: 13px; letter-spacing: 0.4em; color: var(--gold2); }
+.sim-prog b { display: block; margin: 10px 0 16px; font-size: 42px; font-weight: 900; letter-spacing: 0.08em; transform: skewX(-7deg); }
+.sim-prog .meter { height: 12px; }
+.sim-prog .meter i { transition: width 0.3s; }
+.sim-prog small { display: block; margin-top: 12px; min-height: 18px; font-size: 14px; color: var(--grey); }
+
+/* 標題：存檔讀不了 */
+.s-title .save-bad { display: flex; align-items: center; gap: 12px; padding: 12px 18px; font-size: 15px; line-height: 1.5; color: var(--white); background: rgba(var(--red-rgb), 0.08); box-shadow: inset 0 0 0 1px rgba(var(--red-rgb), 0.5); }
+.s-title .save-bad b { display: block; color: var(--red2); }
+.s-title .save-bad .lnk { flex: none; margin-left: auto; }
+
+/* 創立戰隊：選項目 */
+.s-create .opts.kinds { grid-template-columns: repeat(2, 1fr); }
+.s-create .opt.kind { height: 84px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 0 18px; text-align: left; }
+.s-create .opt.kind b { font-size: 22px; font-weight: 900; letter-spacing: 0.08em; }
+.s-create .opt.kind small { font-size: 12px; line-height: 1.4; color: var(--grey); }
+.s-create .opt.kind.on b { color: var(--gold2); }
+
+/* 比賽日：一場比賽（雙方名單、比分隨回合跳動、逐回合比分條） */
+.md-team .col { position: absolute; top: 236px; width: 560px; display: flex; flex-direction: column; gap: 12px; }
+.md-team .col.l { left: 140px; }
+.md-team .col.r { right: 140px; }
+.md-team .mp { display: flex; align-items: center; gap: 16px; height: 82px; padding: 0 22px; background: var(--panel); box-shadow: inset 3px 0 0 var(--gold), inset 0 0 0 1px rgba(255, 255, 255, 0.1); animation: fin calc(0.6s * var(--sp, 1)) both; animation-delay: calc(var(--d) * var(--sp, 1)); }
+.md-team .mp.foe { flex-direction: row-reverse; text-align: right; box-shadow: inset -3px 0 0 var(--red), inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.md-team .mp .av { width: 60px; height: 60px; flex: none; }
+.md-team .mp .c { flex: 1; min-width: 0; }
+.md-team .mp .c small { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; color: var(--grey); }
+.md-team .mp .c b { display: block; font-size: 26px; font-weight: 900; letter-spacing: 0.06em; line-height: 1.15; white-space: nowrap; }
+.md-team .mp .inf { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--grey); }
+.md-team .mp > .num { font-size: 30px; }
+.md-team .mid2 { position: absolute; left: 50%; top: 330px; transform: translateX(-50%); width: 360px; display: flex; flex-direction: column; align-items: center; }
+.md-team .mid2 .vs { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 120px; line-height: 0.8; color: transparent; -webkit-text-stroke: 2px rgba(var(--gold-rgb), 0.85); text-shadow: 0 0 40px rgba(var(--gold-rgb), 0.3); }
+.md-team .mid2 .st { margin-top: 26px; display: flex; align-items: center; gap: 10px; font-size: 20px; letter-spacing: 0.16em; color: var(--white); white-space: nowrap; }
+.md-team .mid2 .st i { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: blink 0.8s infinite; }
+.md-team .mid2 .stamp.big { margin-top: 26px; font-size: 64px; padding: 6px 30px; opacity: 0; }
+.md-team .mid2.done .st { visibility: hidden; }
+.md-team .mid2.done .stamp.big { animation: slam calc(0.5s * var(--sp, 1)) cubic-bezier(.2, .8, .2, 1) both; opacity: 1; }
+.md-team .strip { position: absolute; left: 140px; right: 140px; top: 760px; }
+.md-team .strip .lb { display: flex; align-items: baseline; gap: 14px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.3em; color: var(--grey); }
+.md-team .strip .lb b { font-family: var(--zh); font-size: 16px; letter-spacing: 0.1em; color: var(--white); }
+.md-team .cells { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
+.md-team .rc { width: 40px; height: 40px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); transform: skewX(-12deg); transition: background 0.2s, box-shadow 0.2s; }
+.md-team .rc.on.w { background: var(--gold); box-shadow: 0 0 16px rgba(var(--gold-rgb), 0.5); }
+.md-team .rc.on.l { background: rgba(var(--red-rgb), 0.18); box-shadow: inset 0 0 0 2px var(--red); }
+.md-team .cells .sep { width: 2px; height: 40px; margin: 0 6px; background: var(--gold2); }
+.md-result.md-team .strip2 { position: absolute; left: 200px; right: 200px; top: 620px; animation: fin calc(0.6s * var(--sp, 1)) both; animation-delay: calc(0.45s * var(--sp, 1)); }
+.md-result.md-team .strip2 .cells { justify-content: center; gap: 4px; margin: 0; }
+.md-result.md-team .strip2 .rc { width: 22px; height: 22px; }
+.md-result.md-team .strip2 .sep { height: 22px; }
+.md-result.md-team .lineups { position: absolute; left: 160px; right: 160px; top: 662px; display: flex; align-items: center; justify-content: center; gap: 18px; }
+.md-result.md-team .lineups .side { display: flex; gap: 8px; }
+.md-result.md-team .lineups .vs { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 28px; color: var(--grey2); }
+.md-result.md-team .ch { width: 128px; height: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: var(--panel); box-shadow: inset 0 2px 0 var(--gold), inset 0 0 0 1px rgba(255, 255, 255, 0.1); animation: fin calc(0.6s * var(--sp, 1)) both; animation-delay: calc(var(--d) * var(--sp, 1)); }
+.md-result.md-team .ch.foe { box-shadow: inset 0 2px 0 rgba(var(--red-rgb), 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.md-result.md-team .ch .av { width: 44px; height: 44px; }
+.md-result.md-team .ch .c { display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: 120px; }
+.md-result.md-team .ch .c b { font-size: 16px; font-weight: 900; letter-spacing: 0.04em; white-space: nowrap; }
+.md-result.md-team .ch .c small { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--grey); white-space: nowrap; }
+.md-result.md-team .ch em { min-height: 16px; font-family: var(--en); font-style: italic; font-weight: 700; font-size: 15px; color: var(--grey); }
+.md-result.md-team .ch em.up { color: var(--gold2); }
+.md-result.md-team .gains { top: 800px; }
+
 @media (prefers-reduced-motion: reduce) {
   #stage *, #stage *::before, #stage *::after { animation: none !important; transition: none !important; }
 }
