@@ -22,12 +22,12 @@ const SEED = 4242;
 
 /** 觀戰設定的等價請求單：10 個 PlayerSpec 與試玩同角色、同版本、同 habit */
 function equivalentRequest(seed: number, t: number, ct: number): MatchRequest {
-  const side = (from: number, version: number) => ({ players: BALANCED_ROLES.map((role, i) => ({ lineageId: role, version, config: { habit: trialHabit(seed, from + i) } })) });
+  const side = (from: number, version: number): MatchRequest['a'] => ({ players: BALANCED_ROLES.map((role, i) => ({ lineageId: role, version, config: { habit: trialHabit(seed, from + i) } })) });
   return { formatId: 'shooter-mr12', a: side(0, t), b: side(5, ct), seed };
 }
 
 function sameFields(a: ShooterRunOptions, b: ShooterRunOptions): void {
-  const fields = (o: ShooterRunOptions) => Object.keys(o).filter((k) => k !== 'record').sort();
+  const fields = (o: ShooterRunOptions): string[] => Object.keys(o).filter((k) => k !== 'record').sort();
   expect(fields(a)).toEqual(fields(b));
   for (const k of fields(a)) {
     if (k === 'controllers') continue;

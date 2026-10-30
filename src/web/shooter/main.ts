@@ -45,7 +45,7 @@ function selectedLineup(): Lineup {
 function syncLineupCard(): void {
   const spectate = $<HTMLInputElement>('spectate').checked;
   const [teamName, enemyName] = spectate ? ['T 側（0～4）', 'CT 側（5～9）'] : ['我方隊友', '對手'];
-  const level = (id: string) => LEVELS.find((l) => l.value === $<HTMLSelectElement>(id).value) ?? LEVELS[0];
+  const level = (id: string): (typeof LEVELS)[number] => LEVELS.find((l) => l.value === $<HTMLSelectElement>(id).value) ?? LEVELS[0];
   $('level-team-label').textContent = teamName;
   $('level-enemy-label').textContent = enemyName;
   $('level-team-hint').textContent = level('level-team').hint;

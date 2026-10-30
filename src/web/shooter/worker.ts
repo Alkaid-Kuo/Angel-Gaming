@@ -10,7 +10,7 @@ import type { ShooterObservation, SoundEvent, Team } from '../../shooter/api.ts'
 import { GRENADES, TPS } from '../../shooter/config.ts';
 import { ShooterHumanController } from '../../shooter/human.ts';
 import { ShooterDriver } from '../../shooter/runner.ts';
-import { PLAYER_COUNT, activeWeaponId, shooterInitData, smokeRadius, type ShooterMatch } from '../../shooter/sim.ts';
+import { activeWeaponId, shooterInitData, smokeRadius, type ShooterMatch } from '../../shooter/sim.ts';
 import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
 import { gatewayDriverOptions, outcomeOf } from '../../shooter/gateway.ts';
 import { humanSeat, seatLabels, seatNames, trialRunOptions } from './lineup.ts';
