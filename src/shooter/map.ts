@@ -27,8 +27,11 @@ export interface MapLayout {
   readonly areas: readonly (Rect & { readonly id: string; readonly name: string })[];
   /** 挖開之後再填回去的實心（箱子、柱子） */
   readonly blocks: readonly Rect[];
-  /** 多邊形（格座標頂點，格中心落在多邊形內的格）：open = 挖開、wall = 填回牆；在矩形之後依序處理（v0.5） */
-  readonly polys?: readonly { readonly mode: 'open' | 'wall'; readonly pts: readonly (readonly [number, number])[] }[];
+  /**
+   * 多邊形（格座標頂點，格中心落在多邊形內的格）：open = 挖開、wall = 填回牆、low = 填矮牆；在矩形之後依序處理（v0.5）。
+   * slope（v1.1）：邊只用水平、垂直、45°，頂點在格點上，斜邊經過的格變成半格的斜切格（沒標的多邊形照舊成鋸齒）
+   */
+  readonly polys?: readonly { readonly mode: 'open' | 'wall' | 'low'; readonly slope?: boolean; readonly pts: readonly (readonly [number, number])[] }[];
   /** 矮牆（v0.5）：擋移動；只有蹲著的人貼近時才擋視線與子彈（VISION.lowCoverRange），道具飛得過去 */
   readonly low?: readonly Rect[];
   readonly sites: readonly (Rect & { readonly id: 'A' | 'B' })[];
@@ -279,7 +282,11 @@ export function buildMap(layout: MapLayout): ShooterMap {
       y1 = Math.max(y1, Math.ceil(py));
     }
     for (let y = Math.max(0, y0); y < Math.min(height, y1); y++) {
-      for (let x = Math.max(0, x0); x < Math.min(width, x1); x++) if (inPolygon(p.pts, x + 0.5, y + 0.5)) solid[y * width + x] = p.mode === 'open' ? 0 : 1;
+      for (let x = Math.max(0, x0); x < Math.min(width, x1); x++) {
+        const k = y * width + x;
+        if (p.slope === true) solid[k] = cutCell(solid[k], p.mode, polyCover(p.pts, x, y));
+        else if (inPolygon(p.pts, x + 0.5, y + 0.5)) solid[k] = p.mode === 'open' ? 0 : p.mode === 'low' ? 2 : 1;
+      }
     }
   }
   for (const r of layout.low ?? []) carve(r, 2);
@@ -327,22 +334,139 @@ function inPolygon(pts: readonly (readonly [number, number])[], x: number, y: nu
   return inside;
 }
 
-/** 格座標是否為牆（擋視線、子彈、道具；不含矮牆）；出界視為牆 */
-export function isSolidCell(map: ShooterMap, cx: number, cy: number): boolean {
+/**
+ * 斜切格（v1.1）：solid 的 3～6 是斜切牆、7～10 是斜切矮牆，值減去基底是實心角（0 西北、1 東北、2 東南、3 西南）。
+ * 實心的是貼著那個角的 45° 三角形，另一半可走。格子層（尋路、區域）把斜切格當整格擋，碰撞與射線才算實際形狀
+ */
+export const SLOPE_WALL = 3;
+export const SLOPE_LOW = 7;
+
+/** 只讀格子的介面：引擎地圖與給選手的 MapInfo 都符合 */
+export type CellGrid = Pick<ShooterMap, 'width' | 'height'> & { readonly solid: ArrayLike<number> };
+
+/** 格值的實心角；不是斜切格回傳 −1 */
+export const slopeCorner = (v: number): number => (v < SLOPE_WALL ? -1 : (v - SLOPE_WALL) % 4);
+
+/** 把格值改成 mode 蓋過之後的結果。cover：−2 沒蓋到、−1 蓋滿、0～3 只蓋到貼著該角的半格 */
+function cutCell(v: number, mode: 'open' | 'wall' | 'low', cover: number): number {
+  if (cover === -2) return v;
+  if (mode === 'open') {
+    if (cover === -1) return 0;
+    if (v === 1 || v === 2) return (v === 1 ? SLOPE_WALL : SLOPE_LOW) + ((cover + 2) % 4);
+    return slopeCorner(v) === cover ? 0 : v;
+  }
+  const full = mode === 'wall' ? 1 : 2;
+  if (cover === -1) return full;
+  const base = full === 1 ? SLOPE_WALL : SLOPE_LOW;
+  if (v === 0) return base + cover;
+  // 同材質的兩個對角半格合成一整格
+  return v === base + ((cover + 2) % 4) ? full : v;
+}
+
+/** 多邊形蓋住格 (x, y) 的部分：兩條對角線把格切成四塊，45° 的邊不會切過任何一塊（回傳值同 cutCell 的 cover） */
+function polyCover(pts: readonly (readonly [number, number])[], x: number, y: number): number {
+  const n = inPolygon(pts, x + 0.5, y + 0.25);
+  const e = inPolygon(pts, x + 0.75, y + 0.5);
+  const s = inPolygon(pts, x + 0.5, y + 0.75);
+  const w = inPolygon(pts, x + 0.25, y + 0.5);
+  const count = Number(n) + Number(e) + Number(s) + Number(w);
+  if (count >= 3) return -1;
+  if (count < 2) return -2;
+  if (n && w) return 0;
+  if (n && e) return 1;
+  if (s && e) return 2;
+  if (s && w) return 3;
+  return -2;
+}
+
+/** 格座標是否為牆（擋視線、子彈、道具；含斜切牆，不含矮牆）；出界視為牆 */
+export function isSolidCell(map: CellGrid, cx: number, cy: number): boolean {
   if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return true;
-  return map.solid[cy * map.width + cx] === 1;
+  const v = map.solid[cy * map.width + cx];
+  return v === 1 || (v >= SLOPE_WALL && v < SLOPE_LOW);
 }
 
-/** 格座標是否為矮牆（v0.5） */
-export function isLowCell(map: ShooterMap, cx: number, cy: number): boolean {
+/** 格座標是否為矮牆（v0.5；含斜切矮牆） */
+export function isLowCell(map: CellGrid, cx: number, cy: number): boolean {
   if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return false;
-  return map.solid[cy * map.width + cx] === 2;
+  const v = map.solid[cy * map.width + cx];
+  return v === 2 || v >= SLOPE_LOW;
 }
 
-/** 格座標是否擋移動（牆或矮牆）；出界視為擋 */
-export function blocksMove(map: ShooterMap, cx: number, cy: number): boolean {
+/** 格座標是否擋移動（牆或矮牆，斜切格算整格）；出界視為擋 */
+export function blocksMove(map: CellGrid, cx: number, cy: number): boolean {
   if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return true;
   return map.solid[cy * map.width + cx] !== 0;
+}
+
+/** 格 (cx, cy) 的實心角；不是斜切格或出界回傳 −1 */
+export function slopeAt(map: CellGrid, cx: number, cy: number): number {
+  if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return -1;
+  return slopeCorner(map.solid[cy * map.width + cx]);
+}
+
+/** 斜面朝可走那一側的法線（分量 ±1） */
+export function slopeNormal(corner: number): readonly [number, number] {
+  return corner === 0 ? [1, 1] : corner === 1 ? [-1, 1] : corner === 2 ? [-1, -1] : [1, -1];
+}
+
+/** 換到以實心角為原點、朝格內為正的本地座標：實心三角形是 u ≥ 0、v ≥ 0、u + v ≤ UNIT */
+function slopeLocal(cx: number, cy: number, corner: number, x: number, y: number): readonly [number, number] {
+  const u = corner === 0 || corner === 3 ? x - cx * UNIT : (cx + 1) * UNIT - x;
+  const v = corner === 0 || corner === 1 ? y - cy * UNIT : (cy + 1) * UNIT - y;
+  return [u, v];
+}
+
+/** 點到斜切格實心三角形的距離平方（點在三角形內為 0） */
+export function slopeDistSq(cx: number, cy: number, corner: number, x: number, y: number): number {
+  const [u, v] = slopeLocal(cx, cy, corner, x, y);
+  if (u >= 0 && v >= 0 && u + v <= UNIT) return 0;
+  const clampU = Math.max(0, Math.min(UNIT, u));
+  const clampV = Math.max(0, Math.min(UNIT, v));
+  const legU = (u - clampU) * (u - clampU) + v * v;
+  const legV = u * u + (v - clampV) * (v - clampV);
+  // 斜邊上最近的點：(UNIT + s, UNIT − s) / 2
+  const s = Math.max(-UNIT, Math.min(UNIT, u - v));
+  const du = u - (UNIT + s) / 2;
+  const dv = v - (UNIT - s) / 2;
+  return Math.min(legU, legV, du * du + dv * dv);
+}
+
+/**
+ * 線段 a→b 進入斜切格實心三角形時沿線段的參數，分數 [分子, 分母]（0～1，整數運算）；碰不到回傳 null。
+ * 碰到邊界就算：相鄰斜切格的接縫不漏視線與子彈
+ */
+export function slopeEntry(cx: number, cy: number, corner: number, ax: number, ay: number, bx: number, by: number): readonly [number, number] | null {
+  const [ua, va] = slopeLocal(cx, cy, corner, ax, ay);
+  const [ub, vb] = slopeLocal(cx, cy, corner, bx, by);
+  const du = ub - ua;
+  const dv = vb - va;
+  let inNum = 0;
+  let inDen = 1;
+  let outNum = 1;
+  let outDen = 1;
+  // 三條邊各是一個半平面 g ≤ 0：起點的 g、沿線段的變化量
+  for (const [g, d] of [[-ua, -du], [-va, -dv], [ua + va - UNIT, du + dv]]) {
+    if (d === 0) {
+      if (g > 0) return null;
+    } else if (d < 0) {
+      if (g * inDen > inNum * -d) {
+        inNum = g;
+        inDen = -d;
+      }
+    } else if (-g * outDen < outNum * d) {
+      outNum = -g;
+      outDen = d;
+    }
+  }
+  return inNum * outDen > outNum * inDen ? null : [inNum, inDen];
+}
+
+/** 斜切格可走半邊裡的一點（座標單位） */
+export function slopeFreePoint(cx: number, cy: number, corner: number): readonly [number, number] {
+  const far = (UNIT * 3) / 4;
+  const near = UNIT / 4;
+  return [cx * UNIT + (corner === 0 || corner === 3 ? far : near), cy * UNIT + (corner === 0 || corner === 1 ? far : near)];
 }
 
 /** 座標單位 → 格座標（向下取整；負數也正確） */
@@ -379,7 +503,7 @@ export function mapInfo(map: ShooterMap): MapInfo {
   };
 }
 
-/** 文字圖（除錯、審圖用）：# 牆、= 矮牆、. 可走、A／B 炸彈點、t／c 出生區、T／C 出生點 */
+/** 文字圖（除錯、審圖用）：# 牆、= 矮牆、/ \ 斜切格、. 可走、A／B 炸彈點、t／c 出生區、T／C 出生點 */
 export function dumpAscii(map: ShooterMap): string {
   const rows: string[] = [];
   for (let y = 0; y < map.height; y++) {
@@ -391,6 +515,10 @@ export function dumpAscii(map: ShooterMap): string {
       }
       if (map.solid[y * map.width + x] === 2) {
         line += '=';
+        continue;
+      }
+      if (slopeAt(map, x, y) >= 0) {
+        line += slopeAt(map, x, y) % 2 === 0 ? '/' : '\\';
         continue;
       }
       let ch = '.';

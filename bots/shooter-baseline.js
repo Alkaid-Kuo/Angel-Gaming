@@ -226,12 +226,63 @@ class Grid {
     this.wall = new Uint8Array(this.N);
     this.block = new Uint8Array(this.N);
     this.low = new Uint8Array(this.N);
+    this.slope = new Int8Array(this.N);
     for (let i = 0; i < this.N; i++) {
       const v = map.solid[i];
-      this.wall[i] = v === 1 ? 1 : 0;
+      this.wall[i] = v === 1 || (v >= 3 && v <= 6) ? 1 : 0;
       this.block[i] = v !== 0 ? 1 : 0;
-      this.low[i] = v === 2 ? 1 : 0;
+      this.low[i] = v === 2 || v >= 7 ? 1 : 0;
+      this.slope[i] = v >= 3 ? (v - 3) % 4 : -1;
     }
+  }
+  /** 換到斜切格的本地座標：實心三角形是 u ≥ 0、v ≥ 0、u + v ≤ UNIT @param {number} i @param {number} x @param {number} y @returns {[number, number]} */
+  slopeLocal(i, x, y) {
+    const c = this.slope[i];
+    const cx = (i % this.W) * UNIT;
+    const cy = Math.floor(i / this.W) * UNIT;
+    return [c === 0 || c === 3 ? x - cx : cx + UNIT - x, c === 0 || c === 1 ? y - cy : cy + UNIT - y];
+  }
+  /** 點落在這格的實心部分：斜切格只算實心三角形 @param {number} i 格索引 @param {number} x @param {number} y */
+  filled(i, x, y) {
+    if (this.slope[i] < 0) return true;
+    const [u, v] = this.slopeLocal(i, x, y);
+    return u + v <= UNIT;
+  }
+  /** 點落在牆裡 @param {number} i 格索引 @param {number} x @param {number} y */
+  wallAt(i, x, y) {
+    return this.wall[i] === 1 && this.filled(i, x, y);
+  }
+  /** 點到斜切格實心三角形的距離平方（同引擎） @param {number} i @param {number} x @param {number} y */
+  slopeDistSq(i, x, y) {
+    const [u, v] = this.slopeLocal(i, x, y);
+    if (u >= 0 && v >= 0 && u + v <= UNIT) return 0;
+    const cu = Math.max(0, Math.min(UNIT, u));
+    const cv = Math.max(0, Math.min(UNIT, v));
+    const s = Math.max(-UNIT, Math.min(UNIT, u - v));
+    const du = u - (UNIT + s) / 2;
+    const dv = v - (UNIT - s) / 2;
+    return Math.min((u - cu) * (u - cu) + v * v, u * u + (v - cv) * (v - cv), du * du + dv * dv);
+  }
+  /** 線段碰到斜切格的實心三角形（同引擎，邊界算碰到） @param {number} i @param {number} ax @param {number} ay @param {number} bx @param {number} by */
+  cutsSlope(i, ax, ay, bx, by) {
+    const [ua, va] = this.slopeLocal(i, ax, ay);
+    const [ub, vb] = this.slopeLocal(i, bx, by);
+    let t0 = 0;
+    let t1 = 1;
+    for (const [g, d] of [[-ua, ua - ub], [-va, va - vb], [ua + va - UNIT, ub - ua + vb - va]]) {
+      if (d === 0) {
+        if (g > 0) return false;
+      } else if (d < 0) t0 = Math.max(t0, g / -d);
+      else t1 = Math.min(t1, -g / d);
+    }
+    return t0 <= t1;
+  }
+  /** 斜穿格角時的側格算不算牆：斜切格看線段有沒有碰到 @param {number} cx @param {number} cy @param {number} ax @param {number} ay @param {number} bx @param {number} by */
+  sideWall(cx, cy, ax, ay, bx, by) {
+    if (!this.isWall(cx, cy)) return false;
+    if (cx < 0 || cy < 0 || cx >= this.W || cy >= this.H) return true;
+    const i = cy * this.W + cx;
+    return this.slope[i] < 0 || this.cutsSlope(i, ax, ay, bx, by);
   }
   /** 座標單位 → 格索引；出界 −1 @param {number} x @param {number} y */
   cellOf(x, y) {
@@ -262,6 +313,8 @@ class Grid {
    * @param {number} ax @param {number} ay @param {number} bx @param {number} by
    */
   los(ax, ay, bx, by) {
+    const start = this.cellOf(ax, ay);
+    if (start >= 0 && this.slope[start] >= 0 && this.wall[start] === 1 && this.cutsSlope(start, ax, ay, bx, by)) return false;
     const x0 = ax / UNIT;
     const y0 = ay / UNIT;
     const x1 = bx / UNIT;
@@ -281,7 +334,7 @@ class Grid {
     let n = Math.abs(ex - cx) + Math.abs(ey - cy);
     while (n > 0) {
       if (Math.abs(tmx - tmy) < 1e-9) {
-        if (this.isWall(cx + sx, cy) && this.isWall(cx, cy + sy)) return false;
+        if (this.sideWall(cx + sx, cy, ax, ay, bx, by) && this.sideWall(cx, cy + sy, ax, ay, bx, by)) return false;
         cx += sx;
         cy += sy;
         tmx += tdx;
@@ -295,6 +348,12 @@ class Grid {
         cy += sy;
         tmy += tdy;
         n -= 1;
+      }
+      const i = cx >= 0 && cy >= 0 && cx < this.W && cy < this.H ? cy * this.W + cx : -1;
+      if (i >= 0 && this.slope[i] >= 0) {
+        if (this.sideWall(cx, cy, ax, ay, bx, by)) return false;
+        if (cx === ex && cy === ey) return true;
+        continue;
       }
       if (cx === ex && cy === ey) return true;
       if (this.isWall(cx, cy)) return false;
@@ -311,7 +370,7 @@ class Grid {
     let last = -1;
     for (let k = 1; k <= maxCells * 2; k++) {
       const i = this.cellOf(x + c * k, y + s * k);
-      if (i < 0 || this.wall[i] === 1) return;
+      if (i < 0 || this.wallAt(i, x + c * k, y + s * k)) return;
       if (i === last) continue;
       last = i;
       if (visit(i, k / 2) === false) return;
@@ -2046,8 +2105,10 @@ class Combat {
     if (len < 1) return false;
     const r = Math.min(len, this.rules.lowCoverRange * UNIT);
     for (let s = 250; s <= r; s += 250) {
-      const i = this.g.cellOf(ax + ((bx - ax) * s) / len, ay + ((by - ay) * s) / len);
-      if (i >= 0 && this.g.low[i] === 1) return true;
+      const x = ax + ((bx - ax) * s) / len;
+      const y = ay + ((by - ay) * s) / len;
+      const i = this.g.cellOf(x, y);
+      if (i >= 0 && this.g.low[i] === 1 && this.g.filled(i, x, y)) return true;
     }
     return false;
   }
@@ -2471,6 +2532,11 @@ class Utility {
     for (let cy = Math.floor((y - r) / UNIT); cy <= Math.floor((y + r) / UNIT); cy++) {
       for (let cx = Math.floor((x - r) / UNIT); cx <= Math.floor((x + r) / UNIT); cx++) {
         if (!g.isWall(cx, cy)) continue;
+        const i = cx >= 0 && cy >= 0 && cx < g.W && cy < g.H ? cy * g.W + cx : -1;
+        if (i >= 0 && g.slope[i] >= 0) {
+          if (g.slopeDistSq(i, x, y) <= r * r) return true;
+          continue;
+        }
         const nx = Math.max(cx * UNIT, Math.min(x, cx * UNIT + UNIT));
         const ny = Math.max(cy * UNIT, Math.min(y, cy * UNIT + UNIT));
         if ((nx - x) * (nx - x) + (ny - y) * (ny - y) <= r * r) return true;

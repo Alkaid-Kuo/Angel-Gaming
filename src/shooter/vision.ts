@@ -3,7 +3,7 @@
 import { cdegDiff, iatan2C } from '../shared/geom.ts';
 import { idiv, isqrt } from '../shared/intmath.ts';
 import { SOUND, UNIT, VISION } from './config.ts';
-import { cellOf, isLowCell, isSolidCell, type ShooterMap } from './map.ts';
+import { cellOf, isLowCell, isSolidCell, slopeAt, slopeEntry, type ShooterMap } from './map.ts';
 import type { SoundRange } from './api.ts';
 
 /** 擋視線的圓（煙霧；步驟 3 接上）。座標單位 */
@@ -110,31 +110,41 @@ export function lowCoverBlocks(map: ShooterMap, ax: number, ay: number, bx: numb
     const d = tDen === 0 ? 0 : idiv(tNum * len, tDen);
     return (aLow && d <= range) || (bLow && len - d - UNIT <= range);
   };
-  return traverse(
-    ax,
-    ay,
-    bx,
-    by,
-    (cx, cy, tNum, tDen) => isLowCell(map, cx, cy) && near(tNum, tDen),
-    (sx, sy, tx, ty, tNum, tDen) => (isLowCell(map, sx, sy) || isLowCell(map, tx, ty)) && near(tNum, tDen),
-  );
+  const lowAt = (cx: number, cy: number, tNum: number, tDen: number): boolean => {
+    if (!isLowCell(map, cx, cy)) return false;
+    const corner = slopeAt(map, cx, cy);
+    if (corner < 0) return near(tNum, tDen);
+    const e = slopeEntry(cx, cy, corner, ax, ay, bx, by);
+    return e !== null && near(e[0], e[1]);
+  };
+  if (slopeAt(map, cellOf(ax), cellOf(ay)) >= 0 && lowAt(cellOf(ax), cellOf(ay), 0, 1)) return true;
+  return traverse(ax, ay, bx, by, lowAt, (sx, sy, tx, ty, tNum, tDen) => lowAt(sx, sy, tNum, tDen) || lowAt(tx, ty, tNum, tDen));
 }
 
 /**
  * 視線：兩點之間沒有牆（穿過格角時兩側都是牆才算擋），也沒有穿過煙霧；
  * 任一端蹲著時，貼近他的矮牆也擋（aLow／bLow，v0.5）。
- * 起點、終點所在的格子不檢查（角色本身不會在牆裡）。
+ * 起點、終點所在的格子不檢查（角色本身不會在牆裡）；斜切格例外，人站得進可走半邊，所以一律算實際形狀（v1.1）。
  */
 export function lineOfSight(map: ShooterMap, ax: number, ay: number, bx: number, by: number, smokes: readonly SightBlocker[] = [], aLow = false, bLow = false): boolean {
   if (lowCoverBlocks(map, ax, ay, bx, by, aLow, bLow)) return false;
-  const blocked = traverse(
-    ax,
-    ay,
-    bx,
-    by,
-    (cx, cy) => isSolidCell(map, cx, cy) && !(cx === cellOf(bx) && cy === cellOf(by)),
-    (sx, sy, tx, ty) => isSolidCell(map, sx, sy) && isSolidCell(map, tx, ty),
-  );
+  /** 斜切牆有沒有擋到線段；不是斜切牆回傳 false */
+  const slopeWall = (cx: number, cy: number): boolean => {
+    const corner = slopeAt(map, cx, cy);
+    return corner >= 0 && isSolidCell(map, cx, cy) && slopeEntry(cx, cy, corner, ax, ay, bx, by) !== null;
+  };
+  /** 穿過格角時的側面：斜切格看實際形狀有沒有碰到那個角 */
+  const side = (cx: number, cy: number): boolean => (slopeAt(map, cx, cy) >= 0 ? slopeWall(cx, cy) : isSolidCell(map, cx, cy));
+  const blocked =
+    slopeWall(cellOf(ax), cellOf(ay)) ||
+    traverse(
+      ax,
+      ay,
+      bx,
+      by,
+      (cx, cy) => (slopeAt(map, cx, cy) >= 0 ? slopeWall(cx, cy) : isSolidCell(map, cx, cy) && !(cx === cellOf(bx) && cy === cellOf(by))),
+      (sx, sy, tx, ty) => side(sx, sy) && side(tx, ty),
+    );
   if (blocked) return false;
   for (const s of smokes) if (segmentHitsCircle(ax, ay, bx, by, s)) return false;
   return true;
@@ -148,23 +158,26 @@ export function rayWallDistance(map: ShooterMap, x: number, y: number, cx: numbe
   const bx = x + idiv(cx * maxLen, 10000);
   const by = y + idiv(cy * maxLen, 10000);
   let hit = maxLen;
+  /** 這一格擋不擋得到子彈：斜切格算實際形狀與進入點（v1.1），其他格用進入格子的距離 d */
+  const stops = (gx: number, gy: number, d: number): boolean => {
+    const corner = slopeAt(map, gx, gy);
+    const e = corner < 0 ? null : slopeEntry(gx, gy, corner, x, y, bx, by);
+    if (corner >= 0 && e === null) return false;
+    const at = e === null ? d : idiv(e[0] * maxLen, e[1]);
+    if (!isSolidCell(map, gx, gy) && !(lowRange > 0 && at <= lowRange && isLowCell(map, gx, gy))) return false;
+    hit = at;
+    return true;
+  };
+  if (slopeAt(map, cellOf(x), cellOf(y)) >= 0 && stops(cellOf(x), cellOf(y), 0)) return hit;
   traverse(
     x,
     y,
     bx,
     by,
-    (gx, gy, tNum, tDen) => {
-      const d = tDen === 0 ? 0 : idiv(tNum * maxLen, tDen);
-      if (!isSolidCell(map, gx, gy) && !(lowRange > 0 && d <= lowRange && isLowCell(map, gx, gy))) return false;
-      hit = d;
-      return true;
-    },
+    (gx, gy, tNum, tDen) => stops(gx, gy, tDen === 0 ? 0 : idiv(tNum * maxLen, tDen)),
     (sx, sy, tx, ty, tNum, tDen) => {
       const d = tDen === 0 ? 0 : idiv(tNum * maxLen, tDen);
-      const low = lowRange > 0 && d <= lowRange && (isLowCell(map, sx, sy) || isLowCell(map, tx, ty));
-      if (!isSolidCell(map, sx, sy) && !isSolidCell(map, tx, ty) && !low) return false;
-      hit = d;
-      return true;
+      return stops(sx, sy, d) || stops(tx, ty, d);
     },
   );
   return hit > maxLen ? maxLen : hit;

@@ -61,8 +61,8 @@ import {
   type WeaponId,
   type WeaponSlot,
 } from './config.ts';
-import { DEFAULT_MAP_ID, MAPS, blocksMove, cellOf, inRect, isSolidCell, mapInfo, type Rect, type ShooterMap } from './map.ts';
-import { circleHitsWall, findPath } from './path.ts';
+import { DEFAULT_MAP_ID, MAPS, blocksMove, cellOf, inRect, isSolidCell, mapInfo, slopeAt, slopeFreePoint, slopeNormal, type Rect, type ShooterMap } from './map.ts';
+import { circleHitsWall, findPath, slopeContact, slopeSlide, sweepCircle } from './path.ts';
 import { distance, inCone, lineOfSight, lowCoverBlocks, quantizeDir, rayWallDistance, soundRange, type SightBlocker } from './vision.ts';
 
 export const PLAYER_COUNT = TEAM_SIZE * 2;
@@ -348,9 +348,10 @@ export function burnCells(map: ShooterMap, x: number, y: number, radius: number)
   const r1 = cellOf(y + radius);
   for (let cy = Math.max(0, r0); cy <= Math.min(map.height - 1, r1); cy++) {
     for (let cx = Math.max(0, c0); cx <= Math.min(map.width - 1, c1); cx++) {
-      if (map.solid[cy * map.width + cx] !== 0) continue;
-      const px = cx * UNIT + UNIT / 2;
-      const py = cy * UNIT + UNIT / 2;
+      // 斜切格（v1.1）的可走半邊也燒得到：站那裡不能躲火
+      const corner = slopeAt(map, cx, cy);
+      if (corner < 0 && map.solid[cy * map.width + cx] !== 0) continue;
+      const [px, py] = corner < 0 ? [cx * UNIT + UNIT / 2, cy * UNIT + UNIT / 2] : slopeFreePoint(cx, cy, corner);
       if ((px - x) * (px - x) + (py - y) * (py - y) >= radius * radius) continue;
       if (!lineOfSight(map, x, y, px, py)) continue;
       out.push(cy * map.width + cx);
@@ -1338,8 +1339,19 @@ export class ShooterMatch {
     }
     const r = VISION.bodyRadius;
     // 先對牆滑動，再對其他活人：會重疊的那一軸退到最遠不重疊的位置（v1.0）
-    p.x += slideBodies(this.players, p, p.x, p.y, slideAxis(this.map, p.x, p.y, dx, 0, r), 0);
-    p.y += slideBodies(this.players, p, p.x, p.y, slideAxis(this.map, p.x, p.y, dy, 1, r), 1);
+    const slide = slopeSlide(this.map, p.x, p.y, dx, dy, r);
+    if (slide === null) {
+      p.x += slideBodies(this.players, p, p.x, p.y, slideAxis(this.map, p.x, p.y, dx, 0, r), 0);
+      p.y += slideBodies(this.players, p, p.x, p.y, slideAxis(this.map, p.x, p.y, dy, 1, r), 1);
+    } else {
+      // 貼斜面（v1.1）：被人擋掉其中一軸時，另一軸可能頂進斜面，這步就不走
+      const nx = p.x + slideBodies(this.players, p, p.x, p.y, slide[0], 0);
+      const ny = p.y + slideBodies(this.players, p, nx, p.y, slide[1], 1);
+      if (!circleHitsWall(this.map, nx, ny, r)) {
+        p.x = nx;
+        p.y = ny;
+      }
+    }
     if (this.phase === 'freeze') {
       const z: Rect = this.map.spawnZones[p.team];
       p.x = clamp(p.x, z.x0 * UNIT + r, z.x1 * UNIT - r);
@@ -1563,7 +1575,7 @@ export class ShooterMatch {
   }
 
   /**
-   * 飛一步（最多 flySpeed）：x、y 分軸移動，碰牆的軸把方向分量反號（軸對齊牆面的法線鏡射，整數）；
+   * 飛一步（最多 flySpeed）：x、y 分軸移動，碰牆的軸把方向分量反號（軸對齊牆面的法線鏡射，整數）；撞上斜面時對斜面法線鏡射（v1.1）。
    * 剩餘距離扣實際移動量。已反彈 maxBounces 次後再碰牆、或走完距離就停（落地）。反彈與落地發 grenadeLand
    */
   private fly(g: Projectile): void {
@@ -1571,22 +1583,38 @@ export class ShooterMatch {
     const r = GRENADE_RULES.projectileRadius;
     const wx = tdiv(g.dx * step, 10000);
     const wy = tdiv(g.dy * step, 10000);
-    const mx = slideAxis(this.map, g.x, g.y, wx, 0, r, true);
-    g.x += mx;
-    const my = slideAxis(this.map, g.x, g.y, wy, 1, r, true);
-    g.y += my;
+    const slope = slopeContact(this.map, g.x + wx, g.y + wy, wx, wy, r, isSolidCell);
+    let mx: number;
+    let my: number;
+    if (slope >= 0) {
+      [mx, my] = sweepCircle(this.map, g.x, g.y, wx, wy, r, isSolidCell);
+      g.x += mx;
+      g.y += my;
+    } else {
+      mx = slideAxis(this.map, g.x, g.y, wx, 0, r, true);
+      g.x += mx;
+      my = slideAxis(this.map, g.x, g.y, wy, 1, r, true);
+      g.y += my;
+    }
     const hitX = mx !== wx;
     const hitY = my !== wy;
     const range = SOUND.actionRange * UNIT;
-    if (hitX || hitY) {
+    if (slope >= 0 || hitX || hitY) {
       g.left = Math.max(0, g.left - distance(0, 0, mx, my));
       if (g.bounces >= GRENADE_RULES.maxBounces) {
         g.moving = false;
         g.left = 0;
       } else {
         g.bounces += 1;
-        if (hitX) g.dx = -g.dx;
-        if (hitY) g.dy = -g.dy;
+        if (slope >= 0) {
+          const [nx, ny] = slopeNormal(slope);
+          const along = g.dx * nx + g.dy * ny;
+          g.dx -= along * nx;
+          g.dy -= along * ny;
+        } else {
+          if (hitX) g.dx = -g.dx;
+          if (hitY) g.dy = -g.dy;
+        }
       }
       this.emit('grenadeLand', g.x, g.y, g.owner, null, range);
       return;
