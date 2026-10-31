@@ -4,8 +4,8 @@
 // habit 由種子與座位號雜湊（範圍同經營層的 ±60），同種子同陣容的選手完全相同。
 import type { PlayerSpec } from '../../manage/gateway.ts';
 import type { CompiledBot } from '../../sandbox/compile.ts';
-import { MIN_REACTION_TICKS, ROUND, TEAM_SIZE } from '../../shooter/config.ts';
-import { seatController, seatKnobs, seatOf } from '../../shooter/gateway.ts';
+import { MIN_REACTION_TICKS, TEAM_SIZE } from '../../shooter/config.ts';
+import { LEAGUE_FORMAT_ID, formatOptions, seatController, seatKnobs, seatOf } from '../../shooter/gateway.ts';
 import { DEFAULT_MAP_ID, MAPS } from '../../shooter/map.ts';
 import { BALANCED_ROLES, ROLE_TABLE } from '../../shooter/players.ts';
 import { ShooterBatchController, type ShooterController, type ShooterRunOptions } from '../../shooter/runner.ts';
@@ -53,8 +53,9 @@ export function trialRunOptions(s: ShooterSetup, bots: { readonly practice: Comp
     }
     return seatCtl[pid] ?? new ShooterBatchController(bots.practice, 'shooter-practice.js', s.seed, pid, map);
   });
-  // 凍結時間：有人類用預設（ROUND.freezeTicks），觀戰是 Bot 對打
-  const base = { seed: s.seed, mapId: map.id, controllers, record: true, ...(human === null ? { freezeTicks: ROUND.botFreezeTicks } : {}), ...(s.loadout !== undefined ? { defaultLoadout: { T: s.loadout, CT: s.loadout } } : {}) };
+  // 賽制跟聯賽同一份；凍結時間只有觀戰（Bot 對打）照賽制，有人類用引擎預設
+  const { freezeTicks, ...format } = formatOptions(LEAGUE_FORMAT_ID);
+  const base = { seed: s.seed, mapId: map.id, ...format, controllers, record: true, ...(human === null ? { freezeTicks } : {}), ...(s.loadout !== undefined ? { defaultLoadout: { T: s.loadout, CT: s.loadout } } : {}) };
   if (seats.every((seat) => seat === null)) return base;
   const knobs = seats.map((seat, pid) => (seat !== null ? seatKnobs(seatCtl[pid]!, seat) : {}));
   // 有 attributes 時驅動層會替沒給延遲的座位用預設屬性算，所以陪練座位要明講原本的最短延遲

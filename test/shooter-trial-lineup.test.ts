@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { MatchRequest } from '../src/manage/gateway.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
-import { MIN_REACTION_TICKS, ROUND, ticks } from '../src/shooter/config.ts';
-import { gatewayDriverOptions, outcomeOf, runGatewayMatch } from '../src/shooter/gateway.ts';
+import { MIN_REACTION_TICKS, ticks } from '../src/shooter/config.ts';
+import { LEAGUE_FORMAT_ID, formatOptions, gatewayDriverOptions, outcomeOf, runGatewayMatch } from '../src/shooter/gateway.ts';
 import { ShooterHumanController } from '../src/shooter/human.ts';
 import { DEFAULT_MAP_ID, MAPS } from '../src/shooter/map.ts';
 import { BALANCED_ROLES, ROLE_KNOB, type ShooterRole } from '../src/shooter/players.ts';
@@ -23,7 +23,7 @@ const SEED = 4242;
 /** 觀戰設定的等價請求單：10 個 PlayerSpec 與試玩同角色、同版本、同 habit */
 function equivalentRequest(seed: number, t: number, ct: number): MatchRequest {
   const side = (from: number, version: number): MatchRequest['a'] => ({ players: BALANCED_ROLES.map((role, i) => ({ lineageId: role, version, config: { habit: trialHabit(seed, from + i) } })) });
-  return { formatId: 'shooter-mr12', a: side(0, t), b: side(5, ct), seed };
+  return { formatId: LEAGUE_FORMAT_ID, a: side(0, t), b: side(5, ct), seed };
 }
 
 function sameFields(a: ShooterRunOptions, b: ShooterRunOptions): void {
@@ -45,7 +45,10 @@ describe('試玩基準座位與閘道同一條路', () => {
     const trial = runShooterMatch(trialRunOptions(s, bots, null));
     const gw = runGatewayMatch(req, baselineBot, { record: true });
     expect(trial.finalHash).toBe(gw.finalHash);
-    expect(outcomeOf(trial.result, trial.match)).toEqual(gw.outcome);
+    const outcome = outcomeOf(trial.result, trial.match);
+    expect(outcome).toEqual(gw.outcome);
+    outcome.rounds.forEach((r, i) => expect(r.phase).toBe(i < 6 ? '上半場' : i < 12 ? '下半場' : `加時 ${Math.floor((i - 12) / 6) + 1}`));
+    expect([trial.replay?.header.roundsPerHalf, trial.replay?.header.winRounds]).toEqual([6, 7]);
     expect(trial.replay?.header).toEqual(gw.replay?.header);
     const file = JSON.parse(JSON.stringify({ ...trial.replay, ...seatLabels(s) })) as ShooterReplay & { lineup: string[] };
     expect(file.lineup).toEqual(Array.from({ length: PLAYER_COUNT }, () => '基準 v3'));
@@ -72,7 +75,7 @@ describe('預設陪練與改前相同', () => {
   const old = (seed: number): ShooterRunOptions => {
     const map = MAPS[DEFAULT_MAP_ID]();
     const controllers = Array.from({ length: PLAYER_COUNT }, (_, i) => new ShooterBatchController(practice, 'shooter-practice.js', seed, i, map));
-    return { seed, mapId: map.id, controllers, record: true, freezeTicks: ROUND.botFreezeTicks };
+    return { seed, mapId: map.id, ...formatOptions(LEAGUE_FORMAT_ID), controllers, record: true };
   };
 
   it('沒帶 lineup 不碰基準 Bot、選項同改前，整場雜湊與改前相同', () => {
@@ -91,7 +94,8 @@ describe('人類與混合陣容', () => {
   it('凍結時間：有人類用預設 10 秒，觀戰是 Bot 對打 3 秒', () => {
     const human = new ShooterHumanController();
     expect(trialRunOptions({ team: 'T', seed: 5, spectate: false }, bots, human).freezeTicks).toBeUndefined();
-    expect(new ShooterDriver(trialRunOptions({ team: 'T', seed: 5, spectate: false }, bots, human)).match.freezeTicks).toBe(ticks(10));
+    const play = new ShooterDriver(trialRunOptions({ team: 'T', seed: 5, spectate: false }, bots, human));
+    expect([play.match.freezeTicks, play.match.roundsPerHalf, play.match.winRounds, play.replay?.header.freezeTicks, play.replay?.header.roundsPerHalf]).toEqual([ticks(10), 6, 7, ticks(10), 6]);
     expect(new ShooterDriver(trialRunOptions({ team: 'T', seed: 5, spectate: true }, bots, null)).match.freezeTicks).toBe(ticks(3));
   });
 
