@@ -51,61 +51,61 @@ function buildGun(id: WeaponId): GunModel {
   const y = 0.06;
   switch (id) {
     case 'pistol':
-      box(dark, 0.3, 0.64, y, 0.09);
+      box(dark, 0.3, 0.68, y, 0.11);
       box(light, 0.34, 0.6, y - 0.012, 0.03);
-      return { dark, mid: null, light, wood: null, grip: [[0.31, y + 0.05], [0.31, y - 0.05]], tip: 0.64 };
+      return { dark, mid: null, light, wood: null, grip: [[0.31, y + 0.05], [0.31, y - 0.05]], tip: 0.68 };
     case 'deagle':
-      box(dark, 0.3, 0.76, y, 0.125);
-      box(dark, 0.76, 0.81, y, 0.15);
-      box(light, 0.34, 0.74, y - 0.02, 0.04);
-      return { dark, mid: null, light, wood: null, grip: [[0.31, y + 0.07], [0.31, y - 0.07]], tip: 0.81 };
+      box(dark, 0.3, 0.8, y, 0.15);
+      box(dark, 0.8, 0.86, y, 0.18);
+      box(light, 0.34, 0.78, y - 0.02, 0.05);
+      return { dark, mid: null, light, wood: null, grip: [[0.31, y + 0.07], [0.31, y - 0.07]], tip: 0.86 };
     case 'smg':
-      box(dark, 0.08, 0.6, y, 0.15);
-      box(dark, 0.6, 0.78, y, 0.06);
+      box(dark, 0.08, 0.6, y, 0.18);
+      box(dark, 0.6, 0.84, y, 0.085);
       box(mid, 0.34, 0.46, y + 0.13, 0.13);
       box(light, 0.14, 0.54, y - 0.03, 0.03);
-      return { dark, mid, light, wood: null, grip: [[0.2, y + 0.05], [0.5, y - 0.03]], tip: 0.78 };
+      return { dark, mid, light, wood: null, grip: [[0.2, y + 0.05], [0.5, y - 0.03]], tip: 0.84 };
     case 'shotgun':
-      box(dark, 0.08, 1.06, y, 0.075);
-      box(dark, 0.08, 0.4, y, 0.13);
-      box(mid, 0.6, 0.8, y, 0.125);
+      box(dark, 0.08, 1.14, y, 0.1);
+      box(dark, 0.08, 0.4, y, 0.16);
+      box(mid, 0.6, 0.84, y, 0.16);
       box(wood, -0.1, 0.1, y, 0.12);
-      box(light, 0.12, 1.02, y - 0.02, 0.018);
-      return { dark, mid, light, wood, grip: [[0.2, y + 0.05], [0.68, y]], tip: 1.06 };
+      box(light, 0.12, 1.1, y - 0.025, 0.022);
+      return { dark, mid, light, wood, grip: [[0.2, y + 0.05], [0.68, y]], tip: 1.14 };
     case 'ak':
-      box(dark, 0.08, 0.56, y, 0.14);
-      box(dark, 0.56, 1.08, y, 0.055);
-      box(wood, 0.5, 0.76, y, 0.12);
+      box(dark, 0.08, 0.56, y, 0.17);
+      box(dark, 0.56, 1.2, y, 0.08);
+      box(wood, 0.5, 0.8, y, 0.15);
       box(wood, -0.12, 0.08, y, 0.11);
       box(mid, 0.36, 0.47, y + 0.11, 0.11);
       box(mid, 0.47, 0.53, y + 0.17, 0.08);
       box(light, 0.12, 0.5, y - 0.03, 0.03);
-      return { dark, mid, light, wood, grip: [[0.2, y + 0.05], [0.62, y - 0.02]], tip: 1.08 };
+      return { dark, mid, light, wood, grip: [[0.2, y + 0.05], [0.62, y - 0.02]], tip: 1.2 };
     case 'm4':
-      box(dark, 0.08, 0.6, y, 0.14);
-      box(mid, 0.5, 0.82, y, 0.12);
-      box(dark, 0.82, 1.0, y, 0.05);
-      box(dark, 1.0, 1.05, y, 0.085);
+      box(dark, 0.08, 0.6, y, 0.17);
+      box(mid, 0.5, 0.88, y, 0.15);
+      box(dark, 0.88, 1.08, y, 0.075);
+      box(dark, 1.08, 1.15, y, 0.115);
       box(dark, -0.14, 0.08, y, 0.09);
       box(mid, 0.34, 0.45, y + 0.12, 0.12);
-      box(light, 0.12, 0.8, y - 0.04, 0.024);
-      return { dark, mid, light, wood: null, grip: [[0.2, y + 0.05], [0.64, y - 0.02]], tip: 1.05 };
+      box(light, 0.12, 0.86, y - 0.05, 0.03);
+      return { dark, mid, light, wood: null, grip: [[0.2, y + 0.05], [0.64, y - 0.02]], tip: 1.15 };
     case 'awp':
-      box(dark, -0.16, 0.5, y, 0.14);
-      box(dark, 0.5, 1.42, y, 0.055);
-      box(dark, 1.42, 1.5, y, 0.095);
-      box(mid, 0.22, 0.68, y - 0.075, 0.075);
-      box(mid, 0.14, 0.22, y - 0.075, 0.1);
-      box(mid, 0.68, 0.76, y - 0.075, 0.12);
-      box(light, 0.24, 0.66, y - 0.09, 0.02);
-      return { dark, mid, light, wood: null, grip: [[0.14, y + 0.05], [0.58, y]], tip: 1.5 };
+      box(dark, -0.16, 0.5, y, 0.17);
+      box(dark, 0.5, 1.62, y, 0.075);
+      box(dark, 1.62, 1.72, y, 0.125);
+      box(mid, 0.22, 0.72, y - 0.09, 0.09);
+      box(mid, 0.14, 0.22, y - 0.09, 0.125);
+      box(mid, 0.72, 0.82, y - 0.09, 0.15);
+      box(light, 0.24, 0.7, y - 0.105, 0.025);
+      return { dark, mid, light, wood: null, grip: [[0.14, y + 0.05], [0.58, y]], tip: 1.72 };
     case 'knife': {
       dark.rect(0.3, 0.14, 0.13, 0.055);
-      light.moveTo(0.43, 0.12);
-      light.lineTo(0.7, 0.155);
-      light.lineTo(0.43, 0.205);
+      light.moveTo(0.43, 0.105);
+      light.lineTo(0.8, 0.155);
+      light.lineTo(0.43, 0.215);
       light.closePath();
-      return { dark, mid: null, light, wood: null, grip: [[0.34, 0.165], [0.08, -0.26]], tip: 0.7 };
+      return { dark, mid: null, light, wood: null, grip: [[0.34, 0.165], [0.08, -0.26]], tip: 0.8 };
     }
   }
 }
@@ -125,6 +125,11 @@ function gunOf(id: WeaponId): GunModel {
 export const muzzleReach = (w: WeaponId): number => gunOf(w).tip * BODY;
 
 function paintGun(g: CanvasRenderingContext2D, m: GunModel): void {
+  // 亮邊：深色槍身壓在深色地板上也看得到剪影
+  g.strokeStyle = 'rgba(255, 246, 228, 0.55)';
+  g.lineWidth = 0.05;
+  g.lineJoin = 'round';
+  g.stroke(m.dark);
   g.fillStyle = '#25222a';
   g.fill(m.dark);
   if (m.wood !== null) {
@@ -147,6 +152,10 @@ export function paintDroppedGun(g: CanvasRenderingContext2D, id: WeaponId, deg: 
   g.rotate((deg * Math.PI) / 180);
   g.scale(1.1, 1.1);
   const m = gunOf(id);
+  g.fillStyle = 'rgba(255, 250, 240, 0.42)';
+  g.beginPath();
+  g.ellipse(0, 0, m.tip * 0.62, 0.3, 0, 0, Math.PI * 2);
+  g.fill();
   g.translate(-m.tip / 2, -0.06);
   g.fillStyle = 'rgba(58, 38, 62, 0.4)';
   g.save();

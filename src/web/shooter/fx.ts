@@ -123,30 +123,29 @@ export function paintSmoke(g: CanvasRenderingContext2D, sx: number, sy: number, 
 
 // ───────── 火 ─────────
 
-/** 一格的火：焦痕交給外面畫，這裡是兩條跳動的火舌（紅底、橘身、亮芯） */
+/** 一格的火：焦痕交給外面畫，這裡是一條跳動的火舌（下圓上尖，紅底、橘身、亮芯）；彼此交疊成一片，中心高、邊緣低 */
 export function paintFlame(g: CanvasRenderingContext2D, cx: number, cy: number, size: number, cell: number, k: number, now: number): void {
-  for (let i = 0; i < 2; i++) {
-    const hx = hash2(cell, i, 31) - 0.5;
-    const hy = hash2(cell, i, 37) - 0.5;
-    const phase = hash2(cell, i, 41) * 6.28;
-    const f = 0.8 + 0.2 * Math.sin(now / 83 + phase);
-    const lift = (0.5 + 0.5 * Math.sin(now / 131 + phase)) * size * 0.12;
-    const x = cx + hx * size * 0.7;
-    const y = cy + hy * size * 0.7 - lift;
-    const r = size * (0.3 + 0.28 * k) * f;
-    g.fillStyle = 'rgba(229, 72, 77, 0.55)';
+  const hx = hash2(cell, 1, 31) - 0.5;
+  const hy = hash2(cell, 1, 37) - 0.5;
+  const phase = hash2(cell, 1, 41) * 6.28;
+  const f = 0.82 + 0.18 * Math.sin(now / 83 + phase);
+  const x = cx + hx * size * 0.6;
+  const y = cy + hy * size * 0.6;
+  const r = size * (0.46 + 0.42 * k) * f;
+  // 火舌頂端隨時間往左右擺
+  const sway = Math.sin(now / 131 + phase) * r * 0.32;
+  const tongue = (rr: number, dy: number, color: string): void => {
+    g.fillStyle = color;
     g.beginPath();
-    g.ellipse(x, y, r, r * 1.22, 0, 0, Math.PI * 2);
+    g.moveTo(x + sway * (rr / r), y + dy - rr * 1.75);
+    g.bezierCurveTo(x + rr * 0.3, y + dy - rr * 0.8, x + rr, y + dy - rr * 0.35, x + rr, y + dy + rr * 0.1);
+    g.arc(x, y + dy + rr * 0.1, rr, 0, Math.PI);
+    g.bezierCurveTo(x - rr, y + dy - rr * 0.35, x - rr * 0.3, y + dy - rr * 0.8, x + sway * (rr / r), y + dy - rr * 1.75);
     g.fill();
-    g.fillStyle = 'rgba(255, 150, 50, 0.85)';
-    g.beginPath();
-    g.ellipse(x, y + r * 0.12, r * 0.68, r * 0.88, 0, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = 'rgba(255, 235, 170, 0.9)';
-    g.beginPath();
-    g.ellipse(x, y + r * 0.26, r * 0.32, r * 0.44, 0, 0, Math.PI * 2);
-    g.fill();
-  }
+  };
+  tongue(r, 0, 'rgba(229, 72, 77, 0.62)');
+  tongue(r * 0.68, r * 0.2, 'rgba(255, 150, 50, 0.9)');
+  tongue(r * 0.34, r * 0.36, 'rgba(255, 235, 170, 0.95)');
 }
 
 // ───────── 手雷、爆炸 ─────────
@@ -213,10 +212,10 @@ export function paintBlast(g: CanvasRenderingContext2D, x: number, y: number, r:
   }
   const flashK = Math.max(0, 1 - k * 2.6);
   if (flashK > 0) {
-    const fr = r * (kind === 'flash' ? 1.1 : 0.85) * (0.6 + 0.4 * k);
+    const fr = r * (kind === 'flash' ? 1.25 : 1.05) * (0.75 + 0.6 * k);
     const fl = g.createRadialGradient(x, y, 0, x, y, fr);
     fl.addColorStop(0, `rgba(255, 252, 235, ${flashK})`);
-    fl.addColorStop(0.4, kind === 'flash' ? `rgba(255, 252, 235, ${0.8 * flashK})` : `rgba(255, 190, 90, ${0.9 * flashK})`);
+    fl.addColorStop(0.5, kind === 'flash' ? `rgba(255, 252, 235, ${0.85 * flashK})` : `rgba(255, 196, 96, ${0.95 * flashK})`);
     fl.addColorStop(1, 'rgba(255, 150, 60, 0)');
     g.fillStyle = fl;
     g.beginPath();
