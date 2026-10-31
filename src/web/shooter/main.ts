@@ -2,11 +2,12 @@
 // 主執行緒不持有引擎；玩家模式的畫面只來自觀察資料，觀戰模式才有全狀態。
 // 經營層觀戰（web/shooter.html#watch）：讀正式版寫的觀戰票（watch.ts），請 Worker 用請求單重跑那一場；外框換天使金、結束時對照存檔成績單、可回經營。
 // 回放下載：比賽結束後向 Worker 要回放（ShooterReplay JSON），可用 npx tsx src/cli/main.ts shooter replay 檔名 核對雜湊。
+// 兩隊等級：設定卡的兩個下拉 → setup.lineup；基準 Bot 第一次用到時在 Worker 裡編譯，等 meta 回來前顯示「載入基準 Bot…」。
 import type { BuyItem, ShooterCommand } from '../../shooter/api.ts';
 import { BuyMenu } from './buy.ts';
 import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
-import type { FromShooterWorker, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
+import type { BotLevel, FromShooterWorker, Lineup, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
 import { WATCH_HASH, readTicket, type WatchTicket } from './watch.ts';
 import { DAMAGE_MS, HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type DamagePop, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
@@ -20,6 +21,43 @@ let worker: Worker | null = null;
 let game: Game | null = null;
 /** 經營層觀戰的票（#watch 開啟時才有） */
 let ticket: WatchTicket | null = null;
+
+/** 下拉的選項（value：practice 或版本號） */
+const LEVELS: readonly { readonly value: string; readonly name: string; readonly hint: string }[] = [
+  { value: 'practice', name: '陪練 v5', hint: '對照組：會買槍打包，但沒有指揮與輪轉；反應固定最短，對上基準 Bot 不算弱' },
+  { value: '1', name: '基準 v1', hint: '有指揮、喊話與輪轉，基準裡瞄準與反應最慢' },
+  { value: '2', name: '基準 v2', hint: '屬性比角色基準低一級' },
+  { value: '3', name: '基準 v3', hint: '角色基準屬性，中段選手' },
+  { value: '4', name: '基準 v4', hint: '屬性比角色基準高一級' },
+  { value: '5', name: '基準 v5', hint: '基準裡反應最快，經營層的頂級選手' },
+];
+
+function levelOf(value: string | null): BotLevel {
+  const v = Number(value);
+  return v === 1 || v === 2 || v === 3 || v === 4 || v === 5 ? { kind: 'baseline', version: v } : { kind: 'practice' };
+}
+
+function selectedLineup(): Lineup {
+  return { team: levelOf($<HTMLSelectElement>('level-team').value), enemy: levelOf($<HTMLSelectElement>('level-enemy').value) };
+}
+
+/** 設定卡跟著選項：標題（觀戰時是 T 側／CT 側）、每個下拉的說明、種子旁那行 */
+function syncLineupCard(): void {
+  const spectate = $<HTMLInputElement>('spectate').checked;
+  const [teamName, enemyName] = spectate ? ['T 側（0～4）', 'CT 側（5～9）'] : ['我方隊友', '對手'];
+  const level = (id: string): (typeof LEVELS)[number] => LEVELS.find((l) => l.value === $<HTMLSelectElement>(id).value) ?? LEVELS[0];
+  $('level-team-label').textContent = teamName;
+  $('level-enemy-label').textContent = enemyName;
+  $('level-team-hint').textContent = level('level-team').hint;
+  $('level-enemy-hint').textContent = level('level-enemy').hint;
+  $('lineup-note').textContent = `${teamName} ${level('level-team').name}、${enemyName} ${level('level-enemy').name}；同一個種子＋同樣的操作，結果一樣`;
+}
+
+/** 開始後等 Worker 回 meta：基準 Bot 第一次要編譯，不讓畫面看起來卡住，也不讓人重按 */
+function setLoading(on: boolean): void {
+  $('start-status').classList.toggle('hidden', !on);
+  $<HTMLButtonElement>('start').disabled = on;
+}
 
 class Game {
   readonly meta: ShooterMeta;
@@ -121,7 +159,7 @@ class Game {
       const act = (e.target as HTMLElement).closest('button')?.dataset.act;
       if (act === 'again') {
         if (ticket !== null) startWatch(ticket);
-        else start({ team: meta.spectate ? 'T' : meta.playerId < 5 ? 'T' : 'CT', seed: randomSeed(), spectate: meta.spectate });
+        else start({ team: meta.spectate ? 'T' : meta.playerId < 5 ? 'T' : 'CT', seed: randomSeed(), spectate: meta.spectate, lineup: meta.lineup });
       } else if (act === 'home') home();
       else if (act === 'replay') this.post({ type: 'getReplay' });
     });
@@ -328,6 +366,7 @@ function ensureWorker(): Worker {
     const msg = ev.data;
     switch (msg.type) {
       case 'meta':
+        setLoading(false);
         game?.dispose();
         game = new Game(msg.meta, (m) => w.postMessage(m));
         break;
@@ -341,6 +380,7 @@ function ensureWorker(): Worker {
         game?.saveReplay(msg.replay);
         break;
       case 'error':
+        setLoading(false);
         console.error(msg.message);
         alert(`引擎錯誤：${msg.message}`);
         break;
@@ -352,6 +392,7 @@ function ensureWorker(): Worker {
 }
 
 function start(s: ShooterSetup): void {
+  if (s.lineup?.team.kind === 'baseline' || s.lineup?.enemy.kind === 'baseline') setLoading(true);
   ensureWorker().postMessage({ type: 'start', setup: s } satisfies ToShooterWorker);
 }
 
@@ -397,6 +438,13 @@ function init(): void {
     else $('setup').innerHTML = '<section class="card"><h2>沒有要觀戰的比賽</h2><p class="muted">從經營頁（web/game.html）比賽日的結果畫面或聯賽頁點「觀戰」，會在這裡重播那一場。</p><div class="row"><a class="primary" href="./game.html">回經營頁</a><a href="./shooter.html">攻防戰試玩</a></div></section>';
     return;
   }
+  for (const id of ['level-team', 'level-enemy']) {
+    const sel = $<HTMLSelectElement>(id);
+    sel.innerHTML = LEVELS.map((l) => `<option value="${l.value}">${l.name}</option>`).join('');
+    sel.addEventListener('change', syncLineupCard);
+  }
+  $('spectate').addEventListener('change', syncLineupCard);
+  syncLineupCard();
   const seed = $<HTMLInputElement>('seed');
   seed.value = String(randomSeed());
   $('reroll').addEventListener('click', () => {
@@ -407,14 +455,14 @@ function init(): void {
     if ($<HTMLInputElement>('fullscreen').checked) enterFullscreen();
     const team = (document.querySelector('input[name="team"]:checked') as HTMLInputElement | null)?.value === 'CT' ? 'CT' : 'T';
     const n = Number(seed.value);
-    start({ team, seed: Number.isFinite(n) && n >= 0 ? Math.floor(n) : randomSeed(), spectate: $<HTMLInputElement>('spectate').checked });
+    start({ team, seed: Number.isFinite(n) && n >= 0 ? Math.floor(n) : randomSeed(), spectate: $<HTMLInputElement>('spectate').checked, lineup: selectedLineup() });
   });
-  // 除錯與自動驗收用：網址帶 ?auto=T|CT&seed=N 直接開局；&loadout=awp 讓雙方開局拿該武器（測狙擊鏡用）
+  // 除錯與自動驗收用：網址帶 ?auto=T|CT&seed=N 直接開局；&loadout=awp 讓雙方開局拿該武器（測狙擊鏡用）；&mate=3&foe=5 選基準版本（不帶＝陪練）
   const q = new URLSearchParams(location.search);
   const auto = q.get('auto');
   const loadout = q.get('loadout');
   const weapon = loadout === 'awp' || loadout === 'ak' || loadout === 'm4' || loadout === 'smg' || loadout === 'shotgun' ? loadout : undefined;
-  if (auto === 'T' || auto === 'CT' || auto === 'spectate') start({ team: auto === 'CT' ? 'CT' : 'T', seed: Number(q.get('seed') ?? randomSeed()), spectate: auto === 'spectate', loadout: weapon });
+  if (auto === 'T' || auto === 'CT' || auto === 'spectate') start({ team: auto === 'CT' ? 'CT' : 'T', seed: Number(q.get('seed') ?? randomSeed()), spectate: auto === 'spectate', loadout: weapon, lineup: { team: levelOf(q.get('mate')), enemy: levelOf(q.get('foe')) } });
 }
 
 init();
