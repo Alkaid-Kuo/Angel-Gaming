@@ -6,12 +6,23 @@ import type { MatchOutcome, MatchRequest } from '../../manage/gateway.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
 import type { GrenadeInfo, MapInfo, RoundEndReason, RulesInfo, ShooterCommand, ShooterObservation, SoundEvent, Team, WeaponInfo, WeaponId, GrenadeId } from '../../shooter/api.ts';
 
+/** 一隊 Bot 的等級：陪練 v5（對照組），或基準 Bot 的版本 1～5 */
+export type BotLevel = { readonly kind: 'practice' } | { readonly kind: 'baseline'; readonly version: 1 | 2 | 3 | 4 | 5 };
+
+/** 試玩的兩隊等級。team：人類那一隊的隊友、enemy：對手；觀戰模式 team 是 T 側（0～4）、enemy 是 CT 側（5～9） */
+export interface Lineup {
+  readonly team: BotLevel;
+  readonly enemy: BotLevel;
+}
+
 export interface ShooterSetup {
   /** 玩家開局的陣營（T = playerId 0、CT = playerId 5；半場換邊後陣營互換） */
   readonly team: Team;
   readonly seed: number;
-  /** 觀戰模式：不參賽，10 隻陪練 Bot 互打，畫面讀引擎全狀態 */
+  /** 觀戰模式：不參賽，10 隻 Bot 互打，畫面讀引擎全狀態 */
   readonly spectate: boolean;
+  /** 沒帶＝兩邊陪練 */
+  readonly lineup?: Lineup;
   /** 除錯用（只有網址 ?auto=…&loadout=awp 會帶）：雙方開局主武器 */
   readonly loadout?: WeaponId;
 }
@@ -61,6 +72,8 @@ export interface ShooterMeta {
   readonly grenades: readonly GrenadeInfo[];
   /** 經營層觀戰才有 */
   readonly watch?: WatchInfo;
+  /** 試玩有選等級才有（「再來一場」沿用） */
+  readonly lineup?: Lineup;
 }
 
 /** 計分板一列（公開資訊）：敵人的金錢在比賽中為 null */
@@ -139,9 +152,12 @@ export interface ShooterSummary {
   readonly outcome?: MatchOutcome;
 }
 
+/** 下載的回放：試玩有基準 Bot 座位時，頂層多一欄依 playerId 的等級（「你」「陪練 v5」「基準 v3」）；重播用不到 */
+export type TrialReplay = ShooterReplay & { readonly lineup?: readonly string[] };
+
 export type FromShooterWorker =
   | { readonly type: 'meta'; readonly meta: ShooterMeta }
   | { readonly type: 'frame'; readonly frame: ShooterFrame }
   | { readonly type: 'over'; readonly summary: ShooterSummary }
-  | { readonly type: 'replay'; readonly replay: ShooterReplay }
+  | { readonly type: 'replay'; readonly replay: TrialReplay }
   | { readonly type: 'error'; readonly message: string };

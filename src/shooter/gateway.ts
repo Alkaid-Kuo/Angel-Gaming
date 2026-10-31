@@ -11,12 +11,14 @@
 // 確定性：控制器關掉逾時判定（timeLimits: false），結果只由程式碼與種子決定；Bot 例外仍算「該次無指令」。
 // 觀戰回放（步驟 9）：可玩版的觀戰 Worker 用同一個 gatewayDriverOptions 建 ShooterDriver、逐 tick 推進，
 // 所以重播與經營層當時打的那一場是同一場（成績單與終局雜湊相同，test/manage-shooter.test.ts）。
+// 試玩頁的基準 Bot 座位（src/web/shooter/lineup.ts）也呼叫 seatOf、seatController、seatKnobs，座位邏輯只有這一份。
 import type { MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec } from '../manage/gateway.ts';
+import type { KnobValues } from '../api/types.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
 import type { Attributes } from './api.ts';
 import { TEAM_SIZE } from './config.ts';
-import { MAPS } from './map.ts';
+import { MAPS, type ShooterMap } from './map.ts';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES, type ShooterRole } from './players.ts';
 import { ShooterBatchController, runShooterMatch, type ShooterReplay, type ShooterRunOptions } from './runner.ts';
 import { PLAYER_COUNT, type ShooterMatch, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
@@ -59,6 +61,16 @@ export function seatOf(p: PlayerSpec): GatewaySeat {
   const a = d.attributes;
   const attributes: Attributes = { ...a, aim: clamp(a.aim + shift, 0, 100), reaction: clamp(a.reaction + shift, 0, 100), awareness: clamp(a.awareness + shift, 0, 100) };
   return { role, attributes, knobs: { role: Number(d.knobs.role) }, reactionTicks: reactionTicksFor(attributes) };
+}
+
+/** 座位的控制器：關掉逾時判定，結果只由程式碼與種子決定；pid 0～4 標 A、5～9 標 B */
+export function seatController(bot: CompiledBot, seed: number, pid: number, map: ShooterMap): ShooterBatchController {
+  return new ShooterBatchController(bot, pid < TEAM_SIZE ? 'A' : 'B', seed, pid, map, { timeLimits: false });
+}
+
+/** 座位的旋鈕：只給選手宣告過的旋鈕（基準 Bot 有 role） */
+export function seatKnobs(c: ShooterBatchController, seat: GatewaySeat): KnobValues {
+  return resolveKnobs(c.declaration, c.declaration.knobs.some((k) => k.key === 'role') ? seat.knobs : {}, c.label);
 }
 
 export function formatOf(id: string): MatchFormat {
@@ -116,9 +128,8 @@ export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, op
   }
   const seats = [...request.a.players, ...request.b.players].map(seatOf);
   const map = MAPS[GATEWAY_MAP_ID]();
-  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(bot, pid < TEAM_SIZE ? 'A' : 'B', request.seed, pid, map, { timeLimits: false }));
-  // 只給選手宣告過的旋鈕（基準 Bot 有 role）
-  const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, c.declaration.knobs.some((k) => k.key === 'role') ? seats[pid].knobs : {}, c.label));
+  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => seatController(bot, request.seed, pid, map));
+  const knobs = controllers.map((c, pid) => seatKnobs(c, seats[pid]));
   const fo = FORMAT_OPTIONS[format.id] ?? {};
   return { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), record: opts.record === true, ...fo };
 }
