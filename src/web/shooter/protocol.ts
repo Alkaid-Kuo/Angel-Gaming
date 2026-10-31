@@ -111,6 +111,9 @@ export interface FullPlayer {
   readonly scoped: boolean;
   /** 最近 3 tick 內開過火（畫槍口火光） */
   readonly firing: boolean;
+  /** 模型兵的姿勢（畫面用） */
+  readonly crouching?: boolean;
+  readonly working?: boolean;
 }
 
 export interface FullState {

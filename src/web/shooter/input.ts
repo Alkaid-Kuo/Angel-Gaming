@@ -30,6 +30,9 @@ export interface InputHost {
   zoom(step: number): void;
   /** 觀戰模式：全圖透視、播放速度 */
   toggleXray(): void;
+  /** 觀戰模式：全圖鏡頭、戰術疊層 */
+  toggleOverview(): void;
+  toggleTactical(): void;
   speed(step: number): void;
   /** 觀戰模式：跳到下一回合 */
   skipRound(): void;
@@ -194,6 +197,12 @@ export class ShooterInput {
         return;
       case 'KeyX':
         this.host.toggleXray();
+        return;
+      case 'KeyM':
+        this.host.toggleOverview();
+        return;
+      case 'KeyT':
+        this.host.toggleTactical();
         return;
       case 'Space':
         if (this.host.meta.spectate) {

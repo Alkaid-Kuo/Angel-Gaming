@@ -37,7 +37,7 @@ export class BuyMenu {
       ...meta.weapons.filter((w) => w.teams.length > 0 && w.slot === 'primary').map((w) => ({ id: w.id, name: w.name, group: gName.primary, price: w.price, teams: w.teams })),
       { id: 'armor', name: '護甲', group: '裝備', price: rules.armorPrice, teams: ['T', 'CT'] },
       // 彈藥不會在回合間自動補；買一次補滿主武器與手槍的備彈（都滿就不扣錢）
-      { id: 'ammo', name: '彈藥（補滿備彈）', group: '裝備', price: rules.ammoPrice, teams: ['T', 'CT'] },
+      { id: 'ammo', name: '補滿彈藥', group: '裝備', price: rules.ammoPrice, teams: ['T', 'CT'] },
       { id: 'kit', name: '拆彈器', group: '裝備', price: rules.kitPrice, teams: ['CT'] },
       ...meta.grenades.map((g) => ({ id: g.id, name: g.name, group: '道具', price: g.price, teams: g.teams })),
     ];
