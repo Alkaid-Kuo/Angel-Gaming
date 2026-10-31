@@ -2,7 +2,7 @@
 // 第一張圖「沙城」參照 Dust2：北為 CT、南為 T，中路南北直線，A 長在東、B 通道在西（v0.5 起只供引擎測試）。
 // 第二張圖「赤岩鎮」（v0.5 預設）只借三路骨架，格局原創；用多邊形做斜牆、加矮牆。
 // 座標：格為單位的整數矩形，含 x0/y0、不含 x1/y1。1 格 = 1 公尺 = UNIT 座標單位。
-import redrock2File from '../../maps/shooter/redrock2-v3.json' with { type: 'json' };
+import redrock2File from '../../maps/shooter/redrock2-v4.json' with { type: 'json' };
 import type { MapInfo, MapRegion } from './api.ts';
 import { TEAM_SIZE, UNIT, type Team } from './config.ts';
 
@@ -27,8 +27,11 @@ export interface MapLayout {
   readonly name: string;
   readonly width: number;
   readonly height: number;
-  /** 依序挖開的區域（代號＝ callout） */
-  readonly areas: readonly (Rect & { readonly id: string; readonly name: string; readonly material?: MapMaterial })[];
+  /**
+   * 依序挖開的區域（代號＝ callout）。callout：這個框併進哪個區域（門洞、轉角），regions 裡用那個區域的代號與名稱，
+   * 框本身留著，所以格子與 Bot 的路線圖都不變；主區域要排在併進來的框前面（選手用代號找區域時拿到第一個框）
+   */
+  readonly areas: readonly (Rect & { readonly id: string; readonly name: string; readonly material?: MapMaterial; readonly callout?: string })[];
   /** 挖開之後再填回去的實心（箱子、柱子） */
   readonly blocks: readonly Rect[];
   /**
@@ -321,7 +324,11 @@ export function buildMap(layout: MapLayout): ShooterMap {
     sites: layout.sites,
     spawnZones: layout.spawnZones,
     spawns: layout.spawns,
-    regions: layout.areas.map((a) => ({ id: a.id, name: a.name, x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1 })),
+    regions: layout.areas.map((a) => {
+      const c = a.callout === undefined ? a : layout.areas.find((o) => o.id === a.callout);
+      if (c === undefined) throw new Error(`地圖 ${layout.id}：區域 ${a.id} 併入的 ${a.callout} 不存在`);
+      return { id: c.id, name: c.name, x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1 };
+    }),
   };
 }
 

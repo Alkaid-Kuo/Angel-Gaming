@@ -163,6 +163,20 @@ describe('赤岩舊城（編輯器的 JSON 進引擎）', () => {
     expect(map.name).toBe('赤岩舊城');
   });
 
+  it('併入的框用主區域的代號與名稱，主區域排在最前面，代號定案不改', () => {
+    const map = MAPS.redrock2();
+    expect(REDROCK2_LAYOUT.areas.length).toBeGreaterThan(24);
+    const ids = [...new Set(map.regions.map((r) => r.id))];
+    expect(ids).toEqual(['tSpawn', 'market', 'marketNorth', 'cellarHall', 'cellarMouth', 'sideAlley', 'tMid', 'mid', 'eastRamp', 'plaza', 'arch', 'eastLane', 'eastGate', 'eastStore', 'eastYard', 'longHall', 'belfry', 'bellYard', 'aSite', 'bSite', 'ctSpawn', 'northSt', 'ctRampW', 'ctEast']);
+    const door = REDROCK2_LAYOUT.areas.find((a) => a.id === 'bGate')!;
+    expect(regionsAt(map, door.x0 * UNIT + UNIT / 2, door.y0 * UNIT + UNIT / 2)[0]).toBe('ctRampW');
+    for (const id of ids) expect(REDROCK2_LAYOUT.areas.find((a) => a.id === id)?.material).toBeDefined();
+  });
+
+  it('併入不存在的區域會在建圖時擋下', () => {
+    expect(() => buildMap({ ...REDROCK2_LAYOUT, areas: [...REDROCK2_LAYOUT.areas, { id: 'x', name: 'x', x0: 50, y0: 50, x1: 51, y1: 51, callout: 'nowhere' }] })).toThrow('nowhere');
+  });
+
   it('有斜切格，選手資料的地圖代號與區域跟著走', () => {
     const map = MAPS.redrock2();
     expect(map.solid.some((v) => v >= 3)).toBe(true);

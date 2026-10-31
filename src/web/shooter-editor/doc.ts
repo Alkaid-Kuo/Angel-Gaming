@@ -1,6 +1,6 @@
 // 地圖編輯器的文件：就是可改動的 MapLayout，存出去的 JSON 能直接餵給 buildMap。
 import type { Team } from '../../shooter/config.ts';
-import type { MapLayout } from '../../shooter/map.ts';
+import type { MapLayout, MapMaterial } from '../../shooter/map.ts';
 
 export interface MRect {
   x0: number;
@@ -11,6 +11,10 @@ export interface MRect {
 export interface MArea extends MRect {
   id: string;
   name: string;
+  /** 地面材質（畫面用，引擎不讀） */
+  material?: MapMaterial;
+  /** 併進哪個區域；畫面與 Bot 喊話用那個區域的代號與名稱 */
+  callout?: string;
 }
 export interface MSite extends MRect {
   id: 'A' | 'B';

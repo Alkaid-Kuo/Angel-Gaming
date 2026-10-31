@@ -29,6 +29,18 @@ describe('地圖檢查', () => {
     const checks = analyze(doc, buildMap(doc));
     expect(checks.filter((c) => c.level === 'fail')).toEqual([]);
     expect(deadEnds(doc, buildMap(doc))).toEqual([]);
+    expect(checks.find((c) => c.label === '正式區域')?.level).toBe('info');
+  });
+
+  it('併入的框要指到排在前面的主區域', () => {
+    const doc = toDoc(REDROCK_LAYOUT);
+    const level = (): string => analyze(doc, buildMap(doc)).find((c) => c.label === '區域併入')!.level;
+    expect(level()).toBe('ok');
+    doc.areas[0].callout = doc.areas[1].id;
+    expect(level()).toBe('fail');
+    delete doc.areas[0].callout;
+    doc.areas[1].callout = doc.areas[0].id;
+    expect(level()).toBe('ok');
   });
 
   it('只有一個門的房間算死路，連門洞一起', () => {
