@@ -251,19 +251,24 @@ function commit(): void {
     if (undoStack.length > 300) undoStack.shift();
     redoStack = [];
     snapshot = now;
-    try {
-      localStorage.setItem(AUTOSAVE_KEY, formatDoc(doc));
-    } catch {
-      // 瀏覽器不給存就算了，手動存檔不受影響
-    }
+    autosave();
   }
   refresh();
+}
+
+function autosave(): void {
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, formatDoc(doc));
+  } catch {
+    // 瀏覽器不給存就算了，手動存檔不受影響
+  }
 }
 
 function restore(text: string): void {
   doc = JSON.parse(text) as EditDoc;
   snapshot = text;
   selection = [];
+  autosave();
   refresh();
 }
 
@@ -291,6 +296,7 @@ function loadDoc(d: EditDoc): void {
   measure = { a: null, b: null, path: [], cells: 0 };
   sightPinned = false;
   sightFrom = null;
+  autosave();
   refresh();
   fit();
 }
@@ -1304,7 +1310,11 @@ async function start(): Promise<void> {
     }
   }
   loadDoc(first);
-  if (restored) $('dirty').textContent = '已還原上次的編輯';
+  if (restored) {
+    savedSnapshot = '';
+    renderTop();
+    $('dirty').textContent = '已還原上次的編輯，尚未存檔';
+  }
 }
 
 void start();
