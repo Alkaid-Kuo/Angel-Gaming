@@ -47,7 +47,7 @@ export interface GameKind {
 
 /** 可選的項目（內容包）；第一個是預設 */
 export const GAME_KINDS: readonly GameKind[] = [
-  { content: SHOOTER_CONTENT, name: '攻防戰', desc: '5v5 攻防射擊，基準 Bot 依角色、版本、習慣真打（一週約 20～40 秒模擬，打完的比賽可以觀戰）' },
+  { content: SHOOTER_CONTENT, name: '攻防戰', desc: '5v5 攻防射擊，基準 Bot 依角色、版本、習慣真打（一週約 10 秒模擬，打完的比賽可以觀戰）' },
   { content: STUB_CONTENT, name: '軍團戰（暫代）', desc: '3 人名單，假比賽依隱藏強度擲骰（瞬間出結果）' },
 ];
 

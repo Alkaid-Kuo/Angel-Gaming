@@ -18,7 +18,7 @@ import { runMatch } from '../sandbox/runner.ts';
 import { TPS as SHOOTER_TPS, WEAPONS, WEAPON_IDS, type Team, type WeaponId } from '../shooter/config.ts';
 import { DEFAULT_MAP_ID, MAPS as SHOOTER_MAPS, cellOf as shooterCellOf, dumpAscii, inRect as shooterInRect } from '../shooter/map.ts';
 import { derivePlayer, type ShooterPlayerSpec } from '../shooter/players.ts';
-import { ShooterBatchController, ShooterDriver, driverPlayers, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOutput } from '../shooter/runner.ts';
+import { ShooterBatchController, ShooterDriver, driverPlayers, replayVersionError, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOutput } from '../shooter/runner.ts';
 import { PLAYER_COUNT, type ShooterMatch } from '../shooter/sim.ts';
 import { renderPng } from './png.ts';
 import { eloFromWins, gameOutput, summarize, type BotInfo, type GameOutput } from './stats.ts';
@@ -627,6 +627,8 @@ function cmdShooterReplay(file: string | undefined, args: Args): void {
     throw new ArgError(`無法讀取回放 ${file}：${(e as Error).message}`);
   }
   if (replay.kind !== 'shooter') throw new ArgError(`${file} 不是射擊回放`);
+  const stale = replayVersionError(replay.header.engineVersion);
+  if (stale !== null) throw new ArgError(`${file}：${stale}`);
   const t0 = performance.now();
   const r = runShooterReplay(replay);
   const expected = replay.result?.finalHash ?? null;

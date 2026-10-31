@@ -71,7 +71,7 @@ npm run serve:lan
 
 - **試玩**：`npm run web` 後開 <http://localhost:5173/web/shooter.html>（首頁也有入口）。選 T 或 CT 與 9 隻 Bot 打，隊友與對手各自可選陪練或基準 Bot 版本 1～5；勾「觀戰模式」看 10 隻 Bot 互打（暫停、0.5～8 倍速、N 跳到下一回合）。試玩是 MR12、凍結 10 秒，觀戰是 Bot 對打、凍結 3 秒。打完可「下載回放」。
 - **地圖**：正式地圖是赤岩舊城（代號 `redrock`，`maps/shooter/redrock.json`），地圖規格書在 [docs/2026-11-01_CS射擊_地圖規格書.md](docs/2026-11-01_CS射擊_地圖規格書.md)。編輯器在 <http://localhost:5173/web/shooter-map-editor.html>，存檔進 `maps/shooter/`；改完用 `node scripts/shooter-eval.ts --a bots/shooter-baseline.js --b bots/shooter-baseline.js --lineup 3 --layout maps/shooter/檔名.json --games 100` 跑大樣本，要進遊戲就在 `src/shooter/map.ts` 的 `LAYOUTS` 登錄，並加進 `web/shooter.html` 的地圖下拉。
-- **經營與看比賽**：開 <http://localhost:5173/web/game.html>，創立戰隊時選「攻防戰」。每週的比賽在 Web Worker 裡由基準 Bot 依選手的角色、版本、習慣真打（一週約 10～25 秒）。結果畫面與聯賽頁的每一場都有「觀戰」：用存檔裡的請求單重跑那一場，比分與成績單逐回合對照。
+- **經營與看比賽**：開 <http://localhost:5173/web/game.html>，創立戰隊時選「攻防戰」。每週的比賽在 Web Worker 裡由基準 Bot 依選手的角色、版本、習慣真打（一週約 10 秒）。結果畫面與聯賽頁的每一場都有「觀戰」：用存檔裡的請求單重跑那一場，比分與成績單逐回合對照。
 - **CLI**：
 
 ```bash
