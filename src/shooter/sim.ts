@@ -285,6 +285,8 @@ export interface ShooterMatchOptions {
   readonly winRounds?: number;
   /** 加時規則（預設 ROUND.overtime）；false = 不加時，正規平手就平手結束（短賽制測試用） */
   readonly overtime?: false | OvertimeRules;
+  /** 凍結時間（tick，規則 1.2；預設 ROUND.freezeTicks） */
+  readonly freezeTicks?: number;
 }
 
 /** 該半場玩家 0～4（組 0）是否為 T：上半場 T、下半場 CT；每段加時開始不換邊、段內換邊（半場 1 T、2 CT、3 CT、4 T、5 T、6 CT…） */
@@ -546,7 +548,7 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 export const DEFAULT_ATTRIBUTES: Attributes = Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, 50])) as unknown as Attributes;
 
 /** 開局資料（JSON 安全） */
-export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney' | 'overtime'> & { readonly reactionTicks?: number } = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
+export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney' | 'overtime' | 'freezeTicks'> & { readonly reactionTicks?: number } = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
   const group = playerId < TEAM_SIZE ? 0 : 1;
   const ids = Array.from({ length: PLAYER_COUNT }, (_, i) => i);
   return {
@@ -576,7 +578,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
       roundsPerHalf: opts.roundsPerHalf ?? ROUND.roundsPerHalf,
       winRounds: opts.winRounds ?? ROUND.winRounds,
       overtime: opts.overtime === false ? false : { ...(opts.overtime ?? ROUND.overtime) },
-      freezeTicks: ROUND.freezeTicks,
+      freezeTicks: opts.freezeTicks ?? ROUND.freezeTicks,
       buyTicks: ROUND.buyTicks,
       roundTicks: ROUND.roundTicks,
       bombTicks: ROUND.bombTicks,
@@ -660,6 +662,7 @@ export class ShooterMatch {
   readonly winRounds: number;
   /** 加時規則；null = 不加時 */
   readonly overtimeRule: OvertimeRules | null;
+  readonly freezeTicks: number;
   readonly defaultLoadout: Partial<Record<Team, WeaponId>>;
   readonly defaultArmor: number;
   readonly startMoney: number;
@@ -712,6 +715,7 @@ export class ShooterMatch {
     this.roundsPerHalf = opts.roundsPerHalf ?? ROUND.roundsPerHalf;
     this.winRounds = opts.winRounds ?? ROUND.winRounds;
     this.overtimeRule = opts.overtime === false ? null : (opts.overtime ?? ROUND.overtime);
+    this.freezeTicks = opts.freezeTicks ?? ROUND.freezeTicks;
     this.defaultLoadout = opts.defaultLoadout ?? {};
     this.defaultArmor = opts.defaultArmor ?? 0;
     this.startMoney = opts.startMoney ?? ECONOMY.startMoney;
@@ -828,7 +832,7 @@ export class ShooterMatch {
     this.fullBuy = null;
     this.phase = 'freeze';
     this.roundStartTick = this.tick;
-    this.phaseEnd = this.tick + ROUND.freezeTicks;
+    this.phaseEnd = this.tick + this.freezeTicks;
     this.ended = null;
   }
 
@@ -1930,7 +1934,7 @@ export class ShooterMatch {
     };
   }
 
-  /** 可購買：活著、人在出生區、回合開始（凍結開始）後 buyTicks 內（CS 的 mp_buytime；凍結 15 秒＋開打後 5 秒） */
+  /** 可購買：活著、人在出生區、回合開始（凍結開始）後 buyTicks 內（CS 的 mp_buytime；不隨凍結時間變動） */
   canBuy(p: Player): boolean {
     if (!p.alive || (this.phase !== 'freeze' && this.phase !== 'live')) return false;
     if (this.tick - this.roundStartTick >= ROUND.buyTicks) return false;

@@ -4,7 +4,7 @@
 //   版本單調：均衡陣容（五角色各一）版本 1～5 對版本 3
 //   五狙：五個狙擊手（版本 3）對均衡陣容版本 3
 //   陪練：均衡陣容版本 3 對陪練 v5（全 50）
-// 用法：node scripts/shooter-gradient.ts [--seeds 10] [--jobs 4] [--only attr,style,version,awp,practice] [--maps redrock,dust] [--out out/shooter-gradient.json]
+// 用法：node scripts/shooter-gradient.ts [--format shooter-mr6] [--no-limits] [--seeds 10] [--jobs 4] [--only attr,style,version,awp,practice] [--maps redrock,dust] [--out out/shooter-gradient.json]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { AttributeKey } from '../src/shooter/config.ts';

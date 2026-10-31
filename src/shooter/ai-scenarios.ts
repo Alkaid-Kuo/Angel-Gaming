@@ -28,7 +28,10 @@ export interface AiScenario {
 
 /** 每個情境固定跑這 5 個種子，全過才算過 */
 export const AI_SCENARIO_SEEDS: readonly number[] = [1, 2, 3, 4, 5];
-const MAP_ID = 'redrock';
+/** 單兵情境的地圖（腳本 --solo-map 換） */
+let MAP_ID = 'redrock';
+/** 情境的凍結時間（預設 Bot 對打；腳本 --freeze 換） */
+let scenarioFreeze: number = ROUND.botFreezeTicks;
 
 type Script = (obs: ShooterObservation) => readonly ShooterCommand[];
 const idle: Script = () => [];
@@ -245,13 +248,13 @@ function driver(bot: CompiledBot, s: Setup): ShooterDriver {
   const now = (): number => d?.match.tick ?? 0;
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => (s.seats.includes(pid) ? new SpyController(bot, s.seed, pid, map, s.log, now) : s.opp?.seats.includes(pid) === true ? new ShooterBatchController(s.opp.bot, 'opponent', s.seed, pid, map) : new ScriptController(`script-${pid}`, s.scripts?.[pid] ?? idle)));
   const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, c instanceof SpyController ? { ...s.knobs, ...s.seatKnobs?.[pid] } : undefined, c.label));
-  d = new ShooterDriver({ seed: s.seed, mapId, ...s.opts, controllers, knobs, record: false });
+  d = new ShooterDriver({ seed: s.seed, mapId, freezeTicks: scenarioFreeze, ...s.opts, controllers, knobs, record: false });
   if (s.alive !== undefined) killExcept(d.match, s.alive);
   return d;
 }
 
 function toLive(d: ShooterDriver): void {
-  for (let i = 0; i < ROUND.freezeTicks + 5 && d.match.phase !== 'live'; i++) d.step();
+  for (let i = 0; i < ROUND.roundEndTicks + d.match.freezeTicks + 5 && d.match.phase !== 'live'; i++) d.step();
 }
 
 /** 跑 n 個 tick，每個 tick 之後呼叫 each（回傳 true 就停） */
@@ -1757,8 +1760,10 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
 export const AI_SCENARIOS: readonly AiScenario[] = [...SOLO_SCENARIOS, ...TEAM_SCENARIOS, ...ROLE_SCENARIOS];
 
 /** 跑一組情境（每個 5 個種子）；filter 只跑指定的情境 */
-export function runAiScenarios(bot: CompiledBot, filter?: (id: string) => boolean, opponent?: CompiledBot, maps?: readonly string[]): { id: string; name: string; pass: boolean; detail: string }[] {
+export function runAiScenarios(bot: CompiledBot, filter?: (id: string) => boolean, opponent?: CompiledBot, maps?: readonly string[], o: { readonly soloMap?: string; readonly freezeTicks?: number } = {}): { id: string; name: string; pass: boolean; detail: string }[] {
   if (maps !== undefined) teamMaps = maps;
+  if (o.soloMap !== undefined) MAP_ID = o.soloMap;
+  if (o.freezeTicks !== undefined) scenarioFreeze = o.freezeTicks;
   const out: { id: string; name: string; pass: boolean; detail: string }[] = [];
   for (const s of AI_SCENARIOS) {
     if (filter !== undefined && !filter(s.id)) continue;

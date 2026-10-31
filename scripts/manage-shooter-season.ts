@@ -1,4 +1,4 @@
-// 攻防戰經營整季驗證（步驟 8）：射擊內容包＋真閘道（正式賽制 shooter-mr12），六種自動玩家策略各打一個賽段（同一個種子＝同一個聯賽），
+// 攻防戰經營整季驗證（步驟 8）：射擊內容包＋真閘道（聯賽賽制，見 SHOOTER_CONTENT.formatId），六種自動玩家策略各打一個賽段（同一個種子＝同一個聯賽），
 // 外加一次「第 k 週存檔、讀檔後打完」與 passive 不中斷的結果比對。每個工作一個 worker 平行跑。
 // 檢查：沒有例外、帳本與資金恆等、Elo 總分守恆、32 場都有結果；輸出名次、現金、耗時、每回合平均耗時（填回 SHOOTER_FORMATS 的 estMsPerRound）。
 // 用法：node scripts/manage-shooter-season.ts [--seed 2026] [--resume-week 4] [--out out/manage-shooter-season.json]

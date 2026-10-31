@@ -72,7 +72,7 @@ function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string
   overSent = false;
   const m = d.match;
   // 規則照這場的賽制（短賽制的半場長度、加時與否）
-  const init = shooterInitData(m.map, playerId, {}, { roundsPerHalf: m.roundsPerHalf, winRounds: m.winRounds, overtime: m.overtimeRule ?? false });
+  const init = shooterInitData(m.map, playerId, {}, { roundsPerHalf: m.roundsPerHalf, winRounds: m.winRounds, overtime: m.overtimeRule ?? false, freezeTicks: m.freezeTicks });
   post({
     type: 'meta',
     meta: {

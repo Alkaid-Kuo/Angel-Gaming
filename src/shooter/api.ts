@@ -1,7 +1,7 @@
 // CS 射擊選手 API 的公開型別：開局資料、觀察資料、指令、事件。
 // 選手程式只依賴本檔；引擎內部型別不對外。
 //
-// 【API 1.1（2026-10-31，規格 v1.1、引擎 1.1.0）】版本見 config.ts 的 SHOOTER_API_VERSION（開局資料 rules.apiVersion）。
+// 【API 1.1（2026-10-31，規格 v1.1；引擎 1.2.0 沿用，開局資料形狀沒變，rules.freezeTicks 改由賽制決定）】版本見 config.ts 的 SHOOTER_API_VERSION（開局資料 rules.apiVersion）。
 // 要改：升 SHOOTER_API_VERSION、寫規格修訂紀錄、重跑全部驗收與強度表。
 //
 // 公平原則（規格書第二節）：觀察資料裡**沒有**視野外敵人的任何欄位。

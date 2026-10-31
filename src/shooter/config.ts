@@ -6,7 +6,7 @@
 //   角度　整數度；0 = +x（東）、90 = +y（畫面下＝南）。
 //   速度　座標單位／tick（已由 CS 的 units／秒換算：1 格 ≈ 52.5 units）。
 
-export const SHOOTER_ENGINE_VERSION = '1.1.0';
+export const SHOOTER_ENGINE_VERSION = '1.2.0';
 /** 選手 API 版本（v1.0 凍結）：觀察、指令、開局資料的欄位或語意變動都要升這個版本（1.1：MapInfo.solid 加斜切格） */
 export const SHOOTER_API_VERSION = '1.1';
 
@@ -76,8 +76,11 @@ export const ROUND = {
    * 3:3 再開下一段；最多 maxBlocks 段，仍平手則平手。每段開始不換邊（延續上一個半場的陣營）
    */
   overtime: { roundsPerHalf: 3, winRounds: 4, maxBlocks: 4 },
-  freezeTicks: ticks(15),
-  /** 購買時間：從凍結開始（回合開始）算 20 秒＝凍結 15 秒＋開打後 5 秒（CS 的 mp_buytime）；且人在出生區 */
+  /** 凍結時間是賽制選項（規則 1.2，ShooterMatchOptions.freezeTicks）：預設值給有人類參與的場 */
+  freezeTicks: ticks(10),
+  /** Bot 對打的凍結時間（閘道、試玩觀戰、量測腳本） */
+  botFreezeTicks: ticks(3),
+  /** 購買時間：從凍結開始（回合開始）算 20 秒，不隨凍結時間變動（CS 的 mp_buytime）；且人在出生區 */
   buyTicks: ticks(20),
   roundTicks: ticks(115),
   bombTicks: ticks(40),

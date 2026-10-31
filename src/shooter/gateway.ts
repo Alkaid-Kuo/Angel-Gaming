@@ -17,7 +17,7 @@ import type { KnobValues } from '../api/types.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
 import type { Attributes } from './api.ts';
-import { TEAM_SIZE } from './config.ts';
+import { ROUND, TEAM_SIZE } from './config.ts';
 import { MAPS, type ShooterMap } from './map.ts';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES, type ShooterRole } from './players.ts';
 import { ShooterBatchController, runShooterMatch, type ShooterReplay, type ShooterRunOptions } from './runner.ts';
@@ -25,17 +25,31 @@ import { PLAYER_COUNT, type ShooterMatch, type ShooterMatchOptions, type Shooter
 
 export const GATEWAY_MAP_ID = 'redrock';
 
+/** 聯賽賽制（規則 1.2 起）；MR12 留作賽制選項（季後賽日後用） */
+export const LEAGUE_FORMAT_ID = 'shooter-mr6';
+
 /** 經營層看得到的賽制（estMsPerRound：Node 單執行緒、兩隊基準 Bot 2.1 的量測平均，見步驟 8 交付報告） */
 export const SHOOTER_FORMATS: readonly MatchFormat[] = [
+  { id: 'shooter-mr6', name: '攻防戰 MR6（先到 7 勝、MR3 加時）', rounds: 12, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
   { id: 'shooter-mr12', name: '攻防戰 MR12（先到 13 勝、MR3 加時）', rounds: 24, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
   { id: 'shooter-short', name: '攻防戰短賽制（測試用：每半場 1 回合、先到 2 勝、不加時，1:1 平手）', rounds: 2, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
 ];
 
-/** 各賽制的引擎選項（規則不變，只是 ShooterMatchOptions 既有的賽制長度參數） */
-const FORMAT_OPTIONS: Readonly<Record<string, Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'overtime'>>> = {
-  'shooter-mr12': {},
-  'shooter-short': { roundsPerHalf: 1, winRounds: 2, overtime: false },
+type FormatOptions = Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'overtime' | 'freezeTicks'>;
+
+/** 各賽制的引擎選項：賽制長度與凍結時間（經營層全是 Bot 對打，都用 Bot 的凍結時間） */
+const FORMAT_OPTIONS: Readonly<Record<string, FormatOptions>> = {
+  'shooter-mr6': { roundsPerHalf: 6, winRounds: 7, freezeTicks: ROUND.botFreezeTicks },
+  'shooter-mr12': { freezeTicks: ROUND.botFreezeTicks },
+  'shooter-short': { roundsPerHalf: 1, winRounds: 2, overtime: false, freezeTicks: ROUND.botFreezeTicks },
 };
+
+/** 賽制的引擎選項（量測腳本也用這份，才與聯賽同一套規則） */
+export function formatOptions(id: string): FormatOptions {
+  const o = FORMAT_OPTIONS[id];
+  if (o === undefined) throw new Error(`攻防戰沒有賽制 ${id}`);
+  return o;
+}
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const num = (v: number | string | undefined): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -132,7 +146,7 @@ export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, op
   const map = buildMap();
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => seatController(bot, request.seed, pid, map));
   const knobs = controllers.map((c, pid) => seatKnobs(c, seats[pid]));
-  const fo = FORMAT_OPTIONS[format.id] ?? {};
+  const fo = formatOptions(format.id);
   return { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), record: opts.record === true, ...fo };
 }
 

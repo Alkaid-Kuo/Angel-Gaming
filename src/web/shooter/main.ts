@@ -11,7 +11,7 @@ import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { BotLevel, FromShooterWorker, Lineup, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
-import { WATCH_HASH, readTicket, type WatchTicket } from './watch.ts';
+import { WATCH_HASH, readTicket, ticketVersionError, type WatchTicket } from './watch.ts';
 import { DAMAGE_MS, HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type Corpse, type DamagePop, type DrawInput, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -469,6 +469,11 @@ function paintBackdrop(): void {
 /** 經營層觀戰：Worker 用請求單重跑那一場（基準 Bot 第一次觀戰時在 Worker 裡編譯，會停一下） */
 function startWatch(t: WatchTicket): void {
   void fontsReady.then(() => setTimeout(paintBackdrop, 30));
+  const stale = ticketVersionError(t);
+  if (stale !== null) {
+    $('setup').innerHTML = `<section class="card sg-loading"><h2>無法觀戰</h2><p class="muted">${esc(stale)}</p><div class="row"><a class="primary" href="./game.html">回經營頁</a></div></section>`;
+    return;
+  }
   $('setup').innerHTML = `<section class="card sg-loading"><h2>準備觀戰</h2><p class="muted">${esc(t.teams[0])} VS ${esc(t.teams[1])}・${esc(t.title)}：載入基準 Bot、用存檔的請求單重跑這一場…</p></section>`;
   ensureWorker().postMessage({ type: 'watch', watch: { request: t.request, names: t.names, tags: t.tags, teams: t.teams, mine: t.mine } } satisfies ToShooterWorker);
 }

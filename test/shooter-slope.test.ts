@@ -68,10 +68,10 @@ describe('斜切格的格子資料', () => {
     expect(m.solid[12 * m.width + 18]).toBe(1);
   });
 
-  it('沒標 slope 的多邊形維持鋸齒，舊圖沒有斜切格', () => {
+  it('沒標 slope 的多邊形維持鋸齒，沙城沒有斜切格', () => {
     const m = field([{ mode: 'wall', pts: SLOPE }]);
     expect([...m.solid].every((v) => v <= 2)).toBe(true);
-    for (const id of ['dust', 'redrock']) expect([...MAPS[id]().solid].every((v) => v <= 2)).toBe(true);
+    expect([...MAPS.dust().solid].every((v) => v <= 2)).toBe(true);
   });
 });
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { MatchRequest } from '../src/manage/gateway.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
-import { MIN_REACTION_TICKS } from '../src/shooter/config.ts';
+import { MIN_REACTION_TICKS, ROUND, ticks } from '../src/shooter/config.ts';
 import { gatewayDriverOptions, outcomeOf, runGatewayMatch } from '../src/shooter/gateway.ts';
 import { ShooterHumanController } from '../src/shooter/human.ts';
 import { DEFAULT_MAP_ID, MAPS } from '../src/shooter/map.ts';
@@ -72,7 +72,7 @@ describe('預設陪練與改前相同', () => {
   const old = (seed: number): ShooterRunOptions => {
     const map = MAPS[DEFAULT_MAP_ID]();
     const controllers = Array.from({ length: PLAYER_COUNT }, (_, i) => new ShooterBatchController(practice, 'shooter-practice.js', seed, i, map));
-    return { seed, mapId: map.id, controllers, record: true };
+    return { seed, mapId: map.id, controllers, record: true, freezeTicks: ROUND.botFreezeTicks };
   };
 
   it('沒帶 lineup 不碰基準 Bot、選項同改前，整場雜湊與改前相同', () => {
@@ -88,6 +88,13 @@ describe('預設陪練與改前相同', () => {
 });
 
 describe('人類與混合陣容', () => {
+  it('凍結時間：有人類用預設 10 秒，觀戰是 Bot 對打 3 秒', () => {
+    const human = new ShooterHumanController();
+    expect(trialRunOptions({ team: 'T', seed: 5, spectate: false }, bots, human).freezeTicks).toBeUndefined();
+    expect(new ShooterDriver(trialRunOptions({ team: 'T', seed: 5, spectate: false }, bots, human)).match.freezeTicks).toBe(ticks(10));
+    expect(new ShooterDriver(trialRunOptions({ team: 'T', seed: 5, spectate: true }, bots, null)).match.freezeTicks).toBe(ticks(3));
+  });
+
   it('人類當 CT：隊友等級在 5～9、對手在 0～4；人類座位空著不衍生且不延遲', () => {
     const s: ShooterSetup = { team: 'CT', seed: 9, spectate: false, lineup: { team: base(2), enemy: PRACTICE } };
     expect(humanSeat(s)).toBe(5);

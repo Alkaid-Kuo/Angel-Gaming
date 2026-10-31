@@ -51,7 +51,7 @@ function runUntil(d: ShooterDriver, stop: () => boolean, maxTicks: number): void
 }
 
 function toLive(d: ShooterDriver): void {
-  runUntil(d, () => d.match.phase === 'live', ROUND.freezeTicks + 5);
+  runUntil(d, () => d.match.phase === 'live', d.match.freezeTicks + 5);
 }
 
 const roundOver = (d: ShooterDriver, n: number): boolean => d.match.rounds.length >= n;
@@ -164,14 +164,14 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     id: 'R1',
     name: '凍結時間限出生區',
-    expect: '凍結時間全員往外直走 15 秒，仍都在出生區內',
+    expect: '凍結時間全員往外直走到結束，仍都在出生區內',
     run: () => {
       const away: Script = (obs) => [{ type: 'moveDir', deg: obs.me.team === 'T' ? 270 : 90 }];
       const scripts: Partial<Record<number, Script>> = {};
       for (let i = 0; i < PLAYER_COUNT; i++) scripts[i] = away;
       const d = driver(scripts);
       const m = d.match;
-      runUntil(d, () => m.tick >= ROUND.freezeTicks - 1, ROUND.freezeTicks);
+      runUntil(d, () => m.tick >= m.freezeTicks - 1, m.freezeTicks);
       const outside = m.players.filter((p) => {
         const z = m.map.spawnZones[p.team];
         return p.x < z.x0 * UNIT || p.x > z.x1 * UNIT || p.y < z.y0 * UNIT || p.y > z.y1 * UNIT;

@@ -2,7 +2,7 @@
 // 跟瀏覽器裡 isPointInPath(wall, x, y, 'evenodd') 是同一個定義（倒圓角只會讓轉角多蓋 0.12 格，到不了格中心）。
 // 真正的 Path2D 與 canvas：有 OffscreenCanvas 的環境才跑，Node 底下略過；瀏覽器驗收見交付報告。
 import { describe, expect, it } from 'vitest';
-import { MAPS, OLD_TOWN_LAYOUT, buildMap, mapVisual, mapVisualOf, type MapLayout } from '../src/shooter/map.ts';
+import { MAPS, OLD_TOWN_LAYOUT, mapVisual, mapVisualOf } from '../src/shooter/map.ts';
 import { SLOPE_WALL, slopeCorner } from '../src/shooter/map.ts';
 import { shooterInitData } from '../src/shooter/sim.ts';
 import { freePoint, inPolygon, lowKind, lowRects, openLoops, pointInWall, regionLabels, siteSpot, traceLoops, type BakeMap } from '../src/web/shooter/outline.ts';

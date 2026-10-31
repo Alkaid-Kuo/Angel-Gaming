@@ -8,6 +8,7 @@ import { compileBot, type CompiledBot } from '../src/sandbox/compile.ts';
 import { resolveKnobs } from '../src/sandbox/controller.ts';
 import type { Attributes } from '../src/shooter/api.ts';
 import { ATTRIBUTE_KEYS, TEAM_SIZE, type AttributeKey } from '../src/shooter/config.ts';
+import { LEAGUE_FORMAT_ID, formatOptions } from '../src/shooter/gateway.ts';
 import { MAPS } from '../src/shooter/map.ts';
 import { derivePlayer, type ShooterPlayerSpec } from '../src/shooter/players.ts';
 import { ShooterBatchController, runShooterMatch } from '../src/shooter/runner.ts';
@@ -27,6 +28,8 @@ export interface LabTeam {
 export interface LabJob {
   readonly seed: number;
   readonly map: string;
+  /** 賽制代號（閘道的 FORMAT_OPTIONS） */
+  readonly format: string;
   /** A 當玩家 0～4 */
   readonly aFirst: boolean;
   readonly a: LabTeam;
@@ -84,14 +87,14 @@ export function playLab(job: LabJob): LabGame {
   const seatAt = (pid: number): LabSeat => (isA(pid) ? job.a : job.b).seats[pid % TEAM_SIZE];
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => {
     const t = isA(pid) ? job.a : job.b;
-    return new ShooterBatchController(bot(t.bot), t.bot, job.seed, pid, map);
+    return new ShooterBatchController(bot(t.bot), t.bot, job.seed, pid, map, { timeLimits: !process.argv.includes('--no-limits') });
   });
   // 只給選手宣告過的旋鈕（陪練 Bot 沒有 role）
   const knobs = controllers.map((c, pid) => {
     const want = seatAt(pid).knobs;
     return resolveKnobs(c.declaration, Object.fromEntries(Object.entries(want).filter(([k]) => c.declaration.knobs.some((d) => d.key === k))), c.label);
   });
-  const run = runShooterMatch({ seed: job.seed, mapId: job.map, controllers, knobs, record: false, attributes: controllers.map((_, pid) => seatAt(pid).attributes) });
+  const run = runShooterMatch({ seed: job.seed, mapId: job.map, ...formatOptions(job.format), controllers, knobs, record: false, attributes: controllers.map((_, pid) => seatAt(pid).attributes) });
   const r = run.result;
   const ga = job.aFirst ? 0 : 1;
   let aRounds = 0;
@@ -184,9 +187,10 @@ export async function runLab(list: readonly LabJob[], jobs: number, onDone?: (do
   return out as LabGame[];
 }
 
-/** 一組比較：A 對 B，maps 每張圖 seeds 個種子 × 雙邊 */
+/** 一組比較：A 對 B，maps 每張圖 seeds 個種子 × 雙邊；賽制預設聯賽，--format 換 */
 export function matchup(a: LabTeam, b: LabTeam, maps: readonly string[], seeds: readonly number[]): LabJob[] {
-  return maps.flatMap((map) => seeds.flatMap((seed) => [true, false].map((aFirst) => ({ seed, map, aFirst, a, b }))));
+  const format = arg('format', LEAGUE_FORMAT_ID);
+  return maps.flatMap((map) => seeds.flatMap((seed) => [true, false].map((aFirst) => ({ seed, map, format, aFirst, a, b }))));
 }
 
 export interface LabSummary {

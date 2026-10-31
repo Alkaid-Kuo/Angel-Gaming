@@ -41,7 +41,7 @@ export const SHOOTER_ECONOMY: Economy = {
 
 export const SHOOTER_CONTENT: ContentPack = {
   id: 'shooter-1',
-  formatId: 'shooter-mr12',
+  formatId: 'shooter-mr6',
   lineupSize: 5,
   slotNames: ['1 號位', '2 號位', '3 號位', '4 號位', '5 號位'],
   lineages: SHOOTER_ROLES.map((r) => ({ id: r, name: ROLE_TABLE[r].name, style: ROLE_TABLE[r].style, power: SHOOTER_POWER[r] })),

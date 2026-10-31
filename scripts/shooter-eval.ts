@@ -7,11 +7,13 @@
 //       [--lineup 3]（兩隊都用均衡陣容的該版本，與閘道同樣的屬性與角色旋鈕；蓋過 --attrs）
 //       [--layout maps/shooter/x.json]（直接打編輯器存的地圖，不用先登錄；蓋過 --map）
 //       [--no-limits]（關掉 decide 的牆鐘逾時，結果只由程式碼與種子決定，同機器跑多批也不互相干擾；量例外與超時時不要加）
+//       [--format shooter-mr12]（賽制，預設聯賽；走閘道同一份賽制選項）
 import { readFileSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import type { Attributes, ShooterInitData, ShooterObservation } from '../src/shooter/api.ts';
 import { ATTRIBUTE_KEYS, TEAM_SIZE, type AttributeKey } from '../src/shooter/config.ts';
+import { LEAGUE_FORMAT_ID, formatOptions } from '../src/shooter/gateway.ts';
 import { MAPS, buildMap, type MapLayout, type ShooterMap } from '../src/shooter/map.ts';
 import { balancedLineup, derivePlayer } from '../src/shooter/players.ts';
 import { ShooterBatchController, runShooterMatch, shooterHelpers, type CallOutcome } from '../src/shooter/runner.ts';
@@ -93,6 +95,8 @@ interface Opts {
   readonly layout: string;
   /** 關掉 decide 逾時 */
   readonly noLimits: boolean;
+  /** 賽制代號 */
+  readonly format: string;
 }
 
 /** 把編輯器存的地圖掛進這個執行緒的 MAPS，回傳代號 */
@@ -148,7 +152,7 @@ function play(o: Opts, job: Job): GameOut {
     }
   }
   const attributes = controllers.map((_, pid) => (seats !== null ? seats[pid % TEAM_SIZE].attributes : isA(pid) ? attrs : undefined));
-  const run = runShooterMatch({ seed: job.seed, mapId: o.map, controllers, knobs, record: false, attributes });
+  const run = runShooterMatch({ seed: job.seed, mapId: o.map, ...formatOptions(o.format), controllers, knobs, record: false, attributes });
   const r = run.result;
   const beh: Beh = { plans: {}, throws: 0, flashEnemy: 0, flashTeam: 0, rounds: 0, contactSec: 0, contacts: 0, deaths: 0, traded: 0, tRounds: 0, planted: 0, retakes: 0, retakeWins: 0, plantSites: {} };
   for (const x of r.rounds) {
@@ -258,7 +262,7 @@ if (!isMainThread) {
     const [k, v] = kv.split('=');
     attrs[k as AttributeKey] = Number(v);
   }
-  const opts: Opts = { a: arg('a', 'bots/shooter-baseline.js'), b: arg('b', 'bots/shooter-practice.js'), map: arg('layout', '') === '' ? arg('map', 'redrock') : loadLayout(arg('layout', '')), attrs, lineup: arg('lineup', '') === '' ? null : Number(arg('lineup', '')), layout: arg('layout', ''), noLimits: process.argv.includes('--no-limits') };
+  const opts: Opts = { a: arg('a', 'bots/shooter-baseline.js'), b: arg('b', 'bots/shooter-practice.js'), map: arg('layout', '') === '' ? arg('map', 'redrock') : loadLayout(arg('layout', '')), attrs, lineup: arg('lineup', '') === '' ? null : Number(arg('lineup', '')), layout: arg('layout', ''), noLimits: process.argv.includes('--no-limits'), format: arg('format', LEAGUE_FORMAT_ID) };
   const all: Job[] = [];
   for (let i = 0; i < games; i++) for (const aFirst of [true, false]) all.push({ seed: seed + i, aFirst });
   const buckets: Job[][] = Array.from({ length: Math.min(jobsN, all.length) }, () => []);
