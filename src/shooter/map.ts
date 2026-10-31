@@ -1,11 +1,10 @@
 // CS 射擊地圖：以「在實心裡挖矩形」描述，再轉成格子。
 // 第一張圖「沙城」參照 Dust2：北為 CT、南為 T，中路南北直線，A 長在東、B 通道在西（v0.5 起只供引擎測試）。
-// 第二張圖「赤岩鎮」（v0.5 預設）只借三路骨架，格局原創；用多邊形做斜牆、加矮牆。
+// 赤岩舊城（maps/shooter/redrock.json，規則 1.2 起的正式地圖）由地圖編輯器產生；赤岩鎮是 1.1 以前的舊圖，已不進 MAPS。
 // 座標：格為單位的整數矩形，含 x0/y0、不含 x1/y1。1 格 = 1 公尺 = UNIT 座標單位。
 import type { MapInfo, MapRegion } from './api.ts';
 import { TEAM_SIZE, UNIT, type Team } from './config.ts';
-import REDROCK2_V3_LAYOUT from '../../maps/shooter/redrock2-v3.json' with { type: 'json' };
-import redrock2V4File from '../../maps/shooter/redrock2-v4.json' with { type: 'json' };
+import redrockFile from '../../maps/shooter/redrock.json' with { type: 'json' };
 
 export interface Rect {
   readonly x0: number;
@@ -268,8 +267,8 @@ export const REDROCK_LAYOUT: MapLayout = {
   },
 };
 
-/** 赤岩舊城第四版：第三版的幾何一格不動，41 個框併成 24 個正式區域、加材質 */
-export const REDROCK2_V4_LAYOUT = redrock2V4File as unknown as MapLayout;
+/** 赤岩舊城（規則 1.2 起唯一的正式地圖，代號 redrock）：地圖編輯器的存檔，區域併成 24 個 callout */
+export const OLD_TOWN_LAYOUT = redrockFile as unknown as MapLayout;
 
 export function buildMap(layout: MapLayout): ShooterMap {
   const { width, height } = layout;
@@ -332,13 +331,10 @@ export function buildMap(layout: MapLayout): ShooterMap {
 
 export const MAPS: Readonly<Record<string, () => ShooterMap>> = {
   dust: () => buildMap(DUST_LAYOUT),
-  redrock: () => buildMap(REDROCK_LAYOUT),
-  // 地圖編輯器的存檔；試玩頁可選，預設與閘道不用
-  'redrock2-v3': () => buildMap(REDROCK2_V3_LAYOUT as unknown as MapLayout),
-  'redrock2-v4': () => buildMap(REDROCK2_V4_LAYOUT),
+  redrock: () => buildMap(OLD_TOWN_LAYOUT),
 };
 
-/** 預設地圖（v0.5 起為赤岩鎮；沙城保留給引擎測試與驗收情境） */
+/** 預設地圖（規則 1.2 起為赤岩舊城；沙城留給引擎測試與 Bot 驗收，玩家面不出現） */
 export const DEFAULT_MAP_ID = 'redrock';
 
 /** 點是否在多邊形內（偶奇規則；地圖建構用，頂點為格座標小數） */

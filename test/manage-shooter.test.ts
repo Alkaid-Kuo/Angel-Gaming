@@ -163,7 +163,7 @@ describe('請求單的地圖', () => {
   const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'shooter-baseline.js');
   const req: MatchRequest = { formatId: 'shooter-short', a: side(3), b: side(3), seed: 11 };
 
-  it('缺值當赤岩鎮：與明寫 redrock 的成績單、終局雜湊都相同', () => {
+  it('缺值當赤岩舊城：與明寫 redrock 的成績單、終局雜湊都相同', () => {
     const old = runGatewayMatch(req, bot);
     const named = runGatewayMatch({ ...req, mapId: 'redrock' }, bot);
     expect(named.outcome).toEqual(old.outcome);
@@ -171,17 +171,17 @@ describe('請求單的地圖', () => {
     expect(gatewayDriverOptions(req, bot).mapId).toBe('redrock');
   }, 60_000);
 
-  it('請求單指定赤岩舊城：打得完、觀戰與回放重播都是同一場', () => {
-    const r: MatchRequest = { ...req, mapId: 'redrock2-v4' };
+  it('請求單指定別張圖：打得完、觀戰與回放重播都是同一場', () => {
+    const r: MatchRequest = { ...req, mapId: 'dust' };
     const m = runGatewayMatch(r, bot);
     expect(m.exceptions).toBe(0);
     expect(m.finalHash).not.toBe(runGatewayMatch(req, bot).finalHash);
     const d = new ShooterDriver(gatewayDriverOptions(r, bot, { record: true }));
     while (!d.match.over) d.step();
-    expect(d.match.map.id).toBe('redrock2-v4');
+    expect(d.match.map.id).toBe('dust');
     expect(d.match.hash()).toBe(m.finalHash);
     const rp = d.replay as NonNullable<typeof d.replay>;
-    expect(rp.header.mapId).toBe('redrock2-v4');
+    expect(rp.header.mapId).toBe('dust');
     expect(runShooterReplay(JSON.parse(JSON.stringify(rp)) as typeof rp).finalHash).toBe(m.finalHash);
   }, 60_000);
 

@@ -1,5 +1,5 @@
 // 攻防戰全圖輸出成 SVG（審圖、報告用）：地面依材質上色，牆、矮掩體、斜切格、包點、出生點照引擎 buildMap 的格子畫，區域名畫在主區域中央。
-// 用法：node scripts/shooter-map-svg.ts maps/shooter/redrock2-v4.json --out docs/shots/redrock2-v4.svg [--scale 8]
+// 用法：node scripts/shooter-map-svg.ts maps/shooter/redrock.json --out docs/shots/redrock.svg [--scale 8]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { UNIT } from '../src/shooter/config.ts';
 import { SLOPE_LOW, buildMap, slopeCorner, type MapLayout } from '../src/shooter/map.ts';

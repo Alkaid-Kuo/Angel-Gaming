@@ -1,5 +1,5 @@
 // CS 射擊基準 Bot 情境測試（src/shooter/ai-scenarios.ts）：每個情境 5 個種子，印出每個種子的結果（T9 另外用陪練 Bot 當對手補樣本）。
-// 用法：node scripts/shooter-ai-scenarios.ts [選手檔=bots/shooter-baseline.js] [情境編號,…] [--maps redrock2,redrock]（團隊情境跑哪幾張圖）
+// 用法：node scripts/shooter-ai-scenarios.ts [選手檔=bots/shooter-baseline.js] [情境編號,…] [--maps redrock,dust]（團隊情境跑哪幾張圖）
 import { readFileSync } from 'node:fs';
 import { compileBot } from '../src/sandbox/compile.ts';
 import { runAiScenarios } from '../src/shooter/ai-scenarios.ts';

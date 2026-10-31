@@ -1,6 +1,6 @@
 // 攻防戰地圖編輯器：矩形與多邊形直接對應 MapLayout，畫面上的格子由引擎的 buildMap 算出來，所見即引擎所得。
 import { UNIT, type Team } from '../../shooter/config.ts';
-import { DUST_LAYOUT, REDROCK_LAYOUT, SLOPE_LOW, buildMap, cellOf, slopeCorner, type MapLayout, type MapMaterial, type ShooterMap } from '../../shooter/map.ts';
+import { DUST_LAYOUT, OLD_TOWN_LAYOUT, REDROCK_LAYOUT, SLOPE_LOW, buildMap, cellOf, slopeCorner, type MapLayout, type MapMaterial, type ShooterMap } from '../../shooter/map.ts';
 import { DRAFT_LAYOUT } from '../sketch/shooter/map-draft.ts';
 import { RUN_CELLS_PER_SEC, analyze, pathField, tracePath, visibleCells, type Check } from './checks.ts';
 import { formatDoc, parseDoc, sameRef, toDoc, type EditDoc, type MPoly, type MRect, type MSpawn, type Ref } from './doc.ts';
@@ -8,7 +8,7 @@ import { formatDoc, parseDoc, sameRef, toDoc, type EditDoc, type MPoly, type MRe
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const AUTOSAVE_KEY = 'shooter-map-editor';
 const FILES_API = '/__shooter-maps';
-const DEFAULT_FILE = 'redrock2-v4';
+const DEFAULT_FILE = 'redrock';
 const HANDLE_PX = 7;
 
 const COLOR = {
@@ -31,7 +31,8 @@ const COLOR = {
 } as const;
 
 const PRESETS: Record<string, { label: string; layout: MapLayout }> = {
-  redrock: { label: '赤岩鎮（現行）', layout: REDROCK_LAYOUT },
+  redrock: { label: '赤岩舊城（正式）', layout: OLD_TOWN_LAYOUT },
+  oldRedrock: { label: '赤岩鎮（舊圖）', layout: REDROCK_LAYOUT },
   draft: { label: '赤岩舊城第一版草案', layout: DRAFT_LAYOUT },
   dust: { label: '沙城（測試圖）', layout: DUST_LAYOUT },
 };

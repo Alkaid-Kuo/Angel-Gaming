@@ -1,6 +1,6 @@
 // CS 射擊基準 Bot 情境測試（步驟 6）：「懂不懂」的測試，不是強度測試。
 // 受測 Bot 坐某幾個座位，其他座位用腳本控制（ScriptController），每個情境固定 5 個種子都要過；test/shooter-ai.test.ts 檢查。
-// 位置一律由地圖資料（出生區、包點、牆、矮牆、區域）算出，不寫死座標；預設跑赤岩鎮，換地圖也要能找到位置。
+// 位置一律由地圖資料（出生區、包點、牆、矮牆、區域）算出，不寫死座標；預設跑赤岩舊城，換地圖也要能找到位置。
 // 情境只用引擎的公開狀態判定（位置、朝向、血量、子彈、姿勢），受測 Bot 只拿得到它自己的觀察資料。
 // 用法：runAiScenarios(compileBot(...), 篩選, 對手)；腳本 scripts/shooter-ai-scenarios.ts 印出結果。
 import { resolveKnobs } from '../sandbox/controller.ts';
@@ -199,7 +199,7 @@ interface Setup {
   readonly alive?: readonly number[];
   readonly scripts?: Partial<Record<number, Script>>;
   readonly opts?: Partial<ShooterMatchOptions>;
-  /** 地圖（預設赤岩鎮；6-2 的情境兩張圖都跑） */
+  /** 地圖（預設赤岩舊城；6-2 的情境兩張圖都跑） */
   readonly map?: string;
   /** 受測座位的旋鈕 */
   readonly knobs?: Readonly<Record<string, number>>;
@@ -886,7 +886,7 @@ function lowWallDuel(m: ShooterMap): { s: Pt; e: Pt } {
   throw new Error(`${m.id}：找不到矮牆`);
 }
 
-// ───────── 6-2 團隊情境（T1～T15）：每個情境赤岩鎮與沙城都跑，兩張圖都過才算過（腳本可用 --maps 換圖） ─────────
+// ───────── 6-2 團隊情境（T1～T15）：每個情境赤岩舊城與沙城都跑，兩張圖都過才算過（腳本可用 --maps 換圖） ─────────
 
 let teamMaps: readonly string[] = ['redrock', 'dust'];
 const CTS = [5, 6, 7, 8, 9] as const;

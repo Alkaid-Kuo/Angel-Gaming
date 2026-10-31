@@ -1,7 +1,6 @@
 // 攻防戰烘焙層的幾何（src/web/shooter/outline.ts、materials.ts）。不需要 DOM：牆路徑用同一組折線做點在多邊形內的判斷，
 // 跟瀏覽器裡 isPointInPath(wall, x, y, 'evenodd') 是同一個定義（倒圓角只會讓轉角多蓋 0.12 格，到不了格中心）。
 // 真正的 Path2D 與 canvas：有 OffscreenCanvas 的環境才跑，Node 底下略過；瀏覽器驗收見交付報告。
-import { readFileSync, existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { MAPS, buildMap, type MapLayout } from '../src/shooter/map.ts';
 import { SLOPE_WALL, slopeCorner } from '../src/shooter/map.ts';
@@ -34,10 +33,8 @@ function expectNothingCovered(m: BakeMap): number {
   return checked;
 }
 
-const draftFile = 'maps/shooter/redrock2.json';
-
 describe('牆路徑不蓋可走格', () => {
-  it('赤岩鎮（鋸齒階梯收斜線）', () => {
+  it('赤岩舊城（斜切格與鋸齒階梯）', () => {
     expect(expectNothingCovered(MAPS.redrock())).toBeGreaterThan(5000);
   });
 
@@ -81,12 +78,6 @@ describe('牆路徑不蓋可走格', () => {
       expect(pointInWall(loops, freeAt[0], freeAt[1])).toBe(false);
       expect(slopeCorner(m.solid[6])).toBe(Number(c) - 1);
     }
-  });
-
-  it('各版赤岩舊城（含斜切格）', () => {
-    const files = [draftFile, '../cs-map-redrock2-0359e8/maps/shooter/redrock2-v3.json', '../cs-art-sketch-661c2e/maps/shooter/redrock2-v3.json'].filter((f) => existsSync(f));
-    for (const f of files) expectNothingCovered(buildMap(JSON.parse(readFileSync(f, 'utf8')) as MapLayout));
-    expect(files.length).toBeGreaterThan(0);
   });
 
   it('點在多邊形內', () => {
