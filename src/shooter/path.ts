@@ -1,8 +1,8 @@
 // CS 射擊尋路：格子 A*（八方向、不可切角、貼牆加成本），結果以「角色圓掃過不碰牆」的直線平滑成少數轉折點。
 // 角色半徑 0.3 格、走廊最窄 2 格，不膨脹地圖；路徑點取格中心，平滑時檢查掃過的圓，因此不會貼著格角走。
-import { idiv, pointRectDistSq } from '../shared/intmath.ts';
+import { idiv, pointRectDistSq, tdiv } from '../shared/intmath.ts';
 import { UNIT, VISION } from './config.ts';
-import { blocksMove, cellOf, type ShooterMap } from './map.ts';
+import { blocksMove, cellOf, slopeAt, slopeDistSq, slopeNormal, type CellGrid, type ShooterMap } from './map.ts';
 
 const STRAIGHT = 100;
 const DIAG = 141;
@@ -101,10 +101,54 @@ export function circleHitsWall(map: ShooterMap, x: number, y: number, r: number,
   for (let cy = y0; cy <= y1; cy++) {
     for (let cx = x0; cx <= x1; cx++) {
       if (!blocks(map, cx, cy)) continue;
-      if (pointRectDistSq(x, y, cx * UNIT, cy * UNIT, (cx + 1) * UNIT, (cy + 1) * UNIT) < r2) return true;
+      const corner = slopeAt(map, cx, cy);
+      if ((corner >= 0 ? slopeDistSq(cx, cy, corner, x, y) : pointRectDistSq(x, y, cx * UNIT, cy * UNIT, (cx + 1) * UNIT, (cy + 1) * UNIT)) < r2) return true;
     }
   }
   return false;
+}
+
+/** 圓走到 (x, y) 時撞上的斜面，而且 (dx, dy) 是往斜面裡走：回傳斜切格的實心角，沒有回傳 −1 */
+export function slopeContact(map: CellGrid, x: number, y: number, dx: number, dy: number, r: number, blocks: (map: CellGrid, cx: number, cy: number) => boolean = blocksMove): number {
+  const r2 = r * r;
+  for (let cy = cellOf(y - r); cy <= cellOf(y + r); cy++) {
+    for (let cx = cellOf(x - r); cx <= cellOf(x + r); cx++) {
+      const corner = slopeAt(map, cx, cy);
+      if (corner < 0 || !blocks(map, cx, cy) || slopeDistSq(cx, cy, corner, x, y) >= r2) continue;
+      const [nx, ny] = slopeNormal(corner);
+      if (dx * nx + dy * ny < 0) return corner;
+    }
+  }
+  return -1;
+}
+
+/** 沿 (dx, dy) 走到不碰牆的最遠處，回傳實際位移（二分）；起點就卡在牆裡時放行讓它脫困 */
+export function sweepCircle(map: ShooterMap, x: number, y: number, dx: number, dy: number, r: number, blocks: (map: ShooterMap, cx: number, cy: number) => boolean = blocksMove): readonly [number, number] {
+  if (!circleHitsWall(map, x + dx, y + dy, r, blocks) || circleHitsWall(map, x, y, r, blocks)) return [dx, dy];
+  const steps = Math.max(Math.abs(dx), Math.abs(dy));
+  let lo = 0;
+  let hi = steps;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (circleHitsWall(map, x + tdiv(dx * mid, steps), y + tdiv(dy * mid, steps), r, blocks)) hi = mid;
+    else lo = mid;
+  }
+  return [tdiv(dx * lo, steps), tdiv(dy * lo, steps)];
+}
+
+/**
+ * 貼斜面滑動（v1.1）：這步會撞上斜面時，先走到貼住斜面，剩下的位移投影到斜面方向繼續走。
+ * 回傳總位移；沒撞上斜面回傳 null，由呼叫端照分軸滑動處理
+ */
+export function slopeSlide(map: ShooterMap, x: number, y: number, dx: number, dy: number, r: number): readonly [number, number] | null {
+  if (dx === 0 && dy === 0) return null;
+  const corner = slopeContact(map, x + dx, y + dy, dx, dy, r);
+  if (corner < 0) return null;
+  const [fx, fy] = sweepCircle(map, x, y, dx, dy, r);
+  const [nx, ny] = slopeNormal(corner);
+  const s = tdiv((dx - fx) * ny - (dy - fy) * nx, 2);
+  const [gx, gy] = sweepCircle(map, x + fx, y + fy, s * ny, -s * nx, r);
+  return [fx + gx, fy + gy];
 }
 
 /** 圓沿線段掃過時是否碰牆（每 200 單位取樣一次） */

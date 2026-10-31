@@ -35,6 +35,17 @@
         "--strictPort"
       ],
       "port": 5179
+    },
+    {
+      "name": "map-editor",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5186",
+        "--strictPort"
+      ],
+      "port": 5186
     }
   ]
 }

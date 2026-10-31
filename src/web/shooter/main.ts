@@ -159,7 +159,7 @@ class Game {
       const act = (e.target as HTMLElement).closest('button')?.dataset.act;
       if (act === 'again') {
         if (ticket !== null) startWatch(ticket);
-        else start({ team: meta.spectate ? 'T' : meta.playerId < 5 ? 'T' : 'CT', seed: randomSeed(), spectate: meta.spectate, lineup: meta.lineup });
+        else start({ team: meta.spectate ? 'T' : meta.playerId < 5 ? 'T' : 'CT', seed: randomSeed(), spectate: meta.spectate, lineup: meta.lineup, mapId: meta.map.id });
       } else if (act === 'home') home();
       else if (act === 'replay') this.post({ type: 'getReplay' });
     });
@@ -455,14 +455,14 @@ function init(): void {
     if ($<HTMLInputElement>('fullscreen').checked) enterFullscreen();
     const team = (document.querySelector('input[name="team"]:checked') as HTMLInputElement | null)?.value === 'CT' ? 'CT' : 'T';
     const n = Number(seed.value);
-    start({ team, seed: Number.isFinite(n) && n >= 0 ? Math.floor(n) : randomSeed(), spectate: $<HTMLInputElement>('spectate').checked, lineup: selectedLineup() });
+    start({ team, seed: Number.isFinite(n) && n >= 0 ? Math.floor(n) : randomSeed(), spectate: $<HTMLInputElement>('spectate').checked, lineup: selectedLineup(), mapId: $<HTMLSelectElement>('map').value });
   });
-  // 除錯與自動驗收用：網址帶 ?auto=T|CT&seed=N 直接開局；&loadout=awp 讓雙方開局拿該武器（測狙擊鏡用）；&mate=3&foe=5 選基準版本（不帶＝陪練）
+  // 除錯與自動驗收用：網址帶 ?auto=T|CT&seed=N 直接開局；&loadout=awp 讓雙方開局拿該武器（測狙擊鏡用）；&mate=3&foe=5 選基準版本（不帶＝陪練）；&map=代號 換地圖
   const q = new URLSearchParams(location.search);
   const auto = q.get('auto');
   const loadout = q.get('loadout');
   const weapon = loadout === 'awp' || loadout === 'ak' || loadout === 'm4' || loadout === 'smg' || loadout === 'shotgun' ? loadout : undefined;
-  if (auto === 'T' || auto === 'CT' || auto === 'spectate') start({ team: auto === 'CT' ? 'CT' : 'T', seed: Number(q.get('seed') ?? randomSeed()), spectate: auto === 'spectate', loadout: weapon, lineup: { team: levelOf(q.get('mate')), enemy: levelOf(q.get('foe')) } });
+  if (auto === 'T' || auto === 'CT' || auto === 'spectate') start({ team: auto === 'CT' ? 'CT' : 'T', seed: Number(q.get('seed') ?? randomSeed()), spectate: auto === 'spectate', loadout: weapon, lineup: { team: levelOf(q.get('mate')), enemy: levelOf(q.get('foe')) }, mapId: q.get('map') ?? undefined });
 }
 
 init();

@@ -2,6 +2,8 @@
 // 視錐迷霧：從所看選手的位置對視錐內打一圈射線，遇牆、看得見的煙霧、視野距離（v0.5）就停，蹲著時貼近的矮牆也擋；
 // 射線扇形之外稍微壓暗（看得出地形，看不到人）。
 import type { AreaEffect, GrenadeId, MapInfo, ShooterObservation, SoundEvent, SoundKind, Team, WeaponId } from '../../shooter/api.ts';
+import { SLOPE_LOW, isSolidCell, slopeAt, slopeCorner, slopeEntry, slopeNormal } from '../../shooter/map.ts';
+import { slopeContact } from '../../shooter/path.ts';
 import type { FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
 
 /** 隊伍色（兩個對比色）；其餘一律灰階 */
@@ -143,6 +145,15 @@ function interp<T extends { readonly id: number; readonly x: number; readonly y:
 function castRay(map: MapInfo, ox: number, oy: number, dx: number, dy: number, maxT: number, lowT = 0): number {
   let cx = Math.floor(ox);
   let cy = Math.floor(oy);
+  /** 斜切格算實際形狀：射線切到實心三角形的距離，擋不到回傳 −1 */
+  const slopeHit = (gx: number, gy: number, corner: number): number => {
+    const e = slopeEntry(gx, gy, corner, Math.round(ox * UNIT), Math.round(oy * UNIT), Math.round((ox + dx * maxT) * UNIT), Math.round((oy + dy * maxT) * UNIT));
+    if (e === null) return -1;
+    const t = (e[0] / e[1]) * maxT;
+    return isSolidCell(map, gx, gy) || t <= lowT ? t : -1;
+  };
+  const first = slopeAt(map, cx, cy);
+  if (first >= 0 && slopeHit(cx, cy, first) >= 0) return slopeHit(cx, cy, first);
   const sx = dx > 0 ? 1 : -1;
   const sy = dy > 0 ? 1 : -1;
   const tdx = dx === 0 ? Infinity : Math.abs(1 / dx);
@@ -162,10 +173,27 @@ function castRay(map: MapInfo, ox: number, oy: number, dx: number, dy: number, m
     }
     if (t >= maxT) return maxT;
     if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return t;
+    const corner = slopeAt(map, cx, cy);
+    if (corner >= 0) {
+      const hit = slopeHit(cx, cy, corner);
+      if (hit >= 0) return hit;
+      continue;
+    }
     const v = map.solid[cy * map.width + cx];
     if (v === 1 || (v === 2 && t <= lowT)) return t;
   }
   return maxT;
+}
+
+/** 格的四個角（順時針，從西北起）相對左上角的位置 */
+const CORNER_X = [0, 1, 1, 0];
+const CORNER_Y = [0, 0, 1, 1];
+
+/** 描出斜切格 (x, y) 貼著 corner 角的三角形（畫布座標，格邊長 s） */
+function slopeTriangle(g: CanvasRenderingContext2D, x: number, y: number, s: number, corner: number): void {
+  g.beginPath();
+  for (const c of [corner, (corner + 1) % 4, (corner + 3) % 4]) g.lineTo(x + CORNER_X[c] * s, y + CORNER_Y[c] * s);
+  g.closePath();
 }
 
 /** 射線與圓（煙霧）的第一個交點距離；沒交到回傳 Infinity；起點在圓內回傳 0 */
@@ -200,6 +228,17 @@ export function predictThrow(map: MapInfo, x: number, y: number, deg: number, di
     const s = Math.min(step, left);
     const nx = px + dx * s;
     const ny = py + dy * s;
+    const corner = slopeContact(map, nx * UNIT, ny * UNIT, dx, dy, r * UNIT, isSolidCell);
+    if (corner >= 0) {
+      if (bounces >= 1) break;
+      bounces += 1;
+      const [ax, ay] = slopeNormal(corner);
+      const along = dx * ax + dy * ay;
+      dx -= along * ax;
+      dy -= along * ay;
+      pts.push([px, py]);
+      continue;
+    }
     const hitX = solid(nx + Math.sign(dx) * r, py);
     const hitY = solid(px, ny + Math.sign(dy) * r);
     if (hitX || hitY) {
@@ -253,13 +292,23 @@ export class ShooterRenderer {
         if (v === 1) continue;
         g.fillStyle = v === 2 ? PAL.low : (x + y) % 2 === 0 ? PAL.floorA : PAL.floorB;
         g.fillRect(x * MAP_PX, y * MAP_PX, MAP_PX, MAP_PX);
+        const corner = slopeCorner(v);
+        if (corner < 0) continue;
+        g.fillStyle = v >= SLOPE_LOW ? PAL.low : PAL.wall;
+        slopeTriangle(g, x * MAP_PX, y * MAP_PX, MAP_PX, corner);
+        g.fill();
       }
     }
     g.strokeStyle = PAL.lowEdge;
     g.lineWidth = 2;
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        if (map.solid[y * map.width + x] !== 2) continue;
+        const v = map.solid[y * map.width + x];
+        if (v >= SLOPE_LOW) {
+          slopeTriangle(g, x * MAP_PX, y * MAP_PX, MAP_PX, slopeCorner(v));
+          g.stroke();
+        }
+        if (v !== 2) continue;
         g.strokeRect(x * MAP_PX + 1, y * MAP_PX + 1, MAP_PX - 2, MAP_PX - 2);
         g.beginPath();
         g.moveTo(x * MAP_PX + 3, y * MAP_PX + 3);
@@ -291,25 +340,31 @@ export class ShooterRenderer {
     g.strokeStyle = PAL.wallEdge;
     g.lineWidth = 3;
     g.beginPath();
-    const solid = (x: number, y: number): boolean => x < 0 || y < 0 || x >= map.width || y >= map.height || map.solid[y * map.width + x] === 1;
+    /** 牆蓋滿這格的 side 邊（0 北、1 東、2 南、3 西）：斜切牆只蓋滿貼著實心角的兩條邊 */
+    const covers = (x: number, y: number, side: number): boolean => {
+      if (x < 0 || y < 0 || x >= map.width || y >= map.height) return true;
+      const v = map.solid[y * map.width + x];
+      if (v === 1) return true;
+      return isSolidCell(map, x, y) && (side === slopeCorner(v) || side === (slopeCorner(v) + 3) % 4);
+    };
+    const STEP = [[0, -1], [1, 0], [0, 1], [-1, 0]];
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        if (!solid(x, y)) continue;
-        if (!solid(x, y - 1)) {
-          g.moveTo(x * MAP_PX, y * MAP_PX);
-          g.lineTo((x + 1) * MAP_PX, y * MAP_PX);
+        for (let side = 0; side < 4; side++) {
+          const [ox, oy] = STEP[side];
+          if (!covers(x, y, side) || covers(x + ox, y + oy, (side + 2) % 4)) continue;
+          // 這條邊的兩端是格的第 side、side + 1 個角
+          const end = (side + 1) % 4;
+          g.moveTo((x + CORNER_X[side]) * MAP_PX, (y + CORNER_Y[side]) * MAP_PX);
+          g.lineTo((x + CORNER_X[end]) * MAP_PX, (y + CORNER_Y[end]) * MAP_PX);
         }
-        if (!solid(x, y + 1)) {
-          g.moveTo(x * MAP_PX, (y + 1) * MAP_PX);
-          g.lineTo((x + 1) * MAP_PX, (y + 1) * MAP_PX);
-        }
-        if (!solid(x - 1, y)) {
-          g.moveTo(x * MAP_PX, y * MAP_PX);
-          g.lineTo(x * MAP_PX, (y + 1) * MAP_PX);
-        }
-        if (!solid(x + 1, y)) {
-          g.moveTo((x + 1) * MAP_PX, y * MAP_PX);
-          g.lineTo((x + 1) * MAP_PX, (y + 1) * MAP_PX);
+        const corner = slopeAt(map, x, y);
+        if (corner >= 0 && isSolidCell(map, x, y)) {
+          // 斜邊接著實心角的兩個鄰角
+          const a = (corner + 1) % 4;
+          const b = (corner + 3) % 4;
+          g.moveTo((x + CORNER_X[a]) * MAP_PX, (y + CORNER_Y[a]) * MAP_PX);
+          g.lineTo((x + CORNER_X[b]) * MAP_PX, (y + CORNER_Y[b]) * MAP_PX);
         }
       }
     }
@@ -562,7 +617,13 @@ export class ShooterRenderer {
         const k = 1 - Math.min(1, Math.hypot(cx * UNIT + UNIT / 2 - e.x, cy * UNIT + UNIT / 2 - e.y) / e.radius);
         const f2 = flick * (0.85 + 0.15 * Math.sin(now / 90 + i));
         ctx.fillStyle = `rgba(234, 88, 12, ${(0.25 + 0.45 * k) * f2})`;
-        ctx.fillRect(px, py, s + 0.5, s + 0.5);
+        // 斜切格只有可走半邊著火
+        const corner = slopeAt(this.meta.map, cx, cy);
+        if (corner < 0) ctx.fillRect(px, py, s + 0.5, s + 0.5);
+        else {
+          slopeTriangle(ctx, px, py, s, (corner + 2) % 4);
+          ctx.fill();
+        }
       }
       ctx.fillStyle = `rgba(253, 186, 116, ${0.7 * flick})`;
       ctx.beginPath();

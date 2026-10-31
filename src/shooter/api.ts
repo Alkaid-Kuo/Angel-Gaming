@@ -1,8 +1,8 @@
 // CS 射擊選手 API 的公開型別：開局資料、觀察資料、指令、事件。
 // 選手程式只依賴本檔；引擎內部型別不對外。
 //
-// 【API 1.0 已凍結（2026-10-30，規格 v1.0、引擎 1.0.0）】版本見 config.ts 的 SHOOTER_API_VERSION（開局資料 rules.apiVersion）。
-// 基準 Bot 階段（步驟 6～7）不得改；真要改：升 SHOOTER_API_VERSION、寫規格修訂紀錄、重跑全部驗收與強度表。
+// 【API 1.1（2026-10-31，規格 v1.1、引擎 1.1.0）】版本見 config.ts 的 SHOOTER_API_VERSION（開局資料 rules.apiVersion）。
+// 要改：升 SHOOTER_API_VERSION、寫規格修訂紀錄、重跑全部驗收與強度表。
 //
 // 公平原則（規格書第二節）：觀察資料裡**沒有**視野外敵人的任何欄位。
 // 敵人只會出現在 enemies（自己視錐內且有視線）、radar（隊友此刻看見的座標點）、sounds（粗略方向與距離等級）。
@@ -39,7 +39,10 @@ export interface MapInfo {
   /** 格數 */
   readonly width: number;
   readonly height: number;
-  /** 列優先；0 = 可走、1 = 牆、2 = 矮牆（v0.5：擋移動；站著的人視線與子彈越得過去，蹲著的人貼近時才擋） */
+  /**
+   * 列優先；0 = 可走、1 = 牆、2 = 矮牆（v0.5：擋移動；站著的人視線與子彈越得過去，蹲著的人貼近時才擋）、
+   * 3～6 = 斜切牆、7～10 = 斜切矮牆（API 1.1：45° 切半的格，減掉 3 或 7 是實心角：0 西北、1 東北、2 東南、3 西南；貼著該角的三角形實心，另一半可走）
+   */
   readonly solid: readonly number[];
   /** 炸彈點（格矩形，含 x0/y0、不含 x1/y1） */
   readonly sites: readonly { readonly id: 'A' | 'B'; readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[];

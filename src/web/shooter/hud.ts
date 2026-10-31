@@ -3,6 +3,7 @@
 // 經營層觀戰（meta.watch）：頂列、計分板、擊殺訊息、結束畫面改用天使金色票（我方金、對手紅；別隊的比賽主隊白、客隊灰），
 // 顯示隊名、選手名、角色與版本；地圖、角色、彈道的 T／CT 配色不動。
 import type { RoundEndReason, ShooterObservation, Team } from '../../shooter/api.ts';
+import { isLowCell } from '../../shooter/map.ts';
 import { GRENADE_TAG, TEAM_COLOR, WEAPON_TAG } from './render.ts';
 import type { BoardRow, KillFeedItem, ShooterFrame, ShooterMeta, ShooterSummary } from './protocol.ts';
 import type { WatchTicket } from './watch.ts';
@@ -131,7 +132,7 @@ export class ShooterHud {
     const cy = y / 1000;
     for (let gy = Math.floor(cy - r); gy <= Math.floor(cy + r); gy++) {
       for (let gx = Math.floor(cx - r); gx <= Math.floor(cx + r); gx++) {
-        if (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height || map.solid[gy * map.width + gx] !== 2) continue;
+        if (!isLowCell(map, gx, gy)) continue;
         const dx = Math.max(gx - cx, 0, cx - (gx + 1));
         const dy = Math.max(gy - cy, 0, cy - (gy + 1));
         if (dx * dx + dy * dy <= r * r) return true;

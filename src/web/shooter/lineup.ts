@@ -42,7 +42,7 @@ export function trialSpec(seed: number, pid: number, version: number): PlayerSpe
 
 /** 試玩設定 → 驅動選項。baseline 只在有基準座位時才呼叫（第一次用到才編譯）；human 是人類座位的控制器（觀戰＝null） */
 export function trialRunOptions(s: ShooterSetup, bots: { readonly practice: CompiledBot; readonly baseline: () => CompiledBot }, human: ShooterController | null): ShooterRunOptions {
-  const map = MAPS[DEFAULT_MAP_ID]();
+  const map = MAPS[s.mapId ?? DEFAULT_MAP_ID]();
   const levels = seatLevels(s);
   const seats = levels.map((l, pid) => (l?.kind === 'baseline' ? seatOf(trialSpec(s.seed, pid, l.version)) : null));
   const seatCtl: (ShooterBatchController | null)[] = seats.map((seat, pid) => (seat !== null ? seatController(bots.baseline(), s.seed, pid, map) : null));

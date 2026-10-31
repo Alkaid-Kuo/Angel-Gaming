@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>攻防戰美術樣張</title>
+<style>
+body { margin: 0; padding: 28px 32px 48px; background: #0d0f14; color: #e8e8e8; font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+h1 { margin: 0 0 6px; font-size: 26px; }
+p { color: #a0a3aa; margin: 0 0 22px; line-height: 1.6; max-width: 1100px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 540px), 1fr)); gap: 20px; }
+.card { background: #181a20; border: 1px solid #2c2e34; border-radius: 12px; overflow: hidden; }
+.card:hover { border-color: #f0b54a; }
+.thumb { display: block; position: relative; width: 100%; aspect-ratio: 1920 / 1080; overflow: hidden; background: #000; }
+.thumb iframe { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; pointer-events: none; }
+.info { padding: 12px 16px 14px; }
+.info b { font-size: 18px; }
+.info span { display: block; color: #a0a3aa; font-size: 13px; margin-top: 4px; line-height: 1.6; }
+.links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.links a { padding: 3px 10px; border: 1px solid #3a3d45; border-radius: 6px; color: #d8dde5; font-size: 13px; text-decoration: none; }
+.links a:hover { border-color: #f0b54a; color: #f0b54a; }
+</style>
+</head>
+<body>
+<h1>攻防戰美術樣張</h1>
+<p>同一張赤岩鎮、同一個時刻：我方 T 從地窖兩個出口推 B，CT 兩人在視錐內，其餘在迷霧外。縮圖是即時繪製的畫面，點進去看全尺寸，每頁都能切計分板、全圖、設定卡、結算。說明與建議見 docs/2026-10-31_CS射擊_美術翻新_三方向樣張.md。</p>
+<div class="grid">
+  <div class="card">
+    <a class="thumb" href="./a-diorama.html"><iframe src="./a-diorama.html?still" loading="lazy" title="方向 A"></iframe></a>
+    <div class="info"><b>A　俯視戰術沙盤（主推）</b><span>台地屋頂、分區材質、落影與接觸陰影、模型兵；迷霧是去飽和的記憶圖，HUD 用天使金語彙。</span>
+      <div class="links"><a href="./a-diorama.html">對局</a><a href="./a-diorama.html?view=board">計分板</a><a href="./a-diorama.html?view=map">全圖</a><a href="./a-diorama.html?view=setup">設定卡</a><a href="./a-diorama.html?view=result">結算</a></div></div>
+  </div>
+  <div class="card">
+    <a class="thumb" href="./b-comic.html"><iframe src="./b-comic.html?still" loading="lazy" title="方向 B"></iframe></a>
+    <div class="info"><b>B　粗線漫畫</b><span>奶油地面加紫牆，三級墨線、硬邊陰影、網點迷霧、爆形命中；HUD 是歪斜的漫畫格。</span>
+      <div class="links"><a href="./b-comic.html">對局</a><a href="./b-comic.html?view=board">計分板</a><a href="./b-comic.html?view=map">全圖</a><a href="./b-comic.html?view=setup">設定卡</a><a href="./b-comic.html?view=result">結算</a></div></div>
+  </div>
+  <div class="card">
+    <a class="thumb" href="./c-minimal.html"><iframe src="./c-minimal.html?still" loading="lazy" title="方向 C"></iframe></a>
+    <div class="info"><b>C　極簡幾何</b><span>八色以內的建築平面圖：牆是剖面、線寬分三級、點陣與距離環、引線標註；我方圓、對手方。</span>
+      <div class="links"><a href="./c-minimal.html">對局</a><a href="./c-minimal.html?view=board">計分板</a><a href="./c-minimal.html?view=map">全圖</a><a href="./c-minimal.html?view=setup">設定卡</a><a href="./c-minimal.html?view=result">結算</a></div></div>
+  </div>
+</div>
+<script>
+  const fit = () => document.querySelectorAll('.thumb').forEach((t) => { t.querySelector('iframe').style.transform = `scale(${t.clientWidth / 1920})`; });
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>
