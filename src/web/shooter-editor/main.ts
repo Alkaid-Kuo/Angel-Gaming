@@ -1,9 +1,8 @@
 // 攻防戰地圖編輯器：矩形與多邊形直接對應 MapLayout，畫面上的格子由引擎的 buildMap 算出來，所見即引擎所得。
 import { UNIT, type Team } from '../../shooter/config.ts';
-import { DUST_LAYOUT, OLD_TOWN_LAYOUT, REDROCK_LAYOUT, SLOPE_LOW, buildMap, cellOf, slopeCorner, type MapLayout, type MapMaterial, type ShooterMap } from '../../shooter/map.ts';
-import { DRAFT_LAYOUT } from '../sketch/shooter/map-draft.ts';
+import { DUST_LAYOUT, OLD_TOWN_LAYOUT, SLOPE_LOW, buildMap, cellOf, slopeCorner, type MapLayout, type MapMaterial, type ShooterMap } from '../../shooter/map.ts';
 import { RUN_CELLS_PER_SEC, analyze, pathField, tracePath, visibleCells, type Check } from './checks.ts';
-import { formatDoc, parseDoc, sameRef, toDoc, type EditDoc, type MPoly, type MRect, type MSpawn, type Ref } from './doc.ts';
+import { fileNameOf, saveTarget, formatDoc, parseDoc, sameRef, toDoc, type EditDoc, type MPoly, type MRect, type MSpawn, type Ref } from './doc.ts';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const AUTOSAVE_KEY = 'shooter-map-editor';
@@ -32,8 +31,6 @@ const COLOR = {
 
 const PRESETS: Record<string, { label: string; layout: MapLayout }> = {
   redrock: { label: '赤岩舊城（正式）', layout: OLD_TOWN_LAYOUT },
-  oldRedrock: { label: '赤岩鎮（舊圖）', layout: REDROCK_LAYOUT },
-  draft: { label: '赤岩舊城第一版草案', layout: DRAFT_LAYOUT },
   dust: { label: '沙城（測試圖）', layout: DUST_LAYOUT },
 };
 
@@ -67,7 +64,7 @@ const cv = $<HTMLCanvasElement>('cv');
 const ctx = cv.getContext('2d')!;
 const stage = $('stage');
 
-let doc: EditDoc = toDoc(DRAFT_LAYOUT);
+let doc: EditDoc = toDoc(OLD_TOWN_LAYOUT);
 let map: ShooterMap = buildMap(doc);
 let buildError = '';
 let tool: Tool = 'select';
@@ -1161,7 +1158,7 @@ window.addEventListener('keydown', (e) => {
   const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl && e.key.toLowerCase() === 's') {
     e.preventDefault();
-    void save();
+    void save(e.shiftKey);
     return;
   }
   if (typing) return;
@@ -1234,7 +1231,7 @@ window.addEventListener('keyup', (e) => {
 
 // ---------- 存檔與開啟 ----------
 
-const fileName = (): string => doc.id.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'map';
+const fileName = (): string => fileNameOf(doc.id);
 
 function download(): void {
   const a = document.createElement('a');
@@ -1244,15 +1241,18 @@ function download(): void {
   URL.revokeObjectURL(a.href);
 }
 
-/** 開發伺服器上存進 maps/shooter/；沒有伺服器時退回下載 */
-async function save(): Promise<void> {
+/** 開發伺服器上存進 maps/shooter/；沒有伺服器時退回下載。正式地圖預設存副本，overwrite（Shift＋存檔）再問一次才寫回正式檔 */
+async function save(overwrite = false): Promise<void> {
   const el = $('dirty');
+  if (overwrite && !saveTarget(doc.id).copy) overwrite = false;
+  if (overwrite && !confirm(`${fileName()}.json 是正式地圖，確定要覆寫嗎？`)) return;
+  const target = saveTarget(doc.id, overwrite);
   try {
-    const res = await fetch(`${FILES_API}/${fileName()}`, { method: 'POST', body: formatDoc(doc) });
+    const res = await fetch(`${FILES_API}/${target.file}`, { method: 'POST', body: formatDoc(doc) });
     if (!res.ok) throw new Error(await res.text());
     savedSnapshot = snapshot;
     renderTop();
-    el.textContent = `已存到 maps/shooter/${fileName()}.json`;
+    el.textContent = target.copy ? `已存成副本 maps/shooter/${target.file}.json，正式檔沒動；要覆寫按 Shift＋存檔` : `已存到 maps/shooter/${target.file}.json`;
     void listFiles();
   } catch {
     download();
@@ -1300,7 +1300,7 @@ async function openChoice(value: string): Promise<void> {
 function wirePanels(): void {
   $('undo').addEventListener('click', undo);
   $('redo').addEventListener('click', redo);
-  $('save').addEventListener('click', () => void save());
+  $('save').addEventListener('click', (e) => void save(e.shiftKey));
   $('download').addEventListener('click', download);
   $('import').addEventListener('click', () => $('import-file').click());
   const file = $<HTMLInputElement>('import-file');
@@ -1363,7 +1363,7 @@ async function start(): Promise<void> {
     try {
       first = await fetchFile(DEFAULT_FILE);
     } catch {
-      first = toDoc(DRAFT_LAYOUT);
+      first = toDoc(OLD_TOWN_LAYOUT);
     }
   }
   loadDoc(first);

@@ -33,7 +33,7 @@ function hudHtml(): string {
   const slots = h.slots.map((s) => `<div class="ws${s.on ? ' sel' : ''}${s.has ? '' : ' empty'}"><kbd>${s.key}</kbd><span class="nm">${s.has ? s.name : '—'}</span></div>`).join('');
   const feed = h.feed.map((f) => `<div class="k"><b class="us">${f.killer}</b><span class="w">${f.weapon}</span><b class="them">${f.victim}</b></div>`).join('');
   return `
-  <div class="h-radar"><canvas id="radar" width="540" height="540"></canvas><div class="rz"><b>${h.zone}</b><span>赤岩鎮</span></div></div>
+  <div class="h-radar"><canvas id="radar" width="540" height="540"></canvas><div class="rz"><b>${h.zone}</b><span>赤岩舊城</span></div></div>
   <div class="h-top">
     <div class="tm us"><b class="n">${h.us}</b><small>T</small><span class="pips">${pips(h.aliveUs)}</span><span class="sc">${h.scoreUs}</span></div>
     <div class="mid"><span class="clock">${h.clock}</span><span class="rd">${h.round}</span></div>
@@ -68,7 +68,7 @@ export function roundsHtml(list: readonly string[] = ROUNDS): string {
 /** 進場設定卡：欄位比照 web/shooter.html，加上之後會有的 Bot 等級下拉 */
 function setupHtml(): string {
   return `
-  <div class="brand"><small>ANGEL GAMING</small><h1>天使戰隊<br><em>攻防戰</em></h1><p>5 對 5 攻防射擊。T 帶炸彈打 A／B 點、CT 防守；不重生、回合制、先贏 13 回合。地圖赤岩鎮。</p></div>
+  <div class="brand"><small>ANGEL GAMING</small><h1>天使戰隊<br><em>攻防戰</em></h1><p>5 對 5 攻防射擊。T 帶炸彈打 A／B 點、CT 防守；不重生、回合制、先贏 13 回合。地圖赤岩舊城。</p></div>
   <form class="card" onsubmit="return false">
     <h2>開始比賽</h2>
     <div class="sides">

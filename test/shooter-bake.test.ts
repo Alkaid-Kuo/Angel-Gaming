@@ -108,7 +108,7 @@ describe('牆路徑不蓋可走格', () => {
 });
 
 describe('材質查表', () => {
-  it('表來自樣張：赤岩鎮的區域都有對應', () => {
+  it('代號表：沒標材質的地圖退回這裡', () => {
     expect(zoneOfRegion('cellarHall')).toBe('wood');
     expect(zoneOfRegion('aSite')).toBe('site');
     expect(zoneOfRegion('market')).toBe('market');
@@ -121,7 +121,7 @@ describe('材質查表', () => {
     expect(zoneOfRegion('沒有這個區域')).toBe('stone');
   });
 
-  it('同一張表涵蓋 redrock2 各版的區域代號', () => {
+  it('代號表也涵蓋赤岩舊城的區域代號', () => {
     for (const id of ['bellLane', 'bellYard', 'eastStore', 'storeDoor', 'sideSouth', 'marketNorth', 'eastYard', 'tMidMouth', 'ctWestDoor', 'shopBarn', 'wineEast']) expect(ZONES).toContain(zoneOfRegion(id));
     expect(zoneOfRegion('marketNorth')).toBe('market');
     expect(zoneOfRegion('eastStore')).toBe('wood');

@@ -450,17 +450,20 @@ function start(s: ShooterSetup): void {
   void fontsReady.then(() => ensureWorker().postMessage({ type: 'start', setup: s } satisfies ToShooterWorker));
 }
 
-/** 設定卡背後的沙盤：預設地圖的 A 包點一帶；烘焙結果留著，開局同一張圖不用再烘 */
+/** 設定卡背後的沙盤：預設地圖的 A 包點一帶（視窗不超出地圖）；烘焙結果留著，開局同一張圖不用再烘 */
 function paintBackdrop(): void {
   const c = document.getElementById('backdrop') as HTMLCanvasElement | null;
   if (c === null) return;
-  const b = bakeMap(MAPS[DEFAULT_MAP_ID]());
+  const map = MAPS[DEFAULT_MAP_ID]();
+  const b = bakeMap(map);
+  const a = map.sites.find((s) => s.id === 'A') ?? map.sites[0];
   c.width = window.innerWidth;
   c.height = window.innerHeight;
   const g = c.getContext('2d') as CanvasRenderingContext2D;
   const ppc = (Math.max(c.width / 1920, c.height / 1080) * 22) / BAKE_PX;
-  const sx = 66 * BAKE_PX - c.width / 2 / ppc;
-  const sy = 32 * BAKE_PX - c.height / 2 / ppc;
+  const fit = (center: number, view: number, size: number): number => Math.max(0, Math.min(size * BAKE_PX - view, center * BAKE_PX - view / 2));
+  const sx = fit((a.x0 + a.x1) / 2, c.width / ppc, map.width);
+  const sy = fit((a.y0 + a.y1) / 2, c.height / ppc, map.height);
   g.drawImage(b.floor, sx, sy, c.width / ppc, c.height / ppc, 0, 0, c.width, c.height);
   g.drawImage(b.walls, sx, sy, c.width / ppc, c.height / ppc, 0, 0, c.width, c.height);
   c.classList.add('on');

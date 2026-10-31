@@ -1,25 +1,15 @@
-// 攻防戰美術樣張共用：只讀 MAPS.redrock() 的幾何，轉成繪製要用的形狀（牆輪廓、區域材質、視線多邊形、固定種子雜訊）。
+// 攻防戰美術樣張共用（已定案，只留參考）：只讀赤岩舊城的幾何，對局場景的擺位當初是照舊圖排的；轉成繪製要用的形狀（牆輪廓、區域材質、視線多邊形、固定種子雜訊）。
 // 全部以格為單位；繪製時由各方向自己乘上鏡頭比例。不用 Math.random，之後正式版可以直接搬。
-import { REDROCK_LAYOUT, buildMap, type Rect } from '../../../shooter/map.ts';
-import { DRAFT_LAYOUT, DRAFT_TARPS, DRAFT_WELL } from './map-draft.ts';
+import { OLD_TOWN_LAYOUT, buildMap, type Rect } from '../../../shooter/map.ts';
 
 export type Pt = readonly [number, number];
-/** 網址帶 ?draft 時畫新地圖草案（只有全圖用得上，對局場景的擺位是照赤岩鎮排的） */
-export const DRAFT = new URLSearchParams(location.search).has('draft');
-const LAYOUT = DRAFT ? DRAFT_LAYOUT : REDROCK_LAYOUT;
+const LAYOUT = OLD_TOWN_LAYOUT;
 export const MAP = buildMap(LAYOUT);
 export const LOW_RECTS: readonly Rect[] = LAYOUT.low ?? [];
 /** B 包點的井（3×3 方塊的左上角） */
-export const WELL = DRAFT ? DRAFT_WELL : { x: 16, y: 18 };
+export const WELL = { x: 20, y: 23 };
 /** 平鋪在市集地上的帆布 */
-export const TARPS: readonly (readonly [number, number, number, number])[] = DRAFT
-  ? DRAFT_TARPS
-  : [
-      [22, 97, 6, 4],
-      [31, 100, 5, 5],
-      [16, 105, 7, 4],
-      [27, 107, 8, 3],
-    ];
+export const TARPS: readonly (readonly [number, number, number, number])[] = (LAYOUT.decor?.tarps ?? []).map((t) => [t.x0, t.y0, t.x1 - t.x0, t.y1 - t.y0]);
 
 export const isWall = (x: number, y: number): boolean => x < 0 || y < 0 || x >= MAP.width || y >= MAP.height || MAP.solid[y * MAP.width + x] === 1;
 export const isLow = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < MAP.width && y < MAP.height && MAP.solid[y * MAP.width + x] === 2;

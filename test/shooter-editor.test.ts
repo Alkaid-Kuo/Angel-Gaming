@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { OLD_TOWN_LAYOUT, buildMap, type MapLayout } from '../src/shooter/map.ts';
 import { analyze, deadEnds, pathField, tracePath, visibleCells } from '../src/web/shooter-editor/checks.ts';
-import { formatDoc, parseDoc, toDoc } from '../src/web/shooter-editor/doc.ts';
+import { fileNameOf, formatDoc, parseDoc, saveTarget, toDoc } from '../src/web/shooter-editor/doc.ts';
 
 /** 兩個出生區、一條走道，走道旁掛一間單門的藥鋪（藥鋪門 → 藥鋪是死路） */
 const DEAD_END_LAYOUT: MapLayout = {
@@ -34,6 +34,20 @@ describe('地圖編輯器的文件', () => {
     const back = parseDoc(JSON.parse(formatDoc(doc)));
     expect(back).toEqual(doc);
     expect(buildMap(back).solid).toEqual(buildMap(OLD_TOWN_LAYOUT).solid);
+  });
+
+  it('存檔保留 theme、decor', () => {
+    const back = parseDoc(JSON.parse(formatDoc(toDoc(OLD_TOWN_LAYOUT))));
+    expect(back.theme).toBe('redrock');
+    expect(back.decor).toEqual(OLD_TOWN_LAYOUT.decor);
+  });
+
+  it('正式地圖預設存副本，明確要求才寫回正式檔；其他地圖照舊', () => {
+    expect(saveTarget('redrock')).toEqual({ file: 'redrock-edit', copy: true });
+    expect(saveTarget('redrock', true)).toEqual({ file: 'redrock', copy: false });
+    expect(saveTarget('New Map')).toEqual({ file: 'new-map', copy: false });
+    expect(fileNameOf('赤岩')).toBe('map');
+    expect(saveTarget('redrock').file).toMatch(/^[a-z0-9][a-z0-9-]*$/);
   });
 
   it('格式不對的檔案會被擋下', () => {

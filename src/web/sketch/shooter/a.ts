@@ -3,7 +3,7 @@
 // 圖層：地面烘焙 → 記憶圖遮罩 → 牆烘焙 → 單位 → 煙 → 彈道與回饋。烘焙層只在地圖變動時重畫。
 import { CALLOUTS, SCENE, UNITS, camRect, makeCanvas, toScreen, worldTransform, type Cam, type Unit } from './scene.ts';
 import { mountPage, radarBase, type Direction } from './shell.ts';
-import { DRAFT, LOW_RECTS, MAP, TARPS, WELL, hash2, isWall, regionLabels, rng, wallPath, zoneAt, zonePath, type Pt, type Zone } from './world.ts';
+import { LOW_RECTS, MAP, TARPS, WELL, hash2, isWall, regionLabels, rng, wallPath, zoneAt, zonePath, type Pt, type Zone } from './world.ts';
 
 /** 調色盤：世界全部在暖土色內，隊色才有飽和度；陰影是偏紫的暖灰，不用黑 */
 const PAL = {
@@ -201,8 +201,8 @@ function paintSites(g: CanvasRenderingContext2D, cam: Cam): void {
     const w = s.x1 - s.x0;
     const h = s.y1 - s.y0;
     // 圓環避開井與石柱
-    const cx = s.x0 + w / 2 + (DRAFT ? (s.id === 'B' ? 3.5 : 3) : s.id === 'B' ? 3 : -2);
-    const cy = s.y0 + h / 2 + (DRAFT ? (s.id === 'B' ? 3 : -2) : 2);
+    const cx = s.x0 + w / 2 + (s.id === 'B' ? 3.5 : 3);
+    const cy = s.y0 + h / 2 + (s.id === 'B' ? 3 : -2);
     p.lineWidth = 0.28;
     p.strokeRect(s.x0, s.y0, w, h);
     p.lineWidth = 0.09;
@@ -226,13 +226,13 @@ function paintSites(g: CanvasRenderingContext2D, cam: Cam): void {
     }
     p.lineWidth = 0.42;
     p.beginPath();
-    p.arc(cx, cy, DRAFT ? 5.2 : 6.4, 0, Math.PI * 2);
+    p.arc(cx, cy, 5.2, 0, Math.PI * 2);
     p.stroke();
     p.lineWidth = 0.12;
     p.beginPath();
-    p.arc(cx, cy, DRAFT ? 4.6 : 5.7, 0, Math.PI * 2);
+    p.arc(cx, cy, 4.6, 0, Math.PI * 2);
     p.stroke();
-    p.font = `900 ${DRAFT ? 6.6 : 8.4}px "Barlow Condensed", "Noto Sans TC", sans-serif`;
+    p.font = `900 6.6px "Barlow Condensed", "Noto Sans TC", sans-serif`;
     p.textAlign = 'center';
     p.textBaseline = 'middle';
     p.fillText(s.id, cx, cy + 0.3);
@@ -511,7 +511,7 @@ function paintWalls(cam: Cam): HTMLCanvasElement {
   g.translate(-0.2, -WALL_H);
   g.clip(wall, 'evenodd');
   paintRoof(g, r);
-  // 一階一階往內退的台地：赤岩鎮的屋頂像層層堆起的土台
+  // 一階一階往內退的台地：屋頂像層層堆起的土台
   for (const [w, tone] of [
     [13, PAL.roofMid],
     [7.4, PAL.roofOuter],

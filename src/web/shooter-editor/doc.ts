@@ -63,6 +63,19 @@ export function toDoc(layout: MapLayout): EditDoc {
   return d;
 }
 
+/** 正式地圖的檔名：預設不直接覆寫，存成副本 */
+const OFFICIAL_FILES: readonly string[] = ['redrock'];
+
+/** 地圖代號 → 存檔檔名（不含副檔名）；伺服器只收小寫英數與連字號 */
+export const fileNameOf = (id: string): string => id.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'map';
+
+/** 這次存檔要寫到哪個檔：正式地圖預設存副本 <檔名>-edit，overwrite 才寫回正式檔 */
+export function saveTarget(id: string, overwrite = false): { readonly file: string; readonly copy: boolean } {
+  const file = fileNameOf(id);
+  const copy = OFFICIAL_FILES.includes(file) && !overwrite;
+  return { file: copy ? `${file}-edit` : file, copy };
+}
+
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isRect = (v: unknown): v is MRect => {
   const r = v as MRect | null;
