@@ -2,7 +2,7 @@
 // 圖層：烘焙地面 → 迷霧（視線外貼記憶圖）→ 烘焙牆與道具 → 地上的東西 → 單位 → 特效 → 準心。烘焙見 bake.ts、模型兵見 soldier.ts、特效見 fx.ts。
 // 視錐迷霧：從所看選手的位置對視錐內打一圈射線，遇牆、看得見的煙霧、視野距離（v0.5）就停，蹲著時貼近的矮牆也擋；
 // 迷霧只改地面呈現，不拿來遮人：視野外的人根本不在觀察資料裡。
-import type { AreaEffect, GrenadeId, MapInfo, ShooterObservation, SoundEvent, SoundKind, Team, WeaponId } from '../../shooter/api.ts';
+import type { AreaEffect, GrenadeId, MapInfo, ShooterObservation, SoundEvent, SoundKind, WeaponId } from '../../shooter/api.ts';
 import { isSolidCell, slopeAt, slopeEntry, slopeFreePoint, slopeNormal } from '../../shooter/map.ts';
 import { slopeContact } from '../../shooter/path.ts';
 import { BAKE_PX, bakeMap, type Baked } from './bake.ts';
@@ -36,6 +36,8 @@ const OVERVIEW_BLEND_MS = 260;
 /** 自己身邊一點點不算迷霧（只是讓自己的腳邊不被蓋住；不代表看得見背後） */
 const SELF_REVEAL = 0.7;
 export const SOUND_MS = 500;
+/** 彈殼飛行時間 */
+const SHELL_MS = 320;
 
 /** 我方是哪一組：玩家模式是自己那組；試玩觀戰把先攻組當我方；別隊的比賽沒有我方 */
 export function mineGroup(meta: ShooterMeta): 0 | 1 | null {
@@ -204,19 +206,6 @@ function castRay(map: MapInfo, ox: number, oy: number, dx: number, dy: number, m
     if (v === 1 || (v === 2 && t <= lowT)) return t;
   }
   return maxT;
-}
-
-/** 格的四個角（順時針，從西北起）相對左上角的位置 */
-const CORNER_X = [0, 1, 1, 0];
-const CORNER_Y = [0, 0, 1, 1];
-
-/** 把斜切格 (x, y) 貼著 corner 角的三角形加進目前路徑（畫布座標，格邊長 s） */
-function slopePath(g: CanvasRenderingContext2D, x: number, y: number, s: number, corner: number): void {
-  const c = [corner, (corner + 1) % 4, (corner + 3) % 4];
-  g.moveTo(x + CORNER_X[c[0]] * s, y + CORNER_Y[c[0]] * s);
-  g.lineTo(x + CORNER_X[c[1]] * s, y + CORNER_Y[c[1]] * s);
-  g.lineTo(x + CORNER_X[c[2]] * s, y + CORNER_Y[c[2]] * s);
-  g.closePath();
 }
 
 /** 射線與圓（煙霧）的第一個交點距離；沒交到回傳 Infinity；起點在圓內回傳 0 */
@@ -438,15 +427,17 @@ export class ShooterRenderer {
     this.blit(ctx, this.baked.floor, cam, dpr);
     // 迷霧在牆之下：邊界被牆蓋住，看不到格子階梯
     if (!seeAll) this.drawFog(cam, view, meNow, dpr);
-    this.blit(ctx, this.baked.walls, cam, dpr);
+    // 焦痕與火在牆層之下：火舌比格子大，靠牆那一側被牆蓋住，不用逐格裁切
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
     for (const s of this.scorches) {
       const [sx, sy] = toScreen(cam, s.x, s.y);
       paintScorch(ctx, sx, sy, s.r * ppc, s.seed);
     }
     const effects: readonly AreaEffect[] = seeAll ? [...full.fires.map((f) => ({ kind: 'fire' as const, x: f.x, y: f.y, radius: f.radius, ticksLeft: 0, cells: f.cells })), ...full.smokes.map((s) => ({ kind: 'smoke' as const, x: s.x, y: s.y, radius: s.radius, ticksLeft: 0 }))] : view.effects;
     for (const e of effects) if (e.kind === 'fire') this.drawFire(cam, e, d.now);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.blit(ctx, this.baked.walls, cam, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.drawCorpses(cam, view, full, d.corpses, lod);
     this.drawItems(cam, seeAll ? full.items : view.items);
     this.drawBomb(cam, view, full, d.xray, d.now);
@@ -456,7 +447,7 @@ export class ShooterRenderer {
     // 人
     const groupOfMe = this.meta.groups[view.me.id];
     if (full !== null) {
-      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod);
+      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tactical);
     } else {
       const us = this.sideOf(groupOfMe);
       for (const t of view.teammates) {
@@ -644,16 +635,17 @@ export class ShooterRenderer {
     ctx.fill();
     const cells = e.cells ?? [];
     const w = this.meta.map.width;
-    // 焦痕：只畫燒得到的格子（牆擋火）；斜切格只有可走半邊著火
-    ctx.fillStyle = 'rgba(52, 32, 30, 0.55)';
+    // 焦痕：只畫燒得到的格子（牆擋火）；一團團圓併起來，邊緣不是格子
+    ctx.fillStyle = 'rgba(52, 32, 30, 0.42)';
     ctx.beginPath();
     for (const i of cells) {
       const cx = i % w;
       const cy = (i - cx) / w;
-      const [px, py] = toScreen(cam, cx * UNIT, cy * UNIT);
       const corner = slopeAt(this.meta.map, cx, cy);
-      if (corner < 0) ctx.rect(px, py, s + 0.5, s + 0.5);
-      else slopePath(ctx, px, py, s, (corner + 2) % 4);
+      const [wx, wy] = corner < 0 ? [cx * UNIT + UNIT / 2, cy * UNIT + UNIT / 2] : slopeFreePoint(cx, cy, corner);
+      const [px, py] = toScreen(cam, wx, wy);
+      ctx.moveTo(px + s * 0.82, py);
+      ctx.arc(px, py, s * 0.82, 0, Math.PI * 2);
     }
     ctx.fill();
     for (const i of cells) {
@@ -799,11 +791,11 @@ export class ShooterRenderer {
     }
   }
 
-  private drawFullPlayers(cam: Camera, full: FullState, prev: FullState | null, alpha: number, viewId: number, lod: boolean): void {
+  private drawFullPlayers(cam: Camera, full: FullState, prev: FullState | null, alpha: number, viewId: number, lod: boolean, tagged: boolean): void {
     for (const p of full.players) {
       if (!p.alive) continue;
       const q = interp(p, prev?.players, alpha);
-      this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: p.hp, hasBomb: p.hasBomb, blind: p.blind, label: this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing }, lod);
+      this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: tagged ? null : p.hp, hasBomb: p.hasBomb, blind: p.blind, label: tagged ? null : this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing }, lod);
     }
   }
 
@@ -841,23 +833,24 @@ export class ShooterRenderer {
         ctx.fillText(l.name, sx, sy);
       }
     }
-    // 引線往畫面上方、左右分開；同一邊依序錯開，不互相壓字
-    const stack = { left: 0, right: 0 };
-    for (const p of [...full.players].sort((a, b) => a.y - b.y)) {
+    // 引線：一隊往左、一隊往右；標註排不下就往上疊，不互相壓字
+    ctx.font = `700 12px ${ZH}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const placed: { x: number; y: number; w: number }[] = [];
+    for (const p of [...full.players].sort((a, b) => b.y - a.y)) {
       if (!p.alive) continue;
       const [sx, sy] = toScreen(cam, p.x, p.y);
       if (sx < 0 || sy < 0 || sx > cam.w || sy > cam.h) continue;
       const side = this.sideOf(this.meta.groups[p.id]);
       const dir = side === 'us' || side === 'home' ? -1 : 1;
-      const lane = dir < 0 ? stack.left++ : stack.right++;
-      const lx = sx + dir * (34 + (lane % 3) * 10);
-      const ly = sy - 30 - (lane % 3) * 14;
       const text = `${this.meta.names[p.id]} ${p.hp}`;
-      ctx.font = `700 12px ${ZH}`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
       const tw = ctx.measureText(text).width + 12;
+      const lx = sx + dir * 36;
       const bx = dir < 0 ? lx - tw : lx;
+      let ly = sy - 26;
+      while (placed.some((q) => bx < q.x + q.w + 4 && bx + tw + 4 > q.x && Math.abs(ly - q.y) < 22)) ly -= 22;
+      placed.push({ x: bx, y: ly, w: tw });
       ctx.strokeStyle = 'rgba(29, 26, 34, 0.8)';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -967,6 +960,19 @@ export class ShooterRenderer {
     const ay = py + Math.sin(a) * reach;
     for (const t of d.tracers) {
       const age = d.now - t.t;
+      if (age < SHELL_MS && weapon !== 'knife') {
+        // 拋殼：往槍的右手邊甩出去、落地淡掉；落點由開火時間固定雜湊
+        const k = age / SHELL_MS;
+        const h = hash2(Math.round(t.t), 3, 9);
+        const b = a + 1.25 + h * 0.7;
+        const dist = reach * 0.35 + ppc * (0.5 + h) * Math.sqrt(k);
+        ctx.fillStyle = `rgba(216, 170, 80, ${1 - k * k})`;
+        ctx.save();
+        ctx.translate(px + Math.cos(a) * reach * 0.35 + Math.cos(b) * dist, py + Math.sin(a) * reach * 0.35 + Math.sin(b) * dist);
+        ctx.rotate(k * 9 + h * 6);
+        ctx.fillRect(-2.5, -1, 5, 2);
+        ctx.restore();
+      }
       if (age > TRACER_MS) continue;
       const [ex, ey] = toScreen(cam, t.x, t.y);
       paintTracer(ctx, ax, ay, ex, ey, Math.min(1, age / 55 + 0.2), Math.max(0, (age - 35) / (TRACER_MS - 35)), Math.max(2, Math.min(4, ppc * 0.14)), 1);
