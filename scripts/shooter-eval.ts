@@ -5,12 +5,13 @@
 // 用法：node scripts/shooter-eval.ts [--a bots/shooter-baseline.js] [--b bots/shooter-practice.js] [--map redrock] [--games 20] [--seed 1] [--jobs 10]
 //       [--attrs aim=80,aggression=20]（只套在 A 身上；預設全部 50；走驅動層的正式屬性路徑，反應延遲由 reaction 算）[--json out.json]
 //       [--lineup 3]（兩隊都用均衡陣容的該版本，與閘道同樣的屬性與角色旋鈕；蓋過 --attrs）
+//       [--layout maps/shooter/x.json]（直接打編輯器存的地圖，不用先登錄；蓋過 --map）
 import { readFileSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import type { Attributes, ShooterInitData, ShooterObservation } from '../src/shooter/api.ts';
 import { ATTRIBUTE_KEYS, TEAM_SIZE, type AttributeKey } from '../src/shooter/config.ts';
-import { MAPS } from '../src/shooter/map.ts';
+import { MAPS, buildMap, type MapLayout, type ShooterMap } from '../src/shooter/map.ts';
 import { balancedLineup, derivePlayer } from '../src/shooter/players.ts';
 import { ShooterBatchController, runShooterMatch, shooterHelpers, type CallOutcome } from '../src/shooter/runner.ts';
 import { PLAYER_COUNT, shooterInitData } from '../src/shooter/sim.ts';
@@ -87,6 +88,15 @@ interface Opts {
   readonly attrs: Partial<Record<AttributeKey, number>>;
   /** 兩隊都用均衡陣容的這個版本；null ＝ 照 attrs */
   readonly lineup: number | null;
+  /** 編輯器存的地圖檔；有給就蓋過 map */
+  readonly layout: string;
+}
+
+/** 把編輯器存的地圖掛進這個執行緒的 MAPS，回傳代號 */
+function loadLayout(path: string): string {
+  const layout = JSON.parse(readFileSync(path, 'utf8')) as MapLayout;
+  (MAPS as Record<string, () => ShooterMap>)[layout.id] = () => buildMap(layout);
+  return layout.id;
 }
 
 /** A 的控制器：記錄 A 的喊話（屬性由驅動層的 attributes 傳入） */
@@ -233,6 +243,7 @@ function arg(name: string, def: string): string {
 
 if (!isMainThread) {
   const { opts, jobs } = workerData as { opts: Opts; jobs: Job[] };
+  if (opts.layout !== '') loadLayout(opts.layout);
   for (const j of jobs) parentPort!.postMessage(play(opts, j));
 } else {
   const games = Number(arg('games', '20'));
@@ -243,7 +254,7 @@ if (!isMainThread) {
     const [k, v] = kv.split('=');
     attrs[k as AttributeKey] = Number(v);
   }
-  const opts: Opts = { a: arg('a', 'bots/shooter-baseline.js'), b: arg('b', 'bots/shooter-practice.js'), map: arg('map', 'redrock'), attrs, lineup: arg('lineup', '') === '' ? null : Number(arg('lineup', '')) };
+  const opts: Opts = { a: arg('a', 'bots/shooter-baseline.js'), b: arg('b', 'bots/shooter-practice.js'), map: arg('layout', '') === '' ? arg('map', 'redrock') : loadLayout(arg('layout', '')), attrs, lineup: arg('lineup', '') === '' ? null : Number(arg('lineup', '')), layout: arg('layout', '') };
   const all: Job[] = [];
   for (let i = 0; i < games; i++) for (const aFirst of [true, false]) all.push({ seed: seed + i, aFirst });
   const buckets: Job[][] = Array.from({ length: Math.min(jobsN, all.length) }, () => []);
