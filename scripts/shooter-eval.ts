@@ -4,12 +4,14 @@
 // 首次接觸時間、換血率、下包率、回防成功率。
 // 用法：node scripts/shooter-eval.ts [--a bots/shooter-baseline.js] [--b bots/shooter-practice.js] [--map redrock] [--games 20] [--seed 1] [--jobs 10]
 //       [--attrs aim=80,aggression=20]（只套在 A 身上；預設全部 50；走驅動層的正式屬性路徑，反應延遲由 reaction 算）[--json out.json]
+//       [--lineup 3]（兩隊都用均衡陣容的該版本，與閘道同樣的屬性與角色旋鈕；蓋過 --attrs）
 import { readFileSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import type { Attributes, ShooterInitData, ShooterObservation } from '../src/shooter/api.ts';
 import { ATTRIBUTE_KEYS, TEAM_SIZE, type AttributeKey } from '../src/shooter/config.ts';
 import { MAPS } from '../src/shooter/map.ts';
+import { balancedLineup, derivePlayer } from '../src/shooter/players.ts';
 import { ShooterBatchController, runShooterMatch, shooterHelpers, type CallOutcome } from '../src/shooter/runner.ts';
 import { PLAYER_COUNT, shooterInitData } from '../src/shooter/sim.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
@@ -37,6 +39,9 @@ interface GameOut {
   readonly decideMax: number;
   readonly exceptions: number;
   readonly timeouts: number;
+  /** 十個座位全部的例外與超時（exceptions、timeouts 只算 A） */
+  readonly exceptionsAll: number;
+  readonly timeoutsAll: number;
   readonly errors: string[];
   readonly wallMs: number;
   /** 行為指標（A 的視角） */
@@ -62,6 +67,8 @@ interface Beh {
   planted: number;
   retakes: number;
   retakeWins: number;
+  /** A 當 T：下在各包點的回合、其中贏的 */
+  plantSites: Record<string, [number, number]>;
 }
 
 /** A 的喊話紀錄：回合 → 計畫、首次接觸 tick、開打 tick、有沒有下包 */
@@ -70,6 +77,7 @@ interface SayLog {
   contact: number;
   live: number;
   planted: boolean;
+  site: string;
 }
 
 interface Opts {
@@ -77,6 +85,8 @@ interface Opts {
   readonly b: string;
   readonly map: string;
   readonly attrs: Partial<Record<AttributeKey, number>>;
+  /** 兩隊都用均衡陣容的這個版本；null ＝ 照 attrs */
+  readonly lineup: number | null;
 }
 
 /** A 的控制器：記錄 A 的喊話（屬性由驅動層的 attributes 傳入） */
@@ -88,10 +98,13 @@ class AttrController extends ShooterBatchController {
     const out = super.decide(obs);
     if (this.log === null) return out;
     const r = obs.round.number;
-    const e = this.log.get(r) ?? { plan: '', contact: -1, live: -1, planted: false };
+    const e = this.log.get(r) ?? { plan: '', contact: -1, live: -1, planted: false, site: '' };
     this.log.set(r, e);
     if (e.live < 0 && obs.round.phase !== 'freeze') e.live = obs.tick - (obs.round.phase === 'live' ? this.roundTicks - obs.round.phaseTicksLeft : 0);
-    if (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing' || obs.bomb.state === 'exploded' || obs.bomb.state === 'defused') e.planted = true;
+    if (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing' || obs.bomb.state === 'exploded' || obs.bomb.state === 'defused') {
+      e.planted = true;
+      e.site = obs.bomb.site ?? e.site;
+    }
     const cmds = Array.isArray(out.value) ? (out.value as { type?: string; text?: string }[]) : [];
     for (const c of cmds) {
       if (c.type !== 'say' || typeof c.text !== 'string') continue;
@@ -110,7 +123,9 @@ function play(o: Opts, job: Job): GameOut {
   const attrs = Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, o.attrs[k] ?? 50])) as Attributes;
   const isA = (pid: number): boolean => (pid < TEAM_SIZE) === job.aFirst;
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => (isA(pid) ? new AttrController(ca, o.a, job.seed, pid, MAPS[o.map]()) : new ShooterBatchController(cb, o.b, job.seed, pid, MAPS[o.map]())));
-  const knobs = controllers.map((c) => resolveKnobs(c.declaration, undefined, c.label));
+  const seats = o.lineup === null ? null : balancedLineup(o.lineup).map(derivePlayer);
+  // 只給選手宣告過的旋鈕（陪練 Bot 沒有 role）
+  const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, seats === null ? undefined : Object.fromEntries(Object.entries(seats[pid % TEAM_SIZE].knobs).filter(([k]) => c.declaration.knobs.some((d) => d.key === k))), c.label));
   const log = new Map<number, SayLog>();
   for (const c of controllers) {
     if (c instanceof AttrController) {
@@ -118,10 +133,10 @@ function play(o: Opts, job: Job): GameOut {
       c.roundTicks = shooterInitData(MAPS[o.map](), 0, {}).rules.roundTicks;
     }
   }
-  const attributes = controllers.map((_, pid) => (isA(pid) ? attrs : undefined));
+  const attributes = controllers.map((_, pid) => (seats !== null ? seats[pid % TEAM_SIZE].attributes : isA(pid) ? attrs : undefined));
   const run = runShooterMatch({ seed: job.seed, mapId: o.map, controllers, knobs, record: false, attributes });
   const r = run.result;
-  const beh: Beh = { plans: {}, throws: 0, flashEnemy: 0, flashTeam: 0, rounds: 0, contactSec: 0, contacts: 0, deaths: 0, traded: 0, tRounds: 0, planted: 0, retakes: 0, retakeWins: 0 };
+  const beh: Beh = { plans: {}, throws: 0, flashEnemy: 0, flashTeam: 0, rounds: 0, contactSec: 0, contacts: 0, deaths: 0, traded: 0, tRounds: 0, planted: 0, retakes: 0, retakeWins: 0, plantSites: {} };
   for (const x of r.rounds) {
     const g = job.aFirst ? 0 : 1;
     const aIsT = x.tGroup === g;
@@ -137,7 +152,13 @@ function play(o: Opts, job: Job): GameOut {
     }
     if (aIsT) {
       beh.tRounds++;
-      if (sl?.planted === true) beh.planted++;
+      if (sl?.planted === true) {
+        beh.planted++;
+        const ps = beh.plantSites[sl.site || '?'] ?? [0, 0];
+        ps[0]++;
+        if (won) ps[1]++;
+        beh.plantSites[sl.site || '?'] = ps;
+      }
       const k = sl?.plan || '?';
       const st = beh.plans[k] ?? [0, 0];
       st[0]++;
@@ -186,7 +207,7 @@ function play(o: Opts, job: Job): GameOut {
     errors.push(...rt.errors);
   });
   for (const rt of run.runtime) if (rt.exceptions > 0 && errors.length < 5) errors.push(...rt.errors);
-  return { seed: job.seed, aFirst: job.aFirst, result: r.winner === null ? 0 : r.winner === aGroup ? 1 : -1, score: r.score, overtimes: r.overtimes, aT, aCT, reasons, decideMs, decisions, decideMax, exceptions, timeouts, errors, wallMs: Math.round(run.wallMs), beh };
+  return { seed: job.seed, aFirst: job.aFirst, result: r.winner === null ? 0 : r.winner === aGroup ? 1 : -1, score: r.score, overtimes: r.overtimes, aT, aCT, reasons, decideMs, decisions, decideMax, exceptions, timeouts, exceptionsAll: run.runtime.reduce((s, rt) => s + rt.exceptions, 0), timeoutsAll: run.runtime.reduce((s, rt) => s + rt.timeouts, 0), errors, wallMs: Math.round(run.wallMs), beh };
 }
 
 /** A 的 init 耗時（毫秒）：直接建立選手類別、計時 init */
@@ -222,7 +243,7 @@ if (!isMainThread) {
     const [k, v] = kv.split('=');
     attrs[k as AttributeKey] = Number(v);
   }
-  const opts: Opts = { a: arg('a', 'bots/shooter-baseline.js'), b: arg('b', 'bots/shooter-practice.js'), map: arg('map', 'redrock'), attrs };
+  const opts: Opts = { a: arg('a', 'bots/shooter-baseline.js'), b: arg('b', 'bots/shooter-practice.js'), map: arg('map', 'redrock'), attrs, lineup: arg('lineup', '') === '' ? null : Number(arg('lineup', '')) };
   const all: Job[] = [];
   for (let i = 0; i < games; i++) for (const aFirst of [true, false]) all.push({ seed: seed + i, aFirst });
   const buckets: Job[][] = Array.from({ length: Math.min(jobsN, all.length) }, () => []);
@@ -258,6 +279,13 @@ if (!isMainThread) {
     st[1] += v[1];
     plans[k] = st;
   }
+  const plantSites: Record<string, [number, number]> = {};
+  for (const g of outs) for (const [k, v] of Object.entries(g.beh.plantSites)) {
+    const st = plantSites[k] ?? [0, 0];
+    st[0] += v[0];
+    st[1] += v[1];
+    plantSites[k] = st;
+  }
   const B = (f: (b: Beh) => number): number => sum((g) => f(g.beh));
   const summary = {
     map: opts.map,
@@ -271,6 +299,7 @@ if (!isMainThread) {
     aRoundWinT: `${pct(tW, tW + tL)}（${tW}/${tW + tL}）`,
     aRoundWinCT: `${pct(cW, cW + cL)}（${cW}/${cW + cL}）`,
     aRoundWin: pct(tW + cW, tW + tL + cW + cL),
+    tRoundWin: `${pct(tW + cL, tW + tL + cW + cL)}（${tW + cL}/${tW + tL + cW + cL}）`,
     overtimeGames: outs.filter((g) => g.overtimes > 0).length,
     reasons: Object.fromEntries(Object.entries(reasons).sort()),
     decideAvgMs: Number((sum((g) => g.decideMs) / Math.max(1, sum((g) => g.decisions))).toFixed(3)),
@@ -278,6 +307,8 @@ if (!isMainThread) {
     initMaxMs: Number(initMs(opts).toFixed(1)),
     exceptions: sum((g) => g.exceptions),
     timeouts: sum((g) => g.timeouts),
+    exceptionsAll: sum((g) => g.exceptionsAll),
+    timeoutsAll: sum((g) => g.timeoutsAll),
     errors: outs.flatMap((g) => g.errors).slice(0, 5),
     behavior: {
       tPlans: Object.fromEntries(Object.entries(plans).sort().map(([k, v]) => [k, `${v[0]} 回合、勝 ${pct(v[1], v[0])}`])),
@@ -288,6 +319,7 @@ if (!isMainThread) {
       firstContactSec: Number((B((b) => b.contactSec) / Math.max(1, B((b) => b.contacts))).toFixed(1)),
       tradeRate: pct(B((b) => b.traded), B((b) => b.deaths)),
       plantRate: pct(B((b) => b.planted), B((b) => b.tRounds)),
+      plantSites: Object.fromEntries(Object.entries(plantSites).sort().map(([k, v]) => [k, `${v[0]} 回合（${pct(v[0], B((b) => b.planted))}）、勝 ${pct(v[1], v[0])}`])),
       retakeWin: `${pct(B((b) => b.retakeWins), B((b) => b.retakes))}（${B((b) => b.retakeWins)}/${B((b) => b.retakes)}）`,
     },
     wallSec: Math.round((performance.now() - t0) / 1000),
