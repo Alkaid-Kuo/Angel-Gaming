@@ -2,6 +2,7 @@
 // 第一張圖「沙城」參照 Dust2：北為 CT、南為 T，中路南北直線，A 長在東、B 通道在西（v0.5 起只供引擎測試）。
 // 第二張圖「赤岩鎮」（v0.5 預設）只借三路骨架，格局原創；用多邊形做斜牆、加矮牆。
 // 座標：格為單位的整數矩形，含 x0/y0、不含 x1/y1。1 格 = 1 公尺 = UNIT 座標單位。
+import redrock2File from '../../maps/shooter/redrock2-v3.json' with { type: 'json' };
 import type { MapInfo, MapRegion } from './api.ts';
 import { TEAM_SIZE, UNIT, type Team } from './config.ts';
 
@@ -18,13 +19,16 @@ export interface MapSpawn {
   readonly facing: number;
 }
 
+/** 區域的地面材質（只給畫面用，引擎不讀，不進 MapInfo） */
+export type MapMaterial = 'stone' | 'dirt' | 'wood' | 'market' | 'plaza' | 'site';
+
 export interface MapLayout {
   readonly id: string;
   readonly name: string;
   readonly width: number;
   readonly height: number;
   /** 依序挖開的區域（代號＝ callout） */
-  readonly areas: readonly (Rect & { readonly id: string; readonly name: string })[];
+  readonly areas: readonly (Rect & { readonly id: string; readonly name: string; readonly material?: MapMaterial })[];
   /** 挖開之後再填回去的實心（箱子、柱子） */
   readonly blocks: readonly Rect[];
   /**
@@ -260,6 +264,12 @@ export const REDROCK_LAYOUT: MapLayout = {
   },
 };
 
+/**
+ * 赤岩舊城（v1.1，使用者用地圖編輯器畫的）。資料在 maps/shooter/，編輯器的 JSON 就是 MapLayout。
+ * 編輯器照檔案內的 id 存檔、一個版本一個檔，所以引擎代號在這裡固定；換版本只改上面那行 import。
+ */
+export const REDROCK2_LAYOUT: MapLayout = { ...(redrock2File as unknown as MapLayout), id: 'redrock2', name: '赤岩舊城' };
+
 export function buildMap(layout: MapLayout): ShooterMap {
   const { width, height } = layout;
   const solid = new Uint8Array(width * height).fill(1);
@@ -318,6 +328,7 @@ export function buildMap(layout: MapLayout): ShooterMap {
 export const MAPS: Readonly<Record<string, () => ShooterMap>> = {
   dust: () => buildMap(DUST_LAYOUT),
   redrock: () => buildMap(REDROCK_LAYOUT),
+  redrock2: () => buildMap(REDROCK2_LAYOUT),
 };
 
 /** 預設地圖（v0.5 起為赤岩鎮；沙城保留給引擎測試與驗收情境） */
