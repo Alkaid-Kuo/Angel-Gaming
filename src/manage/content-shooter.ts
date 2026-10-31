@@ -7,13 +7,13 @@ import { ROLE_TABLE, SHOOTER_ROLES, type ShooterRole } from '../shooter/players.
 import { STUB_CONTENT, type ContentPack, type Economy, type PersonaSpec } from './content.ts';
 import type { Persona } from './types.ts';
 
-/** 隱藏強度表：索引＝版本 − 1（scripts/shooter-strength.ts 的「採用值」，基準 Bot 2.1 @ 5e6916c；量測方法與原始值見步驟 7 交付報告） */
+/** 隱藏強度表：索引＝版本 − 1（scripts/shooter-strength.ts 的「採用值」；規則 1.2：赤岩舊城、MR6、凍結 3 秒，基準 Bot 2.1；回合→整場 k = 11.96；量測見規則 1.2 交付報告） */
 export const SHOOTER_POWER: Readonly<Record<ShooterRole, readonly number[]>> = {
-  entry: [1480, 1490, 1500, 1604, 1614],
-  awp: [1373, 1459, 1500, 1659, 1669],
-  support: [1172, 1358, 1500, 1760, 1848],
-  anchor: [1439, 1490, 1500, 1626, 1636],
-  lurk: [1228, 1387, 1500, 1732, 1791],
+  entry: [1339, 1430, 1500, 1642, 1662],
+  awp: [1383, 1452, 1500, 1620, 1630],
+  support: [1338, 1429, 1500, 1643, 1663],
+  anchor: [1380, 1450, 1500, 1622, 1632],
+  lurk: [1297, 1409, 1500, 1663, 1704],
 };
 
 const STUB_PERSONAS = STUB_CONTENT.personas;
@@ -32,7 +32,7 @@ export const SHOOTER_ECONOMY: Economy = {
   humanStartCash: 2500,
   rosterMax: 8,
   freeAgentCount: 18,
-  // 一場約 13～24 回合：贏方約 13 回合 × 3 ≈ 39，與暫代包「贏 2 個對位 × 20」同一個量級
+  // 聯賽 MR6 一場平均 12 回合（規則 1.2）：贏方約 7 回合 × 3 ≈ 21，比 MR12 時期（約 39）少；數值未動，平衡留給 M5
   roundWinBonus: 3,
   // 真引擎一場數秒（Worker 池約 4 場並行）：練習賽與研發每週可排的場數 ÷20，研發半飽和跟著 ÷20
   scrimCapacity: [10, 30, 75],
