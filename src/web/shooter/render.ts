@@ -421,7 +421,7 @@ export class ShooterRenderer {
     this.trackBlasts(d, nades);
     // 烘焙地面
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = PAL.table;
+    ctx.fillStyle = this.baked.table;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.imageSmoothingEnabled = true;
     this.blit(ctx, this.baked.floor, cam, dpr);

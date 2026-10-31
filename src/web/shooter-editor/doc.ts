@@ -1,6 +1,6 @@
 // 地圖編輯器的文件：就是可改動的 MapLayout，存出去的 JSON 能直接餵給 buildMap。
 import type { Team } from '../../shooter/config.ts';
-import type { MapLayout, MapMaterial } from '../../shooter/map.ts';
+import type { MapDecor, MapLayout, MapMaterial } from '../../shooter/map.ts';
 
 export interface MRect {
   x0: number;
@@ -36,6 +36,9 @@ export interface EditDoc {
   name: string;
   width: number;
   height: number;
+  /** 材質族與擺設：編輯器不改，存檔照原樣帶著 */
+  theme?: string;
+  decor?: MapDecor;
   areas: MArea[];
   blocks: MRect[];
   polys: MPoly[];
@@ -88,7 +91,7 @@ export function formatDoc(d: EditDoc): string {
   "id": ${line(d.id)},
   "name": ${line(d.name)},
   "width": ${d.width},
-  "height": ${d.height},
+  "height": ${d.height},${d.theme !== undefined ? `\n  "theme": ${line(d.theme)},` : ''}${d.decor !== undefined ? `\n  "decor": ${line(d.decor)},` : ''}
   "areas": ${list(d.areas)},
   "blocks": ${list(d.blocks)},
   "polys": ${list(d.polys)},

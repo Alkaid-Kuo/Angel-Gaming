@@ -22,11 +22,29 @@ export interface MapSpawn {
 /** 區域的地面材質（只給畫面用，引擎不讀，不進 MapInfo） */
 export type MapMaterial = 'stone' | 'dirt' | 'wood' | 'market' | 'plaza' | 'site';
 
+/** 擺設（格座標，只給畫面用，引擎不讀，不進 MapInfo）；井要壓在牆方塊上，帆布鋪在 market 材質區的空地，壓到障礙就不畫 */
+export interface MapDecor {
+  readonly wells?: readonly Rect[];
+  readonly tarps?: readonly Rect[];
+  /** 包點塗裝的圓環（圓心、半徑）；沒寫就由畫面自動找離障礙最遠的位置 */
+  readonly sitePaint?: readonly { readonly id: 'A' | 'B'; readonly x: number; readonly y: number; readonly r: number }[];
+}
+
+/** 地圖的畫面資料：不進 MapInfo，選手與引擎都看不到；materials 與 regions 同序 */
+export interface MapVisual {
+  readonly theme: string;
+  readonly decor: MapDecor;
+  readonly materials: readonly (MapMaterial | undefined)[];
+}
+
 export interface MapLayout {
   readonly id: string;
   readonly name: string;
   readonly width: number;
   readonly height: number;
+  /** 材質族代號（只給畫面用；預設 'redrock'），對應美術側 themes/ 的一個檔 */
+  readonly theme?: string;
+  readonly decor?: MapDecor;
   /**
    * 依序挖開的區域（代號＝ callout）。callout：這個框併進哪個區域（門洞、轉角），regions 裡用那個區域的代號與名稱，
    * 框本身留著，所以格子與 Bot 的路線圖都不變；主區域要排在併進來的框前面（選手用代號找區域時拿到第一個框）
@@ -329,10 +347,24 @@ export function buildMap(layout: MapLayout): ShooterMap {
   };
 }
 
-export const MAPS: Readonly<Record<string, () => ShooterMap>> = {
-  dust: () => buildMap(DUST_LAYOUT),
-  redrock: () => buildMap(OLD_TOWN_LAYOUT),
-};
+const LAYOUTS: Readonly<Record<string, MapLayout>> = { dust: DUST_LAYOUT, redrock: OLD_TOWN_LAYOUT };
+
+export const MAPS: Readonly<Record<string, () => ShooterMap>> = Object.fromEntries(Object.entries(LAYOUTS).map(([id, layout]) => [id, () => buildMap(layout)]));
+
+/** 地圖版面 → 畫面資料；併入的框沒標材質就跟主區域 */
+export function mapVisual(layout: MapLayout): MapVisual {
+  return {
+    theme: layout.theme ?? 'redrock',
+    decor: layout.decor ?? {},
+    materials: layout.areas.map((a) => a.material ?? layout.areas.find((o) => o.id === a.callout)?.material),
+  };
+}
+
+/** 依地圖代號查畫面資料（MapInfo 不帶這些）；沒登錄的地圖走預設 theme、退回代號表 */
+export function mapVisualOf(id: string): MapVisual {
+  const layout = LAYOUTS[id];
+  return layout !== undefined ? mapVisual(layout) : { theme: 'redrock', decor: {}, materials: [] };
+}
 
 /** 預設地圖（規則 1.2 起為赤岩舊城；沙城留給引擎測試與 Bot 驗收，玩家面不出現） */
 export const DEFAULT_MAP_ID = 'redrock';

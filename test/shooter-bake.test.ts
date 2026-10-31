@@ -2,10 +2,11 @@
 // 跟瀏覽器裡 isPointInPath(wall, x, y, 'evenodd') 是同一個定義（倒圓角只會讓轉角多蓋 0.12 格，到不了格中心）。
 // 真正的 Path2D 與 canvas：有 OffscreenCanvas 的環境才跑，Node 底下略過；瀏覽器驗收見交付報告。
 import { describe, expect, it } from 'vitest';
-import { MAPS, buildMap, type MapLayout } from '../src/shooter/map.ts';
+import { MAPS, OLD_TOWN_LAYOUT, buildMap, mapVisual, mapVisualOf, type MapLayout } from '../src/shooter/map.ts';
 import { SLOPE_WALL, slopeCorner } from '../src/shooter/map.ts';
+import { shooterInitData } from '../src/shooter/sim.ts';
 import { freePoint, inPolygon, lowKind, lowRects, openLoops, pointInWall, regionLabels, siteSpot, traceLoops, type BakeMap } from '../src/web/shooter/outline.ts';
-import { ZONES, decorOf, hash2, rng, zoneGrid, zoneOfRegion } from '../src/web/shooter/materials.ts';
+import { ZONES, hash2, rng, zoneGrid, zoneOfRegion } from '../src/web/shooter/materials.ts';
 
 /** 手工小圖：. 可走、# 牆、= 矮牆、1～4 斜切牆（實心角 西北、東北、東南、西南） */
 function grid(rows: readonly string[]): BakeMap {
@@ -132,10 +133,43 @@ describe('材質查表', () => {
     expect(g).toEqual(['wood', 'market', 'wood', 'stone']);
   });
 
-  it('擺設：未知地圖沒有；帶版本字尾的地圖吃基底的', () => {
-    expect(decorOf('dust').wells).toHaveLength(0);
-    expect(decorOf('redrock').wells).toHaveLength(1);
-    expect(decorOf('redrock2-v3')).toBe(decorOf('redrock2'));
+  it('地圖 JSON 的 material 優先，沒標的查代號表；併入的框跟主區域', () => {
+    const zone = (id: string): { id: string; name: string; x0: number; y0: number; x1: number; y1: number } => ({ id, name: id, x0: 0, y0: 0, x1: 1, y1: 1 });
+    expect(zoneGrid({ width: 1, height: 1, regions: [zone('cellar')] }, ['dirt'])).toEqual(['dirt']);
+    expect(zoneGrid({ width: 1, height: 1, regions: [zone('cellar')] }, [undefined])).toEqual(['wood']);
+    const v = mapVisual(OLD_TOWN_LAYOUT);
+    expect(v.materials).toHaveLength(MAPS.redrock().regions.length);
+    expect(v.materials[OLD_TOWN_LAYOUT.areas.findIndex((a) => a.id === 'storeDoor')]).toBe('wood');
+    expect(v.materials.every((m) => m !== undefined)).toBe(true);
+  });
+
+  it('theme 與擺設從地圖 JSON 來：井壓在牆上、帆布鋪在空地、包點塗裝在包點裡；沙城沒有擺設', () => {
+    const m = MAPS.redrock();
+    const v = mapVisualOf('redrock');
+    const { wells = [], tarps = [], sitePaint = [] } = v.decor;
+    expect(v.theme).toBe('redrock');
+    expect(wells.length).toBeGreaterThan(0);
+    expect(tarps.length).toBeGreaterThan(0);
+    expect(sitePaint.map((s) => s.id)).toEqual(['A', 'B']);
+    const cells = (r: { x0: number; y0: number; x1: number; y1: number }): number[] => {
+      const out: number[] = [];
+      for (let y = r.y0; y < r.y1; y++) for (let x = r.x0; x < r.x1; x++) out.push(m.solid[y * m.width + x]);
+      return out;
+    };
+    for (const w of wells) expect(cells(w).every((c) => c === 1)).toBe(true);
+    for (const t of tarps) expect(cells(t).every((c) => c === 0)).toBe(true);
+    for (const s of sitePaint) {
+      const r = m.sites.find((x) => x.id === s.id)!;
+      expect(s.x - s.r).toBeGreaterThanOrEqual(r.x0);
+      expect(s.x + s.r).toBeLessThanOrEqual(r.x1);
+    }
+    expect(mapVisualOf('dust').decor).toEqual({});
+    expect(mapVisualOf('沒有這張圖').theme).toBe('redrock');
+  });
+
+  it('畫面資料不進選手看得到的 MapInfo', () => {
+    const data = shooterInitData(MAPS.redrock(), 0, {});
+    expect(Object.keys(data.map).sort()).toEqual(['height', 'id', 'name', 'regions', 'sites', 'solid', 'spawnZones', 'spawns', 'width']);
   });
 });
 
