@@ -20,6 +20,7 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": true,
     "skipLibCheck": true,

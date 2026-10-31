@@ -172,16 +172,16 @@ describe('請求單的地圖', () => {
   }, 60_000);
 
   it('請求單指定赤岩舊城：打得完、觀戰與回放重播都是同一場', () => {
-    const r: MatchRequest = { ...req, mapId: 'redrock2' };
+    const r: MatchRequest = { ...req, mapId: 'redrock2-v4' };
     const m = runGatewayMatch(r, bot);
     expect(m.exceptions).toBe(0);
     expect(m.finalHash).not.toBe(runGatewayMatch(req, bot).finalHash);
     const d = new ShooterDriver(gatewayDriverOptions(r, bot, { record: true }));
     while (!d.match.over) d.step();
-    expect(d.match.map.id).toBe('redrock2');
+    expect(d.match.map.id).toBe('redrock2-v4');
     expect(d.match.hash()).toBe(m.finalHash);
     const rp = d.replay as NonNullable<typeof d.replay>;
-    expect(rp.header.mapId).toBe('redrock2');
+    expect(rp.header.mapId).toBe('redrock2-v4');
     expect(runShooterReplay(JSON.parse(JSON.stringify(rp)) as typeof rp).finalHash).toBe(m.finalHash);
   }, 60_000);
 

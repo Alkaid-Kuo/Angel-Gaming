@@ -409,7 +409,7 @@ function init(): void {
     const n = Number(seed.value);
     start({ team, seed: Number.isFinite(n) && n >= 0 ? Math.floor(n) : randomSeed(), spectate: $<HTMLInputElement>('spectate').checked, mapId: $<HTMLSelectElement>('map').value });
   });
-  // 除錯與自動驗收用：網址帶 ?auto=T|CT&seed=N 直接開局；&loadout=awp 讓雙方開局拿該武器（測狙擊鏡用）；&map=redrock2 指定地圖
+  // 除錯與自動驗收用：網址帶 ?auto=T|CT&seed=N 直接開局；&loadout=awp 讓雙方開局拿該武器（測狙擊鏡用）；&map=代號 換地圖
   const q = new URLSearchParams(location.search);
   const auto = q.get('auto');
   const loadout = q.get('loadout');

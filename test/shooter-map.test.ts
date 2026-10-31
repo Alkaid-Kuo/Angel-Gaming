@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MAP_ID, MAPS, REDROCK2_LAYOUT, blocksMove, buildMap, cellOf, dumpAscii, inRect, isSolidCell, reachable, regionsAt, type ShooterMap } from '../src/shooter/map.ts';
+import { DEFAULT_MAP_ID, MAPS, REDROCK2_V4_LAYOUT, blocksMove, buildMap, cellOf, dumpAscii, inRect, isSolidCell, reachable, regionsAt, type ShooterMap } from '../src/shooter/map.ts';
 import { TEAM_SIZE, UNIT, VISION } from '../src/shooter/config.ts';
 import { lineOfSight } from '../src/shooter/vision.ts';
 
@@ -154,31 +154,29 @@ describe('預設地圖（赤岩鎮，v0.5）', () => {
 
 describe('赤岩舊城（編輯器的 JSON 進引擎）', () => {
   it('同一份 JSON 永遠建出同一張圖', () => {
-    expect(buildMap(REDROCK2_LAYOUT).solid).toEqual(MAPS.redrock2().solid);
+    expect(buildMap(REDROCK2_V4_LAYOUT).solid).toEqual(MAPS['redrock2-v4']().solid);
   });
 
-  it('引擎代號固定，不跟著編輯器檔案的版本走', () => {
-    const map = MAPS.redrock2();
-    expect(map.id).toBe('redrock2');
-    expect(map.name).toBe('赤岩舊城');
+  it('第四版與第三版的格子完全相同（只動區域資料）', () => {
+    expect(MAPS['redrock2-v4']().solid).toEqual(MAPS['redrock2-v3']().solid);
   });
 
   it('併入的框用主區域的代號與名稱，主區域排在最前面，代號定案不改', () => {
-    const map = MAPS.redrock2();
-    expect(REDROCK2_LAYOUT.areas.length).toBeGreaterThan(24);
+    const map = MAPS['redrock2-v4']();
+    expect(REDROCK2_V4_LAYOUT.areas.length).toBeGreaterThan(24);
     const ids = [...new Set(map.regions.map((r) => r.id))];
     expect(ids).toEqual(['tSpawn', 'market', 'marketNorth', 'cellarHall', 'cellarMouth', 'sideAlley', 'tMid', 'mid', 'eastRamp', 'plaza', 'arch', 'eastLane', 'eastGate', 'eastStore', 'eastYard', 'longHall', 'belfry', 'bellYard', 'aSite', 'bSite', 'ctSpawn', 'northSt', 'ctRampW', 'ctEast']);
-    const door = REDROCK2_LAYOUT.areas.find((a) => a.id === 'bGate')!;
+    const door = REDROCK2_V4_LAYOUT.areas.find((a) => a.id === 'bGate')!;
     expect(regionsAt(map, door.x0 * UNIT + UNIT / 2, door.y0 * UNIT + UNIT / 2)[0]).toBe('ctRampW');
-    for (const id of ids) expect(REDROCK2_LAYOUT.areas.find((a) => a.id === id)?.material).toBeDefined();
+    for (const id of ids) expect(REDROCK2_V4_LAYOUT.areas.find((a) => a.id === id)?.material).toBeDefined();
   });
 
   it('併入不存在的區域會在建圖時擋下', () => {
-    expect(() => buildMap({ ...REDROCK2_LAYOUT, areas: [...REDROCK2_LAYOUT.areas, { id: 'x', name: 'x', x0: 50, y0: 50, x1: 51, y1: 51, callout: 'nowhere' }] })).toThrow('nowhere');
+    expect(() => buildMap({ ...REDROCK2_V4_LAYOUT, areas: [...REDROCK2_V4_LAYOUT.areas, { id: 'x', name: 'x', x0: 50, y0: 50, x1: 51, y1: 51, callout: 'nowhere' }] })).toThrow('nowhere');
   });
 
   it('有斜切格，選手資料的地圖代號與區域跟著走', () => {
-    const map = MAPS.redrock2();
+    const map = MAPS['redrock2-v4']();
     expect(map.solid.some((v) => v >= 3)).toBe(true);
     expect(map.regions.map((r) => r.id)).toContain('bSite');
   });
