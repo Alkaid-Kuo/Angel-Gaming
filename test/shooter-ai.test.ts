@@ -88,7 +88,7 @@ describe('射擊基準 Bot：角色分工（roles.js）', () => {
 });
 
 describe('射擊基準 Bot：地圖分析', () => {
-  for (const id of ['redrock', 'redrock2-v3', 'dust']) {
+  for (const id of ['redrock', 'redrock2-v3', 'redrock2-v4', 'dust']) {
     it(`${id}：兩個包點都有入口、守點位、下包位，T 到每個包點至少 2 條路線；init 在 1 秒上限內`, () => {
       const map = MAPS[id]();
       const data: ShooterInitData = shooterInitData(map, 0, {});

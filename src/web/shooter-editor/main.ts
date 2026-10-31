@@ -1,6 +1,6 @@
 // 攻防戰地圖編輯器：矩形與多邊形直接對應 MapLayout，畫面上的格子由引擎的 buildMap 算出來，所見即引擎所得。
 import { UNIT, type Team } from '../../shooter/config.ts';
-import { DUST_LAYOUT, REDROCK_LAYOUT, SLOPE_LOW, buildMap, cellOf, slopeCorner, type MapLayout, type ShooterMap } from '../../shooter/map.ts';
+import { DUST_LAYOUT, REDROCK_LAYOUT, SLOPE_LOW, buildMap, cellOf, slopeCorner, type MapLayout, type MapMaterial, type ShooterMap } from '../../shooter/map.ts';
 import { DRAFT_LAYOUT } from '../sketch/shooter/map-draft.ts';
 import { RUN_CELLS_PER_SEC, analyze, pathField, tracePath, visibleCells, type Check } from './checks.ts';
 import { formatDoc, parseDoc, sameRef, toDoc, type EditDoc, type MPoly, type MRect, type MSpawn, type Ref } from './doc.ts';
@@ -8,7 +8,7 @@ import { formatDoc, parseDoc, sameRef, toDoc, type EditDoc, type MPoly, type MRe
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const AUTOSAVE_KEY = 'shooter-map-editor';
 const FILES_API = '/__shooter-maps';
-const DEFAULT_FILE = 'redrock2';
+const DEFAULT_FILE = 'redrock2-v4';
 const HANDLE_PX = 7;
 
 const COLOR = {
@@ -48,6 +48,7 @@ const TOOLS: readonly { id: Tool; label: string; key: string; hint: string }[] =
 ];
 
 const POLY_MODE: Record<MPoly['mode'], string> = { wall: '填牆', low: '填矮牆', open: '挖開' };
+const MATERIALS: Record<MapMaterial, string> = { stone: '石板', dirt: '泥土', wood: '木板', market: '市集', plaza: '廣場', site: '包點' };
 
 const LAYERS = { areas: '區域框', labels: '名稱', blocks: '實心牆', low: '矮掩體', polys: '斜角', sites: '包點', spawns: '出生', grid: '格線' } as const;
 type Layer = keyof typeof LAYERS;
@@ -719,7 +720,7 @@ function renderObjects(): void {
   };
   const match = (s: string): boolean => q === '' || s.toLowerCase().includes(q);
   const out: HTMLElement[] = [];
-  out.push(...group('區域', doc.areas.flatMap((a, i) => (match(`${a.name} ${a.id}`) ? [objectButton(a.name, size(a), { kind: 'area', i })] : []))));
+  out.push(...group('區域', doc.areas.flatMap((a, i) => (match(`${a.name} ${a.id}`) ? [objectButton(a.name, a.callout === undefined ? size(a) : `併入 ${a.callout}`, { kind: 'area', i })] : []))));
   if (q === '') {
     out.push(...group('實心牆', doc.blocks.map((b, i) => objectButton(`牆 ${b.x0},${b.y0}`, size(b), { kind: 'block', i }))));
     out.push(...group('矮掩體', doc.low.map((b, i) => objectButton(`掩體 ${b.x0},${b.y0}`, size(b), { kind: 'low', i }))));
@@ -783,6 +784,20 @@ function renderInspector(): void {
   const actions = document.createElement('div');
   actions.className = 'actions';
   const r = selection[0];
+  const choice = (name: string, options: string, value: string, set: (v: string) => void): void => {
+    const l = document.createElement('label');
+    l.className = 'wide';
+    l.textContent = name;
+    const s = document.createElement('select');
+    s.innerHTML = options;
+    s.value = value;
+    s.addEventListener('change', () => {
+      set(s.value);
+      commit();
+    });
+    l.append(s);
+    grid.append(l);
+  };
   if (selection.length > 1) {
     const p = document.createElement('p');
     p.className = 'empty';
@@ -793,6 +808,15 @@ function renderInspector(): void {
     if (r.kind === 'area') {
       const a = doc.areas[r.i];
       grid.append(field('名稱', a.name, (v) => (a.name = v), { type: 'text' }), field('代號', a.id, (v) => (a.id = v), { type: 'text' }));
+      const opts = (items: [string, string][], none: string): string => [['', none], ...items].map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+      choice('併入', opts(doc.areas.filter((o) => o !== a && o.callout === undefined).map((o) => [o.id, o.name]), '不併入（正式區域）'), a.callout ?? '', (v) => {
+        if (v === '') delete a.callout;
+        else a.callout = v;
+      });
+      choice('材質', opts(Object.entries(MATERIALS), '未指定'), a.material ?? '', (v) => {
+        if (v === '') delete a.material;
+        else a.material = v as MapMaterial;
+      });
     }
     const rect = rectOf(r);
     if (rect !== null) {
@@ -809,20 +833,6 @@ function renderInspector(): void {
     }
     if (r.kind === 'poly') {
       const p = doc.polys[r.i];
-      const choice = (name: string, options: string, value: string, set: (v: string) => void): void => {
-        const l = document.createElement('label');
-        l.className = 'wide';
-        l.textContent = name;
-        const s = document.createElement('select');
-        s.innerHTML = options;
-        s.value = value;
-        s.addEventListener('change', () => {
-          set(s.value);
-          commit();
-        });
-        l.append(s);
-        grid.append(l);
-      };
       choice('作用', '<option value="wall">填牆</option><option value="low">填矮牆</option><option value="open">挖開</option>', p.mode, (v) => (p.mode = v as MPoly['mode']));
       choice('斜邊', '<option value="slope">斜切（只能 45°）</option><option value="jagged">鋸齒（舊圖用）</option>', p.slope === true ? 'slope' : 'jagged', (v) => {
         if (v === 'slope') p.slope = true;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REDROCK_LAYOUT, buildMap } from '../src/shooter/map.ts';
+import { REDROCK2_V4_LAYOUT, REDROCK_LAYOUT, buildMap } from '../src/shooter/map.ts';
 import { DRAFT_LAYOUT } from '../src/web/sketch/shooter/map-draft.ts';
 import { analyze, deadEnds, pathField, tracePath, visibleCells } from '../src/web/shooter-editor/checks.ts';
 import { formatDoc, parseDoc, toDoc } from '../src/web/shooter-editor/doc.ts';
@@ -22,6 +22,25 @@ describe('地圖檢查', () => {
   it('現行地圖通過全部硬條件', () => {
     const doc = toDoc(REDROCK_LAYOUT);
     expect(analyze(doc, buildMap(doc)).filter((c) => c.level === 'fail')).toEqual([]);
+  });
+
+  it('赤岩舊城通過全部硬條件，沒有死路', () => {
+    const doc = parseDoc(REDROCK2_V4_LAYOUT);
+    const checks = analyze(doc, buildMap(doc));
+    expect(checks.filter((c) => c.level === 'fail')).toEqual([]);
+    expect(deadEnds(doc, buildMap(doc))).toEqual([]);
+    expect(checks.find((c) => c.label === '正式區域')?.level).toBe('info');
+  });
+
+  it('併入的框要指到排在前面的主區域', () => {
+    const doc = toDoc(REDROCK_LAYOUT);
+    const level = (): string => analyze(doc, buildMap(doc)).find((c) => c.label === '區域併入')!.level;
+    expect(level()).toBe('ok');
+    doc.areas[0].callout = doc.areas[1].id;
+    expect(level()).toBe('fail');
+    delete doc.areas[0].callout;
+    doc.areas[1].callout = doc.areas[0].id;
+    expect(level()).toBe('ok');
   });
 
   it('只有一個門的房間算死路，連門洞一起', () => {

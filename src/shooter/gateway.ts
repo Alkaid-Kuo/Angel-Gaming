@@ -7,7 +7,7 @@
 //   shift ＝ clamp(round(habit / 15), −4, 4) ＋ clamp(round(presetBonus / 15), 0, 6)
 // 係數 15 來自步驟 7 的梯度（整隊每屬性點約 15～20 整場 Elo）；用固定換算而不用亂數，讓真實強度與球探報告方向一致。
 // 反應延遲由驅動層依屬性重算（reactionTicksFor）。
-// 座位：A 名單 0～4、B 名單 5～9（A 上半場當 T）；地圖赤岩鎮；種子＝請求單的種子。
+// 座位：A 名單 0～4、B 名單 5～9（A 上半場當 T）；地圖照請求單的 mapId，沒有就是赤岩鎮（舊存檔、舊回放都走這條）；種子＝請求單的種子。
 // 確定性：控制器關掉逾時判定（timeLimits: false），結果只由程式碼與種子決定；Bot 例外仍算「該次無指令」。
 // 觀戰回放（步驟 9）：可玩版的觀戰 Worker 用同一個 gatewayDriverOptions 建 ShooterDriver、逐 tick 推進，
 // 所以重播與經營層當時打的那一場是同一場（成績單與終局雜湊相同，test/manage-shooter.test.ts）。
@@ -127,7 +127,9 @@ export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, op
     if (side.players.length !== format.lineupSize) throw new Error(`攻防戰每方 ${format.lineupSize} 人，名單是 ${side.players.length} 人`);
   }
   const seats = [...request.a.players, ...request.b.players].map(seatOf);
-  const map = MAPS[GATEWAY_MAP_ID]();
+  const buildMap = MAPS[request.mapId ?? GATEWAY_MAP_ID];
+  if (buildMap === undefined) throw new Error(`攻防戰沒有地圖 ${request.mapId}`);
+  const map = buildMap();
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => seatController(bot, request.seed, pid, map));
   const knobs = controllers.map((c, pid) => seatKnobs(c, seats[pid]));
   const fo = FORMAT_OPTIONS[format.id] ?? {};

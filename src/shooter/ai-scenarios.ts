@@ -886,15 +886,15 @@ function lowWallDuel(m: ShooterMap): { s: Pt; e: Pt } {
   throw new Error(`${m.id}：找不到矮牆`);
 }
 
-// ───────── 6-2 團隊情境（T1～T15）：每個情境赤岩鎮與沙城都跑，兩張圖都過才算過 ─────────
+// ───────── 6-2 團隊情境（T1～T15）：每個情境赤岩鎮與沙城都跑，兩張圖都過才算過（腳本可用 --maps 換圖） ─────────
 
-const TEAM_MAPS = ['redrock', 'dust'] as const;
+let teamMaps: readonly string[] = ['redrock', 'dust'];
 const CTS = [5, 6, 7, 8, 9] as const;
 const TS = [0, 1, 2, 3, 4] as const;
 
 /** 兩張圖各跑一次 */
 function onBoth(f: (mapId: string) => AiScenarioResult): AiScenarioResult {
-  const res = TEAM_MAPS.map((id) => {
+  const res = teamMaps.map((id) => {
     try {
       return { id, r: f(id) };
     } catch (e) {
@@ -1409,7 +1409,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
       let team = 0;
       let enemy = 0;
       const opts = { roundsPerHalf: 6, winRounds: 7, overtime: false as const };
-      for (const mapId of TEAM_MAPS) {
+      for (const mapId of teamMaps) {
         const games: { setup: Setup; groups: number[] }[] = [{ setup: { seed, map: mapId, seats: [...TS, ...CTS], opts }, groups: [0, 1] }];
         if (opponent !== undefined) {
           games.push({ setup: { seed, map: mapId, seats: TS, opp: { bot: opponent, seats: CTS }, opts }, groups: [0] });
@@ -1630,7 +1630,7 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
     expect: '均衡陣容（角色依種子輪轉座位）T 全買，split 與 rush 各一回合、兩張圖：第一個進包點的人是突破手（4 回合至少 3 回合）',
     run: (bot, seed) => {
       const roles = rolesFor(seed);
-      const res = TEAM_MAPS.flatMap((mapId) =>
+      const res = teamMaps.flatMap((mapId) =>
         [3, 2].map((plan) => {
           const tr = execTrace(bot, seed, mapId, plan, roles);
           const first = tr.order[0] ?? -1;
@@ -1757,7 +1757,8 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
 export const AI_SCENARIOS: readonly AiScenario[] = [...SOLO_SCENARIOS, ...TEAM_SCENARIOS, ...ROLE_SCENARIOS];
 
 /** 跑一組情境（每個 5 個種子）；filter 只跑指定的情境 */
-export function runAiScenarios(bot: CompiledBot, filter?: (id: string) => boolean, opponent?: CompiledBot): { id: string; name: string; pass: boolean; detail: string }[] {
+export function runAiScenarios(bot: CompiledBot, filter?: (id: string) => boolean, opponent?: CompiledBot, maps?: readonly string[]): { id: string; name: string; pass: boolean; detail: string }[] {
+  if (maps !== undefined) teamMaps = maps;
   const out: { id: string; name: string; pass: boolean; detail: string }[] = [];
   for (const s of AI_SCENARIOS) {
     if (filter !== undefined && !filter(s.id)) continue;

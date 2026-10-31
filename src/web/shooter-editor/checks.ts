@@ -6,6 +6,7 @@ import type { EditDoc, MRect } from './doc.ts';
 
 /** AK／M4 跑步速度（格／秒）；路程換算秒數用 */
 export const RUN_CELLS_PER_SEC = 215 / 52.5;
+const MAX_CALLOUTS = 24;
 
 export interface Check {
   readonly level: 'ok' | 'fail' | 'warn' | 'info';
@@ -323,6 +324,20 @@ function checkSlopes(doc: EditDoc, map: ShooterMap): Check[] {
   ];
 }
 
+/** 併入的框要指到排在它前面的主區域；正式區域太多，畫面與 Bot 喊話都會太碎 */
+function checkCallouts(doc: EditDoc): Check[] {
+  const bad = doc.areas.flatMap((a, i) => {
+    if (a.callout === undefined) return [];
+    const main = doc.areas.findIndex((o) => o.id === a.callout);
+    return main < 0 || main > i || doc.areas[main].callout !== undefined ? [a.name] : [];
+  });
+  const mains = doc.areas.filter((a) => a.callout === undefined).length;
+  return [
+    { level: bad.length === 0 ? 'ok' : 'fail', label: '區域併入', detail: bad.length === 0 ? '都指到排在前面的主區域' : bad.join('、') },
+    { level: mains <= MAX_CALLOUTS ? 'info' : 'warn', label: '正式區域', detail: `${mains} 個（建議 ≤ ${MAX_CALLOUTS}），併入的框 ${doc.areas.length - mains} 個` },
+  ];
+}
+
 /** 硬條件在前（fail 代表引擎測試會掛），設計提示在後 */
 export function analyze(doc: EditDoc, map: ShooterMap): Check[] {
   const open = map.solid.filter((v) => v === 0).length;
@@ -344,6 +359,7 @@ export function analyze(doc: EditDoc, map: ShooterMap): Check[] {
     checkRegions(map),
     { level: pct > 40 && pct < 55 ? 'ok' : 'fail', label: '可走面積', detail: `${pct.toFixed(1)}%（規格 40%～55%）` },
     { level: dup.length === 0 ? 'ok' : 'fail', label: '區域代號重複', detail: dup.length === 0 ? '無' : [...new Set(dup)].join('、') },
+    ...checkCallouts(doc),
     ...checkSlopes(doc, map),
     { level: dead.length === 0 ? 'ok' : 'warn', label: '死路', detail: dead.length === 0 ? '無' : dead.map((i) => doc.areas[i].name).join('、'), cells: dead.flatMap((i) => rectCells(map, doc.areas[i])) },
     ...checkSlivers(map),

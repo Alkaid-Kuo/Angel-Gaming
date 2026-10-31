@@ -39,6 +39,8 @@ export interface MatchRequest {
   readonly a: SideSpec;
   readonly b: SideSpec;
   readonly seed: number;
+  /** 場地代號，經營層不解讀；沒有＝該賽制的預設場地（舊存檔都是這樣） */
+  readonly mapId?: string;
 }
 
 /** 一回合；scoreA／scoreB 是打完這回合後的累計比分 */

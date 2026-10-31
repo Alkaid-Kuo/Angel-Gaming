@@ -5,6 +5,7 @@
 import type { MapInfo, MapRegion } from './api.ts';
 import { TEAM_SIZE, UNIT, type Team } from './config.ts';
 import REDROCK2_V3_LAYOUT from '../../maps/shooter/redrock2-v3.json' with { type: 'json' };
+import redrock2V4File from '../../maps/shooter/redrock2-v4.json' with { type: 'json' };
 
 export interface Rect {
   readonly x0: number;
@@ -19,13 +20,19 @@ export interface MapSpawn {
   readonly facing: number;
 }
 
+/** 區域的地面材質（只給畫面用，引擎不讀，不進 MapInfo） */
+export type MapMaterial = 'stone' | 'dirt' | 'wood' | 'market' | 'plaza' | 'site';
+
 export interface MapLayout {
   readonly id: string;
   readonly name: string;
   readonly width: number;
   readonly height: number;
-  /** 依序挖開的區域（代號＝ callout） */
-  readonly areas: readonly (Rect & { readonly id: string; readonly name: string })[];
+  /**
+   * 依序挖開的區域（代號＝ callout）。callout：這個框併進哪個區域（門洞、轉角），regions 裡用那個區域的代號與名稱，
+   * 框本身留著，所以格子與 Bot 的路線圖都不變；主區域要排在併進來的框前面（選手用代號找區域時拿到第一個框）
+   */
+  readonly areas: readonly (Rect & { readonly id: string; readonly name: string; readonly material?: MapMaterial; readonly callout?: string })[];
   /** 挖開之後再填回去的實心（箱子、柱子） */
   readonly blocks: readonly Rect[];
   /**
@@ -261,6 +268,9 @@ export const REDROCK_LAYOUT: MapLayout = {
   },
 };
 
+/** 赤岩舊城第四版：第三版的幾何一格不動，41 個框併成 24 個正式區域、加材質 */
+export const REDROCK2_V4_LAYOUT = redrock2V4File as unknown as MapLayout;
+
 export function buildMap(layout: MapLayout): ShooterMap {
   const { width, height } = layout;
   const solid = new Uint8Array(width * height).fill(1);
@@ -312,7 +322,11 @@ export function buildMap(layout: MapLayout): ShooterMap {
     sites: layout.sites,
     spawnZones: layout.spawnZones,
     spawns: layout.spawns,
-    regions: layout.areas.map((a) => ({ id: a.id, name: a.name, x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1 })),
+    regions: layout.areas.map((a) => {
+      const c = a.callout === undefined ? a : layout.areas.find((o) => o.id === a.callout);
+      if (c === undefined) throw new Error(`地圖 ${layout.id}：區域 ${a.id} 併入的 ${a.callout} 不存在`);
+      return { id: c.id, name: c.name, x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1 };
+    }),
   };
 }
 
@@ -321,6 +335,7 @@ export const MAPS: Readonly<Record<string, () => ShooterMap>> = {
   redrock: () => buildMap(REDROCK_LAYOUT),
   // 地圖編輯器的存檔；試玩頁可選，預設與閘道不用
   'redrock2-v3': () => buildMap(REDROCK2_V3_LAYOUT as unknown as MapLayout),
+  'redrock2-v4': () => buildMap(REDROCK2_V4_LAYOUT),
 };
 
 /** 預設地圖（v0.5 起為赤岩鎮；沙城保留給引擎測試與驗收情境） */
