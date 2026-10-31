@@ -68,7 +68,7 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 #start:disabled { opacity: 0.55; cursor: progress; }
 #start-status { display: block; margin-top: 8px; text-align: center; }
 #start-status.hidden { display: none; }
-.sg-loading { grid-column: 1 / -1; justify-self: center; width: min(640px, 100%); }
+.setup > .card:only-child { grid-column: 1 / -1; justify-self: center; width: min(640px, 100%); }
 .setup .row a.primary, .setup .row a { padding: 8px 18px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24); color: var(--white); }
 .setup .row a.primary { color: var(--ink); box-shadow: none; }
 @media (max-width: 1000px) {

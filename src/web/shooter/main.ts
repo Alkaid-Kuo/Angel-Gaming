@@ -59,8 +59,10 @@ function syncLineupCard(): void {
 
 /** 開始後等 Worker 回 meta：基準 Bot 第一次要編譯，不讓畫面看起來卡住，也不讓人重按 */
 function setLoading(on: boolean): void {
-  $('start-status').classList.toggle('hidden', !on);
-  $<HTMLButtonElement>('start').disabled = on;
+  // 觀戰頁的設定卡已經換成載入訊息，沒有這兩個元素
+  document.getElementById('start-status')?.classList.toggle('hidden', !on);
+  const start = document.getElementById('start') as HTMLButtonElement | null;
+  if (start !== null) start.disabled = on;
 }
 
 class Game {
@@ -100,6 +102,8 @@ class Game {
   /** 本機投擲冷卻：從自己的道具數減少的那個 tick 起算（觀察資料推得出來，不讀引擎） */
   private throwCdUntil = -1;
   private raf = 0;
+  /** 除錯：蓋掉畫面輸入（凍結時間、擺彈道，瀏覽器驗收用） */
+  private staged: Partial<DrawInput> | null = null;
   /** 除錯：畫之前改一下 frame（瀏覽器驗收擺場景用，不影響 Worker） */
   private patch: ((f: ShooterFrame) => ShooterFrame) | null = null;
   /** 開過購買選單的回合（凍結時自動開一次） */
@@ -183,16 +187,16 @@ class Game {
     // 比賽中關分頁、重新整理、上一頁：瀏覽器先問一次
     window.addEventListener('beforeunload', this.onUnload);
     // 除錯掛勾（瀏覽器驗收用，開發模式或網址帶 ?debug）：只有主執行緒本來就有的畫面資料，沒有引擎
-    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length }), perf: () => ({ drawMs: this.drawMs, bakeMs: this.renderer.baked.ms, bakePx: BAKE_PX }), baked: () => this.renderer.baked, patch: (fn: ((f: ShooterFrame) => ShooterFrame) | null) => (this.patch = fn), bench: (n: number) => this.bench(n) };
+    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length }), perf: () => ({ drawMs: this.drawMs, bakeMs: this.renderer.baked.ms, bakePx: BAKE_PX }), baked: () => this.renderer.baked, patch: (fn: ((f: ShooterFrame) => ShooterFrame) | null) => (this.patch = fn), bench: (n: number) => this.bench(n), stage: (v: Partial<DrawInput> | null) => (this.staged = v), hud: this.hud };
   }
 
   /** 除錯：同步連畫 n 幀量每幀毫秒（最後讀一個像素，逼畫布把指令畫完）；分頁在背景時 rAF 不跑也量得到 */
   private bench(n: number): { frameMs: number; n: number } | null {
     const f = this.patch !== null && this.cur !== null ? this.patch(this.cur) : this.cur;
     if (f === null) return null;
-    const input = { ...this.lastInput(f), prev: f, alpha: 1 };
+    const input = { ...this.lastInput(f), prev: f, alpha: 1, ...this.staged };
     const t0 = performance.now();
-    for (let i = 0; i < n; i++) this.renderer.draw({ ...input, now: t0 + i * 16 });
+    for (let i = 0; i < n; i++) this.renderer.draw({ ...input, now: (this.staged?.now ?? t0) + (this.staged?.now === undefined ? i * 16 : 0) });
     this.canvas.getContext('2d')?.getImageData(0, 0, 1, 1);
     return { frameMs: (performance.now() - t0) / n, n };
   }
@@ -331,7 +335,7 @@ class Game {
     this.input.update(t);
     const cdTicks = this.meta.rules.grenadeRules.throwCooldownTicks;
     const throwCd = f.tick < this.throwCdUntil ? (this.throwCdUntil - f.tick) / cdTicks : 0;
-    const input = { ...this.lastInput(f), alpha, charge: this.input.charge(t), now: t, throwCd };
+    const input = { ...this.lastInput(f), alpha, charge: this.input.charge(t), now: t, throwCd, ...this.staged };
     const t0 = performance.now();
     this.renderer.draw(input);
     this.drawMs += (performance.now() - t0 - this.drawMs) / 60;
@@ -464,6 +468,7 @@ function paintBackdrop(): void {
 
 /** 經營層觀戰：Worker 用請求單重跑那一場（基準 Bot 第一次觀戰時在 Worker 裡編譯，會停一下） */
 function startWatch(t: WatchTicket): void {
+  void fontsReady.then(() => setTimeout(paintBackdrop, 30));
   $('setup').innerHTML = `<section class="card sg-loading"><h2>準備觀戰</h2><p class="muted">${esc(t.teams[0])} VS ${esc(t.teams[1])}・${esc(t.title)}：載入基準 Bot、用存檔的請求單重跑這一場…</p></section>`;
   ensureWorker().postMessage({ type: 'watch', watch: { request: t.request, names: t.names, tags: t.tags, teams: t.teams, mine: t.mine } } satisfies ToShooterWorker);
 }
