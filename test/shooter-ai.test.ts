@@ -88,7 +88,7 @@ describe('射擊基準 Bot：角色分工（roles.js）', () => {
 });
 
 describe('射擊基準 Bot：地圖分析', () => {
-  for (const id of ['redrock', 'dust']) {
+  for (const id of ['redrock', 'redrock2-v3', 'dust']) {
     it(`${id}：兩個包點都有入口、守點位、下包位，T 到每個包點至少 2 條路線；init 在 1 秒上限內`, () => {
       const map = MAPS[id]();
       const data: ShooterInitData = shooterInitData(map, 0, {});
@@ -126,8 +126,8 @@ describe('射擊基準 Bot：情境測試 P0～P13、T1～T15、R1～R6（每個
 });
 
 describe('射擊基準 Bot：對陪練短賽制', () => {
-  it('兩張圖、雙邊各一場（每半場 3 回合）：零例外、零超時', () => {
-    for (const mapId of ['redrock', 'dust']) {
+  it('三張圖、雙邊各一場（每半場 3 回合）：零例外、零超時', () => {
+    for (const mapId of ['redrock', 'redrock2-v3', 'dust']) {
       for (const first of [true, false]) {
         const map = MAPS[mapId]();
         const isBase = (pid: number): boolean => pid < PLAYER_COUNT / 2 === first;

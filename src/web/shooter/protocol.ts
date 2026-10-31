@@ -12,6 +12,8 @@ export interface ShooterSetup {
   readonly seed: number;
   /** 觀戰模式：不參賽，10 隻陪練 Bot 互打，畫面讀引擎全狀態 */
   readonly spectate: boolean;
+  /** 地圖（試玩頁選；沒給用預設地圖） */
+  readonly mapId?: string;
   /** 除錯用（只有網址 ?auto=…&loadout=awp 會帶）：雙方開局主武器 */
   readonly loadout?: WeaponId;
 }

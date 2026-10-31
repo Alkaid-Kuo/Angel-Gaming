@@ -4,6 +4,7 @@
 // 座標：格為單位的整數矩形，含 x0/y0、不含 x1/y1。1 格 = 1 公尺 = UNIT 座標單位。
 import type { MapInfo, MapRegion } from './api.ts';
 import { TEAM_SIZE, UNIT, type Team } from './config.ts';
+import REDROCK2_V3_LAYOUT from '../../maps/shooter/redrock2-v3.json' with { type: 'json' };
 
 export interface Rect {
   readonly x0: number;
@@ -318,6 +319,8 @@ export function buildMap(layout: MapLayout): ShooterMap {
 export const MAPS: Readonly<Record<string, () => ShooterMap>> = {
   dust: () => buildMap(DUST_LAYOUT),
   redrock: () => buildMap(REDROCK_LAYOUT),
+  // 地圖編輯器的存檔；試玩頁可選，預設與閘道不用
+  'redrock2-v3': () => buildMap(REDROCK2_V3_LAYOUT as unknown as MapLayout),
 };
 
 /** 預設地圖（v0.5 起為赤岩鎮；沙城保留給引擎測試與驗收情境） */

@@ -12,7 +12,7 @@
 <div id="setup" class="setup">
   <section class="hero sg-hero">
     <h1>天使戰隊 攻防戰<small>試玩版</small></h1>
-    <p>5 對 5 攻防射擊（參照 CS）：T 帶炸彈打 A／B 點、CT 防守；不重生、回合制、12 回合後換邊、先贏 13 回合獲勝。你和 9 隻陪練 Bot 一起打，地圖「赤岩鎮」。視野公平：視錐外、30 格外（開鏡不限）、牆後、煙後一律看不見，蹲在箱子後面也看不見，靜步沒有聲音。</p>
+    <p>5 對 5 攻防射擊（參照 CS）：T 帶炸彈打 A／B 點、CT 防守；不重生、回合制、12 回合後換邊、先贏 13 回合獲勝。你和 9 隻陪練 Bot 一起打。視野公平：視錐外、30 格外（開鏡不限）、牆後、煙後一律看不見，蹲在箱子後面也看不見，靜步沒有聲音。</p>
     <div class="row"><a class="muted small" href="./index.html">← 回到首頁</a></div>
   </section>
   <section class="card">
@@ -22,6 +22,7 @@
       <label class="sg-team ct"><input type="radio" name="team" value="CT"><span class="t">CT（守方）</span><span class="d">守住兩個炸彈點；時間到、拆彈成功或殲滅 T 就贏</span></label>
     </div>
     <div class="row">
+      <label>地圖 <select id="map"><option value="redrock">赤岩鎮</option><option value="redrock2-v3">赤岩舊城第三版</option></select></label>
       <label>種子 <input id="seed" type="number" min="0" step="1"></label>
       <button id="reroll" type="button">隨機</button>
       <span class="muted small">隊友與對手固定為陪練 Bot v4；同一個種子＋同樣的操作，結果一樣</span>

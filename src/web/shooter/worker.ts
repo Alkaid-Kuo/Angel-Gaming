@@ -47,7 +47,7 @@ function names(spectate: boolean, pid: number): string[] {
 }
 
 function begin(s: ShooterSetup): void {
-  const map = MAPS[DEFAULT_MAP_ID]();
+  const map = MAPS[s.mapId ?? DEFAULT_MAP_ID]();
   const pid = s.spectate ? 0 : s.team === 'T' ? 0 : 5;
   human = s.spectate ? null : new ShooterHumanController();
   const h = human;
