@@ -6,9 +6,9 @@
 //   角度　整數度；0 = +x（東）、90 = +y（畫面下＝南）。
 //   速度　座標單位／tick（已由 CS 的 units／秒換算：1 格 ≈ 52.5 units）。
 
-export const SHOOTER_ENGINE_VERSION = '1.0.0';
-/** 選手 API 版本（v1.0 凍結）：觀察、指令、開局資料的欄位或語意變動都要升這個版本 */
-export const SHOOTER_API_VERSION = '1.0';
+export const SHOOTER_ENGINE_VERSION = '1.1.0';
+/** 選手 API 版本（v1.0 凍結）：觀察、指令、開局資料的欄位或語意變動都要升這個版本（1.1：MapInfo.solid 加斜切格） */
+export const SHOOTER_API_VERSION = '1.1';
 
 export const TPS = 30;
 export const UNIT = 1000;

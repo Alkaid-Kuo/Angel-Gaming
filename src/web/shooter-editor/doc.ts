@@ -16,7 +16,9 @@ export interface MSite extends MRect {
   id: 'A' | 'B';
 }
 export interface MPoly {
-  mode: 'open' | 'wall';
+  mode: 'open' | 'wall' | 'low';
+  /** 斜邊做成真斜線（只能 45°）；沒標的多邊形是鋸齒 */
+  slope?: boolean;
   pts: [number, number][];
 }
 export interface MSpawn {

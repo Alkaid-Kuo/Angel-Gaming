@@ -1,6 +1,6 @@
 // 地圖檢查：前半是 test/shooter-map.test.ts 的硬條件，後半是設計提示；另外提供路程與視線計算。
 import { TEAM_SIZE, UNIT, VISION } from '../../shooter/config.ts';
-import { blocksMove, cellOf, inRect, isSolidCell, reachable, regionsAt, type ShooterMap } from '../../shooter/map.ts';
+import { blocksMove, cellOf, inRect, isSolidCell, reachable, regionsAt, slopeAt, slopeFreePoint, type ShooterMap } from '../../shooter/map.ts';
 import { lineOfSight } from '../../shooter/vision.ts';
 import type { EditDoc, MRect } from './doc.ts';
 
@@ -90,8 +90,10 @@ export function visibleCells(map: ShooterMap, cx: number, cy: number, crouch: bo
   const ay = cy * UNIT + UNIT / 2;
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < W; x++) {
-      if (isSolidCell(map, x, y)) continue;
-      if (lineOfSight(map, ax, ay, x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, [], crouch, false)) out[y * W + x] = 1;
+      const corner = slopeAt(map, x, y);
+      if (corner < 0 && isSolidCell(map, x, y)) continue;
+      const [px, py] = corner < 0 ? [x * UNIT + UNIT / 2, y * UNIT + UNIT / 2] : slopeFreePoint(x, y, corner);
+      if (lineOfSight(map, ax, ay, px, py, [], crouch, false)) out[y * W + x] = 1;
     }
   }
   return out;
@@ -255,7 +257,7 @@ function checkSlivers(map: ShooterMap): Check[] {
       const k = y * W + x;
       if (!blocksMove(map, x, y)) {
         if ((blocksMove(map, x - 1, y) && blocksMove(map, x + 1, y)) || (blocksMove(map, x, y - 1) && blocksMove(map, x, y + 1))) slots.push(k);
-      } else if (isSolidCell(map, x, y)) {
+      } else if (isSolidCell(map, x, y) && slopeAt(map, x, y) < 0) {
         if ((!blocksMove(map, x - 1, y) && !blocksMove(map, x + 1, y)) || (!blocksMove(map, x, y - 1) && !blocksMove(map, x, y + 1))) thin.push(k);
       }
     }
@@ -302,6 +304,25 @@ function checkTravel(map: ShooterMap): Check[] {
   });
 }
 
+/** 斜切多邊形的邊只能水平、垂直、45°，頂點在格點上；沒標斜切的多邊形還是鋸齒，推牆會卡 */
+function checkSlopes(doc: EditDoc, map: ShooterMap): Check[] {
+  const bad: number[] = [];
+  doc.polys.forEach((p) => {
+    if (p.slope !== true) return;
+    p.pts.forEach(([x, y], i) => {
+      const [nx, ny] = p.pts[(i + 1) % p.pts.length];
+      const dx = Math.abs(nx - x);
+      const dy = Math.abs(ny - y);
+      if (!Number.isInteger(x) || !Number.isInteger(y) || (dx !== 0 && dy !== 0 && dx !== dy)) bad.push(Math.floor(y) * map.width + Math.floor(x));
+    });
+  });
+  const jagged = doc.polys.filter((p) => p.slope !== true);
+  return [
+    { level: bad.length === 0 ? 'ok' : 'fail', label: '斜切邊', detail: bad.length === 0 ? '都是 45°' : `${bad.length} 條邊不是 45°`, cells: bad },
+    { level: jagged.length === 0 ? 'ok' : 'warn', label: '鋸齒斜角', detail: jagged.length === 0 ? '無' : `${jagged.length} 個多邊形沒開斜切`, cells: jagged.map((p) => Math.floor(p.pts[0][1]) * map.width + Math.floor(p.pts[0][0])) },
+  ];
+}
+
 /** 硬條件在前（fail 代表引擎測試會掛），設計提示在後 */
 export function analyze(doc: EditDoc, map: ShooterMap): Check[] {
   const open = map.solid.filter((v) => v === 0).length;
@@ -323,6 +344,7 @@ export function analyze(doc: EditDoc, map: ShooterMap): Check[] {
     checkRegions(map),
     { level: pct > 40 && pct < 55 ? 'ok' : 'fail', label: '可走面積', detail: `${pct.toFixed(1)}%（規格 40%～55%）` },
     { level: dup.length === 0 ? 'ok' : 'fail', label: '區域代號重複', detail: dup.length === 0 ? '無' : [...new Set(dup)].join('、') },
+    ...checkSlopes(doc, map),
     { level: dead.length === 0 ? 'ok' : 'warn', label: '死路', detail: dead.length === 0 ? '無' : dead.map((i) => doc.areas[i].name).join('、'), cells: dead.flatMap((i) => rectCells(map, doc.areas[i])) },
     ...checkSlivers(map),
     checkLongLines(map),

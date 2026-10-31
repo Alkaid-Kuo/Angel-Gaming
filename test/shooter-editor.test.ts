@@ -40,6 +40,18 @@ describe('地圖檢查', () => {
     expect(names).not.toContain('內院門');
   });
 
+  it('斜切多邊形的邊不是 45° 會被擋下，鋸齒多邊形只提醒', () => {
+    const doc = toDoc(REDROCK_LAYOUT);
+    const levels = (): Record<string, string> => Object.fromEntries(analyze(doc, buildMap(doc)).map((c) => [c.label, c.level]));
+    expect(levels()['斜切邊']).toBe('ok');
+    expect(levels()['鋸齒斜角']).toBe('warn');
+    doc.polys = [{ mode: 'wall', slope: true, pts: [[40, 98], [46, 98], [40, 103]] }];
+    expect(levels()['斜切邊']).toBe('fail');
+    doc.polys = [{ mode: 'wall', slope: true, pts: [[40, 98], [46, 98], [40, 104]] }];
+    expect(levels()['斜切邊']).toBe('ok');
+    expect(levels()['鋸齒斜角']).toBe('ok');
+  });
+
   it('路程沿走得到的格子回到起點', () => {
     const map = buildMap(toDoc(REDROCK_LAYOUT));
     const [s, e] = [map.spawns.T[0], map.spawns.CT[0]];

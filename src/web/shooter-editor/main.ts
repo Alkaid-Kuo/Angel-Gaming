@@ -1,6 +1,6 @@
 // 攻防戰地圖編輯器：矩形與多邊形直接對應 MapLayout，畫面上的格子由引擎的 buildMap 算出來，所見即引擎所得。
 import { UNIT, type Team } from '../../shooter/config.ts';
-import { DUST_LAYOUT, REDROCK_LAYOUT, buildMap, cellOf, type MapLayout, type ShooterMap } from '../../shooter/map.ts';
+import { DUST_LAYOUT, REDROCK_LAYOUT, SLOPE_LOW, buildMap, cellOf, slopeCorner, type MapLayout, type ShooterMap } from '../../shooter/map.ts';
 import { DRAFT_LAYOUT } from '../sketch/shooter/map-draft.ts';
 import { RUN_CELLS_PER_SEC, analyze, pathField, tracePath, visibleCells, type Check } from './checks.ts';
 import { formatDoc, parseDoc, sameRef, toDoc, type EditDoc, type MPoly, type MRect, type MSpawn, type Ref } from './doc.ts';
@@ -42,10 +42,12 @@ const TOOLS: readonly { id: Tool; label: string; key: string; hint: string }[] =
   { id: 'area', label: '開路', key: 'A', hint: '拖曳挖開一塊可走區域。走道、門洞、房間都用它。' },
   { id: 'block', label: '實心牆', key: 'B', hint: '拖曳填回一塊實心牆，擋移動、視線與子彈。' },
   { id: 'low', label: '矮掩體', key: 'L', hint: '拖曳放矮掩體：擋移動，蹲著貼近時才擋視線。' },
-  { id: 'poly', label: '斜角', key: 'P', hint: '逐點點擊畫多邊形，點回起點或按 Enter 結束，Esc 取消。屬性可切填牆或挖開。' },
+  { id: 'poly', label: '斜角', key: 'P', hint: '逐點點擊畫多邊形，邊會吸到水平、垂直或 45°，點回起點或按 Enter 結束，Esc 取消。屬性可切填牆、填矮牆或挖開。' },
   { id: 'measure', label: '量路程', key: 'M', hint: '點兩個位置，顯示最短路線、格數與跑步秒數。' },
   { id: 'sight', label: '看視線', key: 'E', hint: '滑鼠所在位置看得到的範圍，點一下固定，再點解除。用引擎的視線判定。' },
 ];
+
+const POLY_MODE: Record<MPoly['mode'], string> = { wall: '填牆', low: '填矮牆', open: '挖開' };
 
 const LAYERS = { areas: '區域框', labels: '名稱', blocks: '實心牆', low: '矮掩體', polys: '斜角', sites: '包點', spawns: '出生', grid: '格線' } as const;
 type Layer = keyof typeof LAYERS;
@@ -327,6 +329,26 @@ function paintRaster(): void {
   g.putImageData(img, 0, 0);
 }
 
+/** 描出格 (x, y) 貼著 corner 角的三角形 */
+function cellTriangle(x: number, y: number, corner: number): void {
+  ctx.beginPath();
+  for (const c of [corner, (corner + 1) % 4, (corner + 3) % 4]) ctx.lineTo(sx(x + (c === 1 || c === 2 ? 1 : 0)), sy(y + (c === 2 || c === 3 ? 1 : 0)));
+  ctx.closePath();
+}
+
+/** 底圖是一格一像素，斜切格的實心半邊另外畫 */
+function drawSlopes(): void {
+  for (let i = 0; i < map.solid.length; i++) {
+    const corner = slopeCorner(map.solid[i]);
+    if (corner < 0) continue;
+    const c = map.solid[i] >= SLOPE_LOW ? COLOR.low : COLOR.wall;
+    const x = i % map.width;
+    ctx.fillStyle = `rgb(${c[0]} ${c[1]} ${c[2]})`;
+    cellTriangle(x, (i - x) / map.width, corner);
+    ctx.fill();
+  }
+}
+
 function paintOverlay(): void {
   overlayCanvas.width = map.width;
   overlayCanvas.height = map.height;
@@ -445,6 +467,7 @@ function draw(): void {
   const W = map.width * view.scale;
   const H = map.height * view.scale;
   ctx.drawImage(raster, view.ox, view.oy, W, H);
+  drawSlopes();
   if (overlay !== 'none') ctx.drawImage(overlayCanvas, view.ox, view.oy, W, H);
 
   if (sightCells !== null && sightFrom !== null && tool === 'sight') {
@@ -453,7 +476,13 @@ function draw(): void {
     for (let i = 0; i < map.solid.length; i++) {
       if (map.solid[i] === 1 || sightCells[i] === 1) continue;
       const x = i % map.width;
-      ctx.fillRect(sx(x), sy((i - x) / map.width), view.scale, view.scale);
+      const y = (i - x) / map.width;
+      const corner = slopeCorner(map.solid[i]);
+      if (corner < 0) ctx.fillRect(sx(x), sy(y), view.scale, view.scale);
+      else {
+        cellTriangle(x, y, (corner + 2) % 4);
+        ctx.fill();
+      }
     }
     ctx.fillStyle = COLOR.gold;
     ctx.beginPath();
@@ -484,7 +513,7 @@ function draw(): void {
   if (layers.polys) {
     for (const p of doc.polys) {
       polyPath(p.pts);
-      ctx.strokeStyle = p.mode === 'wall' ? COLOR.polyWall : COLOR.polyOpen;
+      ctx.strokeStyle = p.mode === 'open' ? COLOR.polyOpen : COLOR.polyWall;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
@@ -694,7 +723,7 @@ function renderObjects(): void {
   if (q === '') {
     out.push(...group('實心牆', doc.blocks.map((b, i) => objectButton(`牆 ${b.x0},${b.y0}`, size(b), { kind: 'block', i }))));
     out.push(...group('矮掩體', doc.low.map((b, i) => objectButton(`掩體 ${b.x0},${b.y0}`, size(b), { kind: 'low', i }))));
-    out.push(...group('斜角', doc.polys.map((p, i) => objectButton(p.mode === 'wall' ? '填牆' : '挖開', `${p.pts.length} 點`, { kind: 'poly', i }))));
+    out.push(...group('斜角', doc.polys.map((p, i) => objectButton(POLY_MODE[p.mode], `${p.slope === true ? '斜切' : '鋸齒'}・${p.pts.length} 點`, { kind: 'poly', i }))));
     out.push(...group('包點', doc.sites.map((s, i) => objectButton(`${s.id} 可下包區`, size(s), { kind: 'site', i }))));
     out.push(...group('出生區', (['T', 'CT'] as const).map((team) => objectButton(`${team} 出生區`, size(doc.spawnZones[team]), { kind: 'zone', team }))));
   }
@@ -780,18 +809,25 @@ function renderInspector(): void {
     }
     if (r.kind === 'poly') {
       const p = doc.polys[r.i];
-      const l = document.createElement('label');
-      l.className = 'wide';
-      l.textContent = '作用';
-      const s = document.createElement('select');
-      s.innerHTML = '<option value="wall">填牆</option><option value="open">挖開</option>';
-      s.value = p.mode;
-      s.addEventListener('change', () => {
-        p.mode = s.value as MPoly['mode'];
-        commit();
+      const choice = (name: string, options: string, value: string, set: (v: string) => void): void => {
+        const l = document.createElement('label');
+        l.className = 'wide';
+        l.textContent = name;
+        const s = document.createElement('select');
+        s.innerHTML = options;
+        s.value = value;
+        s.addEventListener('change', () => {
+          set(s.value);
+          commit();
+        });
+        l.append(s);
+        grid.append(l);
+      };
+      choice('作用', '<option value="wall">填牆</option><option value="low">填矮牆</option><option value="open">挖開</option>', p.mode, (v) => (p.mode = v as MPoly['mode']));
+      choice('斜邊', '<option value="slope">斜切（只能 45°）</option><option value="jagged">鋸齒（舊圖用）</option>', p.slope === true ? 'slope' : 'jagged', (v) => {
+        if (v === 'slope') p.slope = true;
+        else delete p.slope;
       });
-      l.append(s);
-      grid.append(l);
     }
     if (r.kind === 'block' || r.kind === 'low') actions.append(actionButton(r.kind === 'block' ? '改成矮掩體' : '改成實心牆', swapCover));
   }
@@ -889,17 +925,27 @@ function pointerSelect(e: PointerEvent, x: number, y: number): void {
   drag = { t: 'move', cx: x, cy: y, orig: selection.map((r) => JSON.parse(JSON.stringify(objectOf(r)))), moved: false, cycle };
 }
 
+/** 從上一點出發，把落點吸到最接近的水平、垂直或 45° 方向 */
+function snapPoly(from: readonly [number, number], p: [number, number]): [number, number] {
+  const dx = p[0] - from[0];
+  const dy = p[1] - from[1];
+  if (Math.abs(dx) * 2 < Math.abs(dy)) return [from[0], p[1]];
+  if (Math.abs(dy) * 2 < Math.abs(dx)) return [p[0], from[1]];
+  const d = Math.max(Math.abs(dx), Math.abs(dy));
+  return [from[0] + Math.sign(dx) * d, from[1] + Math.sign(dy) * d];
+}
+
 function pointerPoly(x: number, y: number): void {
   const p: [number, number] = [Math.round(x), Math.round(y)];
   const [fx, fy] = draftPoly[0] ?? [Infinity, Infinity];
   if (draftPoly.length >= 3 && p[0] === fx && p[1] === fy) finishPoly();
-  else draftPoly.push(p);
+  else draftPoly.push(draftPoly.length === 0 ? p : snapPoly(draftPoly[draftPoly.length - 1], p));
   requestDraw();
 }
 
 function finishPoly(): void {
   if (draftPoly.length >= 3) {
-    selection = [{ kind: 'poly', i: doc.polys.push({ mode: 'wall', pts: draftPoly }) - 1 }];
+    selection = [{ kind: 'poly', i: doc.polys.push({ mode: 'wall', slope: true, pts: draftPoly }) - 1 }];
     draftPoly = [];
     setTool('select');
     commit();
