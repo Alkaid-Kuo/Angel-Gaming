@@ -1,11 +1,11 @@
-// 攻防戰烘焙層的幾何（src/web/shooter/bake.ts、materials.ts）。不需要 DOM：牆路徑用同一組折線做點在多邊形內的判斷，
+// 攻防戰烘焙層的幾何（src/web/shooter/outline.ts、materials.ts）。不需要 DOM：牆路徑用同一組折線做點在多邊形內的判斷，
 // 跟瀏覽器裡 isPointInPath(wall, x, y, 'evenodd') 是同一個定義（倒圓角只會讓轉角多蓋 0.12 格，到不了格中心）。
 // 真正的 Path2D 與 canvas：有 OffscreenCanvas 的環境才跑，Node 底下略過；瀏覽器驗收見交付報告。
 import { readFileSync, existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { MAPS, buildMap, type MapLayout } from '../src/shooter/map.ts';
 import { SLOPE_WALL, slopeCorner } from '../src/shooter/map.ts';
-import { freePoint, inPolygon, lowKind, lowRects, openLoops, pointInWall, regionLabels, siteSpot, traceLoops, type BakeMap } from '../src/web/shooter/bake.ts';
+import { freePoint, inPolygon, lowKind, lowRects, openLoops, pointInWall, regionLabels, siteSpot, traceLoops, type BakeMap } from '../src/web/shooter/outline.ts';
 import { ZONES, decorOf, hash2, rng, zoneGrid, zoneOfRegion } from '../src/web/shooter/materials.ts';
 
 /** 手工小圖：. 可走、# 牆、= 矮牆、1～4 斜切牆（實心角 西北、東北、東南、西南） */
@@ -95,9 +95,23 @@ describe('牆路徑不蓋可走格', () => {
     expect(inPolygon(3, 1, sq)).toBe(false);
   });
 
-  it.skipIf(typeof OffscreenCanvas === 'undefined')('瀏覽器環境：isPointInPath 與折線判斷一致', () => {
-    // Node 沒有 Path2D／OffscreenCanvas，這段由瀏覽器驗收涵蓋（報告的「牆路徑」一列）
-    expect(typeof OffscreenCanvas).toBe('function');
+  it.skipIf(!('OffscreenCanvas' in globalThis))('有 canvas 的環境：isPointInPath 與折線判斷一致', () => {
+    // Node 沒有 Path2D／OffscreenCanvas，這段略過；瀏覽器驗收另外跑過同樣的判斷（交付報告的「牆輪廓」一列）
+    const g = globalThis as unknown as { OffscreenCanvas: new (w: number, h: number) => { getContext(t: '2d'): { isPointInPath(p: unknown, x: number, y: number, r: 'evenodd'): boolean } }; Path2D: new () => { rect(x: number, y: number, w: number, h: number): void; moveTo(x: number, y: number): void; lineTo(x: number, y: number): void; closePath(): void } };
+    const m = MAPS.redrock();
+    const path = new g.Path2D();
+    path.rect(-8, -8, m.width + 16, m.height + 16);
+    for (const l of openLoops(m)) {
+      l.forEach(([x, y], i) => (i === 0 ? path.moveTo(x, y) : path.lineTo(x, y)));
+      path.closePath();
+    }
+    const ctx = new g.OffscreenCanvas(16, 16).getContext('2d');
+    for (let y = 0; y < m.height; y++) {
+      for (let x = 0; x < m.width; x++) {
+        const p = freePoint(m, x, y);
+        if (p !== null) expect(ctx.isPointInPath(path, p[0], p[1], 'evenodd')).toBe(false);
+      }
+    }
   });
 });
 
@@ -122,7 +136,7 @@ describe('材質查表', () => {
   });
 
   it('區域重疊時後面的蓋前面；不在區域裡的格子是石板', () => {
-    const zone = (id: string, x0: number, x1: number) => ({ id, name: id, x0, y0: 0, x1, y1: 1 });
+    const zone = (id: string, x0: number, x1: number): { id: string; name: string; x0: number; y0: number; x1: number; y1: number } => ({ id, name: id, x0, y0: 0, x1, y1: 1 });
     const g = zoneGrid({ width: 4, height: 1, regions: [zone('cellar', 0, 3), zone('market', 1, 2)] });
     expect(g).toEqual(['wood', 'market', 'wood', 'stone']);
   });
