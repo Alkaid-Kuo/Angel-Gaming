@@ -146,6 +146,32 @@ function paintGun(g: CanvasRenderingContext2D, m: GunModel): void {
   }
 }
 
+/** 商店卡片的武器剪影：同一組模型，壓在深色面板上改用淺色單色；寬 w 高 h 內置中 */
+export function paintGunIcon(g: CanvasRenderingContext2D, id: WeaponId, w: number, h: number): void {
+  const m = gunOf(id);
+  // 槍托最遠到 −0.16；短槍不要放大成長槍那麼大
+  const span = Math.max(1.2, m.tip + 0.2);
+  const s = (w * 0.92) / span;
+  g.save();
+  g.translate((w - (m.tip + 0.16) * s) / 2 + 0.16 * s, h / 2 - 0.06 * s);
+  g.scale(s, s);
+  g.fillStyle = '#c3cad4';
+  g.fill(m.dark);
+  if (m.wood !== null) {
+    g.fillStyle = '#8b95a4';
+    g.fill(m.wood);
+  }
+  if (m.mid !== null) {
+    g.fillStyle = '#8b95a4';
+    g.fill(m.mid);
+  }
+  if (m.light !== null) {
+    g.fillStyle = '#eef2f6';
+    g.fill(m.light);
+  }
+  g.restore();
+}
+
 /** 地上的槍：跟手上同一個剪影，縮小躺著 */
 export function paintDroppedGun(g: CanvasRenderingContext2D, id: WeaponId, deg: number): void {
   g.save();
