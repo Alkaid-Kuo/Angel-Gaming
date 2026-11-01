@@ -148,7 +148,7 @@ describe('驅動層接屬性', () => {
 describe('射擊內容包 SHOOTER_CONTENT', () => {
   it('五個 lineage（id ＝ 角色）、power 長度＝MAX_VERSION、隨版本嚴格遞增、可以餵 expectedPermille', () => {
     expect(SHOOTER_CONTENT.id).toBe('shooter-1');
-    expect(SHOOTER_CONTENT.formatId).toBe('shooter-mr12');
+    expect(SHOOTER_CONTENT.formatId).toBe('shooter-mr6');
     expect(SHOOTER_CONTENT.lineages.map((l) => l.id).sort()).toEqual([...SHOOTER_ROLES].sort());
     for (const l of SHOOTER_CONTENT.lineages) {
       expect(l.power.length).toBe(MAX_VERSION);

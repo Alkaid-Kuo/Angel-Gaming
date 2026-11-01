@@ -98,6 +98,11 @@ export class Utility {
     for (let cy = Math.floor((y - r) / UNIT); cy <= Math.floor((y + r) / UNIT); cy++) {
       for (let cx = Math.floor((x - r) / UNIT); cx <= Math.floor((x + r) / UNIT); cx++) {
         if (!g.isWall(cx, cy)) continue;
+        const i = cx >= 0 && cy >= 0 && cx < g.W && cy < g.H ? cy * g.W + cx : -1;
+        if (i >= 0 && g.slope[i] >= 0) {
+          if (g.slopeDistSq(i, x, y) <= r * r) return true;
+          continue;
+        }
         const nx = Math.max(cx * UNIT, Math.min(x, cx * UNIT + UNIT));
         const ny = Math.max(cy * UNIT, Math.min(y, cy * UNIT + UNIT));
         if ((nx - x) * (nx - x) + (ny - y) * (ny - y) <= r * r) return true;

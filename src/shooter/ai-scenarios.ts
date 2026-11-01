@@ -1,6 +1,6 @@
 // CS 射擊基準 Bot 情境測試（步驟 6）：「懂不懂」的測試，不是強度測試。
 // 受測 Bot 坐某幾個座位，其他座位用腳本控制（ScriptController），每個情境固定 5 個種子都要過；test/shooter-ai.test.ts 檢查。
-// 位置一律由地圖資料（出生區、包點、牆、矮牆、區域）算出，不寫死座標；預設跑赤岩鎮，換地圖也要能找到位置。
+// 位置一律由地圖資料（出生區、包點、牆、矮牆、區域）算出，不寫死座標；預設跑赤岩舊城，換地圖也要能找到位置。
 // 情境只用引擎的公開狀態判定（位置、朝向、血量、子彈、姿勢），受測 Bot 只拿得到它自己的觀察資料。
 // 用法：runAiScenarios(compileBot(...), 篩選, 對手)；腳本 scripts/shooter-ai-scenarios.ts 印出結果。
 import { resolveKnobs } from '../sandbox/controller.ts';
@@ -28,7 +28,10 @@ export interface AiScenario {
 
 /** 每個情境固定跑這 5 個種子，全過才算過 */
 export const AI_SCENARIO_SEEDS: readonly number[] = [1, 2, 3, 4, 5];
-const MAP_ID = 'redrock';
+/** 單兵情境的地圖（腳本 --solo-map 換） */
+let MAP_ID = 'redrock';
+/** 情境的凍結時間（預設 Bot 對打；腳本 --freeze 換） */
+let scenarioFreeze: number = ROUND.botFreezeTicks;
 
 type Script = (obs: ShooterObservation) => readonly ShooterCommand[];
 const idle: Script = () => [];
@@ -199,7 +202,7 @@ interface Setup {
   readonly alive?: readonly number[];
   readonly scripts?: Partial<Record<number, Script>>;
   readonly opts?: Partial<ShooterMatchOptions>;
-  /** 地圖（預設赤岩鎮；6-2 的情境兩張圖都跑） */
+  /** 地圖（預設赤岩舊城；6-2 的情境兩張圖都跑） */
   readonly map?: string;
   /** 受測座位的旋鈕 */
   readonly knobs?: Readonly<Record<string, number>>;
@@ -245,13 +248,13 @@ function driver(bot: CompiledBot, s: Setup): ShooterDriver {
   const now = (): number => d?.match.tick ?? 0;
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => (s.seats.includes(pid) ? new SpyController(bot, s.seed, pid, map, s.log, now) : s.opp?.seats.includes(pid) === true ? new ShooterBatchController(s.opp.bot, 'opponent', s.seed, pid, map) : new ScriptController(`script-${pid}`, s.scripts?.[pid] ?? idle)));
   const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, c instanceof SpyController ? { ...s.knobs, ...s.seatKnobs?.[pid] } : undefined, c.label));
-  d = new ShooterDriver({ seed: s.seed, mapId, ...s.opts, controllers, knobs, record: false });
+  d = new ShooterDriver({ seed: s.seed, mapId, freezeTicks: scenarioFreeze, ...s.opts, controllers, knobs, record: false });
   if (s.alive !== undefined) killExcept(d.match, s.alive);
   return d;
 }
 
 function toLive(d: ShooterDriver): void {
-  for (let i = 0; i < ROUND.freezeTicks + 5 && d.match.phase !== 'live'; i++) d.step();
+  for (let i = 0; i < ROUND.roundEndTicks + d.match.freezeTicks + 5 && d.match.phase !== 'live'; i++) d.step();
 }
 
 /** 跑 n 個 tick，每個 tick 之後呼叫 each（回傳 true 就停） */
@@ -886,15 +889,15 @@ function lowWallDuel(m: ShooterMap): { s: Pt; e: Pt } {
   throw new Error(`${m.id}：找不到矮牆`);
 }
 
-// ───────── 6-2 團隊情境（T1～T15）：每個情境赤岩鎮與沙城都跑，兩張圖都過才算過 ─────────
+// ───────── 6-2 團隊情境（T1～T15）：每個情境赤岩舊城與沙城都跑，兩張圖都過才算過（腳本可用 --maps 換圖） ─────────
 
-const TEAM_MAPS = ['redrock', 'dust'] as const;
+let teamMaps: readonly string[] = ['redrock', 'dust'];
 const CTS = [5, 6, 7, 8, 9] as const;
 const TS = [0, 1, 2, 3, 4] as const;
 
 /** 兩張圖各跑一次 */
 function onBoth(f: (mapId: string) => AiScenarioResult): AiScenarioResult {
-  const res = TEAM_MAPS.map((id) => {
+  const res = teamMaps.map((id) => {
     try {
       return { id, r: f(id) };
     } catch (e) {
@@ -1409,7 +1412,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
       let team = 0;
       let enemy = 0;
       const opts = { roundsPerHalf: 6, winRounds: 7, overtime: false as const };
-      for (const mapId of TEAM_MAPS) {
+      for (const mapId of teamMaps) {
         const games: { setup: Setup; groups: number[] }[] = [{ setup: { seed, map: mapId, seats: [...TS, ...CTS], opts }, groups: [0, 1] }];
         if (opponent !== undefined) {
           games.push({ setup: { seed, map: mapId, seats: TS, opp: { bot: opponent, seats: CTS }, opts }, groups: [0] });
@@ -1630,7 +1633,7 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
     expect: '均衡陣容（角色依種子輪轉座位）T 全買，split 與 rush 各一回合、兩張圖：第一個進包點的人是突破手（4 回合至少 3 回合）',
     run: (bot, seed) => {
       const roles = rolesFor(seed);
-      const res = TEAM_MAPS.flatMap((mapId) =>
+      const res = teamMaps.flatMap((mapId) =>
         [3, 2].map((plan) => {
           const tr = execTrace(bot, seed, mapId, plan, roles);
           const first = tr.order[0] ?? -1;
@@ -1757,7 +1760,10 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
 export const AI_SCENARIOS: readonly AiScenario[] = [...SOLO_SCENARIOS, ...TEAM_SCENARIOS, ...ROLE_SCENARIOS];
 
 /** 跑一組情境（每個 5 個種子）；filter 只跑指定的情境 */
-export function runAiScenarios(bot: CompiledBot, filter?: (id: string) => boolean, opponent?: CompiledBot): { id: string; name: string; pass: boolean; detail: string }[] {
+export function runAiScenarios(bot: CompiledBot, filter?: (id: string) => boolean, opponent?: CompiledBot, maps?: readonly string[], o: { readonly soloMap?: string; readonly freezeTicks?: number } = {}): { id: string; name: string; pass: boolean; detail: string }[] {
+  if (maps !== undefined) teamMaps = maps;
+  if (o.soloMap !== undefined) MAP_ID = o.soloMap;
+  if (o.freezeTicks !== undefined) scenarioFreeze = o.freezeTicks;
   const out: { id: string; name: string; pass: boolean; detail: string }[] = [];
   for (const s of AI_SCENARIOS) {
     if (filter !== undefined && !filter(s.id)) continue;

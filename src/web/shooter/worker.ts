@@ -2,25 +2,27 @@
 // CS 射擊可玩版的引擎 Worker：固定 30 TPS 推進比賽（累積時間，不靠計時器間隔），每次推進後把畫面資料送回主執行緒。
 // 玩家模式只送觀察資料與計分板公開資訊；觀戰模式另送引擎全狀態。主執行緒不持有引擎。
 // 經營層觀戰（watch）：請求單 → gatewayDriverOptions（與經營層閘道同一條路）→ ShooterDriver，以觀戰模式播放；結束時附上閘道換算的成績單。
+// 試玩的兩隊等級：setup.lineup → lineup.ts 的 trialRunOptions（基準 Bot 座位與閘道共用座位函式）。
 // 回放：每場都錄（record: true），比賽結束後主執行緒要才送（getReplay）。
 import baselineSource from '../../../bots/shooter-baseline.js?raw';
 import practiceSource from '../../../bots/shooter-practice.js?raw';
 import type { ShooterObservation, SoundEvent, Team } from '../../shooter/api.ts';
 import { GRENADES, TPS } from '../../shooter/config.ts';
 import { ShooterHumanController } from '../../shooter/human.ts';
-import { DEFAULT_MAP_ID, MAPS } from '../../shooter/map.ts';
-import { ShooterBatchController, ShooterDriver, type ShooterController } from '../../shooter/runner.ts';
-import { PLAYER_COUNT, activeWeaponId, shooterInitData, smokeRadius, type ShooterMatch } from '../../shooter/sim.ts';
+import { ShooterDriver } from '../../shooter/runner.ts';
+import { activeWeaponId, shooterInitData, smokeRadius, type ShooterMatch } from '../../shooter/sim.ts';
 import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
 import { gatewayDriverOptions, outcomeOf } from '../../shooter/gateway.ts';
+import { humanSeat, seatLabels, seatNames, trialRunOptions } from './lineup.ts';
 import type { BoardRow, FromShooterWorker, FullState, KillFeedItem, ShooterFrame, ShooterSetup, ToShooterWorker, WatchInfo, WatchSetup } from './protocol.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (msg: FromShooterWorker): void => ctx.postMessage(msg);
 
 const practice = compileBot(practiceSource, 'shooter-practice.js');
-/** 基準 Bot（經營層觀戰才用；第一次觀戰時才編譯） */
+/** 基準 Bot（經營層觀戰與試玩的基準座位；第一次用到時才編譯） */
 let baseline: CompiledBot | null = null;
+const baselineBot = (): CompiledBot => (baseline ??= compileBot(baselineSource, 'shooter-baseline.js'));
 const TICK_MS = 1000 / TPS;
 /** 一次迴圈最多補幾個 tick（分頁在背景被節流後回來，不要一口氣快轉太多） */
 const MAX_CATCH_UP = 8;
@@ -42,27 +44,16 @@ let watching: WatchInfo | null = null;
 /** 跳回合略過的回合結果，下一個 frame 帶出去 */
 let skipped: NonNullable<ShooterFrame['skipped']>[number][] = [];
 
-function names(spectate: boolean, pid: number): string[] {
-  return Array.from({ length: PLAYER_COUNT }, (_, i) => (!spectate && i === pid ? '你' : `陪練 ${i < 5 ? i + 1 : i - 4}${i < 5 ? 'α' : 'β'}`));
-}
-
 function begin(s: ShooterSetup): void {
-  const map = MAPS[DEFAULT_MAP_ID]();
-  const pid = s.spectate ? 0 : s.team === 'T' ? 0 : 5;
   human = s.spectate ? null : new ShooterHumanController();
-  const h = human;
-  const controllers: ShooterController[] = Array.from({ length: PLAYER_COUNT }, (_, i) =>
-    h !== null && i === pid ? h : new ShooterBatchController(practice, 'shooter-practice.js', s.seed, i, map),
-  );
-  launch(s, new ShooterDriver({ seed: s.seed, mapId: map.id, controllers, record: true, defaultLoadout: s.loadout !== undefined ? { T: s.loadout, CT: s.loadout } : undefined }), pid, names(s.spectate, pid), null);
+  launch(s, new ShooterDriver(trialRunOptions(s, { practice, baseline: baselineBot }, human)), humanSeat(s) ?? 0, seatNames(s), null);
 }
 
 /** 經營層觀戰：與閘道同一條建驅動的路徑，所以播出來的就是存檔裡那一場 */
 function beginWatch(w: WatchSetup): void {
-  baseline ??= compileBot(baselineSource, 'shooter-baseline.js');
   human = null;
   const info: WatchInfo = { teams: w.teams, tags: w.tags, mine: w.mine };
-  launch({ team: 'T', seed: w.request.seed, spectate: true }, new ShooterDriver(gatewayDriverOptions(w.request, baseline, { record: true })), 0, [...w.names], info);
+  launch({ team: 'T', seed: w.request.seed, spectate: true }, new ShooterDriver(gatewayDriverOptions(w.request, baselineBot(), { record: true })), 0, [...w.names], info);
 }
 
 function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string[], info: WatchInfo | null): void {
@@ -81,7 +72,7 @@ function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string
   overSent = false;
   const m = d.match;
   // 規則照這場的賽制（短賽制的半場長度、加時與否）
-  const init = shooterInitData(m.map, playerId, {}, { roundsPerHalf: m.roundsPerHalf, winRounds: m.winRounds, overtime: m.overtimeRule ?? false });
+  const init = shooterInitData(m.map, playerId, {}, { roundsPerHalf: m.roundsPerHalf, winRounds: m.winRounds, overtime: m.overtimeRule ?? false, freezeTicks: m.freezeTicks });
   post({
     type: 'meta',
     meta: {
@@ -95,6 +86,7 @@ function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string
       weapons: init.weapons,
       grenades: init.grenades,
       ...(info !== null ? { watch: info } : {}),
+      ...(s.lineup !== undefined ? { lineup: s.lineup } : {}),
     },
   });
   sendFrame();
@@ -144,7 +136,7 @@ function cycleView(step: number): void {
 
 function fullState(m: ShooterMatch): FullState {
   return {
-    players: m.players.map((p) => ({ id: p.id, team: p.team, alive: p.alive, x: p.x, y: p.y, facing: Math.round(p.facing / 100) % 360, hp: p.hp, weapon: activeWeaponId(p), hasBomb: p.hasBomb, blind: p.blindTicks > 0, scoped: p.scoped, firing: m.tick - p.lastShotTick <= 3 })),
+    players: m.players.map((p) => ({ id: p.id, team: p.team, alive: p.alive, x: p.x, y: p.y, facing: Math.round(p.facing / 100) % 360, hp: p.hp, weapon: activeWeaponId(p), hasBomb: p.hasBomb, blind: p.blindTicks > 0, scoped: p.scoped, firing: m.tick - p.lastShotTick <= 3, crouching: p.crouching, working: p.plantTicks > 0 || p.defuseTicks > 0 })),
     smokes: m.smokes.filter((s) => m.tick < s.endTick).map((s) => ({ x: s.x, y: s.y, radius: smokeRadius(s, m.tick) })),
     fires: m.fires.map((f) => ({ x: f.x, y: f.y, radius: GRENADES[f.kind].radius, cells: f.cells })),
     projectiles: m.projectiles.map((g) => ({ kind: g.kind, x: g.x, y: g.y })),
@@ -232,7 +224,7 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
         skipRound();
         break;
       case 'getReplay':
-        if (driver?.replay && driver.match.over) post({ type: 'replay', replay: driver.replay });
+        if (driver?.replay && driver.match.over) post({ type: 'replay', replay: setup !== null && watching === null ? { ...driver.replay, ...seatLabels(setup) } : driver.replay });
         break;
       case 'cmd':
         if (human !== null && driver !== null && !paused) human.enqueue(msg.cmds);

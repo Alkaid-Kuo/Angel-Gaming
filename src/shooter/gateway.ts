@@ -7,33 +7,49 @@
 //   shift ＝ clamp(round(habit / 15), −4, 4) ＋ clamp(round(presetBonus / 15), 0, 6)
 // 係數 15 來自步驟 7 的梯度（整隊每屬性點約 15～20 整場 Elo）；用固定換算而不用亂數，讓真實強度與球探報告方向一致。
 // 反應延遲由驅動層依屬性重算（reactionTicksFor）。
-// 座位：A 名單 0～4、B 名單 5～9（A 上半場當 T）；地圖赤岩鎮；種子＝請求單的種子。
+// 座位：A 名單 0～4、B 名單 5～9（A 上半場當 T）；地圖照請求單的 mapId，沒有就是預設地圖 redrock（赤岩舊城）；種子＝請求單的種子。
 // 確定性：控制器關掉逾時判定（timeLimits: false），結果只由程式碼與種子決定；Bot 例外仍算「該次無指令」。
 // 觀戰回放（步驟 9）：可玩版的觀戰 Worker 用同一個 gatewayDriverOptions 建 ShooterDriver、逐 tick 推進，
 // 所以重播與經營層當時打的那一場是同一場（成績單與終局雜湊相同，test/manage-shooter.test.ts）。
+// 試玩頁的基準 Bot 座位（src/web/shooter/lineup.ts）也呼叫 seatOf、seatController、seatKnobs，座位邏輯只有這一份。
 import type { MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec } from '../manage/gateway.ts';
+import type { KnobValues } from '../api/types.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
 import type { Attributes } from './api.ts';
-import { TEAM_SIZE } from './config.ts';
-import { MAPS } from './map.ts';
+import { ROUND, TEAM_SIZE } from './config.ts';
+import { MAPS, type ShooterMap } from './map.ts';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES, type ShooterRole } from './players.ts';
 import { ShooterBatchController, runShooterMatch, type ShooterReplay, type ShooterRunOptions } from './runner.ts';
 import { PLAYER_COUNT, type ShooterMatch, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
 
 export const GATEWAY_MAP_ID = 'redrock';
 
+/** 聯賽賽制（規則 1.2 起）；MR12 留作賽制選項（季後賽日後用） */
+export const LEAGUE_FORMAT_ID = 'shooter-mr6';
+
 /** 經營層看得到的賽制（estMsPerRound：Node 單執行緒、兩隊基準 Bot 2.1 的量測平均，見步驟 8 交付報告） */
 export const SHOOTER_FORMATS: readonly MatchFormat[] = [
+  { id: 'shooter-mr6', name: '攻防戰 MR6（先到 7 勝、MR3 加時）', rounds: 12, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
   { id: 'shooter-mr12', name: '攻防戰 MR12（先到 13 勝、MR3 加時）', rounds: 24, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
   { id: 'shooter-short', name: '攻防戰短賽制（測試用：每半場 1 回合、先到 2 勝、不加時，1:1 平手）', rounds: 2, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
 ];
 
-/** 各賽制的引擎選項（規則不變，只是 ShooterMatchOptions 既有的賽制長度參數） */
-const FORMAT_OPTIONS: Readonly<Record<string, Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'overtime'>>> = {
-  'shooter-mr12': {},
-  'shooter-short': { roundsPerHalf: 1, winRounds: 2, overtime: false },
+type FormatOptions = Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'overtime' | 'freezeTicks'>;
+
+/** 各賽制的引擎選項：賽制長度與凍結時間（經營層全是 Bot 對打，都用 Bot 的凍結時間） */
+const FORMAT_OPTIONS: Readonly<Record<string, FormatOptions>> = {
+  'shooter-mr6': { roundsPerHalf: 6, winRounds: 7, freezeTicks: ROUND.botFreezeTicks },
+  'shooter-mr12': { freezeTicks: ROUND.botFreezeTicks },
+  'shooter-short': { roundsPerHalf: 1, winRounds: 2, overtime: false, freezeTicks: ROUND.botFreezeTicks },
 };
+
+/** 賽制的引擎選項（量測腳本也用這份，才與聯賽同一套規則） */
+export function formatOptions(id: string): FormatOptions {
+  const o = FORMAT_OPTIONS[id];
+  if (o === undefined) throw new Error(`攻防戰沒有賽制 ${id}`);
+  return o;
+}
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const num = (v: number | string | undefined): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -59,6 +75,16 @@ export function seatOf(p: PlayerSpec): GatewaySeat {
   const a = d.attributes;
   const attributes: Attributes = { ...a, aim: clamp(a.aim + shift, 0, 100), reaction: clamp(a.reaction + shift, 0, 100), awareness: clamp(a.awareness + shift, 0, 100) };
   return { role, attributes, knobs: { role: Number(d.knobs.role) }, reactionTicks: reactionTicksFor(attributes) };
+}
+
+/** 座位的控制器：關掉逾時判定，結果只由程式碼與種子決定；pid 0～4 標 A、5～9 標 B */
+export function seatController(bot: CompiledBot, seed: number, pid: number, map: ShooterMap): ShooterBatchController {
+  return new ShooterBatchController(bot, pid < TEAM_SIZE ? 'A' : 'B', seed, pid, map, { timeLimits: false });
+}
+
+/** 座位的旋鈕：只給選手宣告過的旋鈕（基準 Bot 有 role） */
+export function seatKnobs(c: ShooterBatchController, seat: GatewaySeat): KnobValues {
+  return resolveKnobs(c.declaration, c.declaration.knobs.some((k) => k.key === 'role') ? seat.knobs : {}, c.label);
 }
 
 export function formatOf(id: string): MatchFormat {
@@ -115,11 +141,12 @@ export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, op
     if (side.players.length !== format.lineupSize) throw new Error(`攻防戰每方 ${format.lineupSize} 人，名單是 ${side.players.length} 人`);
   }
   const seats = [...request.a.players, ...request.b.players].map(seatOf);
-  const map = MAPS[GATEWAY_MAP_ID]();
-  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(bot, pid < TEAM_SIZE ? 'A' : 'B', request.seed, pid, map, { timeLimits: false }));
-  // 只給選手宣告過的旋鈕（基準 Bot 有 role）
-  const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, c.declaration.knobs.some((k) => k.key === 'role') ? seats[pid].knobs : {}, c.label));
-  const fo = FORMAT_OPTIONS[format.id] ?? {};
+  const buildMap = MAPS[request.mapId ?? GATEWAY_MAP_ID];
+  if (buildMap === undefined) throw new Error(`攻防戰沒有地圖 ${request.mapId}`);
+  const map = buildMap();
+  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => seatController(bot, request.seed, pid, map));
+  const knobs = controllers.map((c, pid) => seatKnobs(c, seats[pid]));
+  const fo = formatOptions(format.id);
   return { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), record: opts.record === true, ...fo };
 }
 

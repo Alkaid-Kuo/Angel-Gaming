@@ -33,6 +33,7 @@ const SAVE_KEY = 'angel-gaming-m4-save-v2';
 const VERSION_NOTE: Readonly<Record<number, string>> = {
   1: '三個 1 對 1 對位',
   2: '比賽沒有保存請求單，不能觀戰回放',
+  3: '地圖與賽制已更新，舊存檔無法沿用',
 };
 /** 舊存檔鍵（SAVE_VERSION 1，三個 1 對 1 對位的年代）；只拿來告訴玩家舊檔不能用了 */
 const OLD_SAVE_KEYS = ['angel-gaming-m4-save-v1'];
@@ -46,7 +47,7 @@ export interface GameKind {
 
 /** 可選的項目（內容包）；第一個是預設 */
 export const GAME_KINDS: readonly GameKind[] = [
-  { content: SHOOTER_CONTENT, name: '攻防戰', desc: '5v5 攻防射擊，基準 Bot 依角色、版本、習慣真打（一週約 20～40 秒模擬，打完的比賽可以觀戰）' },
+  { content: SHOOTER_CONTENT, name: '攻防戰', desc: '5v5 攻防射擊，基準 Bot 依角色、版本、習慣真打（一週約 10 秒模擬，打完的比賽可以觀戰）' },
   { content: STUB_CONTENT, name: '軍團戰（暫代）', desc: '3 人名單，假比賽依隱藏強度擲骰（瞬間出結果）' },
 ];
 
@@ -89,6 +90,7 @@ function parseSave(json: string): { state: GameState; content: ContentPack } {
   }
   if (raw.version !== SAVE_VERSION) {
     const note = typeof raw.version === 'number' ? VERSION_NOTE[raw.version] : undefined;
+    if (raw.version === 3) throw new Error(`${note}（存檔第 3 版，目前第 ${SAVE_VERSION} 版）`);
     throw new Error(`存檔是第 ${String(raw.version)} 版${note ? `（${note}）` : ''}，目前是第 ${SAVE_VERSION} 版，舊存檔不能繼續`);
   }
   const kind = kindOf(String(raw.contentId));

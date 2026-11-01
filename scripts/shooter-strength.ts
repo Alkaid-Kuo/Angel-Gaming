@@ -6,7 +6,7 @@
 //   回合 → 整場：量測用回合勝率（整場勝率很快飽和），用全部對局擬合 P(整場) ＝ 1 / (1 + e^(−k × (回合 − 0.5)))，Elo 以整場為準
 //   power(r, v) ＝ 1500 + growth(v) + off_r × (v − 3)，再單調化（每個角色隨版本嚴格遞增、最小間隔 10）
 //   驗證：10 組隨機名單（角色、版本混搭、habit ≠ 0），兩張圖各 --vseeds 個種子 × 雙邊；預測（隊伍 power ＝ 五人平均）對實測
-// 用法：node scripts/shooter-strength.ts [--seeds 20] [--btseeds 10] [--vseeds 5] [--jobs 4] [--out out/shooter-strength/strength.json]
+// 用法：node scripts/shooter-strength.ts [--format shooter-mr6] [--no-limits] [--seeds 20] [--btseeds 10] [--vseeds 5] [--jobs 4] [--maps redrock,dust] [--out out/shooter-strength/strength.json]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Prng } from '../src/shared/prng.ts';
@@ -14,7 +14,7 @@ import { BALANCED_ROLES, BASE_VERSION, MAX_VERSION, SHOOTER_ROLES, balancedLineu
 import { arg, eloOf, matchup, progress, runLab, specTeam, summarize, winOf, type LabSummary } from './shooter-lab.ts';
 
 const BOT = 'bots/shooter-baseline.js';
-const MAPS = ['redrock', 'dust'];
+const MAPS = arg('maps', 'redrock,dust').split(',');
 const range = (n: number, from = 1001): number[] => Array.from({ length: n }, (_, i) => from + i);
 const seeds = range(Number(arg('seeds', '20')));
 const btSeeds = range(Number(arg('btseeds', '10')));

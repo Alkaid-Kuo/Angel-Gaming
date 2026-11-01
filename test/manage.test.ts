@@ -253,7 +253,7 @@ describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
     expect(played).toHaveLength(4);
     expect(played.map((f) => f.result?.request)).toEqual(spy.sent);
     expect(s.version).toBe(SAVE_VERSION);
-    expect(SAVE_VERSION).toBe(3);
+    expect(SAVE_VERSION).toBe(4);
     for (const f of played) {
       const r = f.result as NonNullable<typeof f.result>;
       expect(r.request.formatId).toBe(s.formatId);
@@ -270,7 +270,7 @@ describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
   it('第 2 版存檔被拒，訊息說明版本', () => {
     const s = newGame(62, content);
     const old = JSON.stringify({ ...s, version: 2 });
-    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 3 不符/);
+    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 4 不符/);
   });
 
   it('watchable 由賽制自報、透傳到視圖；視圖不帶請求單（含隱藏的習慣）', async () => {

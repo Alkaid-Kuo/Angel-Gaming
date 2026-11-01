@@ -405,8 +405,10 @@ export class Combat {
     if (len < 1) return false;
     const r = Math.min(len, this.rules.lowCoverRange * UNIT);
     for (let s = 250; s <= r; s += 250) {
-      const i = this.g.cellOf(ax + ((bx - ax) * s) / len, ay + ((by - ay) * s) / len);
-      if (i >= 0 && this.g.low[i] === 1) return true;
+      const x = ax + ((bx - ax) * s) / len;
+      const y = ay + ((by - ay) * s) / len;
+      const i = this.g.cellOf(x, y);
+      if (i >= 0 && this.g.low[i] === 1 && this.g.filled(i, x, y)) return true;
     }
     return false;
   }

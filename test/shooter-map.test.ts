@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MAP_ID, MAPS, blocksMove, cellOf, dumpAscii, inRect, isSolidCell, reachable, regionsAt, type ShooterMap } from '../src/shooter/map.ts';
+import { DEFAULT_MAP_ID, MAPS, OLD_TOWN_LAYOUT, blocksMove, buildMap, cellOf, dumpAscii, inRect, isSolidCell, reachable, regionsAt, type ShooterMap } from '../src/shooter/map.ts';
 import { TEAM_SIZE, UNIT, VISION } from '../src/shooter/config.ts';
 import { lineOfSight } from '../src/shooter/vision.ts';
 
@@ -107,11 +107,12 @@ function mapChecks(map: ShooterMap): void {
   });
 }
 
-describe('預設地圖（赤岩鎮，v0.5）', () => {
+describe('預設地圖（赤岩舊城，規則 1.2）', () => {
   const map = MAPS[DEFAULT_MAP_ID]();
 
-  it('預設是赤岩鎮；可走面積四到五成、每個包點都有矮牆', () => {
+  it('預設是赤岩舊城；可走面積四到五成、每個包點都有矮牆', () => {
     expect(map.id).toBe('redrock');
+    expect(map.name).toBe('赤岩舊城');
     const open = map.solid.filter((v) => v === 0).length;
     expect(open / map.solid.length).toBeGreaterThan(0.4);
     expect(open / map.solid.length).toBeLessThan(0.55);
@@ -149,5 +150,35 @@ describe('預設地圖（赤岩鎮，v0.5）', () => {
     expect(blocksMove(map, cx, cy)).toBe(true);
     expect(isSolidCell(map, cx, cy)).toBe(false);
     expect(dumpAscii(map)).toContain('=');
+  });
+});
+
+describe('赤岩舊城（編輯器的 JSON 進引擎）', () => {
+  it('同一份 JSON 永遠建出同一張圖', () => {
+    expect(buildMap(OLD_TOWN_LAYOUT).solid).toEqual(MAPS.redrock().solid);
+  });
+
+  it('玩家面只有赤岩舊城；沙城只留給測試', () => {
+    expect(Object.keys(MAPS).sort()).toEqual(['dust', 'redrock']);
+  });
+
+  it('併入的框用主區域的代號與名稱，主區域排在最前面，代號定案不改', () => {
+    const map = MAPS.redrock();
+    expect(OLD_TOWN_LAYOUT.areas.length).toBeGreaterThan(24);
+    const ids = [...new Set(map.regions.map((r) => r.id))];
+    expect(ids).toEqual(['tSpawn', 'market', 'marketNorth', 'cellarHall', 'cellarMouth', 'sideAlley', 'tMid', 'mid', 'eastRamp', 'plaza', 'arch', 'eastLane', 'eastGate', 'eastStore', 'eastYard', 'longHall', 'belfry', 'bellYard', 'aSite', 'bSite', 'ctSpawn', 'northSt', 'ctRampW', 'ctEast']);
+    const door = OLD_TOWN_LAYOUT.areas.find((a) => a.id === 'bGate')!;
+    expect(regionsAt(map, door.x0 * UNIT + UNIT / 2, door.y0 * UNIT + UNIT / 2)[0]).toBe('ctRampW');
+    for (const id of ids) expect(OLD_TOWN_LAYOUT.areas.find((a) => a.id === id)?.material).toBeDefined();
+  });
+
+  it('併入不存在的區域會在建圖時擋下', () => {
+    expect(() => buildMap({ ...OLD_TOWN_LAYOUT, areas: [...OLD_TOWN_LAYOUT.areas, { id: 'x', name: 'x', x0: 50, y0: 50, x1: 51, y1: 51, callout: 'nowhere' }] })).toThrow('nowhere');
+  });
+
+  it('有斜切格，選手資料的地圖代號與區域跟著走', () => {
+    const map = MAPS.redrock();
+    expect(map.solid.some((v) => v >= 3)).toBe(true);
+    expect(map.regions.map((r) => r.id)).toContain('bSite');
   });
 });

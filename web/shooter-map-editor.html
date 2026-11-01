@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>攻防戰地圖編輯器</title>
+<link rel="stylesheet" href="./shooter-map-editor.css">
+</head>
+<body>
+<header id="top">
+  <b class="brand">地圖編輯器</b>
+  <select id="open" title="開啟地圖"></select>
+  <label>名稱 <input id="map-name" size="10" autocomplete="off"></label>
+  <label>代號 <input id="map-id" size="10" autocomplete="off"></label>
+  <span class="grow"></span>
+  <span id="dirty"></span>
+  <button id="undo" title="Ctrl+Z">復原</button>
+  <button id="redo" title="Ctrl+Y">重做</button>
+  <button id="import">匯入</button>
+  <input id="import-file" type="file" accept=".json,application/json" hidden>
+  <button id="download">下載 JSON</button>
+  <button id="save" class="primary" title="Ctrl+S；正式地圖存成副本，Shift＋存檔才覆寫正式檔">存檔</button>
+</header>
+
+<aside id="left">
+  <section>
+    <h2>工具</h2>
+    <div id="tools"></div>
+    <p id="tool-hint"></p>
+  </section>
+  <section>
+    <h2>顯示</h2>
+    <div id="layers"></div>
+    <label class="row">疊圖
+      <select id="overlay">
+        <option value="none">無</option>
+        <option value="race">搶點：誰先到</option>
+        <option value="T">T 路程</option>
+        <option value="CT">CT 路程</option>
+      </select>
+    </label>
+    <p id="overlay-hint"></p>
+  </section>
+  <section class="fill">
+    <h2>物件</h2>
+    <input id="filter" placeholder="篩選區域" autocomplete="off">
+    <div id="objects"></div>
+  </section>
+</aside>
+
+<main id="stage">
+  <canvas id="cv"></canvas>
+  <div id="status"></div>
+</main>
+
+<aside id="right">
+  <section>
+    <h2>屬性</h2>
+    <div id="inspector"></div>
+  </section>
+  <section class="fill">
+    <h2>檢查</h2>
+    <div id="checks"></div>
+  </section>
+</aside>
+
+<script type="module" src="../src/web/shooter-editor/main.ts"></script>
+</body>
+</html>

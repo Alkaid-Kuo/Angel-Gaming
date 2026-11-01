@@ -10,8 +10,8 @@ import type { BattleGateway, MatchOutcome, MatchRequest, PlayerSpec, SideSpec } 
 import { ShooterGateway } from '../src/manage/gateway-shooter.ts';
 import { deserialize, serialize } from '../src/manage/save.ts';
 import type { GameState } from '../src/manage/types.ts';
-import { ATTRIBUTE_KEYS } from '../src/shooter/config.ts';
-import { SHOOTER_FORMATS, attributeShift, gatewayDriverOptions, outcomeOf, roundPhase, runGatewayMatch, seatOf } from '../src/shooter/gateway.ts';
+import { ATTRIBUTE_KEYS, ROUND } from '../src/shooter/config.ts';
+import { LEAGUE_FORMAT_ID, SHOOTER_FORMATS, attributeShift, gatewayDriverOptions, outcomeOf, roundPhase, runGatewayMatch, seatOf } from '../src/shooter/gateway.ts';
 import { ShooterDriver, runShooterReplay } from '../src/shooter/runner.ts';
 import type { ShooterResult } from '../src/shooter/sim.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
@@ -94,7 +94,16 @@ describe('攻防戰閘道：真引擎', () => {
     await expect(gateway.simulateBatch([{ ...req, a: { players: req.a.players.slice(0, 3) } }])).rejects.toThrow(/5 人/);
   }, 60_000);
 
-  it('正式賽制一場：至少 13 回合、累計比分單調、最後比分與勝方一致', async () => {
+  it('聯賽賽制一場（MR6）：至少 7 回合、比分到 7、賽段標籤跟著半場長度', async () => {
+    const [o] = await gateway.simulateBatch([{ formatId: LEAGUE_FORMAT_ID, a: side(3), b: side(3), seed: 7 }]);
+    expect(o.rounds.length).toBeGreaterThanOrEqual(7);
+    const last = o.rounds[o.rounds.length - 1];
+    if (o.winner !== 'draw') expect(Math.max(last.scoreA, last.scoreB)).toBeGreaterThanOrEqual(7);
+    o.rounds.forEach((r, i) => expect(r.phase).toBe(i < 6 ? '上半場' : i < 12 ? '下半場' : `加時 ${Math.floor((i - 12) / 6) + 1}`));
+    expect(SHOOTER_CONTENT.formatId).toBe(LEAGUE_FORMAT_ID);
+  }, 120_000);
+
+  it('MR12 保留：至少 13 回合、累計比分單調、最後比分與勝方一致', async () => {
     const [o] = await gateway.simulateBatch([{ formatId: 'shooter-mr12', a: side(3), b: side(3), seed: 7 }]);
     expect(o.rounds.length).toBeGreaterThanOrEqual(13);
     let pa = 0;
@@ -146,6 +155,7 @@ describe('觀戰重播一致（步驟 9）', () => {
   });
 
   it('賽段標籤：上半場、下半場、加時 k（每段兩個加時半場）', () => {
+    expect([6, 7, 12, 13, 18, 19].map((n) => roundPhase(n, { roundsPerHalf: 6, overtimeRule: { roundsPerHalf: 3, winRounds: 4, startMoney: 10000 } } as unknown as Parameters<typeof roundPhase>[1]))).toEqual(['上半場', '下半場', '下半場', '加時 1', '加時 1', '加時 2']);
     const rules = { roundsPerHalf: 12, overtimeRule: { roundsPerHalf: 3, winRounds: 4, startMoney: 10000 } } as unknown as Parameters<typeof roundPhase>[1];
     expect([1, 12, 13, 24, 25, 30, 31, 36, 37].map((n) => roundPhase(n, rules))).toEqual(['上半場', '上半場', '下半場', '下半場', '加時 1', '加時 1', '加時 2', '加時 2', '加時 3']);
     expect([1, 2].map((n) => roundPhase(n, { roundsPerHalf: 1, overtimeRule: null }))).toEqual(['上半場', '下半場']);
@@ -156,6 +166,48 @@ describe('觀戰重播一致（步驟 9）', () => {
       ['第 2 回合', '下半場', 1, 1],
       ['加時 1', '加時 1', 1, 2],
     ]);
+  });
+});
+
+describe('請求單的地圖', () => {
+  const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'shooter-baseline.js');
+  const req: MatchRequest = { formatId: 'shooter-short', a: side(3), b: side(3), seed: 11 };
+
+  it('缺值當赤岩舊城：與明寫 redrock 的成績單、終局雜湊都相同', () => {
+    const old = runGatewayMatch(req, bot);
+    const named = runGatewayMatch({ ...req, mapId: 'redrock' }, bot);
+    expect(named.outcome).toEqual(old.outcome);
+    expect(named.finalHash).toBe(old.finalHash);
+    expect(gatewayDriverOptions(req, bot).mapId).toBe('redrock');
+  }, 60_000);
+
+  it('請求單指定別張圖：打得完、觀戰與回放重播都是同一場', () => {
+    const r: MatchRequest = { ...req, mapId: 'dust' };
+    const m = runGatewayMatch(r, bot);
+    expect(m.exceptions).toBe(0);
+    expect(m.finalHash).not.toBe(runGatewayMatch(req, bot).finalHash);
+    const d = new ShooterDriver(gatewayDriverOptions(r, bot, { record: true }));
+    while (!d.match.over) d.step();
+    expect(d.match.map.id).toBe('dust');
+    expect(d.match.hash()).toBe(m.finalHash);
+    const rp = d.replay as NonNullable<typeof d.replay>;
+    expect(rp.header.mapId).toBe('dust');
+    expect(runShooterReplay(JSON.parse(JSON.stringify(rp)) as typeof rp).finalHash).toBe(m.finalHash);
+  }, 60_000);
+
+  it('回放檔頭存凍結時間，閘道是 Bot 的 3 秒；引擎版本不符不重播', () => {
+    const d = new ShooterDriver(gatewayDriverOptions(req, bot, { record: true }));
+    expect(d.match.freezeTicks).toBe(ROUND.botFreezeTicks);
+    while (!d.match.over) d.step();
+    const rp = d.replay as NonNullable<typeof d.replay>;
+    expect(rp.header.freezeTicks).toBe(ROUND.botFreezeTicks);
+    expect(runShooterReplay(JSON.parse(JSON.stringify(rp)) as typeof rp).desyncTick).toBeNull();
+    const old = { ...rp, header: { ...rp.header, engineVersion: '1.1.0' } };
+    expect(() => runShooterReplay(old)).toThrow(/1\.1\.0.*舊回放不能重播/);
+  }, 60_000);
+
+  it('沒有這張地圖就拒絕', () => {
+    expect(() => gatewayDriverOptions({ ...req, mapId: 'nowhere' }, bot)).toThrow(/nowhere/);
   });
 });
 

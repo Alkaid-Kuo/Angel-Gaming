@@ -1,9 +1,10 @@
 // CS 射擊地圖：以「在實心裡挖矩形」描述，再轉成格子。
 // 第一張圖「沙城」參照 Dust2：北為 CT、南為 T，中路南北直線，A 長在東、B 通道在西（v0.5 起只供引擎測試）。
-// 第二張圖「赤岩鎮」（v0.5 預設）只借三路骨架，格局原創；用多邊形做斜牆、加矮牆。
+// 赤岩舊城（maps/shooter/redrock.json，規則 1.2 起的正式地圖）由地圖編輯器產生。
 // 座標：格為單位的整數矩形，含 x0/y0、不含 x1/y1。1 格 = 1 公尺 = UNIT 座標單位。
 import type { MapInfo, MapRegion } from './api.ts';
 import { TEAM_SIZE, UNIT, type Team } from './config.ts';
+import redrockFile from '../../maps/shooter/redrock.json' with { type: 'json' };
 
 export interface Rect {
   readonly x0: number;
@@ -18,17 +19,44 @@ export interface MapSpawn {
   readonly facing: number;
 }
 
+/** 區域的地面材質（只給畫面用，引擎不讀，不進 MapInfo） */
+export type MapMaterial = 'stone' | 'dirt' | 'wood' | 'market' | 'plaza' | 'site';
+
+/** 擺設（格座標，只給畫面用，引擎不讀，不進 MapInfo）；井要壓在牆方塊上，帆布鋪在 market 材質區的空地，壓到障礙就不畫 */
+export interface MapDecor {
+  readonly wells?: readonly Rect[];
+  readonly tarps?: readonly Rect[];
+  /** 包點塗裝的圓環（圓心、半徑）；沒寫就由畫面自動找離障礙最遠的位置 */
+  readonly sitePaint?: readonly { readonly id: 'A' | 'B'; readonly x: number; readonly y: number; readonly r: number }[];
+}
+
+/** 地圖的畫面資料：不進 MapInfo，選手與引擎都看不到；materials 與 regions 同序 */
+export interface MapVisual {
+  readonly theme: string;
+  readonly decor: MapDecor;
+  readonly materials: readonly (MapMaterial | undefined)[];
+}
+
 export interface MapLayout {
   readonly id: string;
   readonly name: string;
   readonly width: number;
   readonly height: number;
-  /** 依序挖開的區域（代號＝ callout） */
-  readonly areas: readonly (Rect & { readonly id: string; readonly name: string })[];
+  /** 材質族代號（只給畫面用；預設 'redrock'），對應美術側 themes/ 的一個檔 */
+  readonly theme?: string;
+  readonly decor?: MapDecor;
+  /**
+   * 依序挖開的區域（代號＝ callout）。callout：這個框併進哪個區域（門洞、轉角），regions 裡用那個區域的代號與名稱，
+   * 框本身留著，所以格子與 Bot 的路線圖都不變；主區域要排在併進來的框前面（選手用代號找區域時拿到第一個框）
+   */
+  readonly areas: readonly (Rect & { readonly id: string; readonly name: string; readonly material?: MapMaterial; readonly callout?: string })[];
   /** 挖開之後再填回去的實心（箱子、柱子） */
   readonly blocks: readonly Rect[];
-  /** 多邊形（格座標頂點，格中心落在多邊形內的格）：open = 挖開、wall = 填回牆；在矩形之後依序處理（v0.5） */
-  readonly polys?: readonly { readonly mode: 'open' | 'wall'; readonly pts: readonly (readonly [number, number])[] }[];
+  /**
+   * 多邊形（格座標頂點，格中心落在多邊形內的格）：open = 挖開、wall = 填回牆、low = 填矮牆；在矩形之後依序處理（v0.5）。
+   * slope（v1.1）：邊只用水平、垂直、45°，頂點在格點上，斜邊經過的格變成半格的斜切格（沒標的多邊形照舊成鋸齒）
+   */
+  readonly polys?: readonly { readonly mode: 'open' | 'wall' | 'low'; readonly slope?: boolean; readonly pts: readonly (readonly [number, number])[] }[];
   /** 矮牆（v0.5）：擋移動；只有蹲著的人貼近時才擋視線與子彈（VISION.lowCoverRange），道具飛得過去 */
   readonly low?: readonly Rect[];
   readonly sites: readonly (Rect & { readonly id: 'A' | 'B' })[];
@@ -137,125 +165,8 @@ export const DUST_LAYOUT: MapLayout = {
   },
 };
 
-/**
- * 赤岩鎮（v0.5，原創格局）。120×120 格，北為 CT、南為 T，A 在東、B 在西。
- * 借用的只有這類地圖的通用骨架：三條路線（東長廊、中央大道、西側地窖）、兩個包點、長距離對線、出生區之間沒有直線視線。
- *
- *   B 包點 ─ B 西門 ─ 北街 ─ CT 坡道 ─ CT 營地 ─ CT 後巷 ─ A 包點
- *    │  │              │                                  │   │
- *   地窖口（兩個）     拱門                             石階  東長廊
- *    │  │              │                                  │   │
- *   地窖大廳         中央大道 ─────── 鐘樓步道 ────────────┘  藏兵角
- *    │                 │                                      │
- *   地窖 ─── 側巷 ─────┤                                    東門
- *    │                南街                                    │
- *   西市集 ───────── T 廣場 ─────────── 東巷 ─────────────────┘
- *
- * 中央大道是南北直線，北端的北街北緣是牆，CT 營地只經東側的 CT 坡道通北街：T 廣場與 CT 營地之間沒有直線視線。
- * 矮牆（=）：站著的人越過去看得到也打得到，蹲在後面就看不見、打不到。
- */
-export const REDROCK_LAYOUT: MapLayout = {
-  id: 'redrock',
-  name: '赤岩鎮',
-  width: 120,
-  height: 120,
-  areas: [
-    // T 側
-    A('tSpawn', 'T 廣場', 38, 98, 82, 114),
-    A('market', '西市集', 12, 94, 40, 112),
-    A('eastLane', '東巷', 80, 100, 112, 110),
-    // 西路：地窖
-    A('cellar', '地窖', 20, 62, 28, 96),
-    A('sideAlley', '側巷', 28, 62, 52, 68),
-    A('cellarHall', '地窖大廳', 8, 44, 32, 62),
-    A('cellarWest', '地窖西口', 10, 36, 18, 46),
-    A('cellarEast', '地窖東口', 24, 36, 32, 46),
-    // 中路
-    A('tMid', '南街', 54, 76, 66, 100),
-    A('mid', '中央大道', 52, 40, 68, 76),
-    A('arch', '拱門', 55, 34, 65, 40),
-    A('belfry', '鐘樓步道', 68, 46, 90, 54),
-    A('steps', '石階', 84, 28, 94, 54),
-    // 東路
-    A('eastGate', '東門', 100, 76, 112, 104),
-    A('longHall', '東長廊', 98, 34, 114, 76),
-    A('nook', '藏兵角', 92, 56, 98, 64),
-    // 包點與 CT 側
-    A('aSite', 'A 包點', 86, 6, 114, 36),
-    A('ctAlley', 'CT 後巷', 76, 6, 86, 14),
-    A('ctSpawn', 'CT 營地', 50, 4, 76, 18),
-    A('ctRamp', 'CT 坡道', 72, 14, 80, 22),
-    A('northSt', '北街', 44, 22, 80, 34),
-    A('bGate', 'B 西門', 36, 24, 46, 32),
-    A('bSite', 'B 包點', 6, 6, 38, 38),
-  ],
-  blocks: [
-    // 拱門中柱：分成左右兩個門洞
-    R(59, 34, 61, 38),
-    // 東門門柱：中間留 6 格
-    R(100, 80, 103, 84),
-    R(109, 80, 112, 84),
-    // 北街北緣：封住北街與 CT 營地之間（只留 CT 坡道）
-    R(50, 18, 72, 22),
-    // A 包點的石柱與 B 包點的井
-    R(104, 14, 107, 17),
-    R(16, 18, 19, 21),
-    // 中央大道的石墩
-    R(63, 58, 66, 61),
-  ],
-  polys: [
-    // T 廣場四角削斜
-    { mode: 'wall', pts: [[38, 98], [46, 98], [38, 104]] },
-    { mode: 'wall', pts: [[82, 98], [74, 98], [82, 104]] },
-    { mode: 'wall', pts: [[38, 114], [44, 114], [38, 109]] },
-    // 西市集斜邊、東巷南側斜邊
-    { mode: 'wall', pts: [[12, 94], [20, 94], [12, 102]] },
-    { mode: 'wall', pts: [[80, 110], [92, 110], [80, 106]] },
-    // 中央大道南口斜坡（往南街收窄）
-    { mode: 'wall', pts: [[52, 70], [54, 70], [54, 76], [52, 76]] },
-    { mode: 'open', pts: [[66, 70], [70, 76], [66, 76]] },
-    // 鐘樓步道斜接石階
-    { mode: 'open', pts: [[84, 54], [90, 54], [94, 50], [94, 46]] },
-    // A 包點：東北角削斜、西南角斜坡
-    { mode: 'wall', pts: [[114, 6], [106, 6], [114, 12]] },
-    { mode: 'wall', pts: [[86, 36], [86, 28], [84, 36]] },
-    // B 包點：西北角削斜、東南角斜邊
-    { mode: 'wall', pts: [[6, 6], [14, 6], [6, 13]] },
-    { mode: 'wall', pts: [[38, 38], [38, 33], [33, 38]] },
-    // 地窖大廳的斜牆
-    { mode: 'wall', pts: [[8, 62], [8, 54], [14, 62]] },
-    // 東長廊西側凹位
-    { mode: 'wall', pts: [[98, 40], [98, 48], [100, 48], [100, 40]] },
-  ],
-  low: [
-    // A 包點的箱子
-    R(92, 16, 95, 18),
-    R(96, 24, 98, 27),
-    R(108, 26, 111, 28),
-    // B 包點的箱子
-    R(24, 14, 27, 16),
-    R(12, 28, 14, 31),
-    R(28, 28, 31, 30),
-    // 中央大道、東長廊、北街的掩體
-    R(56, 50, 59, 52),
-    R(104, 60, 107, 62),
-    R(66, 26, 69, 28),
-    // 地窖大廳
-    R(18, 52, 21, 54),
-  ],
-  sites: [
-    { id: 'A', x0: 90, y0: 10, x1: 110, y1: 30 },
-    { id: 'B', x0: 10, y0: 10, x1: 32, y1: 32 },
-  ],
-  spawnZones: {
-    T: R(44, 100, 76, 112),
-    CT: R(52, 5, 74, 17),
-  },
-  spawns: {
-    T: spawnRow([48, 54, 60, 66, 72], 106, 270),
-    CT: spawnRow([54, 58, 63, 67, 71], 10, 90),
-  },
-};
+/** 赤岩舊城（規則 1.2 起唯一的正式地圖，代號 redrock）：地圖編輯器的存檔，區域併成 24 個 callout */
+export const OLD_TOWN_LAYOUT = redrockFile as unknown as MapLayout;
 
 export function buildMap(layout: MapLayout): ShooterMap {
   const { width, height } = layout;
@@ -279,7 +190,11 @@ export function buildMap(layout: MapLayout): ShooterMap {
       y1 = Math.max(y1, Math.ceil(py));
     }
     for (let y = Math.max(0, y0); y < Math.min(height, y1); y++) {
-      for (let x = Math.max(0, x0); x < Math.min(width, x1); x++) if (inPolygon(p.pts, x + 0.5, y + 0.5)) solid[y * width + x] = p.mode === 'open' ? 0 : 1;
+      for (let x = Math.max(0, x0); x < Math.min(width, x1); x++) {
+        const k = y * width + x;
+        if (p.slope === true) solid[k] = cutCell(solid[k], p.mode, polyCover(p.pts, x, y));
+        else if (inPolygon(p.pts, x + 0.5, y + 0.5)) solid[k] = p.mode === 'open' ? 0 : p.mode === 'low' ? 2 : 1;
+      }
     }
   }
   for (const r of layout.low ?? []) carve(r, 2);
@@ -304,16 +219,34 @@ export function buildMap(layout: MapLayout): ShooterMap {
     sites: layout.sites,
     spawnZones: layout.spawnZones,
     spawns: layout.spawns,
-    regions: layout.areas.map((a) => ({ id: a.id, name: a.name, x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1 })),
+    regions: layout.areas.map((a) => {
+      const c = a.callout === undefined ? a : layout.areas.find((o) => o.id === a.callout);
+      if (c === undefined) throw new Error(`地圖 ${layout.id}：區域 ${a.id} 併入的 ${a.callout} 不存在`);
+      return { id: c.id, name: c.name, x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1 };
+    }),
   };
 }
 
-export const MAPS: Readonly<Record<string, () => ShooterMap>> = {
-  dust: () => buildMap(DUST_LAYOUT),
-  redrock: () => buildMap(REDROCK_LAYOUT),
-};
+const LAYOUTS: Readonly<Record<string, MapLayout>> = { dust: DUST_LAYOUT, redrock: OLD_TOWN_LAYOUT };
 
-/** 預設地圖（v0.5 起為赤岩鎮；沙城保留給引擎測試與驗收情境） */
+export const MAPS: Readonly<Record<string, () => ShooterMap>> = Object.fromEntries(Object.entries(LAYOUTS).map(([id, layout]) => [id, () => buildMap(layout)]));
+
+/** 地圖版面 → 畫面資料；併入的框沒標材質就跟主區域 */
+export function mapVisual(layout: MapLayout): MapVisual {
+  return {
+    theme: layout.theme ?? 'redrock',
+    decor: layout.decor ?? {},
+    materials: layout.areas.map((a) => a.material ?? layout.areas.find((o) => o.id === a.callout)?.material),
+  };
+}
+
+/** 依地圖代號查畫面資料（MapInfo 不帶這些）；沒登錄的地圖走預設 theme、退回代號表 */
+export function mapVisualOf(id: string): MapVisual {
+  const layout = LAYOUTS[id];
+  return layout !== undefined ? mapVisual(layout) : { theme: 'redrock', decor: {}, materials: [] };
+}
+
+/** 預設地圖（規則 1.2 起為赤岩舊城；沙城留給引擎測試與 Bot 驗收，玩家面不出現） */
 export const DEFAULT_MAP_ID = 'redrock';
 
 /** 點是否在多邊形內（偶奇規則；地圖建構用，頂點為格座標小數） */
@@ -327,22 +260,139 @@ function inPolygon(pts: readonly (readonly [number, number])[], x: number, y: nu
   return inside;
 }
 
-/** 格座標是否為牆（擋視線、子彈、道具；不含矮牆）；出界視為牆 */
-export function isSolidCell(map: ShooterMap, cx: number, cy: number): boolean {
+/**
+ * 斜切格（v1.1）：solid 的 3～6 是斜切牆、7～10 是斜切矮牆，值減去基底是實心角（0 西北、1 東北、2 東南、3 西南）。
+ * 實心的是貼著那個角的 45° 三角形，另一半可走。格子層（尋路、區域）把斜切格當整格擋，碰撞與射線才算實際形狀
+ */
+export const SLOPE_WALL = 3;
+export const SLOPE_LOW = 7;
+
+/** 只讀格子的介面：引擎地圖與給選手的 MapInfo 都符合 */
+export type CellGrid = Pick<ShooterMap, 'width' | 'height'> & { readonly solid: ArrayLike<number> };
+
+/** 格值的實心角；不是斜切格回傳 −1 */
+export const slopeCorner = (v: number): number => (v < SLOPE_WALL ? -1 : (v - SLOPE_WALL) % 4);
+
+/** 把格值改成 mode 蓋過之後的結果。cover：−2 沒蓋到、−1 蓋滿、0～3 只蓋到貼著該角的半格 */
+function cutCell(v: number, mode: 'open' | 'wall' | 'low', cover: number): number {
+  if (cover === -2) return v;
+  if (mode === 'open') {
+    if (cover === -1) return 0;
+    if (v === 1 || v === 2) return (v === 1 ? SLOPE_WALL : SLOPE_LOW) + ((cover + 2) % 4);
+    return slopeCorner(v) === cover ? 0 : v;
+  }
+  const full = mode === 'wall' ? 1 : 2;
+  if (cover === -1) return full;
+  const base = full === 1 ? SLOPE_WALL : SLOPE_LOW;
+  if (v === 0) return base + cover;
+  // 同材質的兩個對角半格合成一整格
+  return v === base + ((cover + 2) % 4) ? full : v;
+}
+
+/** 多邊形蓋住格 (x, y) 的部分：兩條對角線把格切成四塊，45° 的邊不會切過任何一塊（回傳值同 cutCell 的 cover） */
+function polyCover(pts: readonly (readonly [number, number])[], x: number, y: number): number {
+  const n = inPolygon(pts, x + 0.5, y + 0.25);
+  const e = inPolygon(pts, x + 0.75, y + 0.5);
+  const s = inPolygon(pts, x + 0.5, y + 0.75);
+  const w = inPolygon(pts, x + 0.25, y + 0.5);
+  const count = Number(n) + Number(e) + Number(s) + Number(w);
+  if (count >= 3) return -1;
+  if (count < 2) return -2;
+  if (n && w) return 0;
+  if (n && e) return 1;
+  if (s && e) return 2;
+  if (s && w) return 3;
+  return -2;
+}
+
+/** 格座標是否為牆（擋視線、子彈、道具；含斜切牆，不含矮牆）；出界視為牆 */
+export function isSolidCell(map: CellGrid, cx: number, cy: number): boolean {
   if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return true;
-  return map.solid[cy * map.width + cx] === 1;
+  const v = map.solid[cy * map.width + cx];
+  return v === 1 || (v >= SLOPE_WALL && v < SLOPE_LOW);
 }
 
-/** 格座標是否為矮牆（v0.5） */
-export function isLowCell(map: ShooterMap, cx: number, cy: number): boolean {
+/** 格座標是否為矮牆（v0.5；含斜切矮牆） */
+export function isLowCell(map: CellGrid, cx: number, cy: number): boolean {
   if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return false;
-  return map.solid[cy * map.width + cx] === 2;
+  const v = map.solid[cy * map.width + cx];
+  return v === 2 || v >= SLOPE_LOW;
 }
 
-/** 格座標是否擋移動（牆或矮牆）；出界視為擋 */
-export function blocksMove(map: ShooterMap, cx: number, cy: number): boolean {
+/** 格座標是否擋移動（牆或矮牆，斜切格算整格）；出界視為擋 */
+export function blocksMove(map: CellGrid, cx: number, cy: number): boolean {
   if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return true;
   return map.solid[cy * map.width + cx] !== 0;
+}
+
+/** 格 (cx, cy) 的實心角；不是斜切格或出界回傳 −1 */
+export function slopeAt(map: CellGrid, cx: number, cy: number): number {
+  if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return -1;
+  return slopeCorner(map.solid[cy * map.width + cx]);
+}
+
+/** 斜面朝可走那一側的法線（分量 ±1） */
+export function slopeNormal(corner: number): readonly [number, number] {
+  return corner === 0 ? [1, 1] : corner === 1 ? [-1, 1] : corner === 2 ? [-1, -1] : [1, -1];
+}
+
+/** 換到以實心角為原點、朝格內為正的本地座標：實心三角形是 u ≥ 0、v ≥ 0、u + v ≤ UNIT */
+function slopeLocal(cx: number, cy: number, corner: number, x: number, y: number): readonly [number, number] {
+  const u = corner === 0 || corner === 3 ? x - cx * UNIT : (cx + 1) * UNIT - x;
+  const v = corner === 0 || corner === 1 ? y - cy * UNIT : (cy + 1) * UNIT - y;
+  return [u, v];
+}
+
+/** 點到斜切格實心三角形的距離平方（點在三角形內為 0） */
+export function slopeDistSq(cx: number, cy: number, corner: number, x: number, y: number): number {
+  const [u, v] = slopeLocal(cx, cy, corner, x, y);
+  if (u >= 0 && v >= 0 && u + v <= UNIT) return 0;
+  const clampU = Math.max(0, Math.min(UNIT, u));
+  const clampV = Math.max(0, Math.min(UNIT, v));
+  const legU = (u - clampU) * (u - clampU) + v * v;
+  const legV = u * u + (v - clampV) * (v - clampV);
+  // 斜邊上最近的點：(UNIT + s, UNIT − s) / 2
+  const s = Math.max(-UNIT, Math.min(UNIT, u - v));
+  const du = u - (UNIT + s) / 2;
+  const dv = v - (UNIT - s) / 2;
+  return Math.min(legU, legV, du * du + dv * dv);
+}
+
+/**
+ * 線段 a→b 進入斜切格實心三角形時沿線段的參數，分數 [分子, 分母]（0～1，整數運算）；碰不到回傳 null。
+ * 碰到邊界就算：相鄰斜切格的接縫不漏視線與子彈
+ */
+export function slopeEntry(cx: number, cy: number, corner: number, ax: number, ay: number, bx: number, by: number): readonly [number, number] | null {
+  const [ua, va] = slopeLocal(cx, cy, corner, ax, ay);
+  const [ub, vb] = slopeLocal(cx, cy, corner, bx, by);
+  const du = ub - ua;
+  const dv = vb - va;
+  let inNum = 0;
+  let inDen = 1;
+  let outNum = 1;
+  let outDen = 1;
+  // 三條邊各是一個半平面 g ≤ 0：起點的 g、沿線段的變化量
+  for (const [g, d] of [[-ua, -du], [-va, -dv], [ua + va - UNIT, du + dv]]) {
+    if (d === 0) {
+      if (g > 0) return null;
+    } else if (d < 0) {
+      if (g * inDen > inNum * -d) {
+        inNum = g;
+        inDen = -d;
+      }
+    } else if (-g * outDen < outNum * d) {
+      outNum = -g;
+      outDen = d;
+    }
+  }
+  return inNum * outDen > outNum * inDen ? null : [inNum, inDen];
+}
+
+/** 斜切格可走半邊裡的一點（座標單位） */
+export function slopeFreePoint(cx: number, cy: number, corner: number): readonly [number, number] {
+  const far = (UNIT * 3) / 4;
+  const near = UNIT / 4;
+  return [cx * UNIT + (corner === 0 || corner === 3 ? far : near), cy * UNIT + (corner === 0 || corner === 1 ? far : near)];
 }
 
 /** 座標單位 → 格座標（向下取整；負數也正確） */
@@ -379,7 +429,7 @@ export function mapInfo(map: ShooterMap): MapInfo {
   };
 }
 
-/** 文字圖（除錯、審圖用）：# 牆、= 矮牆、. 可走、A／B 炸彈點、t／c 出生區、T／C 出生點 */
+/** 文字圖（除錯、審圖用）：# 牆、= 矮牆、/ \ 斜切格、. 可走、A／B 炸彈點、t／c 出生區、T／C 出生點 */
 export function dumpAscii(map: ShooterMap): string {
   const rows: string[] = [];
   for (let y = 0; y < map.height; y++) {
@@ -391,6 +441,10 @@ export function dumpAscii(map: ShooterMap): string {
       }
       if (map.solid[y * map.width + x] === 2) {
         line += '=';
+        continue;
+      }
+      if (slopeAt(map, x, y) >= 0) {
+        line += slopeAt(map, x, y) % 2 === 0 ? '/' : '\\';
         continue;
       }
       let ch = '.';

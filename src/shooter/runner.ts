@@ -32,6 +32,8 @@ export interface ShooterReplay {
     readonly winRounds?: number;
     /** 加時規則（v1.0）；沒寫＝預設 MR3 */
     readonly overtime?: ShooterMatchOptions['overtime'];
+    /** 凍結時間（tick，規則 1.2）：一律寫實際值，預設值日後再改也重播得出來 */
+    readonly freezeTicks: number;
     /** 各選手的反應延遲（tick，v1.0；只供查閱，decisions 已是實際套用的 tick） */
     readonly reactionTicks?: readonly number[];
     /** attributes：選手屬性包（步驟 7；只供查閱與顯示，重播不需要） */
@@ -235,7 +237,7 @@ export class ShooterDriver {
       return clampReaction(given);
     });
     opts.controllers.forEach((c, pid) => {
-      const init = { roundsPerHalf: opts.roundsPerHalf, winRounds: opts.winRounds, startMoney: opts.startMoney, overtime: opts.overtime, reactionTicks: this.reactionTicks[pid] };
+      const init = { roundsPerHalf: opts.roundsPerHalf, winRounds: opts.winRounds, startMoney: opts.startMoney, overtime: opts.overtime, freezeTicks: this.match.freezeTicks, reactionTicks: this.reactionTicks[pid] };
       const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init, this.attributes[pid]));
       const rt = this.runtime[pid];
       if (out.exception !== null) this.error(pid, `init: ${out.exception}`);
@@ -260,6 +262,7 @@ export class ShooterDriver {
             ...(opts.roundsPerHalf !== undefined ? { roundsPerHalf: opts.roundsPerHalf } : {}),
             ...(opts.winRounds !== undefined ? { winRounds: opts.winRounds } : {}),
             ...(opts.overtime !== undefined ? { overtime: opts.overtime } : {}),
+            freezeTicks: this.match.freezeTicks,
             reactionTicks: this.reactionTicks,
             players: opts.controllers.map((c, i) => ({ playerId: i, bot: c.declaration.name, version: c.declaration.version ?? '', knobs: knobs[i], attributes: this.attributes[i] })),
           },
@@ -368,6 +371,16 @@ export function driverPlayers(d: ShooterDriver): ShooterRunOutput['players'] {
   return d.attributes.map((attributes, pid) => ({ attributes, reactionTicks: d.reactionTicks[pid] }));
 }
 
+/** 回放與目前引擎不同版就擋下：地圖、賽制、規則都可能變了，同代號不代表同一張圖 */
+export function replayVersionError(engineVersion: unknown): string | null {
+  return engineVersion === SHOOTER_ENGINE_VERSION ? null : `回放是引擎 ${String(engineVersion)} 錄的，目前是 ${SHOOTER_ENGINE_VERSION}：地圖或規則可能已改，舊回放不能重播`;
+}
+
+function assertReplayVersion(engineVersion: unknown): void {
+  const e = replayVersionError(engineVersion);
+  if (e !== null) throw new Error(e);
+}
+
 /** 回放重建：逐 tick 套用紀錄的指令，比對雜湊 */
 export class ShooterReplayCursor {
   readonly match: ShooterMatch;
@@ -378,9 +391,10 @@ export class ShooterReplayCursor {
 
   constructor(replay: ShooterReplay) {
     if (replay.kind !== 'shooter') throw new Error(`不是射擊回放：${String(replay.kind)}`);
+    assertReplayVersion(replay.header.engineVersion);
     this.replay = replay;
     const h = replay.header;
-    this.match = new ShooterMatch({ seed: h.seed, mapId: h.mapId, defaultLoadout: h.defaultLoadout, defaultArmor: h.defaultArmor, startMoney: h.startMoney, roundMoney: h.roundMoney, roundsPerHalf: h.roundsPerHalf, winRounds: h.winRounds, overtime: h.overtime });
+    this.match = new ShooterMatch({ seed: h.seed, mapId: h.mapId, defaultLoadout: h.defaultLoadout, defaultArmor: h.defaultArmor, startMoney: h.startMoney, roundMoney: h.roundMoney, roundsPerHalf: h.roundsPerHalf, winRounds: h.winRounds, overtime: h.overtime, freezeTicks: h.freezeTicks });
   }
 
   step(): void {
