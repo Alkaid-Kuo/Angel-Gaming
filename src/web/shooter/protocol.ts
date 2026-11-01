@@ -132,8 +132,19 @@ export interface FullPlayer {
   readonly defuseTicks?: number;
 }
 
+/** 一顆子彈（全狀態：不管誰看得見） */
+export interface FullShot {
+  readonly tick: number;
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
 export interface FullState {
   readonly players: readonly FullPlayer[];
+  /** 上一個 frame 之後新開的子彈（全圖與自由鏡頭畫） */
+  readonly shots?: readonly FullShot[];
   readonly smokes: readonly { readonly x: number; readonly y: number; readonly radius: number }[];
   readonly fires: readonly { readonly x: number; readonly y: number; readonly radius: number; readonly cells: readonly number[] }[];
   readonly projectiles: readonly { readonly kind: GrenadeId; readonly x: number; readonly y: number }[];
