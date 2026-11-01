@@ -51,6 +51,8 @@ export type ToShooterWorker =
   | { readonly type: 'watch'; readonly watch: WatchSetup }
   /** 觀戰：以最高速推進到下一回合開始（凍結時間），中間不送畫面 */
   | { readonly type: 'skipRound' }
+  /** 觀戰：回到第 round 回合的凍結開始（同設定同種子重跑，確定性；往後跳直接推進） */
+  | { readonly type: 'seek'; readonly round: number }
   /** 比賽結束後要回放（下載用；比賽中不給） */
   | { readonly type: 'getReplay' }
   | { readonly type: 'cmd'; readonly cmds: readonly ShooterCommand[] }
@@ -72,6 +74,8 @@ export interface ShooterMeta {
   readonly map: MapInfo;
   readonly weapons: readonly WeaponInfo[];
   readonly grenades: readonly GrenadeInfo[];
+  /** 開鏡的移動速度（座標單位／tick）：開局資料 WeaponInfo 沒有這欄，Worker 從規則表補上給商店顯示 */
+  readonly scopedSpeeds?: Readonly<Partial<Record<WeaponId, number>>>;
   /** 經營層觀戰才有 */
   readonly watch?: WatchInfo;
   /** 試玩有選等級才有（「再來一場」沿用） */
@@ -114,6 +118,18 @@ export interface FullPlayer {
   /** 模型兵的姿勢（畫面用） */
   readonly crouching?: boolean;
   readonly working?: boolean;
+  /** 觀戰的選手列表用 */
+  readonly armor?: number;
+  readonly kit?: boolean;
+  readonly money?: number;
+  readonly primary?: WeaponId | null;
+  readonly secondary?: WeaponId | null;
+  readonly grenades?: readonly GrenadeId[];
+  readonly ammoMag?: number;
+  readonly ammoReserve?: number;
+  readonly reloading?: boolean;
+  readonly plantTicks?: number;
+  readonly defuseTicks?: number;
 }
 
 export interface FullState {
@@ -122,7 +138,7 @@ export interface FullState {
   readonly fires: readonly { readonly x: number; readonly y: number; readonly radius: number; readonly cells: readonly number[] }[];
   readonly projectiles: readonly { readonly kind: GrenadeId; readonly x: number; readonly y: number }[];
   readonly items: readonly { readonly kind: 'weapon' | 'bomb' | 'kit'; readonly weapon: WeaponId | null; readonly x: number; readonly y: number }[];
-  readonly bomb: { readonly state: string; readonly x: number; readonly y: number; readonly ticksLeft: number | null };
+  readonly bomb: { readonly state: string; readonly x: number; readonly y: number; readonly ticksLeft: number | null; readonly site?: 'A' | 'B' | null; readonly carrier?: number };
 }
 
 export interface ShooterFrame {
@@ -141,6 +157,8 @@ export interface ShooterFrame {
   readonly paused: boolean;
   /** 跳回合時略過的回合結果（畫面沒看到它們的結束 frame，回合紀錄靠這個補） */
   readonly skipped?: readonly { readonly number: number; readonly winner: Team; readonly winnerGroup: 0 | 1; readonly reason: RoundEndReason }[];
+  /** 跳回合後的第一個 frame：tick 可能倒退，主執行緒的逐幀狀態要清掉；skipped 是到這一刻為止打完的全部回合 */
+  readonly rewound?: boolean;
 }
 
 export interface ShooterSummary {
@@ -165,4 +183,6 @@ export type FromShooterWorker =
   | { readonly type: 'frame'; readonly frame: ShooterFrame }
   | { readonly type: 'over'; readonly summary: ShooterSummary }
   | { readonly type: 'replay'; readonly replay: TrialReplay }
+  /** 跳回合進行中（重跑到第 at 回合，目標 target） */
+  | { readonly type: 'seeking'; readonly at: number; readonly target: number }
   | { readonly type: 'error'; readonly message: string };

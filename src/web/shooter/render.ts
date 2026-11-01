@@ -8,6 +8,7 @@ import { slopeContact } from '../../shooter/path.ts';
 import { BAKE_PX, bakeMap, type Baked } from './bake.ts';
 import { BLAST_MS, paintBlast, paintBombMark, paintChip, paintFlame, paintHurtVignette, paintKit, paintMuzzle, paintProjectile, paintScorch, paintSmoke, paintTracer, paintVignette } from './fx.ts';
 import { PAL, hash2 } from './materials.ts';
+import type { CamView } from './camera.ts';
 import type { FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
 import { muzzleReach, paintCorpse, paintDroppedGun, paintSoldier, sideColor, type Pose, type Side } from './soldier.ts';
 
@@ -31,8 +32,6 @@ export const HURT_MS = 900;
 const SCOPE_ZOOM = 0.55;
 const SCOPE_LEAD = 0.8;
 const SCOPE_BLEND_MS = 180;
-/** 全圖鏡頭的過渡時間 */
-const OVERVIEW_BLEND_MS = 260;
 /** 自己身邊一點點不算迷霧（只是讓自己的腳邊不被蓋住；不代表看得見背後） */
 const SELF_REVEAL = 0.7;
 export const SOUND_MS = 500;
@@ -124,8 +123,14 @@ export interface DrawInput {
   readonly xray: boolean;
   /** 觀戰模式：戰術疊層（距離環、引線標註） */
   readonly tactical: boolean;
-  /** 觀戰模式：鏡頭拉到看得到整張地圖 */
-  readonly overview: boolean;
+  /** 觀戰模式的鏡頭（camera.ts 算好的）；null＝玩家模式，鏡頭跟著自己與滑鼠 */
+  readonly camera: CamView | null;
+  /** 第一人稱的全畫面效果（致盲白幕、受傷暗角、聲音箭頭）；觀戰的全圖與自由鏡頭不是誰的視角，不畫 */
+  readonly pov: boolean;
+  /** 戰術疊層距離環的圓心（座標單位）；null＝所看的選手 */
+  readonly rings: { readonly x: number; readonly y: number } | null;
+  /** 觀戰：滑鼠指著的選手 */
+  readonly hover: number | null;
   readonly charge: ThrowPreview | null;
   /** 在畫面上蓄力中的道具選擇（顯示準心旁的字） */
   readonly sounds: readonly ActiveSound[];
@@ -158,7 +163,7 @@ function lerpDeg(a: number, b: number, t: number): number {
 const rad = (deg: number): number => (deg * Math.PI) / 180;
 
 /** 依 id 在前一個 frame 找同一個人插值位置 */
-function interp<T extends { readonly id: number; readonly x: number; readonly y: number; readonly facing: number }>(cur: T, prev: readonly T[] | undefined, a: number): { x: number; y: number; facing: number; moving: boolean } {
+export function interp<T extends { readonly id: number; readonly x: number; readonly y: number; readonly facing: number }>(cur: T, prev: readonly T[] | undefined, a: number): { x: number; y: number; facing: number; moving: boolean } {
   const p = prev?.find((q) => q.id === cur.id);
   if (p === undefined || Math.abs(p.x - cur.x) > 3 * UNIT || Math.abs(p.y - cur.y) > 3 * UNIT) return { x: cur.x, y: cur.y, facing: cur.facing, moving: false };
   return { x: lerp(p.x, cur.x, a), y: lerp(p.y, cur.y, a), facing: lerpDeg(p.facing, cur.facing, a), moving: p.x !== cur.x || p.y !== cur.y };
@@ -282,7 +287,6 @@ export class ShooterRenderer {
   camera: Camera = { cx: 0, cy: 0, scale: 0.02, w: 1, h: 1 };
   /** 開鏡鏡頭的過渡進度 0～1 */
   private scopeBlend = 0;
-  private overviewBlend = 0;
   private lastDraw = 0;
   /** 我方組別（世界隊色） */
   private readonly mine: 0 | 1 | null;
@@ -292,6 +296,8 @@ export class ShooterRenderer {
   private lastRound = -1;
   private lastBomb = '';
   private blasts: Blast[] = [];
+  /** 戰術疊層標註往上疊的高度（依 playerId，平滑用） */
+  private readonly tagLift: number[];
   private scorches: { x: number; y: number; r: number; seed: number }[] = [];
 
   constructor(canvas: HTMLCanvasElement, meta: ShooterMeta) {
@@ -300,6 +306,7 @@ export class ShooterRenderer {
     this.meta = meta;
     this.mine = mineGroup(meta);
     this.baked = bakeMap(meta.map);
+    this.tagLift = meta.names.map(() => 0);
     this.mask = document.createElement('canvas');
     this.mctx = this.mask.getContext('2d')!;
     this.fog = document.createElement('canvas');
@@ -401,19 +408,9 @@ export class ShooterRenderer {
     const step = dt / SCOPE_BLEND_MS;
     this.scopeBlend = target > this.scopeBlend ? Math.min(target, this.scopeBlend + step) : Math.max(target, this.scopeBlend - step);
     const b = this.scopeBlend * this.scopeBlend * (3 - 2 * this.scopeBlend);
-    // 全圖鏡頭（觀戰）：整張地圖塞進畫面
-    const ovTarget = d.overview ? 1 : 0;
-    const ovStep = dt / OVERVIEW_BLEND_MS;
-    this.overviewBlend = ovTarget > this.overviewBlend ? Math.min(1, this.overviewBlend + ovStep) : Math.max(0, this.overviewBlend - ovStep);
-    const ov = this.overviewBlend * this.overviewBlend * (3 - 2 * this.overviewBlend);
-    const map = this.meta.map;
-    const fitScale = (Math.min(w / map.width, h / map.height) * 0.94) / UNIT;
-    const followScale = ((Math.min(w, h) / 2 / 24) * d.zoom * lerp(1, SCOPE_ZOOM, b)) / UNIT;
-    const scale = Math.exp(lerp(Math.log(followScale), Math.log(fitScale), ov));
+    const scale = d.camera?.scale ?? ((Math.min(w, h) / 2 / 24) * d.zoom * lerp(1, SCOPE_ZOOM, b)) / UNIT;
     const lead = mine ? lerp(0.5, SCOPE_LEAD, b) : 0;
-    const cx = lerp(meNow.x + ((d.mouse.x - w / 2) * lead) / scale, (map.width * UNIT) / 2, ov);
-    const cy = lerp(meNow.y + ((d.mouse.y - h / 2) * lead) / scale, (map.height * UNIT) / 2, ov);
-    const cam: Camera = { cx, cy, scale, w, h };
+    const cam: Camera = d.camera !== null ? { ...d.camera, w, h } : { cx: meNow.x + ((d.mouse.x - w / 2) * lead) / scale, cy: meNow.y + ((d.mouse.y - h / 2) * lead) / scale, scale, w, h };
     this.camera = cam;
     const ppc = scale * UNIT;
     const lod = ppc < LOD_PPC;
@@ -447,7 +444,7 @@ export class ShooterRenderer {
     // 人
     const groupOfMe = this.meta.groups[view.me.id];
     if (full !== null) {
-      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tactical);
+      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tactical, d.hover);
     } else {
       const us = this.sideOf(groupOfMe);
       for (const t of view.teammates) {
@@ -497,7 +494,7 @@ export class ShooterRenderer {
     // 子彈彈道：別人的（隊友、看得見的敵人）與所看選手自己的
     this.drawOtherTracers(cam, d);
     if (view.me.alive) this.drawTracers(cam, meNow, view.me.weapon, d);
-    if (d.tactical && full !== null) this.drawTactical(cam, full, meNow, view.me.id);
+    if (d.tactical && full !== null) this.drawTactical(cam, full, d.rings ?? meNow, view.me.id);
     paintVignette(ctx, w, h);
     // 投擲預估與準心（玩家模式、活著）
     if (mine && view.me.alive) {
@@ -508,11 +505,11 @@ export class ShooterRenderer {
       this.drawHitMarker(d);
     }
     this.drawDamagePops(cam, d);
-    this.drawSoundArrows(cam, meNow, d.sounds, d.now);
-    if (view.me.alive) this.drawHurt(cam, meNow, d, view.me.hp);
+    if (d.pov) this.drawSoundArrows(cam, meNow, d.sounds, d.now);
+    if (d.pov && view.me.alive) this.drawHurt(cam, meNow, d, view.me.hp);
     // 致盲：暖白幕，最後 0.8 秒淡出
     const blind = view.me.blindTicks;
-    if (blind > 0) {
+    if (d.pov && blind > 0) {
       ctx.fillStyle = `rgba(255, 252, 244, ${Math.min(1, blind / 24)})`;
       ctx.fillRect(0, 0, w, h);
     }
@@ -544,6 +541,12 @@ export class ShooterRenderer {
     ctx.stroke();
     ctx.fillStyle = color;
     ctx.fill();
+  }
+
+  /** 回合重來（跳回合）：tick 會倒退，爆炸與焦痕清掉，免得留著別的時間線的東西 */
+  resetRound(): void {
+    this.lastRound = -1;
+    this.lastTick = -1;
   }
 
   /** 視線多邊形（畫面座標）：演算法同引擎視線的浮點近似；碰牆的射線多走一點，碰煙、碰矮牆、到視野距離就停 */
@@ -791,19 +794,33 @@ export class ShooterRenderer {
     }
   }
 
-  private drawFullPlayers(cam: Camera, full: FullState, prev: FullState | null, alpha: number, viewId: number, lod: boolean, tagged: boolean): void {
+  private drawFullPlayers(cam: Camera, full: FullState, prev: FullState | null, alpha: number, viewId: number, lod: boolean, tagged: boolean, hover: number | null): void {
     for (const p of full.players) {
       if (!p.alive) continue;
       const q = interp(p, prev?.players, alpha);
       this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: tagged ? null : p.hp, hasBomb: p.hasBomb, blind: p.blind, label: tagged ? null : this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing }, lod);
+      if (p.id === hover) this.drawHover(cam, q, this.meta.names[p.id]);
     }
   }
 
+  /** 滑鼠指著的選手：細環；遠看沒有名牌，這裡補上 */
+  private drawHover(cam: Camera, p: { x: number; y: number }, name: string): void {
+    const ctx = this.ctx;
+    const [sx, sy] = toScreen(cam, p.x, p.y);
+    const r = Math.max(10, cam.scale * UNIT * 1.05);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    paintChip(ctx, name, sx, sy + r + 12);
+  }
+
   /** 戰術疊層（觀戰）：所看選手的距離環、每個人一條引線標註，全圖鏡頭時加上區域名 */
-  private drawTactical(cam: Camera, full: FullState, me: { x: number; y: number }, viewId: number): void {
+  private drawTactical(cam: Camera, full: FullState, center: { x: number; y: number }, viewId: number): void {
     const ctx = this.ctx;
     const ppc = cam.scale * UNIT;
-    const [mx, my] = toScreen(cam, me.x, me.y);
+    const [mx, my] = toScreen(cam, center.x, center.y);
     ctx.setLineDash([2, 5]);
     ctx.lineWidth = 1;
     ctx.font = `13px "Share Tech Mono", monospace`;
@@ -838,7 +855,7 @@ export class ShooterRenderer {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const placed: { x: number; y: number; w: number }[] = [];
-    for (const p of [...full.players].sort((a, b) => b.y - a.y)) {
+    for (const p of full.players) {
       if (!p.alive) continue;
       const [sx, sy] = toScreen(cam, p.x, p.y);
       if (sx < 0 || sy < 0 || sx > cam.w || sy > cam.h) continue;
@@ -851,6 +868,9 @@ export class ShooterRenderer {
       let ly = sy - 26;
       while (placed.some((q) => bx < q.x + q.w + 4 && bx + tw + 4 > q.x && Math.abs(ly - q.y) < 22)) ly -= 22;
       placed.push({ x: bx, y: ly, w: tw });
+      // 標註換層時滑過去，不要整條跳動：疊的順序依 id 固定，只平滑高度
+      const lift = (this.tagLift[p.id] += (sy - 26 - ly - this.tagLift[p.id]) * 0.2);
+      ly = sy - 26 - lift;
       ctx.strokeStyle = 'rgba(29, 26, 34, 0.8)';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -1175,6 +1195,14 @@ export class ShooterRenderer {
     const groupOfMe = this.meta.groups[view.me.id];
     const usColor = sideColor(this.sideOf(groupOfMe));
     const foeColor = PAL.blueLight;
+    // 全圖與自由鏡頭：框出畫面看到的範圍
+    if (d.camera !== null && !d.pov) {
+      const vw = (this.camera.w / this.camera.scale) * k;
+      const vh = (this.camera.h / this.camera.scale) * k;
+      g.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      g.lineWidth = 1;
+      g.strokeRect(this.camera.cx * k - vw / 2, this.camera.cy * k - vh / 2, vw, vh);
+    }
     if (d.cur.full !== null) {
       for (const p of d.cur.full.players) if (p.alive) dot(p.x, p.y, this.meta.groups[p.id] === groupOfMe ? usColor : foeColor, 3);
     } else {

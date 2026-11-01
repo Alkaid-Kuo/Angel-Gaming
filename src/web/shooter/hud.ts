@@ -4,8 +4,9 @@
 // 我方永遠在左；經營層觀戰顯示隊名、選手名、角色與版本。
 import type { RoundEndReason, ShooterObservation, Team } from '../../shooter/api.ts';
 import { isLowCell } from '../../shooter/map.ts';
-import { GRENADE_TAG, WEAPON_TAG, mineGroup } from './render.ts';
-import type { BoardRow, KillFeedItem, ShooterFrame, ShooterMeta, ShooterSummary } from './protocol.ts';
+import { mineGroup } from './render.ts';
+import type { CamMode } from './camera.ts';
+import type { BoardRow, FullState, KillFeedItem, ShooterFrame, ShooterMeta, ShooterSummary } from './protocol.ts';
 import type { WatchTicket } from './watch.ts';
 
 /** 天使金色票（web/sketch/angel.css） */
@@ -32,7 +33,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, parent: 
 }
 
 /** 只在內容變了才寫 DOM */
-function setHtml(e: HTMLElement, html: string): void {
+export function setHtml(e: HTMLElement, html: string): void {
   if (e.dataset.h !== html) {
     e.dataset.h = html;
     e.innerHTML = html;
@@ -59,6 +60,8 @@ export interface HudExtra {
   readonly bomb: boolean;
   readonly speed: number;
   readonly xray: boolean;
+  /** 觀戰的鏡頭模式 */
+  readonly cam: CamMode;
 }
 
 export class ShooterHud {
@@ -155,7 +158,40 @@ export class ShooterHud {
   }
 
   private weaponName(weapon: string): string {
-    return weapon === 'bomb' ? '炸彈' : weapon in WEAPON_TAG ? WEAPON_TAG[weapon as keyof typeof WEAPON_TAG] : GRENADE_TAG[weapon as keyof typeof GRENADE_TAG];
+    return weapon === 'bomb' ? '炸彈' : (this.meta.weapons.find((w) => w.id === weapon)?.name ?? this.meta.grenades.find((g) => g.id === weapon)?.name ?? weapon);
+  }
+
+  /** 跳回合：逐幀累積的東西清掉（回合紀錄由 Worker 下一個 frame 整批補回） */
+  reset(): void {
+    this.feedItems = [];
+    this.rounds.length = 0;
+    this.bannerUntil = 0;
+    this.banner.classList.add('hidden');
+    this.end.classList.add('hidden');
+  }
+
+  /** 結算畫面先收起來，留在比賽畫面回看 */
+  hideEnd(): void {
+    this.end.classList.add('hidden');
+  }
+
+  /** 左邊放哪一組：我方；別隊的比賽放主隊 */
+  get leftGroup(): 0 | 1 {
+    return this.mine ?? 0;
+  }
+
+  /** 目前左、右各是哪個陣營 */
+  leftRight(board: readonly BoardRow[]): readonly [Team, Team] {
+    const left: Team = this.groupOfTeam('T', board) === this.leftGroup ? 'T' : 'CT';
+    return [left, left === 'T' ? 'CT' : 'T'];
+  }
+
+  groupOf(team: Team, board: readonly BoardRow[]): 0 | 1 {
+    return this.groupOfTeam(team, board);
+  }
+
+  groupLabel(g: 0 | 1): string {
+    return this.groupName(g);
   }
 
   /** 組別的介面文字顏色：我方金、對手紅；別隊的比賽主隊白、客隊灰 */
@@ -199,19 +235,47 @@ export class ShooterHud {
     return best;
   }
 
-  /** 觀戰控制列：暫停／播放、速度、下一回合、全圖（按鈕的 data-act 由 main.ts 處理） */
-  updateCtl(speed: number, paused: boolean, over: boolean, map: { xray: boolean; overview: boolean; tactical: boolean }): void {
+  /** 觀戰控制列：回合、暫停、速度、鏡頭模式、全圖疊層、縮放、按鍵表（按鈕的 data-act 由 main.ts 處理）；鍵盤熱鍵寫在 title 與按鍵表 */
+  updateCtl(speed: number, paused: boolean, over: boolean, map: { xray: boolean; tactical: boolean; cam: CamMode }): void {
     if (this.ctl === null) return;
-    const sp = SPEEDS.map((s, i) => `<button type="button" class="${s === speed ? 'on' : ''}" data-act="speed" data-i="${i}">${s}×</button>`).join('');
-    const tg = (act: string, on: boolean, label: string, key: string): string => `<button type="button" class="${on ? 'on' : ''}" data-act="${act}">${label}<kbd>${key}</kbd></button>`;
+    const sp = SPEEDS.map((s, i) => `<button type="button" class="${s === speed ? 'on' : ''}" data-act="speed" data-i="${i}" title="[ ]">${s}×</button>`).join('');
+    const tg = (act: string, on: boolean, label: string, key: string): string => `<button type="button" class="${on ? 'on' : ''}" data-act="${act}" title="${key}">${label}</button>`;
     setHtml(
       this.ctl,
-      `<button type="button" data-act="pause" ${over ? 'disabled' : ''}>${paused ? '▶ 播放' : 'Ⅱ 暫停'}<kbd>空白</kbd></button>` +
-        `<span class="sp">${sp}<kbd>[</kbd><kbd>]</kbd></span>` +
-        `<button type="button" data-act="skip" ${over ? 'disabled' : ''}>下一回合 ▶▶<kbd>N</kbd></button>` +
-        `<span class="sp">${tg('xray', map.xray, '透視', 'X')}${tg('overview', map.overview, '全圖', 'M')}${tg('tactical', map.tactical, '戰術疊層', 'T')}</span>` +
-        `<button type="button" data-act="quit">${this.meta.watch ? '回經營' : '離開觀戰'}</button>`,
+      `<span class="sp"><button type="button" data-act="prev" title="上一回合（P）">◀◀</button>` +
+        `<button type="button" class="pp" data-act="pause" title="空白鍵" ${over ? 'disabled' : ''}>${paused ? '▶ 播放' : 'Ⅱ 暫停'}</button>` +
+        `<button type="button" data-act="skip" title="下一回合（N）" ${over ? 'disabled' : ''}>▶▶</button></span>` +
+        `<span class="sp">${sp}</span>` +
+        `<span class="sp">${tg('cam-follow', map.cam === 'follow', '跟隨', '← → 換人')}${tg('cam-free', map.cam === 'free', '自由', '拖曳畫面')}${tg('overview', map.cam === 'overview', '全圖', 'M')}</span>` +
+        `<span class="sp">${tg('xray', map.xray, '透視', 'X')}${tg('tactical', map.tactical, '戰術', 'T')}</span>` +
+        `<span class="sp"><button type="button" data-act="zoom-out" title="-">−</button><button type="button" data-act="zoom-in" title="=">＋</button></span>` +
+        `<button type="button" data-act="help" title="? 或 H">?</button>` +
+        `<button type="button" data-act="quit">${this.meta.watch ? '回經營' : '離開'}</button>`,
     );
+  }
+
+  /** 觀戰的炸彈狀態：全狀態的炸彈、誰帶著、誰在下包或拆包、倒數 */
+  private spectateBomb(full: FullState): string {
+    const b = full.bomb;
+    const rules = this.meta.rules;
+    const tps = rules.ticksPerSecond;
+    const who = (id: number): string => this.name(id);
+    const bar = (frac: number): string => `<div class="bar"><i style="width:${Math.min(100, frac * 100)}%"></i></div>`;
+    const left = b.ticksLeft !== null ? `<b>${(b.ticksLeft / tps).toFixed(1)}</b>` : '';
+    if (b.state === 'carried') {
+      const c = full.players.find((p) => p.id === b.carrier);
+      if (c === undefined) return '';
+      const plant = c.plantTicks ?? 0;
+      return plant > 0 ? `<span>${who(c.id)} 下包中</span>${bar(plant / rules.plantTicks)}` : `<span>炸彈在 ${who(c.id)} 身上</span>`;
+    }
+    if (b.state === 'dropped') return '<span>炸彈掉在地上</span>';
+    if (b.state === 'planted') {
+      const d = full.players.find((p) => (p.defuseTicks ?? 0) > 0);
+      const site = `<span>炸彈在 ${b.site ?? '?'} 點</span>`;
+      if (d === undefined) return `${site}${bar((b.ticksLeft ?? 0) / rules.bombTicks)}${left}`;
+      return `${site}<span>${who(d.id)} 拆包中${d.kit === true ? '（拆彈器）' : ''}</span>${bar((d.defuseTicks ?? 0) / (d.kit === true ? rules.defuseKitTicks : rules.defuseTicks))}${left}`;
+    }
+    return b.state === 'defused' ? '<span>炸彈已拆除</span>' : b.state === 'exploded' ? '<span>炸彈已引爆</span>' : '';
   }
 
   update(f: ShooterFrame, now: number, extra: HudExtra): void {
@@ -274,7 +338,8 @@ export class ShooterHud {
       const w = this.meta.watch;
       const head = this.ticket ? `${esc(this.ticket.title)}・重播` : '觀戰模式';
       const tag = w ? `<small class="tg">${esc(w.tags[f.viewId] ?? '')}</small>` : '';
-      hints.push(`${head}・跟隨 ${this.name(f.viewId)}${tag}（← → 切換）`);
+      if (extra.cam === 'follow') hints.push(`${head}・跟隨 ${this.name(f.viewId)}${tag}`);
+      else hints.push(`${head}・${extra.cam === 'overview' ? '全圖鏡頭' : '自由鏡頭'}・點人跟隨${extra.cam === 'free' ? '、雙擊空地回跟隨' : ''}`);
     } else if (!self.me.alive) {
       const d = this.myDeath;
       if (d !== null) hints.push(d.killer >= 0 && d.killer !== d.victim ? `你被 ${this.name(d.killer)} 用 ${this.weaponName(d.weapon)} 擊殺` : `你被${this.weaponName(d.weapon)}炸死`);
@@ -292,10 +357,19 @@ export class ShooterHud {
     }
     setHtml(this.hint, hints.join('<span class="sep"></span>'));
 
+    if (this.meta.spectate) {
+      // 觀戰：血甲錢與武器都在選手列表，這裡只剩炸彈條
+      const bomb = f.full !== null ? this.spectateBomb(f.full) : '';
+      setHtml(this.bombBar, bomb);
+      this.bombBar.classList.toggle('hidden', bomb === '');
+      if (this.boardShown) this.renderBoard(this.board, f.board, null, `${scoreOf(leftTeam)} : ${scoreOf(rightTeam)}`);
+      return;
+    }
+
     // 左下：血、甲、錢（死後看隊友時，血甲是隊友的、錢是自己的）
     const vm = view.me;
     const hp = vm.alive ? vm.hp : 0;
-    const money = this.meta.spectate ? vm.money : self.me.money;
+    const money = self.me.money;
     setHtml(
       this.left,
       `<div class="stat hp${hp <= 30 ? ' low' : ''}"><span class="lb">血量</span><b>${hp}</b><i class="bar"><u style="width:${Math.max(0, hp)}%"></u></i></div>` +
@@ -304,7 +378,7 @@ export class ShooterHud {
     );
 
     // 右下：武器欄 1～5（主武器、手槍、刀、道具、炸彈；沒有的格子變暗）、彈藥
-    const mine = vm.id === this.meta.playerId && !this.meta.spectate;
+    const mine = vm.id === this.meta.playerId;
     const gName = (g: string): string => this.meta.grenades.find((x) => x.id === g)?.name ?? g;
     const wName = (w: string | null): string => (w === null ? '' : (this.meta.weapons.find((x) => x.id === w)?.name ?? w));
     const curSlot = mine && extra.bomb ? 5 : mine && extra.grenade !== null ? 4 : ['primary', 'secondary', 'knife'].indexOf(this.meta.weapons.find((w) => w.id === vm.weapon)?.slot ?? 'knife') + 1;
@@ -391,7 +465,7 @@ export class ShooterHud {
     this.end.innerHTML =
       `<div class="box"><div class="head"><small class="en">MATCH // ${this.meta.spectate ? 'SPECTATE' : 'RESULT'}</small><h2 class="${cls}">${title}</h2>${this.vsLine(left, g0, g1)}</div>` +
       `<div class="sg-board-body"></div>` +
-      `<div class="foot"><span class="meta">種子 ${this.meta.seed}・共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・終局雜湊 ${summary.finalHash}</span><div class="row"><button type="button" class="primary" data-act="again">再來一場</button><button type="button" data-act="replay">下載回放</button><button type="button" data-act="home">回開局畫面</button></div></div></div>`;
+      `<div class="foot"><span class="meta">種子 ${this.meta.seed}・共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・終局雜湊 ${summary.finalHash}</span><div class="row"><button type="button" class="primary" data-act="again">再來一場</button>${this.meta.spectate ? '<button type="button" data-act="review">回看比賽</button>' : ''}<button type="button" data-act="replay">下載回放</button><button type="button" data-act="home">回開局畫面</button></div></div></div>`;
     // 結束時的陣營是最後一個半場的（可能是加時），換回依組別顯示
     this.renderBoard(this.end.querySelector('.sg-board-body')!, rows.map((r) => ({ ...r, alive: true })), summary);
     this.end.classList.remove('hidden');
@@ -420,7 +494,7 @@ export class ShooterHud {
     this.end.innerHTML =
       `<div class="box"><div class="head"><small class="en">${esc(t.title)} // REPLAY</small><h2 class="${cls}">${res}</h2>${this.vsLine(w.mine ?? 0, g0, g1)}</div>` +
       `${check}<div class="sg-board-body"></div>` +
-      `<div class="foot"><span class="meta">共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・種子 ${this.meta.seed}・終局雜湊 ${summary.finalHash}</span><div class="row"><button type="button" class="primary" data-act="home">回經營</button><button type="button" data-act="again">重看一次</button><button type="button" data-act="replay">下載回放</button></div></div></div>`;
+      `<div class="foot"><span class="meta">共 ${summary.rounds.length} 回合${summary.overtimes > 0 ? `・加時 ${summary.overtimes} 段` : ''}・種子 ${this.meta.seed}・終局雜湊 ${summary.finalHash}</span><div class="row"><button type="button" class="primary" data-act="home">回經營</button><button type="button" data-act="review">回看比賽</button><button type="button" data-act="again">重看一次</button><button type="button" data-act="replay">下載回放</button></div></div></div>`;
     this.renderBoard(this.end.querySelector('.sg-board-body')!, rows.map((r) => ({ ...r, alive: true })), summary);
     this.end.classList.remove('hidden');
   }
