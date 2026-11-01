@@ -31,6 +31,8 @@ export const LEAGUE_FORMAT_ID = 'shooter-mr6';
 /** 經營層看得到的賽制（estMsPerRound：Node 單執行緒、兩隊基準 Bot 2.1 的量測平均，見步驟 8 交付報告） */
 export const SHOOTER_FORMATS: readonly MatchFormat[] = [
   { id: 'shooter-mr6', name: '攻防戰 MR6（先到 7 勝、MR3 加時）', rounds: 12, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
+  // 量測用（MR6 對 MR8 對照），聯賽賽制不是這個
+  { id: 'shooter-mr8', name: '攻防戰 MR8（先到 9 勝、MR3 加時）', rounds: 16, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
   { id: 'shooter-mr12', name: '攻防戰 MR12（先到 13 勝、MR3 加時）', rounds: 24, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
   { id: 'shooter-short', name: '攻防戰短賽制（測試用：每半場 1 回合、先到 2 勝、不加時，1:1 平手）', rounds: 2, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
 ];
@@ -40,6 +42,7 @@ type FormatOptions = Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | '
 /** 各賽制的引擎選項：賽制長度與凍結時間（經營層全是 Bot 對打，都用 Bot 的凍結時間） */
 const FORMAT_OPTIONS: Readonly<Record<string, FormatOptions>> = {
   'shooter-mr6': { roundsPerHalf: 6, winRounds: 7, freezeTicks: ROUND.botFreezeTicks },
+  'shooter-mr8': { roundsPerHalf: 8, winRounds: 9, freezeTicks: ROUND.botFreezeTicks },
   'shooter-mr12': { freezeTicks: ROUND.botFreezeTicks },
   'shooter-short': { roundsPerHalf: 1, winRounds: 2, overtime: false, freezeTicks: ROUND.botFreezeTicks },
 };
