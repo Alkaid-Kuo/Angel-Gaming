@@ -69,8 +69,8 @@ const P = {
   waypointReach: 1200,
   maxSegment: 6,
   peekStop: 2,
-  peekHold0: 6,
-  peekHold100: 2,
+  peekHold0: 10,
+  peekHold100: 1,
   shoulderBelow: 60,
   shoulderMove: 40,
   silentMove: 60,
@@ -82,6 +82,8 @@ const P = {
   leadExtra: 2,
   react0: 3,
   react100: 0,
+  reactAggr0: 0.6,
+  reactAggr100: -0.6,
   preAimErr: 0.6,
   preAimDeg: 20,
   periphDeg: 25,
@@ -101,8 +103,8 @@ const P = {
   outnumber100: 3,
   mateNear: 10,
   coverRadius: 8,
-  holdAngle0: 2.0,
-  holdAngle100: 0.6,
+  holdAngle0: 2.6,
+  holdAngle100: 0.4,
   crouchFireMin: 8,
   sloppyStop0: 0.5,
   sloppyStop100: 0,
@@ -114,8 +116,8 @@ const P = {
   stageGap: 1.6,
   splitWait: 32,
   fakeDelay: 4,
-  defaultExec0: 48,
-  defaultExec100: 30,
+  defaultExec0: 56,
+  defaultExec100: 26,
   forceExecLeft: 35,
   contactEvery: 1.5,
   contactTtl: 12,
@@ -1778,10 +1780,10 @@ class Combat {
     const off = attrs.offAim ?? attrs.aim;
     this.errOff = lerp(P.aimErr0, P.aimErr100, off) * UNIT;
     this.convOff = lerp(P.aimConv0, P.aimConv100, off);
-    this.reactExtra = Math.round(lerp(P.react0, P.react100, attrs.reaction));
+    this.reactExtra = Math.max(0, lerp(P.react0, P.react100, attrs.reaction) + lerp(P.reactAggr0, P.reactAggr100, attrs.aggression));
     this.preAim = 1 - P.preAimErr * attrs.awareness;
     this.awareness = attrs.awareness;
-    this.wait = this.reactExtra;
+    this.wait = Math.round(this.reactExtra);
     this.notice = lerp(P.notice0, P.notice100, attrs.awareness);
     /** 已注意到的敵人 → 最後看到的 tick @type {Map<number, number>} */
     this.noticed = new Map();
@@ -1967,7 +1969,8 @@ class Combat {
       this.seen = 0;
       const ahead = Math.abs(adiff(angleTo(me.x, me.y, e.x, e.y), me.facing)) <= P.preAimDeg;
       const cut = ahead && this.h.random() < this.awareness ? 1 : 0;
-      this.wait = Math.max(Math.min(1, this.reactExtra), this.reactExtra - cut);
+      const extra = Math.floor(this.reactExtra + this.h.random());
+      this.wait = Math.max(Math.min(1, extra), extra - cut);
       const a = Math.floor(this.h.random() * 360);
       const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random()) * (ahead ? this.preAim : 1);
       this.errX = cosd(a) * mag;

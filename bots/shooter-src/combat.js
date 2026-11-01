@@ -34,12 +34,12 @@ export class Combat {
     const off = attrs.offAim ?? attrs.aim;
     this.errOff = lerp(P.aimErr0, P.aimErr100, off) * UNIT;
     this.convOff = lerp(P.aimConv0, P.aimConv100, off);
-    this.reactExtra = Math.round(lerp(P.react0, P.react100, attrs.reaction));
+    this.reactExtra = Math.max(0, lerp(P.react0, P.react100, attrs.reaction) + lerp(P.reactAggr0, P.reactAggr100, attrs.aggression));
     // 預瞄（2.1）：新目標出現在自己正看著的方向時，初始瞄準誤差縮小（警覺 0 → 100：× 1 → × (1 − P.preAimErr)），
     // 而且有「警覺」的機率少等一次決策（至少還等一次，不會在瞄準還沒收斂時就開火）
     this.preAim = 1 - P.preAimErr * attrs.awareness;
     this.awareness = attrs.awareness;
-    this.wait = this.reactExtra;
+    this.wait = Math.round(this.reactExtra);
     // 餘光察覺（2.1）：離準心 P.periphDeg 度以外出現的敵人，每次決策以這個機率注意到（警覺 0 → 100）；開火的敵人一定注意到
     this.notice = lerp(P.notice0, P.notice100, attrs.awareness);
     /** 已注意到的敵人 → 最後看到的 tick @type {Map<number, number>} */
@@ -242,7 +242,8 @@ export class Combat {
       this.seen = 0;
       const ahead = Math.abs(adiff(angleTo(me.x, me.y, e.x, e.y), me.facing)) <= P.preAimDeg;
       const cut = ahead && this.h.random() < this.awareness ? 1 : 0;
-      this.wait = Math.max(Math.min(1, this.reactExtra), this.reactExtra - cut);
+      const extra = Math.floor(this.reactExtra + this.h.random());
+      this.wait = Math.max(Math.min(1, extra), extra - cut);
       const a = Math.floor(this.h.random() * 360);
       const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random()) * (ahead ? this.preAim : 1);
       this.errX = cosd(a) * mag;
