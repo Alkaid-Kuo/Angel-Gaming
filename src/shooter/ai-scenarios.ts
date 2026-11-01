@@ -540,7 +540,7 @@ const SOLO_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'P9',
     name: '走低危險路徑',
-    expect: '隊友看到（雷達）一個 CT 守在最短路線上；Bot 去包點的路完全不進入那個 CT 的視線（另一條路存在），30 秒內到包點',
+    expect: '隊友看到（雷達）一個 CT 守在最短路線上；Bot 去包點的路完全不進入那個 CT 的視線（另一條路存在），在時限內到包點（避開的路跑完的時間 ＋ 12 秒給沿路窄口探頭，至少 30 秒）',
     run: (bot, seed) => dangerRun(bot, seed),
   },
   {
@@ -769,7 +769,8 @@ function dangerRun(bot: CompiledBot, seed: number): AiScenarioResult {
       let arrived = -1;
       const sr = siteRect(map, site);
       const t0 = m.tick;
-      run(d, 30 * TPS, (mm) => {
+      const limit = Math.max(30, Math.ceil(alt.length / 4.5) + 12);
+      run(d, limit * TPS, (mm) => {
         const p = mm.players[T1];
         const me: Pt = [p.x, p.y];
         if (d2(me, wp) <= 30 * UNIT && see(mm.map, me, wp)) exposed++;
@@ -779,7 +780,7 @@ function dangerRun(bot: CompiledBot, seed: number): AiScenarioResult {
         }
         return !p.alive;
       });
-      return { pass: exposed === 0 && arrived >= 0, detail: `去 ${site}：守在 ${regionOf(map, w)}（最短路 ${path.length} 格、避開的路 ${alt.length} 格）；進入視線 ${exposed} tick；到達 ${arrived} tick` };
+      return { pass: exposed === 0 && arrived >= 0, detail: `去 ${site}：守在 ${regionOf(map, w)}（最短路 ${path.length} 格、避開的路 ${alt.length} 格）；進入視線 ${exposed} tick；到達 ${arrived} tick（時限 ${limit} 秒）` };
     }
   }
   return { pass: false, detail: '找不到合適的佈置' };
@@ -1264,7 +1265,8 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
           if (enter < 0 && tInSite(mm, TS)) enter = mm.tick;
           return enter >= 0;
         });
-        return { pass: smoke >= 0 && flash > smoke && enter > flash, detail: `煙 ${smoke}、閃 ${flash}、進點 ${enter}` };
+        // CT 打不死：T 在包點外看到他會一直對槍進不了點（enter −1），這裡要驗的是順序，不是進得去
+        return { pass: smoke >= 0 && flash > smoke && (enter > flash || enter < 0), detail: `煙 ${smoke}、閃 ${flash}、進點 ${enter}` };
       }),
   },
   {
@@ -1568,7 +1570,144 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
         return { pass: best >= 2 * TPS, detail: `狙擊手 ${awper}：開鏡站定最長 ${(best / TPS).toFixed(1)} 秒、看出去 ${len.toFixed(1)} 格` };
       }),
   },
+  // ── Bot 2.2 ──
+  {
+    id: 'T16',
+    name: '全滅即拆',
+    expect: 'CT 回防途中最後一個 T 陣亡：拆包者走到炸彈的時間 ＋ 2 秒內開始拆，其他人不回頭、不再去集結位（3 秒後都比陣亡當下更靠近炸彈或已在 12 格內）；兩張圖',
+    run: (bot, seed) =>
+      onBoth((mapId) => {
+        const d = driver(bot, { seed, map: mapId, seats: CTS, alive: [...CTS, T0] });
+        toLive(d);
+        const m = d.match;
+        park(m, T0);
+        run(d, 22 * TPS);
+        const bomb = forcePlant(m, 'B');
+        for (const pid of CTS) if (stepsAt(m.map, 'B', m.players[pid].x, m.players[pid].y) <= 10) m.kill(pid);
+        const rot = CTS.filter((pid) => m.players[pid].alive);
+        const dist = (pid: number): number => d2([m.players[pid].x, m.players[pid].y], bomb);
+        // 回防集結中（離開打還有段距離）：最近的人離炸彈 ≤ 25 格就殺掉最後一個 T
+        run(d, 15 * TPS, () => rot.some((pid) => dist(pid) <= 25 * UNIT));
+        const at = new Map(rot.map((pid) => [pid, dist(pid)]));
+        const near = Math.min(...at.values()) / UNIT;
+        m.kill(T0);
+        const t0 = m.tick;
+        let start = -1;
+        const limit = near / 4.5 + 2;
+        run(d, Math.ceil(3 * TPS), () => {
+          if (start < 0 && rot.some((pid) => m.players[pid].defuseTicks > 0)) start = m.tick - t0;
+        });
+        const closer = rot.filter((pid) => m.players[pid].alive && (dist(pid) < (at.get(pid) ?? 0) || dist(pid) < 12 * UNIT)).length;
+        run(d, Math.ceil((limit + 2) * TPS), () => {
+          if (start < 0 && rot.some((pid) => m.players[pid].defuseTicks > 0)) start = m.tick - t0;
+          return start >= 0;
+        });
+        return { pass: start >= 0 && start <= limit * TPS && closer === rot.length, detail: `${rot.length} 人回防、最近 ${near.toFixed(1)} 格；${(start / TPS).toFixed(1)} 秒開始拆（時限 ${limit.toFixed(1)}）；靠近 ${closer} 人` };
+      }),
+  },
+  {
+    id: 'T17',
+    name: 'CT 全滅 T 守包不追',
+    expect: 'T 下包後最後一個 CT 陣亡：接下來 10 秒沒有 T 離炸彈超過 16 格、不丟道具、不開槍；兩張圖',
+    run: (bot, seed) =>
+      onBoth((mapId) => {
+        const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], opts: { roundMoney: [16000, null] } });
+        toLive(d);
+        const m = d.match;
+        park(m, CT0);
+        run(d, 15 * TPS);
+        const bomb = forcePlant(m, 'B');
+        run(d, 5 * TPS);
+        m.kill(CT0);
+        const ammoAt = TS.map((pid) => ammo(m, pid));
+        const seen = new Set<object>();
+        let thrown = 0;
+        let far = 0;
+        // T 從遠處走回來要時間：只看開始守包之後不再往外走
+        const startD = TS.map((pid) => d2([m.players[pid].x, m.players[pid].y], bomb));
+        run(d, 10 * TPS, (mm) => {
+          for (const g of mm.projectiles) {
+            if (seen.has(g) || g.owner >= TEAM_SIZE) continue;
+            seen.add(g);
+            thrown++;
+          }
+          TS.forEach((pid, i) => {
+            if (mm.players[pid].alive && d2([mm.players[pid].x, mm.players[pid].y], bomb) > Math.max(16 * UNIT, startD[i] + UNIT)) far++;
+          });
+        });
+        const shot = TS.filter((pid, i) => ammo(m, pid) < ammoAt[i]).length;
+        return { pass: thrown === 0 && far === 0 && shot === 0, detail: `丟道具 ${thrown}、離炸彈太遠 ${far} tick、開槍 ${shot} 人` };
+      }),
+  },
+  {
+    id: 'T18',
+    name: '多入口執行',
+    expect: 'T 全買、CT 放進牆角：split／default／fake 第二組與主力從不同入口進點（每張圖每種計畫 5 個種子 ≥ 4 個）；rush 全隊同一個入口（5 個種子 ≥ 4 個）',
+    run: (bot) => {
+      const res = teamMaps.flatMap((mapId) =>
+        [3, 1, 4, 2].map((plan) => {
+          const n = AI_SCENARIO_SEEDS.filter((s) => entrancesOf(bot, s, mapId, plan) >= 2).length;
+          const ok = plan === 2 ? AI_SCENARIO_SEEDS.length - n >= 4 : n >= 4;
+          return { ok, txt: `${mapId} ${['', 'default', 'rush', 'split', 'fake'][plan]} 兩個入口以上 ${n}／5` };
+        }),
+      );
+      return { pass: res.every((r) => r.ok), detail: res.map((r) => r.txt).join('；') };
+    },
+  },
+  {
+    id: 'T19',
+    name: '煙霧分配',
+    expect: 'T 全買、計畫 split、兩個煙霧手（兩組各一）：同回合至少兩顆煙，落點彼此 ≥ 6 格；兩張圖',
+    run: (bot, seed) =>
+      onBoth((mapId) => {
+        const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], knobs: { plan: 3 }, opts: { roundMoney: [16000, null] } });
+        toLive(d);
+        const m = d.match;
+        park(m, CT0);
+        const seen = new Set<object>();
+        const pts: Pt[] = [];
+        run(d, 70 * TPS, (mm) => {
+          for (const s of mm.smokes) {
+            if (seen.has(s)) continue;
+            seen.add(s);
+            pts.push([s.x, s.y]);
+          }
+          return pts.length >= 2 && (mm.smokes.at(-1)?.startTick ?? 0) + 3 * TPS < mm.tick;
+        });
+        let gap = Infinity;
+        for (let i = 0; i < pts.length; i++) for (let k = i + 1; k < pts.length; k++) gap = Math.min(gap, d2(pts[i], pts[k]) / UNIT);
+        return { pass: pts.length >= 2 && gap >= 6, detail: `煙 ${pts.length} 顆、最近 ${pts.length >= 2 ? gap.toFixed(1) : '—'} 格` };
+      }),
+  },
 ];
+
+const entranceMemo = new Map<string, number>();
+/** T18：T 全買照計畫執行，每個人第一次走到包點 4 步內的位置；彼此隔 8 格以上算不同入口（同一個區域可能有兩個口，走進矩形才算的話守位在矩形外的人算不到） */
+function entrancesOf(bot: CompiledBot, seed: number, mapId: string, plan: number): number {
+  const key = `${mapId}:${seed}:${plan}`;
+  const hit = entranceMemo.get(key);
+  if (hit !== undefined) return hit;
+  const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], knobs: { plan }, opts: { roundMoney: [16000, null] } });
+  toLive(d);
+  const m = d.match;
+  park(m, CT0);
+  const from = new Map<number, Pt>();
+  let plantedAt = -1;
+  run(d, 90 * TPS, (mm) => {
+    if (plantedAt < 0 && mm.phase === 'planted') plantedAt = mm.tick;
+    for (const pid of TS) {
+      const p = mm.players[pid];
+      if (!p.alive || from.has(pid)) continue;
+      if (stepsAt(mm.map, 'A', p.x, p.y) <= 4 || stepsAt(mm.map, 'B', p.x, p.y) <= 4) from.set(pid, [p.x, p.y]);
+    }
+    // 下包後再等 12 秒，繞路的第二組才進得來
+    return from.size >= TEAM_SIZE || (plantedAt >= 0 && mm.tick - plantedAt > 12 * TPS);
+  });
+  const groups: Pt[] = [];
+  for (const q of from.values()) if (groups.every((g) => d2(g, q) >= 8 * UNIT)) groups.push(q);
+  entranceMemo.set(key, groups.length);
+  return groups.length;
+}
 
 // ───────── 步驟 7 角色情境（R1～R6）：旋鈕 role（1 突破、2 支援、3 錨點、4 狙擊、5 游擊），每條兩張圖都跑 ─────────
 

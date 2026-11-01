@@ -1,7 +1,7 @@
 // CS 射擊觀戰問題量測（Bot 2.2）：A 對 B 雙邊對打，逐 tick 看引擎狀態（只給離線量測，Bot 看不到），算使用者觀戰指出的五個問題的數字。
 //   手槍局輸家：第二、三回合買了幾把主武器、回合勝率、整場勝率（A 當 T／當 CT 分開）
 //   全滅即拆：炸彈下了、T 全滅之後，CT 多久開始拆；有沒有炸掉
-//   同路：T 進點 ≥ 3 人的回合，全部從同一個區域進點的比例（rush 除外）；團滅：T 在下包前 8 秒內、14 格內死 4 人以上
+//   同路：T 進點 ≥ 3 人的回合，全部從同一個入口進點的比例（rush 除外）；團滅：T 在下包前 8 秒內死 4 人以上
 //   煙霧：同隊同回合兩顆煙落點 < 6 格的比例
 //   發呆：開打 10 秒、20 秒還在起點 5 格內的人
 // 用法：node scripts/shooter-behavior.ts [--a bots/shooter-baseline.js] [--b 同 a] [--lineup 3] [--maps redrock] [--seeds 100] [--from 1] [--jobs 10] [--format shooter-mr6] [--out out/behavior.json]
@@ -13,10 +13,12 @@ import { resolveKnobs } from '../src/sandbox/controller.ts';
 import type { ShooterCommand, ShooterObservation } from '../src/shooter/api.ts';
 import { TEAM_SIZE, UNIT } from '../src/shooter/config.ts';
 import { LEAGUE_FORMAT_ID, formatOptions } from '../src/shooter/gateway.ts';
-import { MAPS, regionsAt } from '../src/shooter/map.ts';
-import { balancedLineup, derivePlayer } from '../src/shooter/players.ts';
-import { ShooterBatchController, ShooterDriver } from '../src/shooter/runner.ts';
-import { PLAYER_COUNT } from '../src/shooter/sim.ts';
+import { MAPS } from '../src/shooter/map.ts';
+import { balancedLineup, derivePlayer, type ShooterPlayerSpec } from '../src/shooter/players.ts';
+import { ShooterBatchController, ShooterDriver, shooterHelpers } from '../src/shooter/runner.ts';
+import { PLAYER_COUNT, shooterInitData } from '../src/shooter/sim.ts';
+import { Grid, initTrig } from '../bots/shooter-src/base.js';
+import { MapIntel } from '../bots/shooter-src/analysis.js';
 import { arg } from './shooter-lab.ts';
 
 interface Job {
@@ -58,6 +60,8 @@ interface GameOut {
   /** 回合內兩顆煙都有的同隊配對：最近距離（格） */
   readonly smokePairs: number[];
   readonly idle: { t10: number; t20: number; ct10: number; ct20: number; n: number };
+  /** 開打 20 秒還在起點的人當時在做什麼（Bot 的 why） */
+  readonly idleWhy: string[];
   readonly plans: Record<string, [number, number]>;
 }
 
@@ -76,6 +80,20 @@ class Spy extends ShooterBatchController {
   }
 }
 
+/** 地圖分析（基準 Bot 同一份）：入口用它認 */
+const intels = new Map<string, MapIntel>();
+function intelOf(id: string): MapIntel {
+  let it = intels.get(id);
+  if (it === undefined) {
+    const map = MAPS[id]();
+    initTrig(shooterHelpers(map, 1, 0));
+    const data = shooterInitData(map, 0, {});
+    it = new MapIntel(data.map, new Grid(data.map));
+    intels.set(id, it);
+  }
+  return it;
+}
+
 const compiled = new Map<string, CompiledBot>();
 function load(path: string): CompiledBot {
   let c = compiled.get(path);
@@ -88,8 +106,9 @@ function load(path: string): CompiledBot {
 
 function play(j: Job): GameOut {
   const map = MAPS[j.map]();
+  const intel = intelOf(j.map);
   const isA = (pid: number): boolean => (pid < TEAM_SIZE) === j.aFirst;
-  const specs = (pid: number) => balancedLineup(isA(pid) ? j.lineupA : j.lineupB)[pid % TEAM_SIZE];
+  const specs = (pid: number): ShooterPlayerSpec => balancedLineup(isA(pid) ? j.lineupA : j.lineupB)[pid % TEAM_SIZE];
   const seats = Array.from({ length: PLAYER_COUNT }, (_, pid) => derivePlayer(specs(pid)));
   /** 回合 → T 指揮喊的計畫 */
   const planOf = new Map<number, string>();
@@ -107,6 +126,7 @@ function play(j: Job): GameOut {
   const entries: GameOut['entries'] = [];
   const smokePairs: number[] = [];
   const idle = { t10: 0, t20: 0, ct10: 0, ct20: 0, n: 0 };
+  const idleWhy: string[] = [];
   let wipes = 0;
   let tRounds = 0;
   let liveTick = -1;
@@ -116,22 +136,32 @@ function play(j: Job): GameOut {
   let plantedTick = -1;
   const seenSmoke = new Set<object>();
   let smokesNow: { team: number; x: number; y: number }[] = [];
-  const entered = new Map<number, { site: string; region: string }>();
-  const lastOut = new Map<number, string>();
-  const inSite = (x: number, y: number): string | null => {
-    const cx = Math.floor(x / UNIT);
-    const cy = Math.floor(y / UNIT);
-    for (const s of m.map.sites) if (cx >= s.x0 && cx < s.x1 && cy >= s.y0 && cy < s.y1) return s.id;
-    return null;
+  const entered = new Map<number, { site: string; entrance: number }>();
+  /** 走進包點區域的那一刻離哪個入口最近 */
+  const entranceAt = (site: 'A' | 'B', x: number, y: number): number => {
+    let best = -1;
+    let bestD = Infinity;
+    for (const e of intel.sites[site].entrances) {
+      const dd = Math.hypot(e.x - x, e.y - y);
+      if (dd < bestD) {
+        bestD = dd;
+        best = e.portal;
+      }
+    }
+    return best;
+  };
+  const inSite = (x: number, y: number): 'A' | 'B' | null => {
+    const r = intel.region[Math.floor(y / UNIT) * m.map.width + Math.floor(x / UNIT)];
+    return intel.sites.A.regions.has(r) ? 'A' : intel.sites.B.regions.has(r) ? 'B' : null;
   };
   const flushRound = (round: number): void => {
     if (round <= 0) return;
     const kind = planOf.get(round) ?? '?';
-    const bySite = new Map<string, Set<string>>();
+    const bySite = new Map<string, Set<number>>();
     const count = new Map<string, number>();
     for (const e of entered.values()) {
       if (!bySite.has(e.site)) bySite.set(e.site, new Set());
-      bySite.get(e.site)!.add(e.region);
+      bySite.get(e.site)!.add(e.entrance);
       count.set(e.site, (count.get(e.site) ?? 0) + 1);
     }
     for (const [s, n] of count) if (n >= 3) entries.push({ kind, n, regions: bySite.get(s)!.size });
@@ -151,7 +181,6 @@ function play(j: Job): GameOut {
       }
     }
     entered.clear();
-    lastOut.clear();
     smokesNow = [];
   };
   while (!m.over) {
@@ -184,6 +213,7 @@ function play(j: Job): GameOut {
         if (moved < 5) {
           const k = (p.team === 'T' ? 't' : 'ct') + (el === 300 ? '10' : '20');
           idle[k as 't10']++;
+          if (el === 600) idleWhy.push(`[${j.seed}:${curRound}:p${p.id}] ${p.team} ${planOf.get(curRound) ?? '?'} ${String((controllers[p.id] as unknown as { bot: { why: string } }).bot.why)}`);
         }
       }
     }
@@ -203,8 +233,7 @@ function play(j: Job): GameOut {
     for (const p of m.players) {
       if (p.team !== 'T' || !p.alive || entered.has(p.id)) continue;
       const s = inSite(p.x, p.y);
-      if (s === null) lastOut.set(p.id, regionsAt(m.map, p.x, p.y)[0] ?? '');
-      else entered.set(p.id, { site: s, region: lastOut.get(p.id) ?? '' });
+      if (s !== null) entered.set(p.id, { site: s, entrance: entranceAt(s, p.x, p.y) });
     }
   }
   flushRound(curRound);
@@ -247,6 +276,7 @@ function play(j: Job): GameOut {
     tRounds,
     smokePairs,
     idle,
+    idleWhy,
     plans,
   };
 }
@@ -294,11 +324,14 @@ if (!isMainThread && (workerData as { behavior?: boolean } | null)?.behavior ===
   console.log(`全滅即拆：${dd.length} 次；開始拆平均 ${(ok.reduce((s, x) => s + x, 0) / Math.max(1, ok.length)).toFixed(2)} 秒、中位 ${(ok[Math.floor(ok.length / 2)] ?? 0).toFixed(2)}、P90 ${(ok[Math.floor(ok.length * 0.9)] ?? 0).toFixed(2)}；來不及炸掉 ${dd.filter((x) => x.exploded).length}`);
   const es = games.flatMap((g) => g.entries);
   const non = es.filter((e) => e.kind !== 'rush');
-  console.log(`同路：非 rush、≥ 3 人進點的回合 ${non.length}，全從同區域進 ${pct(non.filter((e) => e.regions === 1).length, non.length)}；rush ${es.length - non.length}；團滅（T 下包前 8 秒死 4 人）${pct(sum((g) => g.wipes), sum((g) => g.tRounds))}`);
+  console.log(`同路：非 rush、≥ 3 人進點的回合 ${non.length}，全從同入口進 ${pct(non.filter((e) => e.regions === 1).length, non.length)}；rush ${es.length - non.length}；團滅（T 下包前 8 秒死 4 人）${pct(sum((g) => g.wipes), sum((g) => g.tRounds))}`);
   const sp = games.flatMap((g) => g.smokePairs);
   console.log(`煙霧：同隊同回合兩顆煙 ${sp.length} 對，< 6 格 ${pct(sp.filter((x) => x < 6).length, sp.length)}、< 3 格 ${pct(sp.filter((x) => x < 3).length, sp.length)}`);
   const n10 = sum((g) => g.idle.n);
   console.log(`發呆：開打 10 秒還在起點 5 格內 T ${pct(sum((g) => g.idle.t10), n10 / 2)}、CT ${pct(sum((g) => g.idle.ct10), n10 / 2)}；20 秒 T ${sum((g) => g.idle.t20)}、CT ${sum((g) => g.idle.ct20)}`);
+  const whyCount = new Map<string, number>();
+  for (const w of games.flatMap((g) => g.idleWhy)) whyCount.set(w, (whyCount.get(w) ?? 0) + 1);
+  if (whyCount.size > 0) console.log(`發呆原因：${[...whyCount].sort((p, q) => q[1] - p[1]).slice(0, 8).map(([w, n]) => `${w} ×${n}`).join('；')}`);
   const plans: Record<string, [number, number]> = {};
   for (const g of games) for (const [k, [n, w]] of Object.entries(g.plans)) {
     const st = (plans[k] ??= [0, 0]);
