@@ -1,17 +1,20 @@
 // CS 射擊可玩版（步驟 4）：開局畫面 → Worker 跑比賽（30 TPS）→ 主執行緒每個 rAF 畫最新的觀察資料（前後 tick 插值）。
 // 主執行緒不持有引擎；玩家模式的畫面只來自觀察資料，觀戰模式才有全狀態。
 // 經營層觀戰（web/shooter.html#watch）：讀正式版寫的觀戰票（watch.ts），請 Worker 用請求單重跑那一場；外框換天使金、結束時對照存檔成績單、可回經營。
+// 觀戰的鏡頭、滑鼠、選手列表、回合時間軸在 spectate.ts；跳回合由 Worker 重跑（seek.ts）。
 // 回放下載：比賽結束後向 Worker 要回放（ShooterReplay JSON），可用 npx tsx src/cli/main.ts shooter replay 檔名 核對雜湊。
 // 兩隊等級：設定卡的兩個下拉 → setup.lineup；基準 Bot 第一次用到時在 Worker 裡編譯，等 meta 回來前顯示「載入基準 Bot…」。
 import type { BuyItem, ShooterCommand } from '../../shooter/api.ts';
 import { DEFAULT_MAP_ID, MAPS } from '../../shooter/map.ts';
 import { BAKE_PX, bakeMap } from './bake.ts';
+import type { CamMode, CamView } from './camera.ts';
 import { hidesCursor } from './cursor.ts';
 import { BuyMenu } from './buy.ts';
 import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { BotLevel, FromShooterWorker, Lineup, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
+import { SpectateUi } from './spectate.ts';
 import { WATCH_HASH, readTicket, ticketVersionError, type WatchTicket } from './watch.ts';
 import { DAMAGE_MS, HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type Corpse, type DamagePop, type DrawInput, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
 
@@ -19,7 +22,6 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 /** 縮放倍率：短邊的一半是 24 格 ÷ 倍率；預設 1.2（1080p 時 27 px／格），滑鼠推到畫面邊緣剛好看到 30 格視野 */
 const ZOOMS = [0.55, 0.7, 0.85, 1, 1.2, 1.45];
 const ZOOM_PLAY = 4;
-const ZOOM_SPECTATE = 3;
 const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 let worker: Worker | null = null;
@@ -75,6 +77,8 @@ class Game {
   private readonly hud: ShooterHud;
   private readonly buy: BuyMenu;
   private readonly input: ShooterInput;
+  /** 觀戰介面（鏡頭、面板、滑鼠）；玩家模式沒有 */
+  private readonly spec: SpectateUi | null;
   private readonly post: (m: ToShooterWorker) => void;
   private cur: ShooterFrame | null = null;
   private prev: ShooterFrame | null = null;
@@ -90,14 +94,14 @@ class Game {
   private lastHurtTick = -1;
   private zoomIdx: number = ZOOM_PLAY;
   private speedIdx = 1;
+  /** 觀戰：使用者開的透視（全圖與自由鏡頭一律看全狀態，見 seeAll）、戰術疊層 */
   private xray = false;
-  /** 觀戰：全圖鏡頭、戰術疊層 */
-  private overview = false;
   private tactical = false;
   /** 這回合看著倒下的敵人 */
   private corpses: Corpse[] = [];
-  /** 每幀畫面毫秒（最近 60 幀平均，除錯掛勾讀） */
+  /** 每幀畫面毫秒（最近 60 幀平均，除錯掛勾讀）；frameMs 含面板更新 */
   private drawMs = 0;
+  private frameMs = 0;
   private paused = false;
   private over: ShooterSummary | null = null;
   /** 本機投擲冷卻：從自己的道具數減少的那個 tick 起算（觀察資料推得出來，不讀引擎） */
@@ -125,7 +129,7 @@ class Game {
     this.root.classList.toggle('spectate', meta.spectate);
     this.hud = new ShooterHud(this.root, meta, ticket);
     this.buy = new BuyMenu(this.root.querySelector('.sg-buy')!, meta, (items: BuyItem[]) => this.send([{ type: 'buy', items }]));
-    this.zoomIdx = meta.spectate ? ZOOM_SPECTATE : ZOOM_PLAY;
+    this.spec = meta.spectate ? new SpectateUi(this.root, this.canvas, this.mini, meta, this.hud, { view: (id) => this.post({ type: 'view', id }), seek: (round) => this.seek(round), frame: () => this.cur }) : null;
     this.input = new ShooterInput(this.canvas, {
       meta,
       self: () => this.cur?.self ?? null,
@@ -138,21 +142,31 @@ class Game {
         if (!meta.spectate) this.buy.setOpen(!this.buy.isOpen());
       },
       closeBuy: () => {
+        if (this.spec?.helpOpen() === true) {
+          this.spec.setHelp(false);
+          return true;
+        }
         if (!this.buy.isOpen()) return false;
         this.buy.setOpen(false);
         return true;
       },
       setBoard: (show) => this.hud.setBoard(show),
       togglePause: () => this.togglePause(),
-      cycleView: (step) => this.post({ type: 'view', step }),
+      cycleView: (step) => {
+        this.spec?.cam.follow();
+        this.post({ type: 'view', step });
+      },
       zoom: (step) => {
-        this.zoomIdx = Math.max(0, Math.min(ZOOMS.length - 1, this.zoomIdx + step));
+        if (this.spec !== null) this.spec.zoomStep(step);
+        else this.zoomIdx = Math.max(0, Math.min(ZOOMS.length - 1, this.zoomIdx + step));
       },
       toggleXray: () => this.toggleMap('xray'),
       toggleOverview: () => this.toggleMap('overview'),
       toggleTactical: () => this.toggleMap('tactical'),
       speed: (step) => this.setSpeed(this.speedIdx + step),
       skipRound: () => this.skipRound(),
+      prevRound: () => this.prevRound(),
+      toggleHelp: () => this.spec?.setHelp(!this.spec.helpOpen()),
       toggleFullscreen,
     });
     this.hud.ctl?.addEventListener('click', (e) => {
@@ -161,6 +175,12 @@ class Game {
       if (b.dataset.act === 'pause') this.togglePause();
       else if (b.dataset.act === 'speed') this.setSpeed(Number(b.dataset.i));
       else if (b.dataset.act === 'skip') this.skipRound();
+      else if (b.dataset.act === 'prev') this.prevRound();
+      else if (b.dataset.act === 'cam-follow') this.spec?.cam.follow();
+      else if (b.dataset.act === 'cam-free') this.spec?.cam.free();
+      else if (b.dataset.act === 'zoom-in') this.spec?.zoomStep(1);
+      else if (b.dataset.act === 'zoom-out') this.spec?.zoomStep(-1);
+      else if (b.dataset.act === 'help') this.spec?.setHelp(!this.spec.helpOpen());
       else if (b.dataset.act === 'xray' || b.dataset.act === 'overview' || b.dataset.act === 'tactical') this.toggleMap(b.dataset.act);
       else if (b.dataset.act === 'quit') home();
       // 按鈕不留焦點：空白鍵是暫停，不要再觸發一次按鈕
@@ -178,6 +198,7 @@ class Game {
         if (ticket !== null) startWatch(ticket);
         else start({ team: meta.spectate ? 'T' : meta.playerId < 5 ? 'T' : 'CT', seed: randomSeed(), spectate: meta.spectate, lineup: meta.lineup, mapId: meta.map.id });
       } else if (act === 'home') home();
+      else if (act === 'review') this.hud.hideEnd();
       else if (act === 'replay') this.post({ type: 'getReplay' });
     });
     this.raf = requestAnimationFrame((t) => this.frame(t));
@@ -188,7 +209,7 @@ class Game {
     // 比賽中關分頁、重新整理、上一頁：瀏覽器先問一次
     window.addEventListener('beforeunload', this.onUnload);
     // 除錯掛勾（瀏覽器驗收用，開發模式或網址帶 ?debug）：只有主執行緒本來就有的畫面資料，沒有引擎
-    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length }), perf: () => ({ drawMs: this.drawMs, bakeMs: this.renderer.baked.ms, bakePx: BAKE_PX }), baked: () => this.renderer.baked, patch: (fn: ((f: ShooterFrame) => ShooterFrame) | null) => (this.patch = fn), bench: (n: number) => this.bench(n), stage: (v: Partial<DrawInput> | null) => (this.staged = v), hud: this.hud };
+    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length }), perf: () => ({ drawMs: this.drawMs, frameMs: this.frameMs, bakeMs: this.renderer.baked.ms, bakePx: BAKE_PX }), baked: () => this.renderer.baked, patch: (fn: ((f: ShooterFrame) => ShooterFrame) | null) => (this.patch = fn), bench: (n: number) => this.bench(n), stage: (v: Partial<DrawInput> | null) => (this.staged = v), hud: this.hud, spec: this.spec, buy: this.buy };
   }
 
   /** 除錯：同步連畫 n 幀量每幀毫秒（最後讀一個像素，逼畫布把指令畫完）；分頁在背景時 rAF 不跑也量得到 */
@@ -202,14 +223,25 @@ class Game {
     return { frameMs: (performance.now() - t0) / n, n };
   }
 
-  /** 觀戰的全圖開關：全圖鏡頭與戰術疊層都是看全狀態，開了就帶上透視 */
+  /** 觀戰的全圖開關：全圖與自由鏡頭不是誰的視角，一律看全狀態；關透視就回跟隨 */
   private toggleMap(which: 'xray' | 'overview' | 'tactical'): void {
-    if (!this.meta.spectate) return;
-    this[which] = !this[which];
-    if (which === 'xray' && !this.xray) {
-      this.overview = false;
+    const cam = this.spec?.cam;
+    if (cam === undefined) return;
+    if (which === 'overview') {
+      if (cam.mode === 'overview') cam.follow();
+      else cam.overview();
+    } else if (which === 'tactical') {
+      this.tactical = !this.tactical;
+      if (this.tactical) this.xray = true;
+    } else if (this.seeAll()) {
+      this.xray = false;
       this.tactical = false;
-    } else if (which !== 'xray' && this[which]) this.xray = true;
+      cam.follow();
+    } else this.xray = true;
+  }
+
+  private seeAll(): boolean {
+    return this.xray || (this.spec !== null && this.spec.mode !== 'follow');
   }
 
   private togglePause(): void {
@@ -234,11 +266,47 @@ class Game {
     this.post({ type: 'skipRound' });
   }
 
+  /** 觀戰：回到第 round 回合開始（Worker 重跑，等它回 frame） */
+  private seek(round: number): void {
+    const spec = this.spec;
+    if (spec === null || spec.busy || this.cur === null) return;
+    spec.seeking(this.cur.view.round.number, round);
+    this.post({ type: 'seek', round });
+  }
+
+  private prevRound(): void {
+    if (this.cur !== null) this.seek(Math.max(1, this.cur.view.round.number - 1));
+  }
+
+  onSeeking(at: number, target: number): void {
+    this.spec?.seeking(at, target);
+  }
+
+  /** 跳回合後第一個 frame 之前：tick 可能倒退，逐幀累積的都清掉 */
+  private rewind(): void {
+    this.cur = null;
+    this.prev = null;
+    this.corpses = [];
+    this.sounds = [];
+    this.tracers = [];
+    this.hurts = [];
+    this.others = [];
+    this.pops = [];
+    this.lastOtherTick = -1;
+    this.lastShotTick = -1;
+    this.lastHurtTick = -1;
+    this.over = null;
+    this.hud.reset();
+    this.renderer.resetRound();
+    this.spec?.seekDone();
+  }
+
   private send(cmds: ShooterCommand[]): void {
     if (cmds.length > 0 && !this.meta.spectate && this.over === null && !this.paused) this.post({ type: 'cmd', cmds });
   }
 
   onFrame(f: ShooterFrame): void {
+    if (f.rewound === true) this.rewind();
     const now = performance.now();
     const old = this.cur;
     // 敵人倒下的位置：擊殺訊息公開，只有前一刻看得見的人才留屍體（看不見的人還是看不見）
@@ -324,7 +392,7 @@ class Game {
   }
 
   private lastInput(f: ShooterFrame): DrawInput {
-    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.xray, tactical: this.tactical, overview: this.overview, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, pops: this.pops, corpses: this.corpses };
+    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.seeAll(), tactical: this.tactical, camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', rings: this.spec?.rings() ?? null, hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, pops: this.pops, corpses: this.corpses };
   }
 
   private updateCursor(f: ShooterFrame): void {
@@ -337,18 +405,22 @@ class Game {
     const f = this.patch !== null && this.cur !== null ? this.patch(this.cur) : this.cur;
     if (f === null) return;
     this.updateCursor(f);
+    const start = performance.now();
     const tickMs = 1000 / this.meta.rules.ticksPerSecond / (this.meta.spectate ? SPEEDS[this.speedIdx] : 1);
     const alpha = this.paused ? 1 : Math.min(1, (t - this.recvAt) / tickMs);
+    const camera: CamView | null = this.spec?.update(f, this.prev, alpha, t, SPEEDS[this.speedIdx]) ?? null;
     this.input.update(t);
     const cdTicks = this.meta.rules.grenadeRules.throwCooldownTicks;
     const throwCd = f.tick < this.throwCdUntil ? (this.throwCdUntil - f.tick) / cdTicks : 0;
-    const input = { ...this.lastInput(f), alpha, charge: this.input.charge(t), now: t, throwCd, ...this.staged };
+    const input = { ...this.lastInput(f), alpha, camera, charge: this.input.charge(t), now: t, throwCd, ...this.staged };
     const t0 = performance.now();
     this.renderer.draw(input);
     this.drawMs += (performance.now() - t0 - this.drawMs) / 60;
     this.renderer.drawMinimap(this.mini, input);
-    this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.xray });
-    this.hud.updateCtl(SPEEDS[this.speedIdx], this.paused, this.over !== null, { xray: this.xray, overview: this.overview, tactical: this.tactical });
+    const cam: CamMode = this.spec?.mode ?? 'follow';
+    this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.seeAll(), cam });
+    this.hud.updateCtl(SPEEDS[this.speedIdx], this.paused, this.over !== null, { xray: this.seeAll(), tactical: this.tactical, cam });
+    this.frameMs += (performance.now() - start - this.frameMs) / 60;
   }
 
   /** Worker 送來的回放 → 下載 JSON */
@@ -436,6 +508,9 @@ function ensureWorker(): Worker {
         break;
       case 'replay':
         game?.saveReplay(msg.replay);
+        break;
+      case 'seeking':
+        game?.onSeeking(msg.at, msg.target);
         break;
       case 'error':
         setLoading(false);

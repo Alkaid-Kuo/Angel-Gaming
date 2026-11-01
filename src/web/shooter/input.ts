@@ -34,8 +34,11 @@ export interface InputHost {
   toggleOverview(): void;
   toggleTactical(): void;
   speed(step: number): void;
-  /** 觀戰模式：跳到下一回合 */
+  /** 觀戰模式：跳到下一回合、上一回合 */
   skipRound(): void;
+  prevRound(): void;
+  /** 觀戰模式：按鍵表 */
+  toggleHelp(): void;
   toggleFullscreen(): void;
 }
 
@@ -218,6 +221,13 @@ export class ShooterInput {
         return;
       case 'KeyN':
         if (this.host.meta.spectate) this.host.skipRound();
+        return;
+      case 'KeyP':
+        if (this.host.meta.spectate) this.host.prevRound();
+        return;
+      case 'KeyH':
+      case 'Slash':
+        if (this.host.meta.spectate) this.host.toggleHelp();
         return;
       case 'KeyF':
         this.host.toggleFullscreen();
