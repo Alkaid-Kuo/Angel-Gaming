@@ -4,16 +4,18 @@
 // 經營層觀戰（watch）：請求單 → gatewayDriverOptions（與經營層閘道同一條路）→ ShooterDriver，以觀戰模式播放；結束時附上閘道換算的成績單。
 // 試玩的兩隊等級：setup.lineup → lineup.ts 的 trialRunOptions（基準 Bot 座位與閘道共用座位函式）。
 // 回放：每場都錄（record: true），比賽結束後主執行緒要才送（getReplay）。
+// 跳回合（seek）：觀戰模式記住建驅動的方式，往前跳就同設定同種子重跑（seek.ts）。
 import baselineSource from '../../../bots/shooter-baseline.js?raw';
 import practiceSource from '../../../bots/shooter-practice.js?raw';
 import type { ShooterObservation, SoundEvent, Team } from '../../shooter/api.ts';
-import { GRENADES, TPS } from '../../shooter/config.ts';
+import { GRENADES, TPS, WEAPONS, WEAPON_IDS, type WeaponId } from '../../shooter/config.ts';
 import { ShooterHumanController } from '../../shooter/human.ts';
 import { ShooterDriver } from '../../shooter/runner.ts';
 import { activeWeaponId, shooterInitData, smokeRadius, type ShooterMatch } from '../../shooter/sim.ts';
 import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
 import { gatewayDriverOptions, outcomeOf } from '../../shooter/gateway.ts';
 import { humanSeat, seatLabels, seatNames, trialRunOptions } from './lineup.ts';
+import { seekDriver } from './seek.ts';
 import type { BoardRow, FromShooterWorker, FullState, KillFeedItem, ShooterFrame, ShooterSetup, ToShooterWorker, WatchInfo, WatchSetup } from './protocol.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -43,17 +45,25 @@ let overSent = false;
 let watching: WatchInfo | null = null;
 /** 跳回合略過的回合結果，下一個 frame 帶出去 */
 let skipped: NonNullable<ShooterFrame['skipped']>[number][] = [];
+/** 跳回合剛完成，下一個 frame 要帶 rewound */
+let rewound = false;
+/** 重建同一場比賽（觀戰才有；玩家模式有人類操作，不能重跑） */
+let rebuild: (() => ShooterDriver) | null = null;
 
 function begin(s: ShooterSetup): void {
   human = s.spectate ? null : new ShooterHumanController();
-  launch(s, new ShooterDriver(trialRunOptions(s, { practice, baseline: baselineBot }, human)), humanSeat(s) ?? 0, seatNames(s), null);
+  const build = (): ShooterDriver => new ShooterDriver(trialRunOptions(s, { practice, baseline: baselineBot }, human));
+  rebuild = s.spectate ? build : null;
+  launch(s, build(), humanSeat(s) ?? 0, seatNames(s), null);
 }
 
 /** 經營層觀戰：與閘道同一條建驅動的路徑，所以播出來的就是存檔裡那一場 */
 function beginWatch(w: WatchSetup): void {
   human = null;
   const info: WatchInfo = { teams: w.teams, tags: w.tags, mine: w.mine };
-  launch({ team: 'T', seed: w.request.seed, spectate: true }, new ShooterDriver(gatewayDriverOptions(w.request, baselineBot(), { record: true })), 0, [...w.names], info);
+  const build = (): ShooterDriver => new ShooterDriver(gatewayDriverOptions(w.request, baselineBot(), { record: true }));
+  rebuild = build;
+  launch({ team: 'T', seed: w.request.seed, spectate: true }, build(), 0, [...w.names], info);
 }
 
 function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string[], info: WatchInfo | null): void {
@@ -69,6 +79,7 @@ function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string
   feedIdx = 0;
   pendingSounds = [];
   skipped = [];
+  rewound = false;
   overSent = false;
   const m = d.match;
   // 規則照這場的賽制（短賽制的半場長度、加時與否）
@@ -85,6 +96,7 @@ function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string
       map: init.map,
       weapons: init.weapons,
       grenades: init.grenades,
+      scopedSpeeds: Object.fromEntries(WEAPON_IDS.flatMap((id): [WeaponId, number][] => { const v = WEAPONS[id].scopedSpeed; return v !== null ? [[id, v]] : []; })),
       ...(info !== null ? { watch: info } : {}),
       ...(s.lineup !== undefined ? { lineup: s.lineup } : {}),
     },
@@ -103,6 +115,24 @@ function skipRound(): void {
   skipped.push(...m.rounds.slice(before).map((r) => ({ number: r.number, winner: r.winner, winnerGroup: r.winnerGroup, reason: r.reason })));
   feedIdx = m.kills.length;
   pendingSounds = [];
+  acc = 0;
+  last = performance.now();
+  sendFrame();
+  if (m.over) sendOver();
+}
+
+/** 跳回合：重跑（或往前推）到第 round 回合的凍結開始；暫停、速度、跟隨對象都維持 */
+function seek(round: number): void {
+  const d = driver;
+  if (d === null || rebuild === null || !setup?.spectate || !Number.isInteger(round) || round < 1) return;
+  const next = seekDriver(d, rebuild, round, (at) => post({ type: 'seeking', at, target: round }));
+  driver = next;
+  const m = next.match;
+  skipped = m.rounds.map((r) => ({ number: r.number, winner: r.winner, winnerGroup: r.winnerGroup, reason: r.reason }));
+  rewound = true;
+  feedIdx = m.kills.length;
+  pendingSounds = [];
+  overSent = false;
   acc = 0;
   last = performance.now();
   sendFrame();
@@ -136,12 +166,15 @@ function cycleView(step: number): void {
 
 function fullState(m: ShooterMatch): FullState {
   return {
-    players: m.players.map((p) => ({ id: p.id, team: p.team, alive: p.alive, x: p.x, y: p.y, facing: Math.round(p.facing / 100) % 360, hp: p.hp, weapon: activeWeaponId(p), hasBomb: p.hasBomb, blind: p.blindTicks > 0, scoped: p.scoped, firing: m.tick - p.lastShotTick <= 3, crouching: p.crouching, working: p.plantTicks > 0 || p.defuseTicks > 0 })),
+    players: m.players.map((p) => {
+      const held = p.active === 'primary' ? p.primary : p.active === 'secondary' ? p.secondary : null;
+      return { id: p.id, team: p.team, alive: p.alive, x: p.x, y: p.y, facing: Math.round(p.facing / 100) % 360, hp: p.hp, weapon: activeWeaponId(p), hasBomb: p.hasBomb, blind: p.blindTicks > 0, scoped: p.scoped, firing: m.tick - p.lastShotTick <= 3, crouching: p.crouching, working: p.plantTicks > 0 || p.defuseTicks > 0, armor: p.armor, kit: p.kit, money: p.money, primary: p.primary?.id ?? null, secondary: p.secondary?.id ?? null, grenades: p.grenades.slice(), ammoMag: held?.mag ?? 0, ammoReserve: held?.reserve ?? 0, reloading: p.reloadLeft > 0, plantTicks: p.plantTicks, defuseTicks: p.defuseTicks };
+    }),
     smokes: m.smokes.filter((s) => m.tick < s.endTick).map((s) => ({ x: s.x, y: s.y, radius: smokeRadius(s, m.tick) })),
     fires: m.fires.map((f) => ({ x: f.x, y: f.y, radius: GRENADES[f.kind].radius, cells: f.cells })),
     projectiles: m.projectiles.map((g) => ({ kind: g.kind, x: g.x, y: g.y })),
     items: m.items.map((it) => ({ kind: it.kind, weapon: it.weapon?.id ?? null, x: it.x, y: it.y })),
-    bomb: { state: m.bomb.state, x: m.bomb.state === 'carried' && m.bomb.carrier >= 0 ? m.players[m.bomb.carrier].x : m.bomb.x, y: m.bomb.state === 'carried' && m.bomb.carrier >= 0 ? m.players[m.bomb.carrier].y : m.bomb.y, ticksLeft: m.bomb.state === 'planted' ? Math.max(0, m.bomb.explodeTick - m.tick) : null },
+    bomb: { state: m.bomb.state, x: m.bomb.state === 'carried' && m.bomb.carrier >= 0 ? m.players[m.bomb.carrier].x : m.bomb.x, y: m.bomb.state === 'carried' && m.bomb.carrier >= 0 ? m.players[m.bomb.carrier].y : m.bomb.y, ticksLeft: m.bomb.state === 'planted' ? Math.max(0, m.bomb.explodeTick - m.tick) : null, site: m.bomb.site, carrier: m.bomb.state === 'carried' ? m.bomb.carrier : -1 },
   };
 }
 
@@ -156,9 +189,10 @@ function sendFrame(viewObs?: ShooterObservation): void {
   const board: BoardRow[] = m.players.map((p) => ({ id: p.id, team: p.team, alive: p.alive, kills: p.kills, deaths: p.deaths, money: setup?.spectate || p.team === myTeam ? p.money : null }));
   const feed: KillFeedItem[] = m.kills.slice(feedIdx).map((k) => ({ tick: k.tick, killer: k.killer, victim: k.victim, weapon: k.weapon }));
   feedIdx = m.kills.length;
-  post({ type: 'frame', frame: { tick: m.tick, viewId, view, self, sounds: pendingSounds, board, feed, full: setup.spectate ? fullState(m) : null, paused, ...(skipped.length > 0 ? { skipped } : {}) } });
+  post({ type: 'frame', frame: { tick: m.tick, viewId, view, self, sounds: pendingSounds, board, feed, full: setup.spectate ? fullState(m) : null, paused, ...(skipped.length > 0 ? { skipped } : {}), ...(rewound ? { rewound } : {}) } });
   pendingSounds = [];
   skipped = [];
+  rewound = false;
 }
 
 function sendOver(): void {
@@ -223,6 +257,9 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
       case 'skipRound':
         skipRound();
         break;
+      case 'seek':
+        seek(msg.round);
+        break;
       case 'getReplay':
         if (driver?.replay && driver.match.over) post({ type: 'replay', replay: setup !== null && watching === null ? { ...driver.replay, ...seatLabels(setup) } : driver.replay });
         break;
@@ -249,6 +286,7 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
         human = null;
         setup = null;
         watching = null;
+        rebuild = null;
         break;
     }
   } catch (e) {
