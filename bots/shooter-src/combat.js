@@ -76,9 +76,12 @@ export class Combat {
     this.trailTick = -1000000;
     /** 被閃時要退回的點 @type {import('./base.js').Pt | null} */
     this.blindBack = null;
+    /** 看過的火：位置 → 燒的格與燒完的 tick @type {Map<string, { cells: readonly number[], until: number }>} */
+    this.fires = new Map();
   }
 
   reset() {
+    this.fires = new Map();
     this.noticed = new Map();
     this.targetId = -1;
     this.seen = 0;
@@ -142,10 +145,14 @@ export class Combat {
   evade(obs) {
     const me = obs.me;
     const g = this.g;
-    // 站在火上：走到最近不著火的格
+    // 站在火上：走到最近不著火的格。看過的火記到燒完（轉身看不到了也不走回去）
+    for (const e of obs.effects) if (e.kind === 'fire' && e.cells !== undefined) this.fires.set(`${e.x},${e.y}`, { cells: e.cells, until: obs.tick + e.ticksLeft });
     /** @type {Set<number>} */
     const fire = new Set();
-    for (const e of obs.effects) if (e.kind === 'fire' && e.cells !== undefined) for (const c of e.cells) fire.add(c);
+    for (const [key, f] of this.fires) {
+      if (obs.tick >= f.until) this.fires.delete(key);
+      else for (const c of f.cells) fire.add(c);
+    }
     this.nav.hazard = fire;
     const mine = g.cellOf(me.x, me.y);
     if (fire.has(mine)) {
@@ -399,7 +406,7 @@ export class Combat {
     }
     // ── 停步：射程內停下來開火（走位差的偶爾晚一步停）──
     const lowWall = this.lowCoverNear(me.x, me.y, e.x, e.y);
-    if (this.engagedDecisions <= 1 && this.h.random() < this.sloppy) out.move = null;
+    if (this.engagedDecisions <= 1 && me.weapon !== 'awp' && this.h.random() < this.sloppy) out.move = null;
     else out.move = 'stop';
     // ── 蹲：矮牆後沒在開火就蹲下躲；遠距離開火蹲著開 ──
     if (lowWall) out.crouch = !firing;
@@ -446,7 +453,8 @@ export class Combat {
     if (this.lostPos !== null && t - this.lostTick < this.holdAngle && !ctx.objective) {
       out.aim = this.lostPos;
       out.crouch = false;
-      out.holdNav = ctx.holding || this.attrs.aggression < 0.5;
+      // 狙擊槍邊走邊打不到：目標一閃而過就站住等他再出現
+      out.holdNav = ctx.holding || this.attrs.aggression < 0.5 || me.weapon === 'awp';
       out.why = '架槍（目標剛消失）';
       if (this.retreat !== null && t < this.retreatUntil && dist(me.x, me.y, this.retreat.x, this.retreat.y) > 400) {
         out.move = this.retreat;

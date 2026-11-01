@@ -1242,7 +1242,7 @@ class Perception {
     return t === undefined ? null : { ...t, dir: angleTo(x, y, t.x, t.y) };
   }
 }
-/** @typedef {{ portal: number, hold: Pt, far: Pt, cross: Pt, phase: 'approach' | 'hold' | 'shoulder' | 'back', left: number, since: number }} Peek */
+/** @typedef {{ portal: number, hold: Pt, far: Pt, cross: Pt, phase: 'approach' | 'hold' | 'shoulder' | 'back', left: number, since: number, reach: number }} Peek */
 /** @typedef {{ cmds: Command[], look: Pt | null, moving: boolean, peeking: boolean, arrived: boolean, walk: boolean }} NavOut */
 class Navigator {
   /**
@@ -1298,6 +1298,10 @@ class Navigator {
     /** @type {Map<number, number>} */
     this.peeked = new Map();
     this.replans = 0;
+    this.detour = false;
+    this.jammed = 0;
+    /** 上一次探頭停的位置 @type {{ x: number, y: number, t: number } | null} */
+    this.lastPeek = null;
   }
   reset() {
     /** @type {Pt | null} */
@@ -1324,6 +1328,10 @@ class Navigator {
     /** @type {Map<number, number>} */
     this.peeked = new Map();
     this.replans = 0;
+    this.detour = false;
+    this.jammed = 0;
+    /** 上一次探頭停的位置 @type {{ x: number, y: number, t: number } | null} */
+    this.lastPeek = null;
   }
   /**
    * @param {number} x @param {number} y @param {Route | null} [route]
@@ -1475,7 +1483,7 @@ class Navigator {
   }
   /**
    * @param {Observation} obs
-   * @param {{ allowPeek: boolean, speed: number }} opts
+   * @param {{ allowPeek: boolean, speed: number, evading: boolean }} opts
    * @returns {NavOut}
    */
   step(obs, opts) {
@@ -1500,10 +1508,14 @@ class Navigator {
     const holding = this.peek !== null && this.peek.phase === 'hold';
     if (!freeze && !holding && this.moveStreak >= 3 && still) this.stuck++;
     else this.stuck = 0;
+    if (!still) this.jammed = 0;
     let avoid = this.avoid !== null && t < this.avoidUntil ? this.avoid : null;
     const blockedAhead = this.stuck >= 4 && this.personAhead(obs);
     if (this.stuck >= P.stuckDecisions || blockedAhead) {
-      if (blockedAhead && obs.teammates.some((m) => m.alive && dist(m.x, m.y, me.x, me.y) < 900)) this.side = this.sideStep(obs);
+      const jam = obs.teammates.filter((m) => m.alive && dist(m.x, m.y, me.x, me.y) < 900);
+      if (jam.length > 0 && this.jammed >= 1) this.side = this.scatter(obs, jam);
+      else if (blockedAhead && jam.length > 0) this.side = this.sideStep(obs);
+      this.jammed++;
       avoid = this.peopleCells(obs);
       this.avoid = avoid;
       this.avoidUntil = t + 2 * this.tps;
@@ -1513,7 +1525,10 @@ class Navigator {
     }
     const wp = this.wps[this.wpIdx];
     const off = wp !== undefined && dist(me.x, me.y, wp.x, wp.y) > 4 * UNIT && !this.g.walkLine(me.x, me.y, wp.x, wp.y);
-    if (this.wps.length === 0 || off || this.hazard.size !== this.hazardSize || (this.perc.dangerTick > this.planTick && t - this.planTick >= P.replanTicks)) this.plan(obs, avoid);
+    if (opts.evading) this.detour = true;
+    const back = this.detour && !opts.evading;
+    if (back) this.detour = false;
+    if (back || this.wps.length === 0 || off || this.hazard.size !== this.hazardSize || (this.perc.dangerTick > this.planTick && t - this.planTick >= P.replanTicks)) this.plan(obs, avoid);
     while (this.wpIdx < this.wps.length - 1) {
       const p = this.wps[this.wpIdx];
       if (dist(me.x, me.y, p.x, p.y) >= P.waypointReach) break;
@@ -1527,13 +1542,13 @@ class Navigator {
       if (this.peek !== null) {
         const pk = this.peek;
         const dHold = dist(me.x, me.y, pk.hold.x, pk.hold.y);
-        if (dHold > 9 * UNIT || t - pk.since > 8 * this.tps) {
+        if (dHold > pk.reach || t - pk.since > 8 * this.tps) {
           this.peeked.set(pk.portal, t);
           this.peek = null;
         } else {
           out.peeking = true;
           out.look = pk.far;
-          out.walk = true;
+          out.walk = dHold < 4 * UNIT;
           if (pk.phase === 'approach') {
             target = pk.hold;
             if (dHold < 700) {
@@ -1544,6 +1559,7 @@ class Navigator {
           if (pk.phase === 'hold') {
             target = pk.hold;
             if (--pk.left <= 0) {
+              this.lastPeek = { x: pk.hold.x, y: pk.hold.y, t };
               if (this.attrs.aggression * 100 < P.shoulderBelow && this.attrs.movement * 100 >= P.shoulderMove) {
                 pk.phase = 'shoulder';
                 pk.left = 3;
@@ -1597,6 +1613,17 @@ class Navigator {
       if (this.g.walkLine(me.x, me.y, x, y)) return { x, y, until: obs.tick + 15 };
     }
     return null;
+  }
+  /** 卡成一團：往遠離這群人重心的方向走 1.5 格（走不通就往路徑側邊） @param {Observation} obs @param {{ x: number, y: number }[]} jam */
+  scatter(obs, jam) {
+    const me = obs.me;
+    const cx = jam.reduce((a, m) => a + m.x, me.x) / (jam.length + 1);
+    const cy = jam.reduce((a, m) => a + m.y, me.y) / (jam.length + 1);
+    const len = dist(me.x, me.y, cx, cy);
+    if (len < 1) return this.sideStep(obs);
+    const x = me.x + ((me.x - cx) / len) * 1500;
+    const y = me.y + ((me.y - cy) / len) * 1500;
+    return this.g.walkLine(me.x, me.y, x, y) ? { x, y, until: obs.tick + 15 } : this.sideStep(obs);
   }
   /** 有活人貼在前進方向 1 格內 @param {Observation} obs */
   personAhead(obs) {
@@ -1669,7 +1696,8 @@ class Navigator {
       if (!portal.choke && !this.isEntrance(pid)) continue;
       const last = this.peeked.get(pid);
       if (last !== undefined && t - last < 15 * this.tps) continue;
-      const farIdx = Math.min(path.length - 1, i + 3);
+      if (this.lastPeek !== null && t - this.lastPeek.t < 5 * this.tps && dist(this.lastPeek.x, this.lastPeek.y, g.center(path[i]).x, g.center(path[i]).y) < 8 * UNIT) continue;
+      const farIdx = Math.min(path.length - 1, i + 6);
       const far = g.center(path[farIdx]);
       if (!this.perc.reachable(path[farIdx], t, 4) || this.perc.cleared(path[farIdx], t)) continue;
       if (obs.teammates.some((m) => m.alive && dist(m.x, m.y, far.x, far.y) < 6 * UNIT)) continue;
@@ -1678,8 +1706,8 @@ class Navigator {
         this.peeked.set(pid, t);
         continue;
       }
-      const lookIdx = Math.min(path.length - 1, i + 6);
-      return { portal: pid, hold: g.center(path[holdIdx]), far: g.center(path[lookIdx]), cross: g.center(path[i]), phase: 'approach', left: 0, since: t };
+      const hold = g.center(path[holdIdx]);
+      return { portal: pid, hold, far, cross: g.center(path[i]), phase: 'approach', left: 0, since: t, reach: dist(me.x, me.y, hold.x, hold.y) + 3 * UNIT };
     }
     return null;
   }
@@ -1818,8 +1846,11 @@ class Combat {
     this.trailTick = -1000000;
     /** 被閃時要退回的點 @type {Pt | null} */
     this.blindBack = null;
+    /** 看過的火：位置 → 燒的格與燒完的 tick @type {Map<string, { cells: readonly number[], until: number }>} */
+    this.fires = new Map();
   }
   reset() {
+    this.fires = new Map();
     this.noticed = new Map();
     this.targetId = -1;
     this.seen = 0;
@@ -1876,9 +1907,13 @@ class Combat {
   evade(obs) {
     const me = obs.me;
     const g = this.g;
+    for (const e of obs.effects) if (e.kind === 'fire' && e.cells !== undefined) this.fires.set(`${e.x},${e.y}`, { cells: e.cells, until: obs.tick + e.ticksLeft });
     /** @type {Set<number>} */
     const fire = new Set();
-    for (const e of obs.effects) if (e.kind === 'fire' && e.cells !== undefined) for (const c of e.cells) fire.add(c);
+    for (const [key, f] of this.fires) {
+      if (obs.tick >= f.until) this.fires.delete(key);
+      else for (const c of f.cells) fire.add(c);
+    }
     this.nav.hazard = fire;
     const mine = g.cellOf(me.x, me.y);
     if (fire.has(mine)) {
@@ -2114,7 +2149,7 @@ class Combat {
       }
     }
     const lowWall = this.lowCoverNear(me.x, me.y, e.x, e.y);
-    if (this.engagedDecisions <= 1 && this.h.random() < this.sloppy) out.move = null;
+    if (this.engagedDecisions <= 1 && me.weapon !== 'awp' && this.h.random() < this.sloppy) out.move = null;
     else out.move = 'stop';
     if (lowWall) out.crouch = !firing;
     else out.crouch = firing && d >= P.crouchFireMin * UNIT;
@@ -2156,7 +2191,7 @@ class Combat {
     if (this.lostPos !== null && t - this.lostTick < this.holdAngle && !ctx.objective) {
       out.aim = this.lostPos;
       out.crouch = false;
-      out.holdNav = ctx.holding || this.attrs.aggression < 0.5;
+      out.holdNav = ctx.holding || this.attrs.aggression < 0.5 || me.weapon === 'awp';
       out.why = '架槍（目標剛消失）';
       if (this.retreat !== null && t < this.retreatUntil && dist(me.x, me.y, this.retreat.x, this.retreat.y) > 400) {
         out.move = this.retreat;
@@ -3164,7 +3199,7 @@ class Tactics {
     const forced = ['', 'default', 'rush', 'split', 'fake'][this.opts.plan] ?? '';
     let kind = forced;
     if (kind === '') {
-      const w = call === 'eco' ? { default: 0.25, rush: 0.6, split: 0.15, fake: 0 } : this.enemyEco() ? { default: 0.1, rush: 0.35 + 0.2 * ag, split: 0.4, fake: 0.1 } : { default: 0.32, rush: 0.12 + 0.2 * ag, split: 0.3, fake: 0.18 };
+      const w = call === 'eco' ? { default: 0.25, rush: 0.6, split: 0.15, fake: 0 } : this.enemyEco() ? { default: 0.1, rush: 0.35 + 0.2 * ag, split: 0.4, fake: 0.1 } : { default: 0.22, rush: 0.12 + 0.2 * ag, split: 0.4, fake: 0.18 };
       let r = h.random() * (w.default + w.rush + w.split + w.fake);
       kind = 'fake';
       for (const k of /** @type {const} */ (['default', 'rush', 'split'])) {
@@ -3392,7 +3427,8 @@ class Tactics {
   memberIndex(obs, id, p) {
     const gid = this.groupOf(obs, id, p);
     const carrier = obs.me.hasBomb ? obs.me.id : (obs.teammates.find((m) => m.hasBomb)?.id ?? -1);
-    const list = this.ids.filter((x) => this.groupOf(obs, x, p) === gid).sort((a, b) => (a === carrier ? 1 : 0) - (b === carrier ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
+    const last = this.roles.of(carrier) === ENTRY ? -1 : carrier;
+    const list = this.ids.filter((x) => this.groupOf(obs, x, p) === gid).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
     return Math.max(0, list.indexOf(id));
   }
   /** 某隊員佈置時要去的點與路線 @param {Observation} obs @param {number} id @param {TPlan} p @returns {{ site: SiteId, route: number }} */
@@ -3562,6 +3598,11 @@ class Tactics {
     const k = this.rank(obs, (id) => id !== this.carrierId(obs));
     const holds = this.postSpots(exec, site.cx, site.cy);
     const spot = holds.length > 0 ? holds[k % holds.length] : site.plants[0];
+    if (this.roles.of(me.id) === ENTRY && !this.inRectSite(me.x, me.y, exec) && !this.steppedIn) {
+      out.goal = { x: site.cx, y: site.cy };
+      return wish;
+    }
+    this.steppedIn = true;
     out.goal = { x: spot.x, y: spot.y };
     out.hold = spot;
     return wish;
@@ -3929,6 +3970,7 @@ class Tactics {
     const idx = this.routeOverride >= 0 ? this.routeOverride : Math.min(idx0, routes.length - 1);
     const me = obs.me;
     const c = this.g.cellOf(me.x, me.y);
+    if (c >= 0 && !routes[idx].regionSet.has(this.intel.region[c])) return routes.find((r) => r.regionSet.has(this.intel.region[c])) ?? null;
     if (c < 0 || this.intel.distSpawn.T[c] / 10 > P.routeSwitchNear) return routes[idx];
     /** @param {Route} r */
     const risk = (r) => {
@@ -3941,7 +3983,8 @@ class Tactics {
     let best = idx;
     for (let i = 0; i < routes.length; i++) if (risk(routes[i]) < risk(routes[best])) best = i;
     if (best !== idx && risk(routes[best]) < cur / 2) this.routeOverride = best;
-    return routes[this.routeOverride >= 0 ? this.routeOverride : idx];
+    const r = routes[this.routeOverride >= 0 ? this.routeOverride : idx];
+    return risk(r) >= P.routeSwitchRisk ? null : r;
   }
   /** @param {Observation} obs */
   carrierId(obs) {
@@ -4056,6 +4099,7 @@ class Tactics {
         spot = stage[Math.max(0, rotators.indexOf(me.id)) % stage.length];
         out.role = `輪轉 ${p.rot}`;
       }
+      out.allowPeek = false;
       if (lay.site === null) {
         const stack = this.siteSpots(p.rot, 3)[2];
         if (stack !== undefined) {
@@ -4498,7 +4542,7 @@ export default class ShooterBaseline {
   declare() {
     return {
       name: 'shooter-baseline',
-      version: '2.1',
+      version: '2.2',
       style: '基準',
       knobs: [
         { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
@@ -4577,7 +4621,7 @@ export default class ShooterBaseline {
     const fight = this.combat.engage(obs, { holding, objective: tac.objective });
     const w = this.combat.weapon(me.weapon);
     const speed = (w?.speed ?? 130) * (me.walking ? 0.52 : 1) * (me.crouching ? 0.34 : 1);
-    const nav = this.nav.step(obs, { allowPeek: tac.allowPeek && !fight.engaged && ev === null, speed });
+    const nav = this.nav.step(obs, { allowPeek: tac.allowPeek && !fight.engaged && ev === null, speed, evading: ev !== null });
     let moving = false;
     if (!tac.objective) {
       if (ev !== null && ev.move !== null) {

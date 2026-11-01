@@ -516,7 +516,7 @@ export class Tactics {
     let kind = forced;
     if (kind === '') {
       // 對方多半在 eco（我方贏、對方連敗兩場以上）：不打慢的 default，多 rush／split
-      const w = call === 'eco' ? { default: 0.25, rush: 0.6, split: 0.15, fake: 0 } : this.enemyEco() ? { default: 0.1, rush: 0.35 + 0.2 * ag, split: 0.4, fake: 0.1 } : { default: 0.32, rush: 0.12 + 0.2 * ag, split: 0.3, fake: 0.18 };
+      const w = call === 'eco' ? { default: 0.25, rush: 0.6, split: 0.15, fake: 0 } : this.enemyEco() ? { default: 0.1, rush: 0.35 + 0.2 * ag, split: 0.4, fake: 0.1 } : { default: 0.22, rush: 0.12 + 0.2 * ag, split: 0.4, fake: 0.18 };
       let r = h.random() * (w.default + w.rush + w.split + w.fake);
       kind = 'fake';
       for (const k of /** @type {const} */ (['default', 'rush', 'split'])) {
@@ -771,7 +771,9 @@ export class Tactics {
   memberIndex(obs, id, p) {
     const gid = this.groupOf(obs, id, p);
     const carrier = obs.me.hasBomb ? obs.me.id : (obs.teammates.find((m) => m.hasBomb)?.id ?? -1);
-    const list = this.ids.filter((x) => this.groupOf(obs, x, p) === gid).sort((a, b) => (a === carrier ? 1 : 0) - (b === carrier ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
+    // 突破手帶炸彈時還是排最前（他要先進點）
+    const last = this.roles.of(carrier) === ENTRY ? -1 : carrier;
+    const list = this.ids.filter((x) => this.groupOf(obs, x, p) === gid).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
     return Math.max(0, list.indexOf(id));
   }
 
@@ -962,6 +964,12 @@ export class Tactics {
     const k = this.rank(obs, (id) => id !== this.carrierId(obs));
     const holds = this.postSpots(exec, site.cx, site.cy);
     const spot = holds.length > 0 ? holds[k % holds.length] : site.plants[0];
+    // 突破手先踩進包點（守位可能在矩形外，別人在等他進點）
+    if (this.roles.of(me.id) === ENTRY && !this.inRectSite(me.x, me.y, exec) && !this.steppedIn) {
+      out.goal = { x: site.cx, y: site.cy };
+      return wish;
+    }
+    this.steppedIn = true;
     out.goal = { x: spot.x, y: spot.y };
     out.hold = spot;
     return wish;
@@ -1372,6 +1380,8 @@ export class Tactics {
     const idx = this.routeOverride >= 0 ? this.routeOverride : Math.min(idx0, routes.length - 1);
     const me = obs.me;
     const c = this.g.cellOf(me.x, me.y);
+    // 不在路線上（計畫改了、被打亂）：換一條經過這裡的路線，都沒有就直接走，不繞回路線起點
+    if (c >= 0 && !routes[idx].regionSet.has(this.intel.region[c])) return routes.find((r) => r.regionSet.has(this.intel.region[c])) ?? null;
     if (c < 0 || this.intel.distSpawn.T[c] / 10 > P.routeSwitchNear) return routes[idx];
     /** @param {import('./analysis.js').Route} r */
     const risk = (r) => {
@@ -1384,7 +1394,9 @@ export class Tactics {
     let best = idx;
     for (let i = 0; i < routes.length; i++) if (risk(routes[i]) < risk(routes[best])) best = i;
     if (best !== idx && risk(routes[best]) < cur / 2) this.routeOverride = best;
-    return routes[this.routeOverride >= 0 ? this.routeOverride : idx];
+    // 換了還是危險（幾條路線共用一段）：不跟路線，讓 A* 依危險格自己繞
+    const r = routes[this.routeOverride >= 0 ? this.routeOverride : idx];
+    return risk(r) >= P.routeSwitchRisk ? null : r;
   }
 
   /** @param {import('./base.js').Observation} obs */
@@ -1513,6 +1525,8 @@ export class Tactics {
         spot = stage[Math.max(0, rotators.indexOf(me.id)) % stage.length];
         out.role = `輪轉 ${p.rot}`;
       }
+      // 輪轉要快：路上的窄口不停下來探頭
+      out.allowPeek = false;
       // 中路的人（游擊）離那一點最近：直接去疊點看主入口（第三個守位），不在待命位等
       if (lay.site === null) {
         const stack = this.siteSpots(p.rot, 3)[2];

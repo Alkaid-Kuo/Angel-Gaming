@@ -46,7 +46,7 @@ export default class ShooterBaseline {
   declare() {
     return {
       name: 'shooter-baseline',
-      version: '2.1',
+      version: '2.2',
       style: '基準',
       knobs: [
         { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
@@ -128,7 +128,7 @@ export default class ShooterBaseline {
     const fight = this.combat.engage(obs, { holding, objective: tac.objective });
     const w = this.combat.weapon(me.weapon);
     const speed = (w?.speed ?? 130) * (me.walking ? 0.52 : 1) * (me.crouching ? 0.34 : 1);
-    const nav = this.nav.step(obs, { allowPeek: tac.allowPeek && !fight.engaged && ev === null, speed });
+    const nav = this.nav.step(obs, { allowPeek: tac.allowPeek && !fight.engaged && ev === null, speed, evading: ev !== null });
     // ── 移動：自保 → 交戰 → 架槍 → 導航 ──
     let moving = false;
     if (!tac.objective) {
