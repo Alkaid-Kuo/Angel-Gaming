@@ -457,7 +457,7 @@ export class ShooterRenderer {
       if (view.me.alive) {
         const shot = d.tracers.reduce((a, t) => Math.max(a, t.t), 0);
         const age = d.now - shot;
-        this.drawPlayer(cam, { ...meNow, moving: view.me.vx !== 0 || view.me.vy !== 0 }, us, { weapon: view.me.weapon, hp: null, hasBomb: view.me.hasBomb, blind: view.me.blindTicks > 0, label: view.me.id === this.meta.playerId && !this.meta.spectate ? null : this.meta.names[view.me.id], self: true, crouch: view.me.crouching, work: view.me.plantTicks > 0 || view.me.defuseTicks > 0, firing: age < 70, recoil: Math.max(0, 1 - age / 110) }, lod);
+        this.drawPlayer(cam, { ...meNow, moving: view.me.vx !== 0 || view.me.vy !== 0 }, us, { weapon: view.me.weapon, hp: view.me.hp, armor: view.me.loadout.armor, hasBomb: view.me.hasBomb, blind: view.me.blindTicks > 0, label: view.me.id === this.meta.playerId && !this.meta.spectate ? null : this.meta.names[view.me.id], self: true, crouch: view.me.crouching, work: view.me.plantTicks > 0 || view.me.defuseTicks > 0, firing: age < 70, recoil: Math.max(0, 1 - age / 110) }, lod);
       }
       const them = this.sideOf(groupOfMe === 0 ? 1 : 0);
       for (const e of view.enemies) {
@@ -726,8 +726,8 @@ export class ShooterRenderer {
     paintBombMark(this.ctx, sx, sy, cam.scale * UNIT, now, planted, planted && left !== null ? left / rules.bombTicks : null, planted && left !== null ? (left / rules.ticksPerSecond).toFixed(1) : null, state === 'defused');
   }
 
-  /** 模型兵與名牌：隊友有名字與血條，敵人沒有血量（觀察資料沒有） */
-  private drawPlayer(cam: Camera, p: { x: number; y: number; facing: number; moving?: boolean }, side: Side, o: { weapon: WeaponId; hp: number | null; hasBomb: boolean; blind: boolean; label: string | null; self?: boolean; crouch?: boolean; work?: boolean; firing?: boolean; recoil?: number; flashAlways?: boolean }, lod: boolean): void {
+  /** 模型兵與名牌：自己與隊友頭上有血條（自己多一條甲），隊友有名字；敵人沒有血量（觀察資料沒有） */
+  private drawPlayer(cam: Camera, p: { x: number; y: number; facing: number; moving?: boolean }, side: Side, o: { weapon: WeaponId; hp: number | null; armor?: number; hasBomb: boolean; blind: boolean; label: string | null; self?: boolean; crouch?: boolean; work?: boolean; firing?: boolean; recoil?: number; flashAlways?: boolean }, lod: boolean): void {
     const ctx = this.ctx;
     const [sx, sy] = toScreen(cam, p.x, p.y);
     if (sx < -120 || sy < -120 || sx > cam.w + 120 || sy > cam.h + 120) return;
@@ -773,26 +773,32 @@ export class ShooterRenderer {
         ctx.stroke();
       }
     }
-    // 名字、血條（遠看不畫，戰術疊層另有引線標註）
-    if (lod || (o.label === null && o.hp === null)) return;
+    // 名字、血條（遠看只留細血條，戰術疊層另有引線標註）
+    if (o.label === null && o.hp === null) return;
     const top = sy - ppc * 1.05;
-    if (o.label !== null) {
-      ctx.font = `700 13px ${ZH}`;
+    if (o.label !== null && !lod) {
+      ctx.font = `700 12px ${ZH}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.lineJoin = 'round';
-      ctx.lineWidth = 3.5;
+      ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(29, 26, 34, 0.75)';
-      ctx.strokeText(o.label, sx, top - 6);
+      ctx.strokeText(o.label, sx, top - 8);
       ctx.fillStyle = '#fff6e2';
-      ctx.fillText(o.label, sx, top - 6);
+      ctx.fillText(o.label, sx, top - 8);
     }
     if (o.hp !== null) {
-      const bw = 30;
-      ctx.fillStyle = 'rgba(29, 26, 34, 0.75)';
-      ctx.fillRect(sx - bw / 2 - 1, top - 5, bw + 2, 5);
+      const bw = lod ? 20 : o.self === true ? 44 : 34;
+      const bh = lod ? 2 : 4;
+      const armor = !lod && o.armor !== undefined ? o.armor : null;
+      ctx.fillStyle = 'rgba(11, 14, 20, 0.55)';
+      ctx.fillRect(sx - bw / 2 - 1, top - 6, bw + 2, bh + 2 + (armor !== null ? 3 : 0));
       ctx.fillStyle = o.hp <= 30 ? PAL.warn : sideColor(side);
-      ctx.fillRect(sx - bw / 2, top - 4, (bw * Math.max(0, o.hp)) / 100, 3);
+      ctx.fillRect(sx - bw / 2, top - 5, (bw * Math.max(0, o.hp)) / 100, bh);
+      if (armor !== null) {
+        ctx.fillStyle = '#cfd5dd';
+        ctx.fillRect(sx - bw / 2, top, (bw * armor) / 100, 2);
+      }
     }
   }
 
@@ -800,7 +806,7 @@ export class ShooterRenderer {
     for (const p of full.players) {
       if (!p.alive) continue;
       const q = interp(p, prev?.players, alpha);
-      this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: tagged ? null : p.hp, hasBomb: p.hasBomb, blind: p.blind, label: tagged ? null : this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing, flashAlways }, lod);
+      this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: tagged ? null : p.hp, armor: p.id === viewId ? p.armor : undefined, hasBomb: p.hasBomb, blind: p.blind, label: tagged ? null : this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing, flashAlways }, lod);
       if (p.id === hover) this.drawHover(cam, q, this.meta.names[p.id]);
     }
   }
@@ -1179,6 +1185,7 @@ export class ShooterRenderer {
     }
     const g = mini.getContext('2d')!;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, size, size);
     g.drawImage(this.baked.radar, 0, 0, size, size);
     const k = size / (this.meta.map.width * UNIT);
     const view = d.cur.view;
