@@ -1,6 +1,6 @@
 // 試玩頁的陣容 → 驅動選項（純函式，不碰 DOM、不碰 Worker；Worker 與測試都只呼叫這裡）。
 // 基準 Bot 座位走經營層同一條路：角色照 BALANCED_ROLES 排、每位一份 PlayerSpec → 閘道的 seatOf、seatController、seatKnobs。
-// 人類佔掉的座位（0 或 5，突破手）空著不衍生；陪練座位不吃屬性，全陪練場是最短反應延遲，和基準 Bot 混打時用全 50 屬性的 8 tick（與強度表量測同條件）。
+// 人類佔掉的座位（0 或 5，突破手）空著不衍生；陪練座位不吃屬性，全陪練場是最短反應延遲，和基準 Bot 混打時固定 8 tick；基準座位的延遲由驅動層依屬性算（機率式進位）。
 // 所有 Bot 座位都關掉逾時判定（與閘道相同）：結果只由種子與人類操作決定，與機器快慢無關。
 // habit 由種子與座位號雜湊（範圍同經營層的 ±60），同種子同陣容的選手完全相同。
 import type { PlayerSpec } from '../../manage/gateway.ts';
@@ -59,10 +59,10 @@ export function trialRunOptions(s: ShooterSetup, bots: { readonly practice: Comp
   const base = { seed: s.seed, mapId: map.id, ...format, controllers, record: true, ...(human === null ? { freezeTicks } : {}), ...(s.loadout !== undefined ? { defaultLoadout: { T: s.loadout, CT: s.loadout } } : {}) };
   if (seats.every((seat) => seat === null)) return base;
   const knobs = seats.map((seat, pid) => (seat !== null ? seatKnobs(seatCtl[pid]!, seat) : {}));
-  // 混打：陪練座位用全 50 屬性的延遲（8 tick）；人類座位驅動層一律 0，這裡給的值不會用到
+  // 混打：陪練座位固定 8 tick，基準座位留給驅動層依屬性算；人類座位驅動層一律 0，這裡給的值不會用到
   const mixed = levels.some((l) => l?.kind === 'practice');
   const practiceTicks = reactionTicksFor(DEFAULT_ATTRIBUTES);
-  return { ...base, knobs, attributes: seats.map((seat) => seat?.attributes), ...(mixed ? { reactionTicks: seats.map((seat) => seat?.reactionTicks ?? practiceTicks) } : {}) };
+  return { ...base, knobs, attributes: seats.map((seat) => seat?.attributes), ...(mixed ? { reactionTicks: seats.map((seat) => (seat === null ? practiceTicks : undefined)) } : {}) };
 }
 
 /** 依 playerId 的顯示名：「你」、陪練沿用原名、基準 Bot「v3 支援α」 */
