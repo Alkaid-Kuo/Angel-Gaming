@@ -1052,6 +1052,15 @@ class Perception {
   forget(id) {
     if (this.known.delete(id)) this.dangerDirty = true;
   }
+  clearEnemies() {
+    if (this.known.size === 0 && this.anon.length === 0 && this.sectors.length === 0) return;
+    this.known.clear();
+    this.anon.length = 0;
+    this.sectors.length = 0;
+    this.lastSound = null;
+    this.lastHurt = null;
+    this.dangerDirty = true;
+  }
   /** @param {number} x @param {number} y @param {number} conf @param {number} t */
   notePoint(x, y, conf, t) {
     let best = null;
@@ -1829,6 +1838,11 @@ class Combat {
     this.trailTick = -1000000;
     /** 被閃時要退回的點 @type {Pt | null} */
     this.blindBack = null;
+  }
+  clearTargets() {
+    this.lostPos = null;
+    this.retreat = null;
+    this.targetId = -1;
   }
   /** @param {string} id */
   weapon(id) {
@@ -2968,6 +2982,11 @@ class Tactics {
     const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false };
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
     this.enemiesAlive = obs.enemiesAlive;
+    if (obs.enemiesAlive === 0) {
+      this.trade = null;
+      this.chase = null;
+      this.saving = false;
+    }
     if (!this.roleSaid) {
       this.roleSaid = true;
       out.cmds.push({ type: 'say', text: `R:${this.opts.role}` });
@@ -3256,8 +3275,9 @@ class Tactics {
     if (obs.round.phase === 'freeze') return p;
     const b = obs.bomb;
     if ((b.state === 'planted' || b.state === 'defusing') && b.site !== null) {
-      if (p.rot !== b.site) return { ...p, rot: b.site, go: false };
-      if (!p.go && this.retakeReady(obs, b.site)) return { ...p, go: true };
+      const clear = obs.enemiesAlive === 0;
+      if (p.rot !== b.site) return { ...p, rot: b.site, go: clear };
+      if (!p.go && (clear || this.retakeReady(obs, b.site))) return { ...p, go: true };
       return p;
     }
     if (p.rot === null) {
@@ -3743,6 +3763,7 @@ class Tactics {
     out.goal = out.hold ?? { x: bx, y: by };
     out.role = '守包';
     out.allowPeek = false;
+    if (obs.enemiesAlive === 0) return null;
     const snd = this.perc.lastSound;
     const defusing = obs.bomb.state === 'defusing' || (snd !== null && snd.kind === 'defuse' && t - snd.tick < this.tps);
     if (defusing) {
@@ -3943,8 +3964,12 @@ class Tactics {
     const defuseS = (/** @type {boolean} */ k) => (k ? this.data.rules.defuseKitTicks : this.data.rules.defuseTicks) / this.tps;
     const team = this.alive(obs).map((m) => ({ ...m, kit: m.id === me.id ? me.loadout.kit : this.kits.has(m.id), d: dist(m.x, m.y, bx, by), defusing: m.id === me.id ? me.defuseTicks > 0 : obs.teammates.some((x) => x.id === m.id && x.defusing) }));
     const closest = Math.min(...team.map((m) => m.d));
+    const clear = obs.enemiesAlive === 0;
     let defuser = team.find((m) => m.defusing);
-    if (defuser === undefined) {
+    if (defuser === undefined && clear) {
+      const eta = (/** @type {{ d: number, kit: boolean }} */ m) => m.d / UNIT / 4.6 + defuseS(m.kit);
+      defuser = [...team].sort((a, c) => eta(a) - eta(c) || a.id - c.id)[0];
+    } else if (defuser === undefined) {
       const withKit = team.filter((m) => m.kit && m.d <= closest + 8 * UNIT).sort((a, c) => a.d - c.d || a.id - c.id);
       defuser = withKit[0] ?? [...team].sort((a, c) => a.d - c.d || a.id - c.id)[0];
     }
@@ -3960,10 +3985,10 @@ class Tactics {
     }
     const inside = this.inSite(me.x, me.y, s, bx, by);
     const stage = this.stageSpots('CT', s, 0);
-    const go = p.go || this.plan === null;
+    const go = p.go || this.plan === null || clear;
     if (go && this.goTick < 0) this.goTick = t;
     const entry = obs.teammates.find((m) => m.alive && m.id === this.roles.who(ENTRY));
-    const lead = go && entry !== undefined && !this.inSite(entry.x, entry.y, s, bx, by) && t - this.goTick < P.retakeLead * this.tps;
+    const lead = go && !clear && entry !== undefined && !this.inSite(entry.x, entry.y, s, bx, by) && t - this.goTick < P.retakeLead * this.tps;
     if ((!go || lead) && !inside && stage.length > 0) {
       const others = this.ids.filter((id) => this.isAlive(obs, id));
       const sp = stage[Math.max(0, others.indexOf(me.id)) % stage.length];
@@ -4393,6 +4418,10 @@ export default class ShooterBaseline {
     if (obs.round.number !== this.round) this.newRound(obs);
     if (!me.alive || obs.round.phase === 'over') return [];
     this.perc.update(obs);
+    if (obs.enemiesAlive === 0) {
+      this.perc.clearEnemies();
+      this.combat.clearTargets();
+    }
     this.combat.track(obs);
     const tac = this.tactics.update(obs);
     /** @type {Command[]} */

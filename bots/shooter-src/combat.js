@@ -104,6 +104,13 @@ export class Combat {
     this.blindBack = null;
   }
 
+  /** 敵人全滅：不再架槍、撤退 */
+  clearTargets() {
+    this.lostPos = null;
+    this.retreat = null;
+    this.targetId = -1;
+  }
+
   /** @param {string} id */
   weapon(id) {
     return this.weapons.get(id);

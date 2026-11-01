@@ -321,6 +321,11 @@ export class Tactics {
     const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false };
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
     this.enemiesAlive = obs.enemiesAlive;
+    if (obs.enemiesAlive === 0) {
+      this.trade = null;
+      this.chase = null;
+      this.saving = false;
+    }
     if (!this.roleSaid) {
       this.roleSaid = true;
       out.cmds.push({ type: 'say', text: `R:${this.opts.role}` });
@@ -638,8 +643,10 @@ export class Tactics {
     if (obs.round.phase === 'freeze') return p;
     const b = obs.bomb;
     if ((b.state === 'planted' || b.state === 'defusing') && b.site !== null) {
-      if (p.rot !== b.site) return { ...p, rot: b.site, go: false };
-      if (!p.go && this.retakeReady(obs, b.site)) return { ...p, go: true };
+      // 敵人全滅就不用集結
+      const clear = obs.enemiesAlive === 0;
+      if (p.rot !== b.site) return { ...p, rot: b.site, go: clear };
+      if (!p.go && (clear || this.retakeReady(obs, b.site))) return { ...p, go: true };
       return p;
     }
     if (p.rot === null) {
@@ -1187,6 +1194,8 @@ export class Tactics {
     out.goal = out.hold ?? { x: bx, y: by };
     out.role = '守包';
     out.allowPeek = false;
+    // 敵人全滅：守著等爆炸，不追不丟
+    if (obs.enemiesAlive === 0) return null;
     const snd = this.perc.lastSound;
     const defusing = obs.bomb.state === 'defusing' || (snd !== null && snd.kind === 'defuse' && t - snd.tick < this.tps);
     if (defusing) {
@@ -1410,8 +1419,13 @@ export class Tactics {
     // 拆的人：有拆彈器的人（離炸彈不比最近的人遠 8 格以上），否則最近的人；已經在拆的人繼續
     const team = this.alive(obs).map((m) => ({ ...m, kit: m.id === me.id ? me.loadout.kit : this.kits.has(m.id), d: dist(m.x, m.y, bx, by), defusing: m.id === me.id ? me.defuseTicks > 0 : obs.teammates.some((x) => x.id === m.id && x.defusing) }));
     const closest = Math.min(...team.map((m) => m.d));
+    const clear = obs.enemiesAlive === 0;
     let defuser = team.find((m) => m.defusing);
-    if (defuser === undefined) {
+    if (defuser === undefined && clear) {
+      // 敵人全滅：誰拆得最快（走過去＋拆）誰去
+      const eta = (/** @type {{ d: number, kit: boolean }} */ m) => m.d / UNIT / 4.6 + defuseS(m.kit);
+      defuser = [...team].sort((a, c) => eta(a) - eta(c) || a.id - c.id)[0];
+    } else if (defuser === undefined) {
       const withKit = team.filter((m) => m.kit && m.d <= closest + 8 * UNIT).sort((a, c) => a.d - c.d || a.id - c.id);
       defuser = withKit[0] ?? [...team].sort((a, c) => a.d - c.d || a.id - c.id)[0];
     }
@@ -1429,11 +1443,12 @@ export class Tactics {
     }
     const inside = this.inSite(me.x, me.y, s, bx, by);
     const stage = this.stageSpots('CT', s, 0);
-    const go = p.go || this.plan === null;
+    // 敵人全滅不等指揮的 go（喊話有延遲），也不等突破手
+    const go = p.go || this.plan === null || clear;
     if (go && this.goTick < 0) this.goTick = t;
     // go 之後突破手先進：其他還在待命位的人等他進點（最多 P.retakeLead 秒）
     const entry = obs.teammates.find((m) => m.alive && m.id === this.roles.who(ENTRY));
-    const lead = go && entry !== undefined && !this.inSite(entry.x, entry.y, s, bx, by) && t - this.goTick < P.retakeLead * this.tps;
+    const lead = go && !clear && entry !== undefined && !this.inSite(entry.x, entry.y, s, bx, by) && t - this.goTick < P.retakeLead * this.tps;
     if ((!go || lead) && !inside && stage.length > 0) {
       const others = this.ids.filter((id) => this.isAlive(obs, id));
       const sp = stage[Math.max(0, others.indexOf(me.id)) % stage.length];

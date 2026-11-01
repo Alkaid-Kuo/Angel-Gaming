@@ -110,6 +110,10 @@ export default class ShooterBaseline {
     if (obs.round.number !== this.round) this.newRound(obs);
     if (!me.alive || obs.round.phase === 'over') return [];
     this.perc.update(obs);
+    if (obs.enemiesAlive === 0) {
+      this.perc.clearEnemies();
+      this.combat.clearTargets();
+    }
     this.combat.track(obs);
     const tac = this.tactics.update(obs);
     /** @type {import('./base.js').Command[]} */
