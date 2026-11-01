@@ -10,13 +10,15 @@ import type { Attributes } from '../src/shooter/api.ts';
 import { ATTRIBUTE_KEYS, TEAM_SIZE, type AttributeKey } from '../src/shooter/config.ts';
 import { LEAGUE_FORMAT_ID, formatOptions } from '../src/shooter/gateway.ts';
 import { MAPS } from '../src/shooter/map.ts';
-import { derivePlayer, type ShooterPlayerSpec } from '../src/shooter/players.ts';
+import { derivePlayer, reactionTicksFor, type ShooterPlayerSpec } from '../src/shooter/players.ts';
 import { ShooterBatchController, runShooterMatch } from '../src/shooter/runner.ts';
 import { DEFAULT_ATTRIBUTES, PLAYER_COUNT } from '../src/shooter/sim.ts';
 
 export interface LabSeat {
   readonly attributes: Attributes;
   readonly knobs: KnobValues;
+  /** 固定反應延遲（陪練 8 tick）；沒給就由驅動層依屬性算 */
+  readonly reactionTicks?: number;
 }
 
 export interface LabTeam {
@@ -56,7 +58,7 @@ export interface LabGame {
 
 /** 選手規格（或 null ＝ 全 50、自動角色）→ 座位 */
 export function seatOf(spec: ShooterPlayerSpec | null): LabSeat {
-  if (spec === null) return { attributes: DEFAULT_ATTRIBUTES, knobs: {} };
+  if (spec === null) return { attributes: DEFAULT_ATTRIBUTES, knobs: {}, reactionTicks: reactionTicksFor(DEFAULT_ATTRIBUTES) };
   const d = derivePlayer(spec);
   return { attributes: d.attributes, knobs: d.knobs };
 }
@@ -94,7 +96,7 @@ export function playLab(job: LabJob): LabGame {
     const want = seatAt(pid).knobs;
     return resolveKnobs(c.declaration, Object.fromEntries(Object.entries(want).filter(([k]) => c.declaration.knobs.some((d) => d.key === k))), c.label);
   });
-  const run = runShooterMatch({ seed: job.seed, mapId: job.map, ...formatOptions(job.format), controllers, knobs, record: false, attributes: controllers.map((_, pid) => seatAt(pid).attributes) });
+  const run = runShooterMatch({ seed: job.seed, mapId: job.map, ...formatOptions(job.format), controllers, knobs, record: false, attributes: controllers.map((_, pid) => seatAt(pid).attributes), reactionTicks: controllers.map((_, pid) => seatAt(pid).reactionTicks) });
   const r = run.result;
   const ga = job.aFirst ? 0 : 1;
   let aRounds = 0;
@@ -132,8 +134,10 @@ function srcHash(path: string): string {
   }
   return h;
 }
-/** 快取鍵：選手檔內容雜湊＋對局（耗時與 decide 毫秒數不影響勝負） */
-const keyOf = (j: LabJob): string => createHash('sha1').update(JSON.stringify([srcHash(j.a.bot), srcHash(j.b.bot), j])).digest('hex');
+/** 驅動層改了會影響勝負時換這個值（快取鍵只看選手檔與對局，看不到引擎） */
+const DRIVER_TAG = 'delay-eighths-nolimit';
+/** 快取鍵：選手檔內容雜湊＋驅動層標籤＋對局（耗時與 decide 毫秒數不影響勝負） */
+const keyOf = (j: LabJob): string => createHash('sha1').update(JSON.stringify([DRIVER_TAG, srcHash(j.a.bot), srcHash(j.b.bot), j])).digest('hex');
 
 let cache: Map<string, LabGame> | null = null;
 function loadCache(): Map<string, LabGame> {
@@ -171,7 +175,7 @@ export async function runLab(list: readonly LabJob[], jobs: number, onDone?: (do
         (b) =>
           new Promise<void>((resolve, reject) => {
             let n = 0;
-            const w = new Worker(new URL(import.meta.url), { workerData: { lab: true, jobs: b.map((x) => x.j) } });
+            const w = new Worker(new URL(import.meta.url), { workerData: { lab: true, jobs: b.map((x) => x.j) }, argv: process.argv.slice(2) }); // worker 不繼承 argv：--no-limits 要傳進去
             w.on('message', (g: LabGame) => {
               const { i } = b[n++];
               out[i] = g;

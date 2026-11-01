@@ -4,6 +4,7 @@
 //   同路：T 進點 ≥ 3 人的回合，全部從同一個入口進點的比例（rush 除外）；團滅：T 在下包前 8 秒內死 4 人以上
 //   煙霧：同隊同回合兩顆煙落點 < 6 格的比例
 //   發呆：開打 10 秒、20 秒還在起點 5 格內的人
+//   賽制對照（Bot 2.2.1）：回防、A／B、每場回合與秒數、加時、指揮買法比例、全買回合、連敗補償最高階、平均每回合獎金（只算勝負獎金與下包補償，不含擊殺）
 // 用法：node scripts/shooter-behavior.ts [--a bots/shooter-baseline.js] [--b 同 a] [--lineup 3] [--maps redrock] [--seeds 100] [--from 1] [--jobs 10] [--format shooter-mr6] [--out out/behavior.json]
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -11,7 +12,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { compileBot, type CompiledBot } from '../src/sandbox/compile.ts';
 import { resolveKnobs } from '../src/sandbox/controller.ts';
 import type { ShooterCommand, ShooterObservation } from '../src/shooter/api.ts';
-import { TEAM_SIZE, UNIT } from '../src/shooter/config.ts';
+import { ECONOMY, TEAM_SIZE, UNIT } from '../src/shooter/config.ts';
 import { LEAGUE_FORMAT_ID, formatOptions } from '../src/shooter/gateway.ts';
 import { MAPS } from '../src/shooter/map.ts';
 import { balancedLineup, derivePlayer, type ShooterPlayerSpec } from '../src/shooter/players.ts';
@@ -63,6 +64,22 @@ interface GameOut {
   /** 開打 20 秒還在起點的人當時在做什麼（Bot 的 why） */
   readonly idleWhy: string[];
   readonly plans: Record<string, [number, number]>;
+  /** 隊回合（每回合兩隊）：指揮喊的買法次數 */
+  readonly calls: Record<string, number>;
+  /** 全買的隊回合（引擎的 fullBuy）、隊回合總數 */
+  readonly fullBuy: number;
+  readonly teamRounds: number;
+  /** 正規時間每個隊半場的連敗補償最高階 */
+  readonly peaks: number[];
+  /** 勝負獎金與下包補償的總和（每人）、筆數（隊回合） */
+  readonly payTotal: number;
+  /** 下包回合、其中 CT 贏的；各點下包回合 */
+  readonly planted: number;
+  readonly retakeWins: number;
+  readonly sites: Record<string, number>;
+  readonly overtimes: number;
+  readonly ticks: number;
+  readonly wallMs: number;
 }
 
 class Spy extends ShooterBatchController {
@@ -112,8 +129,12 @@ function play(j: Job): GameOut {
   const seats = Array.from({ length: PLAYER_COUNT }, (_, pid) => derivePlayer(specs(pid)));
   /** 回合 → T 指揮喊的計畫 */
   const planOf = new Map<number, string>();
+  const calls: Record<string, number> = {};
+  const plantedRounds = new Map<number, string>();
+  const wall0 = performance.now();
   let curRound = 0;
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => new Spy(load(isA(pid) ? j.a : j.b), isA(pid) ? 'a' : 'b', j.seed, pid, map, (text, obs) => {
+    if (text.startsWith('B:')) calls[text.slice(2)] = (calls[text.slice(2)] ?? 0) + 1;
     if (obs.me.team === 'T' && text.startsWith('P:') && !planOf.has(obs.round.number)) planOf.set(obs.round.number, /^P:(rush|split|default|fake|go)/.exec(text)?.[1] ?? '?');
   }));
   const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, Object.fromEntries(Object.entries(seats[pid].knobs).filter(([k]) => c.declaration.knobs.some((d) => d.key === k))), c.label));
@@ -222,7 +243,10 @@ function play(j: Job): GameOut {
       seenSmoke.add(s);
       smokesNow.push({ team: groupOf(s.owner), x: s.x, y: s.y });
     }
-    if (m.bomb.state === 'planted' && plantedTick < 0) plantedTick = m.tick;
+    if (m.bomb.state === 'planted' && plantedTick < 0) {
+      plantedTick = m.tick;
+      plantedRounds.set(curRound, m.bomb.site ?? '?');
+    }
     const tAlive = m.players.filter((p) => p.team === 'T' && p.alive).length;
     const ctAlive = m.players.filter((p) => p.team === 'CT' && p.alive).length;
     if (plantedTick >= 0 && tAlive === 0 && ctAlive > 0 && wipedAt < 0) wipedAt = m.tick;
@@ -256,6 +280,27 @@ function play(j: Job): GameOut {
     const g3 = liveGear.get(first + 2)?.[loser] ?? [0, 0];
     pistol.push({ isA: loser === ga, side: r2.tGroup === loser ? 'T' : 'CT', guns2: g2[0], armor2: g2[1], won2: r2.winnerGroup === loser, guns3: g3[0], won3: r3.winnerGroup === loser, matchWon: res.winner === loser });
   }
+  // 連敗補償階（半場開始歸零、輸一場升一階、贏一場降一階）與勝負獎金：正規時間
+  const ladder = ECONOMY.lossBonus;
+  const peaks: number[] = [];
+  let payTotal = 0;
+  const regulation = m.roundsPerHalf * 2;
+  for (const half of [0, 1]) {
+    const lv: [number, number] = [0, 0];
+    const peak: [number, number] = [0, 0];
+    for (const r of rs.slice(half * m.roundsPerHalf, Math.min((half + 1) * m.roundsPerHalf, regulation))) {
+      const w = r.winnerGroup;
+      const l = (1 - w) as 0 | 1;
+      lv[l] = Math.min(ladder.length, lv[l] + 1);
+      lv[w] = Math.max(0, lv[w] - 1);
+      peak[l] = Math.max(peak[l], lv[l]);
+      const tLost = r.tGroup === l;
+      payTotal += (r.reason === 'bomb' ? ECONOMY.winBomb : r.reason === 'defuse' ? ECONOMY.winDefuse : ECONOMY.winElimination) + ladder[lv[l] - 1] + (tLost && plantedRounds.has(r.number) ? ECONOMY.plantedLossBonus : 0);
+    }
+    peaks.push(...peak);
+  }
+  const sites: Record<string, number> = {};
+  for (const s of plantedRounds.values()) sites[s] = (sites[s] ?? 0) + 1;
   const plans: Record<string, [number, number]> = {};
   for (const r of rs) {
     const k = planOf.get(r.number) ?? '?';
@@ -278,6 +323,17 @@ function play(j: Job): GameOut {
     idle,
     idleWhy,
     plans,
+    calls,
+    fullBuy: rs.reduce((s, r) => s + (r.fullBuy[0] ? 1 : 0) + (r.fullBuy[1] ? 1 : 0), 0),
+    teamRounds: rs.length * 2,
+    peaks,
+    payTotal,
+    planted: plantedRounds.size,
+    retakeWins: rs.filter((r) => plantedRounds.has(r.number) && r.winner === 'CT').length,
+    sites,
+    overtimes: res.overtimes,
+    ticks: res.ticks,
+    wallMs: performance.now() - wall0,
   };
 }
 
@@ -339,6 +395,12 @@ if (!isMainThread && (workerData as { behavior?: boolean } | null)?.behavior ===
     st[1] += w;
   }
   console.log(`計畫：${Object.entries(plans).map(([k, [n, w]]) => `${k} ${n} 回合 T 勝 ${((100 * w) / n).toFixed(0)}%`).join('、')}`);
+  console.log(`賽制：回防 ${pct(sum((g) => g.retakeWins), sum((g) => g.planted))}；下包 A／B ${['A', 'B'].map((k) => pct(sum((g) => g.sites[k] ?? 0), sum((g) => g.planted))).join('、')}；每場 ${(nRounds / games.length).toFixed(2)} 回合、遊戲內 ${(sum((g) => g.ticks) / 30 / games.length).toFixed(0)} 秒、牆鐘 ${(sum((g) => g.wallMs) / 1000 / games.length).toFixed(2)} 秒；加時 ${games.filter((g) => g.overtimes > 0).length}／${games.length} 場`);
+  const callSum: Record<string, number> = {};
+  for (const g of games) for (const [k, n] of Object.entries(g.calls)) callSum[k] = (callSum[k] ?? 0) + n;
+  const teamRounds = sum((g) => g.teamRounds);
+  const peaks = games.flatMap((g) => g.peaks);
+  console.log(`經濟：全買隊回合 ${pct(sum((g) => g.fullBuy), teamRounds)}；買法 ${Object.entries(callSum).map(([k, n]) => `${k} ${pct(n, teamRounds)}`).join('、')}；連敗補償最高階（每隊半場）平均 ${(peaks.reduce((s, x) => s + x, 0) / Math.max(1, peaks.length)).toFixed(2)}，分布 ${[0, 1, 2, 3, 4, 5].map((k) => `${k} 階 ${peaks.filter((x) => x === k).length}`).join('、')}；平均每回合獎金（勝方＋敗方、每人）${(sum((g) => g.payTotal) / (teamRounds / 2)).toFixed(0)}`);
   const outPath = arg('out', '');
   if (outPath !== '') {
     mkdirSync(dirname(outPath), { recursive: true });

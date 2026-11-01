@@ -19,6 +19,7 @@ interface Job {
   readonly policy: string;
   readonly seed: number;
   readonly resumeWeek: number;
+  readonly format?: string;
 }
 
 interface JobResult {
@@ -42,11 +43,12 @@ interface JobResult {
   readonly week1: { home: string; away: string; score: string }[];
 }
 
-const content = SHOOTER_CONTENT;
+// --format 只換賽制（MR6 對 MR8 對照用，隨 job 傳進 worker）；不給就是聯賽
 
 async function play(job: Job): Promise<JobResult> {
   const t0 = performance.now();
   const gateway = new ShooterGateway();
+  const content = job.format === undefined ? SHOOTER_CONTENT : { ...SHOOTER_CONTENT, formatId: job.format };
   let state = newGame(job.seed, content, { gateway });
   const start = new Map(state.teams.map((t) => [t.id, t.cash]));
   const eloSum = state.players.reduce((s, p) => s + p.elo, 0);
@@ -97,7 +99,8 @@ if (!isMainThread && (workerData as { season?: boolean } | null)?.season === tru
   const seed = Number(arg('--seed', '2026'));
   const resumeWeek = Number(arg('--resume-week', '4'));
   const out = arg('--out', 'out/manage-shooter-season.json');
-  const jobs: Job[] = [...Object.keys(POLICIES).map((policy): Job => ({ kind: 'policy', policy, seed, resumeWeek })), { kind: 'resume', policy: 'passive', seed, resumeWeek }];
+  const format = process.argv.includes('--format') ? arg('--format', '') : undefined;
+  const jobs: Job[] = [...Object.keys(POLICIES).map((policy): Job => ({ kind: 'policy', policy, seed, resumeWeek, format })), { kind: 'resume', policy: 'passive', seed, resumeWeek, format }];
   console.log(`攻防戰整季：種子 ${seed}，${jobs.length} 個工作平行（第 ${resumeWeek} 週存檔重跑）…`);
   const t0 = performance.now();
   const results = await Promise.all(

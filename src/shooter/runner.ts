@@ -4,6 +4,8 @@
 // 經營層閘道用的批次控制器可關掉時間限制（timeLimits: false）：結果只由程式碼與種子決定，不受機器快慢、背景分頁影響。
 // 反應延遲（v1.0 引擎強制）：Bot 在 tick t 決策出的指令排隊到 t + reactionTicks（≥ MIN_REACTION_TICKS）才套用；
 // 回合交接時還沒生效的指令作廢。人類玩家（takeRealtime）不延遲。回放記錄實際套用的 tick，重播不需要知道延遲。
+// 機率式進位（Bot 2.2.1）：延遲由屬性算的選手，期望延遲精確等於 reactionEighths ÷ 8，小數部分每批指令用該選手的 PRNG 決定多等 1 tick 與否；
+// 屬性差一點延遲就差一點，不會在四捨五入的邊界上跳一整個 tick。明確給 reactionTicks 的座位（混打陪練 8 tick）照給的整數。
 import type { KnobValues } from '../api/types.ts';
 import { iatan2, offset } from '../shared/geom.ts';
 import { roundHalfEven } from '../shared/intmath.ts';
@@ -13,7 +15,7 @@ import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
 import type { Attributes, ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, Team, WeaponId } from './api.ts';
 import { MIN_REACTION_TICKS, SHOOTER_ENGINE_VERSION, TIMING } from './config.ts';
 import { DEFAULT_MAP_ID, MAPS, blocksMove, regionsAt, type ShooterMap } from './map.ts';
-import { reactionTicksFor } from './players.ts';
+import { reactionEighths, reactionTicksFor } from './players.ts';
 import { DEFAULT_ATTRIBUTES, HASH_INTERVAL, PLAYER_COUNT, ShooterMatch, shooterInitData, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
 import { lineOfSight } from './vision.ts';
 
@@ -99,6 +101,9 @@ function timedCall<T>(fn: () => T, limitMs: number, fallback: T): CallOutcome<T>
   }
   return { value, exception, timedOut: elapsedMs > limitMs, elapsedMs };
 }
+
+/** 反應延遲進位的 PRNG 標籤 */
+const DELAY_TAG = 0x7eac;
 
 export interface BatchControllerOptions {
   /** false：不做逾時判定（timedOut 永遠 false），比賽結果與機器快慢無關（經營層閘道用）；預設 true */
@@ -190,8 +195,8 @@ export interface ShooterRunOptions extends ShooterMatchOptions {
   readonly controllers: readonly ShooterController[];
   readonly knobs?: readonly KnobValues[];
   readonly record: boolean;
-  /** 依 playerId 的 Bot 反應延遲（tick，v1.0）：有給就照給的（小於下限夾到下限）；沒給時有 attributes 就由 reactionTicksFor 算，都沒有就是 MIN_REACTION_TICKS */
-  readonly reactionTicks?: readonly number[];
+  /** 依 playerId 的 Bot 反應延遲（tick，v1.0）：有給就照給的（小於下限夾到下限）；沒給（或該座位 undefined）時有 attributes 就由屬性算（機率式進位），都沒有就是 MIN_REACTION_TICKS */
+  readonly reactionTicks?: readonly (number | undefined)[];
   /** 依 playerId 的屬性包（步驟 7）：傳進 InitData.attributes；沒給（或該座位 undefined）＝全 50 */
   readonly attributes?: readonly (Attributes | undefined)[];
 }
@@ -216,6 +221,8 @@ export class ShooterDriver {
   readonly reactionTicks: readonly number[];
   /** 各選手的屬性包（InitData.attributes） */
   readonly attributes: readonly Attributes[];
+  /** 延遲由屬性算的選手：1／8 tick 的精確延遲與決定進位的 PRNG；其他人 null（固定 reactionTicks） */
+  private readonly exactDelay: readonly ({ readonly eighths: number; readonly rng: Prng } | null)[];
   /** 排隊中的 Bot 指令（依決策順序；套用 tick 遞增） */
   private pending: { readonly at: number; readonly round: number; readonly playerId: number; readonly commands: unknown[] }[] = [];
 
@@ -236,6 +243,7 @@ export class ShooterDriver {
       if (given === undefined && opts.attributes !== undefined) return clampReaction(reactionTicksFor(this.attributes[pid]));
       return clampReaction(given);
     });
+    this.exactDelay = opts.controllers.map((c, pid) => (c.takeRealtime === undefined && opts.reactionTicks?.[pid] === undefined && opts.attributes !== undefined ? { eighths: reactionEighths(this.attributes[pid]), rng: Prng.fromInts(opts.seed, pid, DELAY_TAG) } : null));
     opts.controllers.forEach((c, pid) => {
       const init = { roundsPerHalf: opts.roundsPerHalf, winRounds: opts.winRounds, startMoney: opts.startMoney, overtime: opts.overtime, freezeTicks: this.match.freezeTicks, reactionTicks: this.reactionTicks[pid] };
       const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init, this.attributes[pid]));
@@ -277,6 +285,14 @@ export class ShooterDriver {
     const rt = this.runtime[pid];
     rt.exceptions += 1;
     if (rt.errors.length < 5) rt.errors.push(text);
+  }
+
+  /** 這批指令的延遲（tick） */
+  private delayOf(pid: number): number {
+    const x = this.exactDelay[pid];
+    if (x === null) return this.reactionTicks[pid];
+    const rest = x.eighths % 8;
+    return (x.eighths - rest) / 8 + (rest > 0 && x.rng.nextInt(8) < rest ? 1 : 0);
   }
 
   step(): void {
@@ -325,7 +341,7 @@ export class ShooterDriver {
             m.applyCommands(pid, cmds);
           } else {
             // 依套用 tick 插入（延遲不同的選手可能後決策先生效）；同 tick 維持決策順序
-            const at = m.tick + this.reactionTicks[pid];
+            const at = m.tick + this.delayOf(pid);
             let i = this.pending.length;
             while (i > 0 && this.pending[i - 1].at > at) i -= 1;
             this.pending.splice(i, 0, { at, round: m.roundNumber, playerId: pid, commands: cmds as unknown[] });

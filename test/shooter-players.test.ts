@@ -3,12 +3,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { compileBot } from '../src/sandbox/compile.ts';
 import { resolveKnobs } from '../src/sandbox/controller.ts';
-import type { Attributes, ShooterInitData } from '../src/shooter/api.ts';
+import type { Attributes, ShooterInitData, ShooterObservation } from '../src/shooter/api.ts';
 import { ATTRIBUTE_KEYS, MIN_REACTION_TICKS } from '../src/shooter/config.ts';
 import { ShooterHumanController } from '../src/shooter/human.ts';
 import { MAPS } from '../src/shooter/map.ts';
-import { BALANCED_ROLES, MAX_VERSION, ROLE_TABLE, SHOOTER_ROLES, balancedLineup, derivePlayer, habitOffsets, reactionTicksFor } from '../src/shooter/players.ts';
-import { ShooterBatchController, ShooterDriver, runShooterMatch, type CallOutcome } from '../src/shooter/runner.ts';
+import { BALANCED_ROLES, MAX_VERSION, ROLE_TABLE, SHOOTER_ROLES, balancedLineup, derivePlayer, habitOffsets, reactionEighths, reactionTicksFor } from '../src/shooter/players.ts';
+import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, type CallOutcome } from '../src/shooter/runner.ts';
 import { DEFAULT_ATTRIBUTES, PLAYER_COUNT } from '../src/shooter/sim.ts';
 import { SHOOTER_CONTENT } from '../src/manage/content-shooter.ts';
 import { STUB_CONTENT } from '../src/manage/content.ts';
@@ -82,6 +82,36 @@ describe('反應延遲 reactionTicksFor', () => {
     expect(reactionTicksFor(at(50))).toBe(8);
     expect(reactionTicksFor(at(100))).toBe(5);
     for (let r = -20; r <= 120; r++) expect(reactionTicksFor(at(r))).toBeGreaterThanOrEqual(MIN_REACTION_TICKS);
+  });
+
+  it('精確延遲 reactionEighths：期望 ＝ 5 + (70 − reaction) / 8，70 以上是 5', () => {
+    expect(reactionEighths(at(50))).toBe(60);
+    expect(reactionEighths(at(69))).toBe(41);
+    expect(reactionEighths(at(70))).toBe(40);
+    expect(reactionEighths(at(100))).toBe(40);
+    expect(reactionEighths(at(0))).toBe(110);
+  });
+
+  it('機率式進位：每批指令 7 或 8 tick、平均 7.5；同種子相同、換種子不同；明確給延遲與沒屬性的不進位', () => {
+    const run = (seed: number, opts: { attrs?: boolean; ticks?: number } = {}): number[] => {
+      const seen: number[] = [];
+      const ctl = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ScriptController(`s${pid}`, (o: ShooterObservation) => {
+        if (pid === 2) seen.push(o.tick);
+        return pid === 2 ? [{ type: 'stop' }] : [];
+      }));
+      const d = new ShooterDriver({ seed, mapId: 'dust', controllers: ctl, record: true, ...(opts.attrs === false ? {} : { attributes: Array.from({ length: PLAYER_COUNT }, () => DEFAULT_ATTRIBUTES) }), ...(opts.ticks !== undefined ? { reactionTicks: Array.from({ length: PLAYER_COUNT }, () => opts.ticks) } : {}) });
+      for (let i = 0; i < 300; i++) d.step();
+      const done = d.replay!.decisions.filter((x) => x.playerId === 2).map((x) => x.tick);
+      return done.map((t, i) => t - seen[i]);
+    };
+    const a = run(7);
+    expect(a.length).toBeGreaterThan(80);
+    expect(new Set(a)).toEqual(new Set([7, 8]));
+    expect(Math.abs(a.reduce((x, y) => x + y, 0) / a.length - 7.5)).toBeLessThan(0.15);
+    expect(run(7)).toEqual(a);
+    expect(run(8)).not.toEqual(a);
+    expect(new Set(run(7, { ticks: 8 }))).toEqual(new Set([8]));
+    expect(new Set(run(7, { attrs: false }))).toEqual(new Set([MIN_REACTION_TICKS]));
   });
 
   it('均衡陣容五人平均 v1 約 9 → v5 約 5，每版快約 1 tick；角色 ±1；突破手最快、狙擊手與錨點最慢', () => {

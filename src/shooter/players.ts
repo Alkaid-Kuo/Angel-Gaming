@@ -58,6 +58,15 @@ export function reactionTicksFor(a: Attributes): number {
   return Math.max(MIN_REACTION_TICKS, MIN_REACTION_TICKS + Math.round((70 - r) / 8));
 }
 
+/**
+ * 反應延遲的精確值（Bot 2.2.1，單位 1／8 tick，整數）：期望延遲 ＝ 5 + (70 − reaction) / 8，reaction 70 以上是 5。
+ * 驅動層每次指令用選手的 PRNG 決定小數部分多等 1 tick 與否；reactionTicksFor 是給 Bot 看的四捨五入值（InitData.rules.reactionTicks）
+ */
+export function reactionEighths(a: Attributes): number {
+  const r = Math.round(Math.max(0, Math.min(100, a.reaction)));
+  return MIN_REACTION_TICKS * 8 + Math.max(0, 70 - r);
+}
+
 /** 個人習慣的偏移（六項各 −HABIT_RANGE～+HABIT_RANGE；habit = 0 全 0） */
 export function habitOffsets(habit: number): Attributes {
   if (habit === 0) return attrs(0, 0, 0, 0, 0, 0);
