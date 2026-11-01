@@ -168,7 +168,7 @@ export class BuyMenu {
     this.states.clear();
     this.cmpKey = '';
     this.el.innerHTML =
-      `<div class="sb-head"><b>購買</b><span class="sd">${team}</span><span class="tm"><i class="tb"><u></u></i><span class="tt"></span></span><span class="cl"><kbd>B</kbd> 關閉・<kbd>1</kbd>～<kbd>=</kbd> 快速購買</span></div>` +
+      `<div class="sb-head"><b>購買</b><span class="tm"><i class="tb"><u></u></i><span class="tt"></span></span><span class="cl"><kbd>B</kbd> 關閉・<kbd>1</kbd>～<kbd>=</kbd> 快速購買</span></div>` +
       `<div class="sb-body"><nav class="sb-cats"></nav><div class="sb-grid"></div><aside class="sb-info"></aside></div>` +
       `<div class="sb-foot"><span class="fm"><small>目前金錢</small><b class="now"></b></span><span class="ar">→</span><span class="fm"><small>購買後</small><b class="af"></b></span><span class="nt"></span></div>`;
     const q = <T extends HTMLElement>(s: string): T => this.el.querySelector(s) as T;
@@ -183,7 +183,7 @@ export class BuyMenu {
       const b = document.createElement('button');
       b.type = 'button';
       b.dataset.cat = c.id;
-      b.innerHTML = `<small>${c.en}</small><b>${c.name}</b>`;
+      b.textContent = c.name;
       b.addEventListener('click', () => this.pickCat(c.id));
       nav.appendChild(b);
     }

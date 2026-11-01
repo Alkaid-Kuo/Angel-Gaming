@@ -78,6 +78,7 @@ export class SpectateUi {
   private readonly mini: HTMLCanvasElement;
   private readonly rosters: readonly [HTMLElement, HTMLElement];
   private readonly rows = new Map<number, HTMLElement>();
+  private readonly bodies = new Map<number, HTMLElement>();
   private readonly heads: [HTMLElement, HTMLElement];
   private readonly timeline: HTMLElement;
   private readonly cells: HTMLElement;
@@ -119,7 +120,10 @@ export class SpectateUi {
         const row = div('ro', this.rosters[side]);
         row.dataset.pid = String(id);
         row.style.setProperty('--c', hud.groupColor(g));
+        // 頭像固定不動，內容只換右邊那塊
+        row.innerHTML = hud.face(id);
         this.rows.set(id, row);
+        this.bodies.set(id, div('bd', row));
       }
     });
     this.timeline = div('sg-timeline', root);
@@ -316,7 +320,7 @@ export class SpectateUi {
       const b = f.board[p.id];
       row.classList.toggle('dead', !p.alive);
       row.classList.toggle('sel', p.id === f.viewId);
-      setHtml(row, this.rowHtml(p, b));
+      setHtml(this.bodies.get(p.id) as HTMLElement, this.rowHtml(p, b));
     }
     this.renderTimeline(f.view);
   }

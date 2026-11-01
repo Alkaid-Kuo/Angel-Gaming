@@ -6,7 +6,8 @@ import type { RoundEndReason, ShooterObservation, Team, WeaponId } from '../../s
 import { mineGroup } from './render.ts';
 import type { CamMode } from './camera.ts';
 import type { BoardRow, FullState, KillFeedItem, ShooterFrame, ShooterMeta, ShooterSummary } from './protocol.ts';
-import { ScoreBar, clockText, clockTicks, gunIconUrl, visibleHp } from './scorebar.ts';
+import { clockText, clockTicks, visibleHp } from './hudinfo.ts';
+import { ScoreBar, avatarHtml, gunIconUrl } from './scorebar.ts';
 import type { WatchTicket } from './watch.ts';
 
 /** 天使金色票（web/sketch/angel.css） */
@@ -95,6 +96,7 @@ export class ShooterHud {
   private boardShown = false;
   /** 這回合自己是被誰、用什麼打死的（擊殺訊息是公開資訊） */
   private myDeath: KillFeedItem | null = null;
+  private readonly faces = new Map<number, string>();
   readonly rounds: RoundMark[] = [];
 
   constructor(root: HTMLElement, meta: ShooterMeta, ticket: WatchTicket | null = null) {
@@ -209,6 +211,16 @@ export class ShooterHud {
     return g === this.mine ? '#b9832a' : '#a33a3a';
   }
 
+  /** 選手頭像（同一個人只產生一次） */
+  face(id: number): string {
+    let html = this.faces.get(id);
+    if (html === undefined) {
+      html = avatarHtml(this.meta.names[id] ?? `#${id}`, this.groupJersey(this.meta.groups[id]));
+      this.faces.set(id, html);
+    }
+    return html;
+  }
+
   /** 目前當 team 的是哪一組（看名單裡任一個該陣營的人） */
   private groupOfTeam(team: Team, board: readonly BoardRow[]): 0 | 1 {
     const row = board.find((b) => b.team === team);
@@ -297,6 +309,7 @@ export class ShooterHud {
     const leftTeam: Team = this.groupOfTeam('T', f.board) === leftGroup ? 'T' : 'CT';
     const rightTeam: Team = leftTeam === 'T' ? 'CT' : 'T';
     const scoreOf = (team: Team): number => (team === 'T' ? r.scoreT : r.scoreCT);
+    const boardHead = { round: `第 ${r.number} 回合・${halfLabel(r.half, r.overtime)}`, score: `${scoreOf(leftTeam)} : ${scoreOf(rightTeam)}` };
     const ticks = clockTicks(view);
     this.score.update(f.board, (id) => visibleHp(view, f.full, id), ticks !== null ? clockText(ticks, tps) : '', r.phase, scoreOf(leftTeam), scoreOf(rightTeam));
     if (this.zone !== null) {
@@ -340,7 +353,7 @@ export class ShooterHud {
       const bomb = f.full !== null ? this.spectateBomb(f.full) : '';
       setHtml(this.bombBar, bomb);
       this.bombBar.classList.toggle('hidden', bomb === '');
-      if (this.boardShown) this.renderBoard(this.board, f.board, null, `${scoreOf(leftTeam)} : ${scoreOf(rightTeam)}`);
+      if (this.boardShown) this.renderBoard(this.board, f.board, null, boardHead);
       return;
     }
 
@@ -384,11 +397,11 @@ export class ShooterHud {
     setHtml(this.bombBar, bombHtml);
     this.bombBar.classList.toggle('hidden', bombHtml === '');
 
-    if (this.boardShown) this.renderBoard(this.board, f.board, null, `${scoreOf(leftTeam)} : ${scoreOf(rightTeam)}`);
+    if (this.boardShown) this.renderBoard(this.board, f.board, null, boardHead);
   }
 
   /** 計分板：兩隊各一欄（敵人的金錢在比賽中不公開）；我方在左 */
-  renderBoard(target: HTMLElement, rows: readonly BoardRow[], summary: ShooterSummary | null, score: string | null = null): void {
+  renderBoard(target: HTMLElement, rows: readonly BoardRow[], summary: ShooterSummary | null, head: { readonly round: string; readonly score: string } | null = null): void {
     const w = this.meta.watch;
     const marks: readonly RoundMark[] = summary !== null ? summary.rounds.map((x) => ({ number: x.number, winner: x.winner, reason: x.reason as RoundEndReason, winnerGroup: x.winnerGroup })) : this.rounds;
     const groupOfMark = (m: RoundMark): 0 | 1 => m.winnerGroup ?? (m.winner === 'T' ? 0 : 1);
@@ -404,14 +417,14 @@ export class ShooterHud {
             const money = summary !== null ? summary.players[r.id].money : r.money;
             const me = r.id === this.meta.playerId && !this.meta.spectate;
             const tag = w ? `<small class="tg">${esc(w.tags[r.id] ?? '')}</small>` : '';
-            return `<tr class="${r.alive || summary !== null ? '' : 'dead'}${me ? ' me' : ''}"><td class="pn"><b>${esc(this.meta.names[r.id] ?? '')}</b>${tag}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${money === null ? '—' : `$${money}`}</td></tr>`;
+            return `<tr class="${r.alive || summary !== null ? '' : 'dead'}${me ? ' me' : ''}"><td class="pn">${this.face(r.id)}<b>${esc(this.meta.names[r.id] ?? '')}</b>${tag}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${money === null ? '—' : `$${money}`}</td></tr>`;
           })
           .join('');
         const head = `<th class="pn" style="color:${this.groupColor(g)}">${this.groupName(g)}${team !== undefined && summary === null ? `<small>${team}</small>` : ''}</th>`;
         return `<table><thead><tr>${head}<th>擊殺</th><th>死亡</th><th>金錢</th></tr></thead><tbody>${body}</tbody></table>`;
       })
       .join('');
-    const title = score !== null ? `<h2><span>計分板</span><em>${score}</em></h2>` : '';
+    const title = head !== null ? `<h2><span>${head.round}</span><em>${head.score}</em></h2>` : '';
     setHtml(target.querySelector('.sg-board-body') ?? target, `${title}<div class="cols">${cols}</div><div class="hist">${hist}</div>`);
   }
 

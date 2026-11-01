@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ShooterObservation } from '../src/shooter/api.ts';
 import type { FullState } from '../src/web/shooter/protocol.ts';
-import { clockText, clockTicks, visibleHp } from '../src/web/shooter/scorebar.ts';
+import { clockText, clockTicks, visibleHp } from '../src/web/shooter/hudinfo.ts';
 import { buyToggle } from '../src/web/shooter/shop.ts';
 
 describe('商店開關', () => {

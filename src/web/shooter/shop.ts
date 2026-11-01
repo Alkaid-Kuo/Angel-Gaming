@@ -13,11 +13,11 @@ export interface ShopData {
 }
 
 export type ShopCat = 'pistol' | 'primary' | 'gear' | 'nade';
-export const SHOP_CATS: readonly { readonly id: ShopCat; readonly name: string; readonly en: string }[] = [
-  { id: 'pistol', name: '手槍', en: 'PISTOL' },
-  { id: 'primary', name: '主武器', en: 'PRIMARY' },
-  { id: 'gear', name: '護甲與裝備', en: 'GEAR' },
-  { id: 'nade', name: '道具', en: 'GRENADE' },
+export const SHOP_CATS: readonly { readonly id: ShopCat; readonly name: string }[] = [
+  { id: 'pistol', name: '手槍' },
+  { id: 'primary', name: '主武器' },
+  { id: 'gear', name: '護甲與裝備' },
+  { id: 'nade', name: '道具' },
 ];
 
 export interface ShopEntry {

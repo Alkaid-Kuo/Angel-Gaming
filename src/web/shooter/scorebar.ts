@@ -1,8 +1,8 @@
 // 頂部計分：兩隊頭像夾著時間與比分。隊別只看顏色，不寫字；陣亡變灰。
 // 頭像是靜態 DOM，每幀只改 class 和血條寬度，SVG 不重建。敵人的血量觀察資料沒有，對局中只有一條隊色線；觀戰有全狀態，全員都有血條。
-import type { ShooterObservation, WeaponId } from '../../shooter/api.ts';
+import type { WeaponId } from '../../shooter/api.ts';
 import { avatarSvg } from '../club/art.ts';
-import type { BoardRow, FullState, ShooterMeta } from './protocol.ts';
+import type { BoardRow, ShooterMeta } from './protocol.ts';
 import { paintGunIcon } from './soldier.ts';
 
 const ICON_W = 216;
@@ -25,26 +25,6 @@ export function gunIconUrl(id: WeaponId): string {
 
 /** 選手頭像：先用經營層的生成頭像，種子是名字 */
 export const avatarHtml = (name: string, jersey: string): string => avatarSvg(name, jersey, 96);
-
-/** 這個人的血量：觀戰全員；對局只有自己與隊友，敵人 null */
-export function visibleHp(view: ShooterObservation, full: FullState | null, id: number): number | null {
-  if (full !== null) return full.players.find((p) => p.id === id)?.hp ?? null;
-  if (view.me.id === id) return view.me.hp;
-  return view.teammates.find((t) => t.id === id)?.hp ?? null;
-}
-
-/** 頂部的時間：凍結與回合中是階段倒數，下包後是炸彈倒數，回合結束不顯示 */
-export function clockTicks(view: ShooterObservation): number | null {
-  const r = view.round;
-  if (r.phase === 'freeze' || r.phase === 'live') return r.phaseTicksLeft;
-  if (r.phase === 'planted') return view.bomb.ticksLeft;
-  return null;
-}
-
-export function clockText(ticks: number, tps: number): string {
-  const s = Math.ceil(ticks / tps);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
 
 interface Cell {
   readonly id: number;
