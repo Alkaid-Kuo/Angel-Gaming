@@ -4,6 +4,7 @@
 // 用法：node scripts/build-shooter-bots.ts          產生
 //       node scripts/build-shooter-bots.ts --check  只檢查產生的檔案是否和原始碼一致（不一致時結束碼為 1）
 import { readFileSync, writeFileSync } from 'node:fs';
+import { tokenizer } from 'acorn';
 
 export const SHOOTER_BOTS = [{ entry: 'baseline.js', out: 'bots/shooter-baseline.js' }] as const;
 
@@ -74,7 +75,16 @@ export function buildShooterBot(entry: string): string {
     ...stripComments(files.filter((f) => f !== entry).flatMap((f) => body(f, false))),
     ...stripComments(head.slice(firstCode)),
   ];
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+  return compactIndent(out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()) + '\n';
+}
+
+/** 產物移除縮排以留給行為邏輯空間；詞法分析保留多行字串／template 的原始空白，換行與 JSDoc 都保留。 */
+export function compactIndent(source: string): string {
+  const protectedRanges: [number, number][] = [];
+  for (const token of tokenizer(source, { ecmaVersion: 2020, sourceType: 'module' })) {
+    if (source.slice(token.start, token.end).includes('\n')) protectedRanges.push([token.start, token.end]);
+  }
+  return source.replace(/^ +/gm, (spaces: string, offset: number) => protectedRanges.some(([a, b]) => offset >= a && offset < b) ? spaces : '');
 }
 
 function current(path: string): string {

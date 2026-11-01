@@ -1,0 +1,2 @@
+# 建置產物有 200 KiB 限制及雜湊封存；Windows checkout 也保留 LF。
+bots/shooter-baseline*.js text eol=lf

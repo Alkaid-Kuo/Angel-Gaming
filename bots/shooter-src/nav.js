@@ -65,6 +65,7 @@ export class Navigator {
     this.peeked = new Map();
     this.replans = 0;
     this.detour = false;
+    this.priority = false;
     this.jammed = 0;
     /** 上一次探頭停的位置 @type {{ x: number, y: number, t: number } | null} */
     this.lastPeek = null;
@@ -96,6 +97,7 @@ export class Navigator {
     this.peeked = new Map();
     this.replans = 0;
     this.detour = false;
+    this.priority = false;
     this.jammed = 0;
     /** 上一次探頭停的位置 @type {{ x: number, y: number, t: number } | null} */
     this.lastPeek = null;
@@ -135,8 +137,8 @@ export class Navigator {
     const region = this.intel.region;
     for (let i = 0; i < g.N; i++) {
       if (g.block[i] === 1) continue;
-      let e = this.base[i] + danger[i];
-      if (route !== null && !route.regionSet.has(region[i])) e += P.offRoute;
+      let e = this.base[i] + danger[i] * (this.priority ? 0.15 : 1);
+      if (!this.priority && route !== null && !route.regionSet.has(region[i])) e += P.offRoute;
       extra[i] = e;
     }
     for (const i of this.hazard) extra[i] += 300;
@@ -261,12 +263,13 @@ export class Navigator {
   /**
    * 每次決策：沿路徑走（含探頭）
    * @param {import('./base.js').Observation} obs
-   * @param {{ allowPeek: boolean, speed: number, evading: boolean }} opts
+   * @param {{ allowPeek: boolean, speed: number, evading: boolean, priority?: boolean }} opts
    * @returns {NavOut}
    */
   step(obs, opts) {
     const me = obs.me;
     const t = obs.tick;
+    if (this.priority !== (opts.priority ?? false)) { this.priority = opts.priority ?? false; this.wps = []; this.path = []; }
     /** @type {NavOut} */
     const out = { cmds: [], look: null, moving: false, peeking: false, arrived: false, walk: false };
     if (this.goal === null) {

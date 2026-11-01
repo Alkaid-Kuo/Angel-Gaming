@@ -18,6 +18,8 @@ import { Navigator } from './nav.js';
 import { Combat } from './combat.js';
 import { Tactics } from './tactics.js';
 import { AWP, ROLE_NAME, autoRole } from './roles.js';
+import { Judgment } from './judgment.js';
+import { Mission } from './mission.js';
 
 export default class ShooterBaseline {
   constructor() {
@@ -46,7 +48,7 @@ export default class ShooterBaseline {
   declare() {
     return {
       name: 'shooter-baseline',
-      version: '2.2',
+      version: '2.4',
       style: '基準',
       knobs: [
         { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
@@ -86,10 +88,14 @@ export default class ShooterBaseline {
     this.intel = new MapIntel(data.map, this.g);
     this.perc = new Perception(this.g, this.intel, data, attrs.awareness);
     this.nav = new Navigator(this.g, this.intel, this.perc, attrs, data);
+    this.judge = new Judgment(this.g, this.intel, this.perc, data);
+    this.mission = new Mission(data, this.judge);
     this.combat = new Combat(this.g, this.intel, this.perc, this.nav, attrs, data, helpers);
     this.tactics = new Tactics(this.g, this.intel, this.perc, data, helpers, { awpSlot, role, economy: k.economy ?? 0, ctSplitA: k.ctSplitA ?? P.ctSplitA, plan: k.plan ?? 0 }, attrs);
     this.tactics.combat = this.combat;
     this.tactics.nav = this.nav;
+    this.tactics.judge = this.judge;
+    this.tactics.mission = this.mission;
   }
 
   /** @param {import('./base.js').Observation} obs */
@@ -97,6 +103,8 @@ export default class ShooterBaseline {
     this.round = obs.round.number;
     this.perc.reset();
     this.nav.reset();
+    this.judge?.reset();
+    this.mission?.reset();
     this.combat.reset();
     this.tactics.reset(obs);
   }
@@ -128,7 +136,9 @@ export default class ShooterBaseline {
     const fight = this.combat.engage(obs, { holding, objective: tac.objective });
     const w = this.combat.weapon(me.weapon);
     const speed = (w?.speed ?? 130) * (me.walking ? 0.52 : 1) * (me.crouching ? 0.34 : 1);
-    const nav = this.nav.step(obs, { allowPeek: tac.allowPeek && !fight.engaged && ev === null, speed, evading: ev !== null });
+    const nav = this.nav.step(obs, { allowPeek: tac.allowPeek && !tac.commit && !fight.engaged && ev === null, speed, evading: ev !== null, priority: tac.commit });
+    const ahead = this.nav.wps[this.nav.wpIdx] ?? tac.goal;
+    const check = ahead !== null && !fight.engaged && ev === null && !tac.objective && !tac.urgent && !tac.stop && !tac.escape && !tac.commit && dist(me.x, me.y, ahead.x, ahead.y) > 900 ? this.judge?.approach(obs, ahead) : null;
     // ── 移動：自保 → 交戰 → 架槍 → 導航 ──
     let moving = false;
     if (!tac.objective) {
@@ -136,11 +146,17 @@ export default class ShooterBaseline {
         out.push({ type: 'move', x: Math.round(ev.move.x), y: Math.round(ev.move.y) });
         moving = true;
       } else if (ev !== null) out.push({ type: 'stop' });
-      else if (fight.move === 'stop') out.push({ type: 'stop' });
+      else if (tac.escape) {
+        out.push(...nav.cmds);
+        moving = nav.moving;
+      } else if (tac.commit && !fight.engaged) {
+        out.push(...nav.cmds);
+        moving = nav.moving;
+      } else if (fight.move === 'stop') out.push({ type: 'stop' });
       else if (fight.move !== null) {
         out.push({ type: 'move', x: Math.round(fight.move.x), y: Math.round(fight.move.y) });
         moving = true;
-      } else if (fight.holdNav || (tac.stop && !fight.engaged)) out.push({ type: 'stop' });
+      } else if (check?.stop || fight.holdNav || (tac.stop && !fight.engaged)) out.push({ type: 'stop' });
       else {
         out.push(...nav.cmds);
         moving = nav.moving;
@@ -148,19 +164,21 @@ export default class ShooterBaseline {
     }
     // ── 瞄準 ──
     const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
-    const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
+    const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
     if (aim !== null && (Math.abs(aim.x - me.x) > 50 || Math.abs(aim.y - me.y) > 50)) out.push({ type: 'aim', x: Math.round(aim.x), y: Math.round(aim.y) });
     // ── 開火與武器 ──
     out.push({ type: 'fire', on: (fight.fire || (tac.noise && !fight.engaged)) && !tac.objective && !tac.hard });
-    out.push(...fight.cmds);
+    out.push(...fight.cmds.filter((c) => !(tac.escape || (tac.commit && !fight.engaged)) || c.type !== 'scope' || !c.on));
+    if (tac.commit && me.scoped && !fight.engaged) out.push({ type: 'scope', on: false });
     if (!fight.engaged) out.push(...this.combat.upkeep(obs, holding && !moving));
     // ── 姿勢：移動時不蹲 ──
     const crouch = moving ? false : ev !== null ? ev.crouch : (fight.crouch ?? false);
     if (crouch !== me.crouching) out.push({ type: 'crouch', on: crouch });
-    const walk = (tac.walk ?? nav.walk) && !fight.engaged && ev === null;
+    const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
     if (walk !== me.walking) out.push({ type: 'walk', on: walk });
     out.push(...late);
-    this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}｜${ev !== null ? ev.why : fight.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
+    const reason = this.mission?.reason ?? '';
+    this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
     return out;
   }
 }

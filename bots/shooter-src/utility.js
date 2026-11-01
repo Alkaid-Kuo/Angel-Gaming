@@ -175,6 +175,7 @@ export class Utility {
       this.away = { x: s.x, y: s.y, tx: wish.x, ty: wish.y, from: t + this.rules.reactionTicks + 1, until: pop + 3 };
       out.cmds.push({ type: 'say', text: `E:flash ${Math.round(s.x / 100)} ${Math.round(s.y / 100)} ${pop}` });
     } else if (wish.kind === 'smoke') out.cmds.push({ type: 'say', text: `E:smoke ${Math.round(s.x / 100)} ${Math.round(s.y / 100)}` });
+    else if (wish.kind === 'molotov' || wish.kind === 'incendiary') out.cmds.push({ type: 'say', text: `E:burn ${Math.round(s.x / 100)} ${Math.round(s.y / 100)} ${t + 8 * this.tps}` });
     return out;
   }
 
