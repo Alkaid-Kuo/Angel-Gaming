@@ -14,6 +14,7 @@ import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { BotLevel, FromShooterWorker, Lineup, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
+import { BUY_CLOSED_NOTE, buyToggle } from './shop.ts';
 import { SpectateUi } from './spectate.ts';
 import { WATCH_HASH, readTicket, ticketVersionError, type WatchTicket } from './watch.ts';
 import { DAMAGE_MS, HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type Corpse, type DamagePop, type DrawInput, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
@@ -142,7 +143,10 @@ class Game {
       buyOpen: () => this.buy.isOpen(),
       buyKey: (code) => this.buy.key(code),
       toggleBuy: () => {
-        if (!meta.spectate) this.buy.setOpen(!this.buy.isOpen());
+        if (meta.spectate) return;
+        const act = buyToggle(this.buy.isOpen(), this.cur?.self.round.canBuy === true);
+        if (act === 'deny') this.hud.cue(BUY_CLOSED_NOTE, performance.now());
+        else this.buy.setOpen(act === 'open');
       },
       closeBuy: () => {
         if (this.spec?.helpOpen() === true) {

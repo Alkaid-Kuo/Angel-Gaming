@@ -19,6 +19,7 @@ const FEED_MS = 6000;
 /** 名字、隊名來自經營層存檔（玩家可自訂隊名），放進 HTML 前跳脫 */
 const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const BANNER_MS = 3200;
+const CUE_MS = 1600;
 
 const clock = (ticks: number, tps: number): string => {
   const s = Math.ceil(ticks / tps);
@@ -85,6 +86,8 @@ export class ShooterHud {
   private readonly mine: 0 | 1 | null;
   private feedItems: { item: KillFeedItem; t: number }[] = [];
   private bannerUntil = 0;
+  private cueText = '';
+  private cueUntil = 0;
   private boardShown = false;
   /** 這回合自己是被誰、用什麼打死的（擊殺訊息是公開資訊） */
   private myDeath: KillFeedItem | null = null;
@@ -114,6 +117,12 @@ export class ShooterHud {
       `<button type="button" data-act="fullscreen">全螢幕（F）</button>` +
       `<button type="button" data-act="quit">${quit}</button></div>` +
       `<p class="muted small">全螢幕時 Ctrl 蹲著按 W 不會關掉分頁（按住 Esc 離開全螢幕）。${meta.spectate ? '' : '離開比賽＝直接回開局畫面，不計成績。'}</p></div>`;
+  }
+
+  /** 短暫提示（按了但現在不能做的事） */
+  cue(text: string, now: number): void {
+    this.cueText = text;
+    this.cueUntil = now + CUE_MS;
   }
 
   showBanner(html: string, now: number): void {
@@ -355,6 +364,7 @@ export class ShooterHud {
       if (self.me.hasBomb && r.phase === 'live') hints.push('你帶著炸彈：到 A／B 點按住 <kbd>E</kbd>（或 <kbd>5</kbd> 選炸彈後按住左鍵）下包');
       if (self.me.team === 'CT' && (self.bomb.state === 'planted' || self.bomb.state === 'defusing') && self.bomb.x !== null && Math.hypot(self.bomb.x - self.me.x, (self.bomb.y ?? 0) - self.me.y) <= 1500 && self.me.defuseTicks === 0) hints.push('按住 <kbd>E</kbd> 拆包');
     }
+    if (now < this.cueUntil) hints.push(this.cueText);
     setHtml(this.hint, hints.join('<span class="sep"></span>'));
 
     if (this.meta.spectate) {

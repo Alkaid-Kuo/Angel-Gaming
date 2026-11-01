@@ -3,7 +3,7 @@
 // 卡片四種狀態：買得起、買不起、已持有、陣營限定。買不了的卡片不是 disabled：點了要在底部說明為什麼。
 import type { BuyItem, GrenadeId, ShooterObservation, Team, WeaponInfo } from '../../shooter/api.ts';
 import type { ShooterMeta } from './protocol.ts';
-import { SHOP_CATS, compareRow, compareTarget, buyTicksLeft, gearNote, grenadeNote, grenadeRows, isIssued, shopEntries, shopState, stateNote, weaponRows, type ShopCat, type ShopEntry, type ShopState, type StatRow } from './shop.ts';
+import { BUY_CLOSED_NOTE, SHOP_CATS, compareRow, compareTarget, buyTicksLeft, gearNote, grenadeNote, grenadeRows, isIssued, shopEntries, shopState, stateNote, weaponRows, type ShopCat, type ShopEntry, type ShopState, type StatRow } from './shop.ts';
 import { paintGunIcon } from './soldier.ts';
 
 const KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'];
@@ -326,7 +326,7 @@ export class BuyMenu {
     this.updateFoot(s);
     const rules = this.meta.rules;
     const left = s.round.canBuy ? buyTicksLeft(s.round, rules) : 0;
-    const text = s.round.canBuy ? `剩 ${Math.ceil(left / rules.ticksPerSecond)} 秒可購買` : '不在購買時間或出生區';
+    const text = s.round.canBuy ? `剩 ${Math.ceil(left / rules.ticksPerSecond)} 秒可購買` : BUY_CLOSED_NOTE;
     if (this.timer.textContent !== text) this.timer.textContent = text;
     this.timerBar.style.width = `${Math.round((left / rules.buyTicks) * 100)}%`;
     this.timerBar.parentElement?.classList.toggle('low', left < 5 * rules.ticksPerSecond);
