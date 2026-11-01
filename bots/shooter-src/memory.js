@@ -167,6 +167,17 @@ export class Perception {
     if (this.known.delete(id)) this.dangerDirty = true;
   }
 
+  /** 敵人全滅：記得的位置、聲音、危險格都作廢 */
+  clearEnemies() {
+    if (this.known.size === 0 && this.anon.length === 0 && this.sectors.length === 0) return;
+    this.known.clear();
+    this.anon.length = 0;
+    this.sectors.length = 0;
+    this.lastSound = null;
+    this.lastHurt = null;
+    this.dangerDirty = true;
+  }
+
   /** @param {number} x @param {number} y @param {number} conf @param {number} t */
   notePoint(x, y, conf, t) {
     let best = null;

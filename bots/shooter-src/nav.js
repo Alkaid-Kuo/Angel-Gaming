@@ -5,7 +5,7 @@
 // 等一下再依侵略度肩探（露一半再退回）或直接過。另有找掩體、離開某點、離開火區的小搜尋。
 import { DIR8, Heap, P, UNIT, dist, lerp } from './base.js';
 
-/** @typedef {{ portal: number, hold: import('./base.js').Pt, far: import('./base.js').Pt, cross: import('./base.js').Pt, phase: 'approach' | 'hold' | 'shoulder' | 'back', left: number, since: number }} Peek */
+/** @typedef {{ portal: number, hold: import('./base.js').Pt, far: import('./base.js').Pt, cross: import('./base.js').Pt, phase: 'approach' | 'hold' | 'shoulder' | 'back', left: number, since: number, reach: number }} Peek */
 /** @typedef {{ cmds: import('./base.js').Command[], look: import('./base.js').Pt | null, moving: boolean, peeking: boolean, arrived: boolean, walk: boolean }} NavOut */
 
 export class Navigator {
@@ -64,7 +64,10 @@ export class Navigator {
     /** @type {Map<number, number>} */
     this.peeked = new Map();
     this.replans = 0;
-
+    this.detour = false;
+    this.jammed = 0;
+    /** 上一次探頭停的位置 @type {{ x: number, y: number, t: number } | null} */
+    this.lastPeek = null;
   }
 
   reset() {
@@ -92,6 +95,10 @@ export class Navigator {
     /** @type {Map<number, number>} */
     this.peeked = new Map();
     this.replans = 0;
+    this.detour = false;
+    this.jammed = 0;
+    /** 上一次探頭停的位置 @type {{ x: number, y: number, t: number } | null} */
+    this.lastPeek = null;
   }
 
   /**
@@ -254,7 +261,7 @@ export class Navigator {
   /**
    * 每次決策：沿路徑走（含探頭）
    * @param {import('./base.js').Observation} obs
-   * @param {{ allowPeek: boolean, speed: number }} opts
+   * @param {{ allowPeek: boolean, speed: number, evading: boolean }} opts
    * @returns {NavOut}
    */
   step(obs, opts) {
@@ -280,11 +287,16 @@ export class Navigator {
     const holding = this.peek !== null && this.peek.phase === 'hold';
     if (!freeze && !holding && this.moveStreak >= 3 && still) this.stuck++;
     else this.stuck = 0;
+    if (!still) this.jammed = 0;
     let avoid = this.avoid !== null && t < this.avoidUntil ? this.avoid : null;
     const blockedAhead = this.stuck >= 4 && this.personAhead(obs);
     if (this.stuck >= P.stuckDecisions || blockedAhead) {
-      // 隊友貼在前面（互相擋住）：往路徑的側邊讓開半秒（id 單雙決定往哪邊，避免兩人往同一邊）
-      if (blockedAhead && obs.teammates.some((m) => m.alive && dist(m.x, m.y, me.x, me.y) < 900)) this.side = this.sideStep(obs);
+      // 隊友貼在前面（互相擋住）：往路徑的側邊讓開半秒（id 單雙決定往哪邊，避免兩人往同一邊）；
+      // 讓了還是動不了（三個人卡成一團，側邊也有人）就直接往遠離他們的方向退
+      const jam = obs.teammates.filter((m) => m.alive && dist(m.x, m.y, me.x, me.y) < 900);
+      if (jam.length > 0 && this.jammed >= 1) this.side = this.scatter(obs, jam);
+      else if (blockedAhead && jam.length > 0) this.side = this.sideStep(obs);
+      this.jammed++;
       avoid = this.peopleCells(obs);
       this.avoid = avoid;
       this.avoidUntil = t + 2 * this.tps;
@@ -295,7 +307,11 @@ export class Navigator {
     // ── 重算：沒有路徑、危險地圖更新且超過間隔、偏離路徑 ──
     const wp = this.wps[this.wpIdx];
     const off = wp !== undefined && dist(me.x, me.y, wp.x, wp.y) > 4 * UNIT && !this.g.walkLine(me.x, me.y, wp.x, wp.y);
-    if (this.wps.length === 0 || off || this.hazard.size !== this.hazardSize || (this.perc.dangerTick > this.planTick && t - this.planTick >= P.replanTicks)) this.plan(obs, avoid);
+    // 剛結束自保（離開火區、躲道具、被閃）：人已經不在舊路徑上，舊路徑點可能穿過火區，重算
+    if (opts.evading) this.detour = true;
+    const back = this.detour && !opts.evading;
+    if (back) this.detour = false;
+    if (back || this.wps.length === 0 || off || this.hazard.size !== this.hazardSize || (this.perc.dangerTick > this.planTick && t - this.planTick >= P.replanTicks)) this.plan(obs, avoid);
     // ── 前進路徑點 ──
     while (this.wpIdx < this.wps.length - 1) {
       const p = this.wps[this.wpIdx];
@@ -311,13 +327,14 @@ export class Navigator {
       if (this.peek !== null) {
         const pk = this.peek;
         const dHold = dist(me.x, me.y, pk.hold.x, pk.hold.y);
-        if (dHold > 9 * UNIT || t - pk.since > 8 * this.tps) {
+        if (dHold > pk.reach || t - pk.since > 8 * this.tps) {
           this.peeked.set(pk.portal, t);
           this.peek = null;
         } else {
           out.peeking = true;
           out.look = pk.far;
-          out.walk = true;
+          // 快到才靜步（探頭從 12 格外就排定，整段靜步太慢）
+          out.walk = dHold < 4 * UNIT;
           if (pk.phase === 'approach') {
             target = pk.hold;
             if (dHold < 700) {
@@ -328,6 +345,7 @@ export class Navigator {
           if (pk.phase === 'hold') {
             target = pk.hold;
             if (--pk.left <= 0) {
+              this.lastPeek = { x: pk.hold.x, y: pk.hold.y, t };
               if (this.attrs.aggression * 100 < P.shoulderBelow && this.attrs.movement * 100 >= P.shoulderMove) {
                 pk.phase = 'shoulder';
                 pk.left = 3;
@@ -383,6 +401,18 @@ export class Navigator {
       if (this.g.walkLine(me.x, me.y, x, y)) return { x, y, until: obs.tick + 15 };
     }
     return null;
+  }
+
+  /** 卡成一團：往遠離這群人重心的方向走 1.5 格（走不通就往路徑側邊） @param {import('./base.js').Observation} obs @param {{ x: number, y: number }[]} jam */
+  scatter(obs, jam) {
+    const me = obs.me;
+    const cx = jam.reduce((a, m) => a + m.x, me.x) / (jam.length + 1);
+    const cy = jam.reduce((a, m) => a + m.y, me.y) / (jam.length + 1);
+    const len = dist(me.x, me.y, cx, cy);
+    if (len < 1) return this.sideStep(obs);
+    const x = me.x + ((me.x - cx) / len) * 1500;
+    const y = me.y + ((me.y - cy) / len) * 1500;
+    return this.g.walkLine(me.x, me.y, x, y) ? { x, y, until: obs.tick + 15 } : this.sideStep(obs);
   }
 
   /** 有活人貼在前進方向 1 格內 @param {import('./base.js').Observation} obs */
@@ -460,7 +490,10 @@ export class Navigator {
       if (!portal.choke && !this.isEntrance(pid)) continue;
       const last = this.peeked.get(pid);
       if (last !== undefined && t - last < 15 * this.tps) continue;
-      const farIdx = Math.min(path.length - 1, i + 3);
+      // 門洞的兩端算同一個窄口：剛探過 8 格內的不再停
+      if (this.lastPeek !== null && t - this.lastPeek.t < 5 * this.tps && dist(this.lastPeek.x, this.lastPeek.y, g.center(path[i]).x, g.center(path[i]).y) < 8 * UNIT) continue;
+      // 看窄口後面 6 格（門洞、短走廊本身常常已經看過，後面才是要探的）
+      const farIdx = Math.min(path.length - 1, i + 6);
       const far = g.center(path[farIdx]);
       if (!this.perc.reachable(path[farIdx], t, 4) || this.perc.cleared(path[farIdx], t)) continue;
       if (obs.teammates.some((m) => m.alive && dist(m.x, m.y, far.x, far.y) < 6 * UNIT)) continue;
@@ -470,8 +503,9 @@ export class Navigator {
         this.peeked.set(pid, t);
         continue;
       }
-      const lookIdx = Math.min(path.length - 1, i + 6);
-      return { portal: pid, hold: g.center(path[holdIdx]), far: g.center(path[lookIdx]), cross: g.center(path[i]), phase: 'approach', left: 0, since: t };
+      const hold = g.center(path[holdIdx]);
+      // 放棄探頭的距離從當下算（路徑前方 12 格可能斜走，直線距離比 9 格遠）
+      return { portal: pid, hold, far, cross: g.center(path[i]), phase: 'approach', left: 0, since: t, reach: dist(me.x, me.y, hold.x, hold.y) + 3 * UNIT };
     }
     return null;
   }

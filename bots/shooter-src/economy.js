@@ -4,6 +4,8 @@
 // 手槍局（錢 ≤ 起始金錢＋100、沒有主武器）一律護甲；加時每半場一開始錢多，自然是 full。
 // 連敗補償照規則自己推算（只用比分變化：半場第一回合歸零、輸一場升一階、贏一場降一階），不讀引擎內部。
 
+import { P } from './base.js';
+
 /** @typedef {'full' | 'force' | 'half' | 'eco'} BuyCall */
 
 /** 解析「B:<買法>」 @param {string} text @returns {BuyCall | null} */
@@ -116,7 +118,7 @@ export class Economy {
 
   /**
    * 指揮決定全隊買法：全隊有 4 人買得起全買 → full；這回合 eco 下回合就能全買 → eco；
-   * 手槍局、對方賽點、半場最後一回合 → force；手槍局贏了的第二回合、或買不起全買但夠衝鋒槍 → half
+   * 手槍局、對方賽點、半場最後一回合、輸手槍局後的第二回合 → force；手槍局贏了的第二回合、或買不起全買但夠衝鋒槍 → half
    * @param {import('./base.js').Observation} obs @returns {BuyCall}
    */
   teamCall(obs) {
@@ -139,6 +141,7 @@ export class Economy {
     const half = this.cost('smg') + this.data.rules.armorPrice;
     if (critical && avg >= half * 0.8) return 'force';
     if (this.roundInHalf === 2 && this.lastWon === true && avg >= half) return 'half';
+    if (this.roundInHalf === 2 && this.lastWon === false) return /** @type {BuyCall} */ (P.afterPistol);
     if (canNext >= n - 1) return 'eco';
     if (this.opts.economy === 2 && avg >= half) return 'force';
     if (this.opts.economy !== 1 && avg >= half + 600) return 'half';

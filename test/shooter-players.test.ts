@@ -76,11 +76,28 @@ describe('選手衍生 derivePlayer', () => {
 
 describe('反應延遲 reactionTicksFor', () => {
   const at = (reaction: number): Attributes => ({ ...DEFAULT_ATTRIBUTES, reaction });
-  it('reaction 0 → 11、50 → 8、100 → 5；永遠 ≥ 5', () => {
-    expect(reactionTicksFor(at(0))).toBe(11);
+  it('reaction 0 → 14、50 → 8、70 以上 → 5；永遠 ≥ 5', () => {
+    expect(reactionTicksFor(at(0))).toBe(14);
+    expect(reactionTicksFor(at(70))).toBe(5);
     expect(reactionTicksFor(at(50))).toBe(8);
     expect(reactionTicksFor(at(100))).toBe(5);
     for (let r = -20; r <= 120; r++) expect(reactionTicksFor(at(r))).toBeGreaterThanOrEqual(MIN_REACTION_TICKS);
+  });
+
+  it('均衡陣容五人平均 v1 約 9 → v5 約 5，每版快約 1 tick；角色 ±1；突破手最快、狙擊手與錨點最慢', () => {
+    const want = [9, 8, 7, 6, 5];
+    for (let v = 1; v <= MAX_VERSION; v++) {
+      const row = balancedLineup(v).map((s) => ({ role: s.role, ticks: derivePlayer(s).reactionTicks }));
+      const ticks = row.map((x) => x.ticks);
+      const avg = ticks.reduce((a, b) => a + b, 0) / ticks.length;
+      expect(Math.abs(avg - want[v - 1])).toBeLessThanOrEqual(0.5);
+      expect(Math.max(...ticks) - Math.min(...ticks)).toBeLessThanOrEqual(2);
+      expect(Math.min(...ticks)).toBeGreaterThanOrEqual(MIN_REACTION_TICKS);
+      const of = (role: string): number => row.find((x) => x.role === role)!.ticks;
+      expect(of('entry')).toBe(Math.min(...ticks));
+      expect(of('awp')).toBe(Math.max(...ticks));
+      expect(of('anchor')).toBe(Math.max(...ticks));
+    }
   });
 });
 
@@ -126,7 +143,7 @@ describe('驅動層接屬性', () => {
     expect(d.reactionTicks[0]).toBe(0);
     expect(d.reactionTicks[1]).toBe(MIN_REACTION_TICKS);
     expect(d.reactionTicks[2]).toBe(9);
-    expect(d.reactionTicks[3]).toBe(11);
+    expect(d.reactionTicks[3]).toBe(14);
     expect(probes2[3].data!.attributes).toEqual(low);
   });
 
@@ -154,7 +171,7 @@ describe('射擊內容包 SHOOTER_CONTENT', () => {
       expect(l.power.length).toBe(MAX_VERSION);
       expect(l.name).toBe(ROLE_TABLE[l.id as keyof typeof ROLE_TABLE].name);
       for (let i = 1; i < l.power.length; i++) expect(l.power[i]).toBeGreaterThan(l.power[i - 1]);
-      for (const p of l.power) expect(Number.isInteger(p) && p > 1000 && p < 2000).toBe(true);
+      for (const p of l.power) expect(Number.isInteger(p) && p > 1000 && p < 2400).toBe(true);
     }
     const top = SHOOTER_CONTENT.lineages[0].power[MAX_VERSION - 1];
     const low = SHOOTER_CONTENT.lineages[0].power[0];

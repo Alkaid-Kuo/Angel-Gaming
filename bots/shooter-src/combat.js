@@ -34,12 +34,12 @@ export class Combat {
     const off = attrs.offAim ?? attrs.aim;
     this.errOff = lerp(P.aimErr0, P.aimErr100, off) * UNIT;
     this.convOff = lerp(P.aimConv0, P.aimConv100, off);
-    this.reactExtra = Math.round(lerp(P.react0, P.react100, attrs.reaction));
+    this.reactExtra = Math.max(0, lerp(P.react0, P.react100, attrs.reaction) + lerp(P.reactAggr0, P.reactAggr100, attrs.aggression));
     // 預瞄（2.1）：新目標出現在自己正看著的方向時，初始瞄準誤差縮小（警覺 0 → 100：× 1 → × (1 − P.preAimErr)），
     // 而且有「警覺」的機率少等一次決策（至少還等一次，不會在瞄準還沒收斂時就開火）
     this.preAim = 1 - P.preAimErr * attrs.awareness;
     this.awareness = attrs.awareness;
-    this.wait = this.reactExtra;
+    this.wait = Math.round(this.reactExtra);
     // 餘光察覺（2.1）：離準心 P.periphDeg 度以外出現的敵人，每次決策以這個機率注意到（警覺 0 → 100）；開火的敵人一定注意到
     this.notice = lerp(P.notice0, P.notice100, attrs.awareness);
     /** 已注意到的敵人 → 最後看到的 tick @type {Map<number, number>} */
@@ -76,9 +76,12 @@ export class Combat {
     this.trailTick = -1000000;
     /** 被閃時要退回的點 @type {import('./base.js').Pt | null} */
     this.blindBack = null;
+    /** 看過的火：位置 → 燒的格與燒完的 tick @type {Map<string, { cells: readonly number[], until: number }>} */
+    this.fires = new Map();
   }
 
   reset() {
+    this.fires = new Map();
     this.noticed = new Map();
     this.targetId = -1;
     this.seen = 0;
@@ -102,6 +105,13 @@ export class Combat {
     this.trailTick = -1000000;
     /** 被閃時要退回的點 @type {import('./base.js').Pt | null} */
     this.blindBack = null;
+  }
+
+  /** 敵人全滅：不再架槍、撤退 */
+  clearTargets() {
+    this.lostPos = null;
+    this.retreat = null;
+    this.targetId = -1;
   }
 
   /** @param {string} id */
@@ -135,10 +145,14 @@ export class Combat {
   evade(obs) {
     const me = obs.me;
     const g = this.g;
-    // 站在火上：走到最近不著火的格
+    // 站在火上：走到最近不著火的格。看過的火記到燒完（轉身看不到了也不走回去）
+    for (const e of obs.effects) if (e.kind === 'fire' && e.cells !== undefined) this.fires.set(`${e.x},${e.y}`, { cells: e.cells, until: obs.tick + e.ticksLeft });
     /** @type {Set<number>} */
     const fire = new Set();
-    for (const e of obs.effects) if (e.kind === 'fire' && e.cells !== undefined) for (const c of e.cells) fire.add(c);
+    for (const [key, f] of this.fires) {
+      if (obs.tick >= f.until) this.fires.delete(key);
+      else for (const c of f.cells) fire.add(c);
+    }
     this.nav.hazard = fire;
     const mine = g.cellOf(me.x, me.y);
     if (fire.has(mine)) {
@@ -235,7 +249,8 @@ export class Combat {
       this.seen = 0;
       const ahead = Math.abs(adiff(angleTo(me.x, me.y, e.x, e.y), me.facing)) <= P.preAimDeg;
       const cut = ahead && this.h.random() < this.awareness ? 1 : 0;
-      this.wait = Math.max(Math.min(1, this.reactExtra), this.reactExtra - cut);
+      const extra = Math.floor(this.reactExtra + this.h.random());
+      this.wait = Math.max(Math.min(1, extra), extra - cut);
       const a = Math.floor(this.h.random() * 360);
       const mag = (me.weapon === 'awp' ? this.err0 : this.errOff) * (0.6 + 0.8 * this.h.random()) * (ahead ? this.preAim : 1);
       this.errX = cosd(a) * mag;
@@ -391,7 +406,7 @@ export class Combat {
     }
     // ── 停步：射程內停下來開火（走位差的偶爾晚一步停）──
     const lowWall = this.lowCoverNear(me.x, me.y, e.x, e.y);
-    if (this.engagedDecisions <= 1 && this.h.random() < this.sloppy) out.move = null;
+    if (this.engagedDecisions <= 1 && me.weapon !== 'awp' && this.h.random() < this.sloppy) out.move = null;
     else out.move = 'stop';
     // ── 蹲：矮牆後沒在開火就蹲下躲；遠距離開火蹲著開 ──
     if (lowWall) out.crouch = !firing;
@@ -438,7 +453,8 @@ export class Combat {
     if (this.lostPos !== null && t - this.lostTick < this.holdAngle && !ctx.objective) {
       out.aim = this.lostPos;
       out.crouch = false;
-      out.holdNav = ctx.holding || this.attrs.aggression < 0.5;
+      // 狙擊槍邊走邊打不到：目標一閃而過就站住等他再出現
+      out.holdNav = ctx.holding || this.attrs.aggression < 0.5 || me.weapon === 'awp';
       out.why = '架槍（目標剛消失）';
       if (this.retreat !== null && t < this.retreatUntil && dist(me.x, me.y, this.retreat.x, this.retreat.y) > 400) {
         out.move = this.retreat;

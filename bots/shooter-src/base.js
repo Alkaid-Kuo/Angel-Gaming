@@ -93,8 +93,8 @@ export const P = {
   maxSegment: 6,
   /** 探頭：停在窄口前幾格、等幾次決策（侵略 0 → 100） */
   peekStop: 2,
-  peekHold0: 6,
-  peekHold100: 2,
+  peekHold0: 10,
+  peekHold100: 1,
   /** 侵略低於這個值、而且走位不低於 shoulderMove 才用肩探（露一半再退），否則直接寬探過去 */
   shoulderBelow: 60,
   shoulderMove: 40,
@@ -115,6 +115,9 @@ export const P = {
   /** 看到新目標後額外等幾次決策才開火：reaction 0 → 100 */
   react0: 3,
   react100: 0,
+  /** 敢開槍（2.2）：侵略 0 → 100 時上面的等待再加減幾次決策（小數用機率進位）。保守的人多看一眼，敢衝的人先開火，赤岩舊城上侵略才量得出強度差 */
+  reactAggr0: 0.6,
+  reactAggr100: -0.6,
   /** 預瞄：新目標在自己朝向 ±preAimDeg 度內出現時，初始瞄準誤差 × (1 − preAimErr × 警覺) */
   preAimErr: 0.6,
   preAimDeg: 20,
@@ -149,8 +152,8 @@ export const P = {
   /** 掩體搜尋半徑（格） */
   coverRadius: 8,
   /** 目標消失後架槍幾秒（侵略 0 → 100） */
-  holdAngle0: 2.0,
-  holdAngle100: 0.6,
+  holdAngle0: 2.6,
+  holdAngle100: 0.4,
   /** 開火時蹲的最短距離（格） */
   crouchFireMin: 8,
   /** 停步開火的乾淨度：movement 0 → 100 時「這次先不停」的機率 */
@@ -173,8 +176,8 @@ export const P = {
   splitWait: 32,
   fakeDelay: 4,
   /** default：開打後幾秒執行（侵略 0 → 100），期間蒐集情報 */
-  defaultExec0: 48,
-  defaultExec100: 30,
+  defaultExec0: 56,
+  defaultExec100: 26,
   /** 剩這麼多秒還沒下包就強行執行最近的點 */
   forceExecLeft: 35,
   /** 事件廣播：同一區域的接觸最少隔幾秒再喊；收到的接觸記多久（秒） */
@@ -203,10 +206,19 @@ export const P = {
   flashMateClear: 4,
   /** 煙霧：放在入口往架點方向幾格 */
   smokeOff: 4.5,
+  /** 同回合兩顆煙的落點至少隔幾格（2.2） */
+  smokeGap: 6,
+  /** 兩路進點（2.2）：主力在待命格等第二組到第二入口這麼近（格），最多等幾秒 */
+  flankNear: 12,
+  flankWait: 18,
   /** 手雷：兩個以上記得的敵人彼此在這麼近（格）內算聚集 */
   nadeCluster: 3.5,
   /** CT 燃燒：敵人離入口這麼近（格）時封入口外側 */
   molotovNear: 16,
+
+  // ── 經濟（2.2） ──
+  /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */
+  afterPistol: 'force',
 
   // ── 角色（2.1） ──
   /** T 執行：不是突破手的人離包點這麼近（格）就等突破手先進；每回合最多等幾秒 */

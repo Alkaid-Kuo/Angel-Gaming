@@ -30,7 +30,7 @@ describe('射擊基準 Bot：檔案與宣告', () => {
     expect(baseline.sizeBytes).toBeLessThanOrEqual(200 * 1024);
     const c = new ShooterBatchController(baseline, 'baseline', 1, 0, MAPS.redrock());
     expect(c.declaration.name).toBe('shooter-baseline');
-    expect(c.declaration.version).toBe('2.1');
+    expect(c.declaration.version).toBe('2.2');
     expect(c.declaration.style).toBe('基準');
     expect(c.declaration.knobs.length).toBeGreaterThanOrEqual(3);
     expect(c.declaration.knobs.length).toBeLessThanOrEqual(6);
@@ -114,43 +114,22 @@ describe('射擊基準 Bot：地圖分析', () => {
   }
 });
 
-/**
- * 已知未過（基準 Bot 2.1，Bot 2.2 追蹤）：用 it.fails，Bot 修好了這些測試會轉紅，提醒把這裡的標記拿掉。
- * 理由見 docs/2026-11-01_CS射擊_規則1.2包_交付報告.md 第二節。
- */
-const KNOWN_GAPS: Readonly<Record<string, string>> = {
-  P7: '赤岩舊城 A 包點：火區 1 秒內走不出去',
-  P8: '赤岩舊城市集北巷窄口沒有停下探頭',
-  P9: '赤岩舊城東門：沒有避開守在路上的 CT',
-  T4: '赤岩舊城種子 4：3 秒凍結下沒丟煙閃就進點',
-  R1: '赤岩舊城種子 2：支援先於突破手進點',
-};
-/** 沙城的單兵情境不在預設跑的地圖上，另外標 */
-const KNOWN_GAPS_DUST: Readonly<Record<string, string>> = {
-  P5: '沙城：狙擊情境沒有開槍',
-  P8: '沙城：T 中路窄口沒有通過',
-};
-
-describe('射擊基準 Bot：情境測試 P0～P13、T1～T15、R1～R6（每個情境 5 個種子）', () => {
+describe('射擊基準 Bot：情境測試 P0～P13、T1～T19、R1～R6（每個情境 5 個種子）', () => {
   for (const s of AI_SCENARIOS) {
-    const gap = KNOWN_GAPS[s.id];
-    const title = `${s.id} ${s.name}：${s.expect}`;
-    const body = (): void => {
+    it(`${s.id} ${s.name}：${s.expect}`, () => {
       for (const seed of AI_SCENARIO_SEEDS) {
         const r = s.run(baseline, seed, practice);
         expect(r.pass, `種子 ${seed}：${r.detail}`).toBe(true);
       }
-    };
-    if (gap !== undefined) it.fails(`已知未過（基準 Bot 2.1，Bot 2.2 追蹤）${title}｜${gap}`, body, 400000);
-    else it(title, body, 400000);
+    }, 400000);
   }
 });
 
-describe('射擊基準 Bot：單兵情境在沙城的已知未過（基準 Bot 2.1，Bot 2.2 追蹤）', () => {
-  for (const [id, gap] of Object.entries(KNOWN_GAPS_DUST)) {
-    it.fails(`${id}｜${gap}`, () => {
+describe('射擊基準 Bot：單兵情境在沙城（P13 沙城沒有矮牆，不適用）', () => {
+  for (const s of AI_SCENARIOS.filter((x) => x.id.startsWith('P') && x.id !== 'P13')) {
+    it(s.id, () => {
       try {
-        const [r] = runAiScenarios(baseline, (x) => x === id, practice, undefined, { soloMap: 'dust' });
+        const [r] = runAiScenarios(baseline, (x) => x === s.id, practice, undefined, { soloMap: 'dust' });
         expect(r.pass, r.detail).toBe(true);
       } finally {
         runAiScenarios(baseline, () => false, practice, undefined, { soloMap: 'redrock' });
