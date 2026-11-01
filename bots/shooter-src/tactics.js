@@ -6,12 +6,13 @@
 //      「P:splitA 0 2[ go]」（兩組兩條路線到待命點，第二組到了才喊 go）
 //      「P:default A 0 1[ >B]」（主力 3 人到 A 路線 0 的待命點、2 人到 B 路線 1 控圖；>B 表示執行 B）
 //      「P:fake B 0 1[ >B]」（主力去 B、佯攻組去 A 製造聲音後主力執行）
+//      2.2 兩路進點：split 兩組走入口不同的路線；default／fake 執行時在點外的那組繞第二入口（flankOf），待命格的那組等他們到了（或逾時）才一起進
 //   CT 「P:hold A=2 M=1 B=2[ rot=B][ go]」（開局配置；rot＝輪轉到哪個點；go＝回防集結完畢一起進）
 // 事件（感知輸出產生，隊友據此更新）：「E:contact <區域> <人數>」「E:dead <區域>」「E:planted <點>」「E:flash x y tick」「E:smoke x y」「E:kit」。
 // 角色（2.1，roles.js）：每回合第一次決策喊「R:<代碼>」；分組、突破手與煙霧手、進點順序、CT 守位、錨點、回防先後都先看角色，
 // 角色重複或缺角時退回隊內序號。
 // 經濟「B:full／force／half／eco」見 economy.js；道具的彈道見 utility.js。全部由地圖資料與觀察資料算，不寫死座標或區域代號。
-import { P, UNIT, adiff, angleTo, clamp, cosd, dist, inRect, lerp, segDist, sind } from './base.js';
+import { P, UNIT, adiff, angleTo, clamp, cosd, dijkstra, dist, inRect, lerp, segDist, sind } from './base.js';
 import { Economy, parseBuy } from './economy.js';
 import { Utility } from './utility.js';
 import { ANCHOR, AWP, ENTRY, LURK, Roles, SUPPORT, parseRole } from './roles.js';
@@ -151,6 +152,17 @@ export class Tactics {
     /** @type {import('./economy.js').BuyCall | null} */
     this.buyCall = null;
     this.routeOverride = -1;
+    /** 兩路進點：地圖算的快取 @type {Map<string, { near: number, main: import('./analysis.js').Entrance, second: import('./analysis.js').Entrance, wait: number } | null>} */
+    this.flankCache = new Map();
+    /** @type {Map<SiteId, import('./analysis.js').Route>} */
+    this.aroundCache = new Map();
+    /** @type {Map<string, import('./base.js').Pt[]>} */
+    this.smokeCache = new Map();
+    /** 本回合：開始等第二組的 tick、第二組到了、自己已繞到第二入口 */
+    this.flankStart = -1;
+    this.flankGo = false;
+    this.flanked = false;
+    this.steppedIn = false;
     /** 收到但還沒處理的喊話（警覺低的晚一點反應） @type {{ ready: number, from: number, text: string }[]} */
     this.inbox = [];
     /** 收到的接觸：區域 → 人數與時間；接觸 → 所屬包點 @type {Map<string, { n: number, tick: number }>} */
@@ -229,6 +241,10 @@ export class Tactics {
     this.bought = false;
     this.buyCall = null;
     this.routeOverride = -1;
+    this.flankStart = -1;
+    this.flankGo = false;
+    this.flanked = false;
+    this.steppedIn = false;
     this.inbox = [];
     this.contacts = new Map();
     this.contactSite = new Map();
@@ -517,10 +533,12 @@ export class Tactics {
       const r1 = 0;
       let r2 = 0;
       let best = Infinity;
+      const entrance1 = routes[r1]?.portals[routes[r1].portals.length - 1];
       for (let i = 1; i < routes.length; i++) {
         let same = 0;
         for (const r of routes[i].regionSet) if (routes[r1].regionSet.has(r)) same++;
-        const j = same / (routes[i].regionSet.size + routes[r1].regionSet.size - same);
+        // 第二組優先走入口不同的路線（同入口的排在所有不同入口之後）
+        const j = same / (routes[i].regionSet.size + routes[r1].regionSet.size - same) + (routes[i].portals[routes[i].portals.length - 1] === entrance1 ? 1 : 0);
         if (j < best) {
           best = j;
           r2 = i;
@@ -850,7 +868,29 @@ export class Tactics {
     const site = this.intel.sites[exec];
     const mine = setup.site === exec;
     out.route = mine ? this.pickRoute(obs, exec, setup.route) : null;
-    const ent = mine ? this.entranceOf(exec, setup.route) : null;
+    const flank = this.flankOf(p, exec);
+    // 兩路進點：待命格那組等第二組就位；點外那組先繞到第二入口外
+    if (flank !== null && mine && this.flankHold(obs, p, exec, flank)) {
+      const st = this.memberStage(obs, me.id, p);
+      if (st !== null) {
+        this.execTick = t;
+        out.goal = { x: st.x, y: st.y };
+        out.hold = st;
+        out.role = '等第二組';
+        this.awpSettle(obs, out, st);
+        return null;
+      }
+    }
+    const ent = mine ? this.entranceOf(exec, setup.route) : flank?.second ?? null;
+    if (flank !== null && !mine && !this.flanked) {
+      if (dist(me.x, me.y, flank.second.ox, flank.second.oy) < 3 * UNIT || this.inRectSite(me.x, me.y, exec)) this.flanked = true;
+      else {
+        out.goal = { x: flank.second.ox, y: flank.second.oy };
+        out.route = this.aroundSite(exec);
+        out.role = `繞第二入口 ${exec}`;
+        return null;
+      }
+    }
     // 進點前的道具：支援先煙、突破手（組內第 0 個）再閃，2.5 秒還沒人閃就誰有誰閃；其他人等閃光（最多 3 秒）
     /** @type {import('./utility.js').ThrowWish | null} */
     let wish = null;
@@ -927,6 +967,60 @@ export class Tactics {
       if (who !== undefined) return this.memberIndex(obs, who, p);
     }
     return -1;
+  }
+
+  /**
+   * 兩路進點：default／fake 執行時，待命格在執行點的那組走路線的入口，另一組走離自己待命格最近的另一個入口；其他計畫（已經兩路或全隊一路）回傳 null
+   * @param {TPlan} p @param {SiteId} exec @returns {{ near: number, main: import('./analysis.js').Entrance, second: import('./analysis.js').Entrance, wait: number } | null}
+   */
+  flankOf(p, exec) {
+    if (p.kind !== 'default' && p.kind !== 'fake') return null;
+    const key = `flank${p.site}${exec}${p.r1}${p.r2}`;
+    const hit = this.flankCache.get(key);
+    if (hit !== undefined) return hit;
+    const near = exec === p.site ? 0 : 1;
+    const main = this.entranceOf(exec, near === 0 ? p.r1 : p.r2);
+    const farSite = near === 0 ? other(p.site) : p.site;
+    const farRoute = near === 0 ? p.r2 : p.r1;
+    const from = this.stageSpots('T', farSite, farRoute)[0];
+    let out = null;
+    if (main !== null && from !== undefined) {
+      let best = Infinity;
+      for (const e of this.intel.sites[exec].entrances) {
+        if (e.portal === main.portal) continue;
+        const d = dijkstra(this.g, [this.g.cellOf(e.ox, e.oy)])[from.cell];
+        // 離主力入口太近的（同一片走道的兩個口）不算第二路，排到最後
+        const sc = d + (dist(e.ox, e.oy, main.ox, main.oy) < 10 * UNIT ? 100000 : 0);
+        if (sc < best) {
+          best = sc;
+          out = { near, main, second: e, wait: Math.min(P.flankWait, d / 10 / 4.5) };
+        }
+      }
+    }
+    this.flankCache.set(key, out);
+    return out;
+  }
+
+  /** 待命格那組還要不要等：第二組還有人活著、都還沒到第二入口附近、沒逾時、回合時間還夠 @param {import('./base.js').Observation} obs @param {TPlan} p @param {SiteId} exec @param {{ near: number, second: import('./analysis.js').Entrance, wait: number }} f */
+  flankHold(obs, p, exec, f) {
+    if (this.flankStart < 0) this.flankStart = obs.tick;
+    if ((obs.tick - this.flankStart) / this.tps >= f.wait || obs.round.phaseTicksLeft <= P.forceExecLeft * this.tps || this.flankGo) return false;
+    const far = obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) !== f.near);
+    const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.second.oy) < P.flankNear * UNIT || this.inRectSite(m.x, m.y, exec));
+    if (done) this.flankGo = true;
+    return !done;
+  }
+
+  /** 繞路用的「路線」：包點區域以外都算路線內，導航就不會穿過包點 @param {SiteId} s @returns {import('./analysis.js').Route} */
+  aroundSite(s) {
+    let r = this.aroundCache.get(s);
+    if (r === undefined) {
+      const site = this.intel.sites[s];
+      const regionSet = new Set(this.intel.map.regions.map((_, i) => i).filter((i) => !site.regions.has(i)));
+      r = /** @type {import('./analysis.js').Route} */ ({ site: s, team: 'T', regions: [...regionSet], regionSet, portals: [], points: [], length: 0 });
+      this.aroundCache.set(s, r);
+    }
+    return r;
   }
 
   /** 在包點矩形裡 @param {number} x @param {number} y @param {SiteId} s */
@@ -1025,6 +1119,52 @@ export class Tactics {
     const d = dist(best.x, best.y, e.ix, e.iy);
     const f = Math.min(0.6, (P.smokeOff * UNIT) / Math.max(d, 1));
     return { x: e.ix + (best.x - e.ix) * f, y: e.iy + (best.y - e.iy) * f };
+  }
+
+  /** 這個入口可以封的點：包點守點位中看得到入口的，遠的先（最可能架這個入口），最後是入口內側 @param {SiteId} s @param {import('./analysis.js').Entrance} e @returns {import('./base.js').Pt[]} */
+  smokeSpots(s, e) {
+    const key = `${s}${e.portal}`;
+    const hit = this.smokeCache.get(key);
+    if (hit !== undefined) return hit;
+    /** @type {import('./base.js').Pt[]} */
+    const out = [];
+    const holds = this.intel.sites[s].holds.filter((h) => dist(h.x, h.y, e.ix, e.iy) <= 25 * UNIT && this.g.los(h.x, h.y, e.ix, e.iy)).sort((a, b) => dist(b.x, b.y, e.ix, e.iy) - dist(a.x, a.y, e.ix, e.iy) || a.cell - b.cell);
+    for (const h of holds) {
+      const f = Math.min(0.6, (P.smokeOff * UNIT) / Math.max(dist(h.x, h.y, e.ix, e.iy), 1));
+      out.push({ x: e.ix + (h.x - e.ix) * f, y: e.iy + (h.y - e.iy) * f });
+    }
+    out.push({ x: e.ix, y: e.iy });
+    this.smokeCache.set(key, out);
+    return out;
+  }
+
+  /**
+   * 這個煙霧手封哪裡：主力組的煙封第一優先的架槍位，第二組的煙封離它 P.smokeGap 格以上的次優先位（只靠地圖算，兩人不用溝通也不會重疊）；
+   * 已知的煙 P.smokeGap 格內不丟；主力組記得有敵人就優先封他；丟不到就換下一個，都不行就不丟
+   * @param {import('./base.js').Observation} obs @param {TPlan} p @param {SiteId} exec @param {import('./analysis.js').Entrance} ent @returns {import('./base.js').Pt | null}
+   */
+  smokeTarget(obs, p, exec, ent) {
+    const me = obs.me;
+    const gap = P.smokeGap * UNIT;
+    const rank = this.groupOf(obs, me.id, p) === 0 ? 0 : 1;
+    const flank = this.flankOf(p, exec);
+    const mine = this.smokeSpots(exec, ent);
+    /** 另一組的入口 @type {import('./analysis.js').Entrance | null} */
+    let peer = null;
+    if (p.kind === 'split') peer = this.entranceOf(exec, rank === 0 ? p.r2 : p.r1);
+    else if (flank !== null) peer = ent.portal === flank.main.portal ? flank.second : flank.main;
+    const peerSpots = peer !== null ? this.smokeSpots(exec, peer) : [];
+    /** @type {import('./base.js').Pt[]} */
+    let list;
+    if (rank === 0) {
+      const second = peerSpots.find((q) => dist(q.x, q.y, mine[0].x, mine[0].y) >= gap);
+      const known = this.smokePoint(exec, ent);
+      list = [...(known !== null ? [known] : []), ...mine].filter((q) => second === undefined || dist(q.x, q.y, second.x, second.y) >= gap);
+    } else {
+      const first = peerSpots[0];
+      list = mine.filter((q) => first === undefined || dist(q.x, q.y, first.x, first.y) >= gap);
+    }
+    return list.find((q) => this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) >= gap) && this.util.solve(me.x, me.y, q.x, q.y) !== null) ?? null;
   }
 
   /** (x, y) 走 depth 步內有沒有看不到爆點 c 的格（BFS） @param {number} x @param {number} y @param {import('./base.js').Pt} c @param {number} depth */

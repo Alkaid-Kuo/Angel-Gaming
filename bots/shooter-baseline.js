@@ -133,6 +133,9 @@ const P = {
   chaseTime: 3,
   flashMateClear: 4,
   smokeOff: 4.5,
+  smokeGap: 6,
+  flankNear: 12,
+  flankWait: 18,
   nadeCluster: 3.5,
   molotovNear: 16,
   afterPistol: 'force',
@@ -2825,6 +2828,16 @@ class Tactics {
     /** @type {BuyCall | null} */
     this.buyCall = null;
     this.routeOverride = -1;
+    /** 兩路進點：地圖算的快取 @type {Map<string, { near: number, main: Entrance, second: Entrance, wait: number } | null>} */
+    this.flankCache = new Map();
+    /** @type {Map<SiteId, Route>} */
+    this.aroundCache = new Map();
+    /** @type {Map<string, Pt[]>} */
+    this.smokeCache = new Map();
+    this.flankStart = -1;
+    this.flankGo = false;
+    this.flanked = false;
+    this.steppedIn = false;
     /** 收到但還沒處理的喊話（警覺低的晚一點反應） @type {{ ready: number, from: number, text: string }[]} */
     this.inbox = [];
     /** 收到的接觸：區域 → 人數與時間；接觸 → 所屬包點 @type {Map<string, { n: number, tick: number }>} */
@@ -2899,6 +2912,10 @@ class Tactics {
     this.bought = false;
     this.buyCall = null;
     this.routeOverride = -1;
+    this.flankStart = -1;
+    this.flankGo = false;
+    this.flanked = false;
+    this.steppedIn = false;
     this.inbox = [];
     this.contacts = new Map();
     this.contactSite = new Map();
@@ -3161,10 +3178,11 @@ class Tactics {
       const r1 = 0;
       let r2 = 0;
       let best = Infinity;
+      const entrance1 = routes[r1]?.portals[routes[r1].portals.length - 1];
       for (let i = 1; i < routes.length; i++) {
         let same = 0;
         for (const r of routes[i].regionSet) if (routes[r1].regionSet.has(r)) same++;
-        const j = same / (routes[i].regionSet.size + routes[r1].regionSet.size - same);
+        const j = same / (routes[i].regionSet.size + routes[r1].regionSet.size - same) + (routes[i].portals[routes[i].portals.length - 1] === entrance1 ? 1 : 0);
         if (j < best) {
           best = j;
           r2 = i;
@@ -3457,7 +3475,28 @@ class Tactics {
     const site = this.intel.sites[exec];
     const mine = setup.site === exec;
     out.route = mine ? this.pickRoute(obs, exec, setup.route) : null;
-    const ent = mine ? this.entranceOf(exec, setup.route) : null;
+    const flank = this.flankOf(p, exec);
+    if (flank !== null && mine && this.flankHold(obs, p, exec, flank)) {
+      const st = this.memberStage(obs, me.id, p);
+      if (st !== null) {
+        this.execTick = t;
+        out.goal = { x: st.x, y: st.y };
+        out.hold = st;
+        out.role = '等第二組';
+        this.awpSettle(obs, out, st);
+        return null;
+      }
+    }
+    const ent = mine ? this.entranceOf(exec, setup.route) : flank?.second ?? null;
+    if (flank !== null && !mine && !this.flanked) {
+      if (dist(me.x, me.y, flank.second.ox, flank.second.oy) < 3 * UNIT || this.inRectSite(me.x, me.y, exec)) this.flanked = true;
+      else {
+        out.goal = { x: flank.second.ox, y: flank.second.oy };
+        out.route = this.aroundSite(exec);
+        out.role = `繞第二入口 ${exec}`;
+        return null;
+      }
+    }
     /** @type {ThrowWish | null} */
     let wish = null;
     const sinceExec = this.execTick >= 0 ? (t - this.execTick) / this.tps : 99;
@@ -3525,6 +3564,55 @@ class Tactics {
       if (who !== undefined) return this.memberIndex(obs, who, p);
     }
     return -1;
+  }
+  /**
+   * @param {TPlan} p @param {SiteId} exec @returns {{ near: number, main: Entrance, second: Entrance, wait: number } | null}
+   */
+  flankOf(p, exec) {
+    if (p.kind !== 'default' && p.kind !== 'fake') return null;
+    const key = `flank${p.site}${exec}${p.r1}${p.r2}`;
+    const hit = this.flankCache.get(key);
+    if (hit !== undefined) return hit;
+    const near = exec === p.site ? 0 : 1;
+    const main = this.entranceOf(exec, near === 0 ? p.r1 : p.r2);
+    const farSite = near === 0 ? other(p.site) : p.site;
+    const farRoute = near === 0 ? p.r2 : p.r1;
+    const from = this.stageSpots('T', farSite, farRoute)[0];
+    let out = null;
+    if (main !== null && from !== undefined) {
+      let best = Infinity;
+      for (const e of this.intel.sites[exec].entrances) {
+        if (e.portal === main.portal) continue;
+        const d = dijkstra(this.g, [this.g.cellOf(e.ox, e.oy)])[from.cell];
+        const sc = d + (dist(e.ox, e.oy, main.ox, main.oy) < 10 * UNIT ? 100000 : 0);
+        if (sc < best) {
+          best = sc;
+          out = { near, main, second: e, wait: Math.min(P.flankWait, d / 10 / 4.5) };
+        }
+      }
+    }
+    this.flankCache.set(key, out);
+    return out;
+  }
+  /** 待命格那組還要不要等：第二組還有人活著、都還沒到第二入口附近、沒逾時、回合時間還夠 @param {Observation} obs @param {TPlan} p @param {SiteId} exec @param {{ near: number, second: Entrance, wait: number }} f */
+  flankHold(obs, p, exec, f) {
+    if (this.flankStart < 0) this.flankStart = obs.tick;
+    if ((obs.tick - this.flankStart) / this.tps >= f.wait || obs.round.phaseTicksLeft <= P.forceExecLeft * this.tps || this.flankGo) return false;
+    const far = obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) !== f.near);
+    const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.second.oy) < P.flankNear * UNIT || this.inRectSite(m.x, m.y, exec));
+    if (done) this.flankGo = true;
+    return !done;
+  }
+  /** 繞路用的「路線」：包點區域以外都算路線內，導航就不會穿過包點 @param {SiteId} s @returns {Route} */
+  aroundSite(s) {
+    let r = this.aroundCache.get(s);
+    if (r === undefined) {
+      const site = this.intel.sites[s];
+      const regionSet = new Set(this.intel.map.regions.map((_, i) => i).filter((i) => !site.regions.has(i)));
+      r = /** @type {Route} */ ({ site: s, team: 'T', regions: [...regionSet], regionSet, portals: [], points: [], length: 0 });
+      this.aroundCache.set(s, r);
+    }
+    return r;
   }
   /** 在包點矩形裡 @param {number} x @param {number} y @param {SiteId} s */
   inRectSite(x, y, s) {
@@ -3612,6 +3700,48 @@ class Tactics {
     const d = dist(best.x, best.y, e.ix, e.iy);
     const f = Math.min(0.6, (P.smokeOff * UNIT) / Math.max(d, 1));
     return { x: e.ix + (best.x - e.ix) * f, y: e.iy + (best.y - e.iy) * f };
+  }
+  /** 這個入口可以封的點：包點守點位中看得到入口的，遠的先（最可能架這個入口），最後是入口內側 @param {SiteId} s @param {Entrance} e @returns {Pt[]} */
+  smokeSpots(s, e) {
+    const key = `${s}${e.portal}`;
+    const hit = this.smokeCache.get(key);
+    if (hit !== undefined) return hit;
+    /** @type {Pt[]} */
+    const out = [];
+    const holds = this.intel.sites[s].holds.filter((h) => dist(h.x, h.y, e.ix, e.iy) <= 25 * UNIT && this.g.los(h.x, h.y, e.ix, e.iy)).sort((a, b) => dist(b.x, b.y, e.ix, e.iy) - dist(a.x, a.y, e.ix, e.iy) || a.cell - b.cell);
+    for (const h of holds) {
+      const f = Math.min(0.6, (P.smokeOff * UNIT) / Math.max(dist(h.x, h.y, e.ix, e.iy), 1));
+      out.push({ x: e.ix + (h.x - e.ix) * f, y: e.iy + (h.y - e.iy) * f });
+    }
+    out.push({ x: e.ix, y: e.iy });
+    this.smokeCache.set(key, out);
+    return out;
+  }
+  /**
+   * @param {Observation} obs @param {TPlan} p @param {SiteId} exec @param {Entrance} ent @returns {Pt | null}
+   */
+  smokeTarget(obs, p, exec, ent) {
+    const me = obs.me;
+    const gap = P.smokeGap * UNIT;
+    const rank = this.groupOf(obs, me.id, p) === 0 ? 0 : 1;
+    const flank = this.flankOf(p, exec);
+    const mine = this.smokeSpots(exec, ent);
+    /** 另一組的入口 @type {Entrance | null} */
+    let peer = null;
+    if (p.kind === 'split') peer = this.entranceOf(exec, rank === 0 ? p.r2 : p.r1);
+    else if (flank !== null) peer = ent.portal === flank.main.portal ? flank.second : flank.main;
+    const peerSpots = peer !== null ? this.smokeSpots(exec, peer) : [];
+    /** @type {Pt[]} */
+    let list;
+    if (rank === 0) {
+      const second = peerSpots.find((q) => dist(q.x, q.y, mine[0].x, mine[0].y) >= gap);
+      const known = this.smokePoint(exec, ent);
+      list = [...(known !== null ? [known] : []), ...mine].filter((q) => second === undefined || dist(q.x, q.y, second.x, second.y) >= gap);
+    } else {
+      const first = peerSpots[0];
+      list = mine.filter((q) => first === undefined || dist(q.x, q.y, first.x, first.y) >= gap);
+    }
+    return list.find((q) => this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) >= gap) && this.util.solve(me.x, me.y, q.x, q.y) !== null) ?? null;
   }
   /** (x, y) 走 depth 步內有沒有看不到爆點 c 的格（BFS） @param {number} x @param {number} y @param {Pt} c @param {number} depth */
   canHide(x, y, c, depth) {
