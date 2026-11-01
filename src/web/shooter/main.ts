@@ -122,7 +122,7 @@ class Game {
     this.post = post;
     this.xray = meta.watch !== undefined;
     this.root = $('game');
-    this.root.innerHTML = `<canvas class="sg-canvas"></canvas><div class="sg-radar"><canvas class="sg-mini"></canvas><div class="rz"><b></b><span>${esc(meta.map.name)}</span></div></div><div class="sg-buy hidden"></div>`;
+    this.root.innerHTML = `<canvas class="sg-canvas"></canvas><div class="sg-radar"><canvas class="sg-mini"></canvas><div class="rz"><b></b></div></div><div class="sg-buy hidden"></div>`;
     this.root.classList.remove('hidden');
     $('setup').classList.add('hidden');
     this.canvas = this.root.querySelector('.sg-canvas')!;
@@ -428,7 +428,7 @@ class Game {
     this.drawMs += (performance.now() - t0 - this.drawMs) / 60;
     this.renderer.drawMinimap(this.mini, input);
     const cam: CamMode = this.spec?.mode ?? 'follow';
-    this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.seeAll(), cam });
+    this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.seeAll(), cam, buyOpen: this.buy.isOpen() });
     this.hud.updateCtl(SPEEDS[this.speedIdx], this.paused, this.over !== null, { xray: this.seeAll(), tactical: this.tactical, cam });
     this.frameMs += (performance.now() - start - this.frameMs) / 60;
   }

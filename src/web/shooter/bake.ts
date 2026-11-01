@@ -347,9 +347,8 @@ export function wallPathOf(m: BakeMap, loops: readonly (readonly Pt[])[], r: num
 
 /** 小地圖底：牆色鋪滿、可走區挖開、包點上色與字母 */
 function paintRadar(m: BakeMap, loops: readonly (readonly Pt[])[]): HTMLCanvasElement {
-  const { c, g } = makeCanvas(m.width * RADAR_PX, m.height * RADAR_PX, false);
-  g.fillStyle = '#141821';
-  g.fillRect(0, 0, c.width, c.height);
+  // 地圖外透明：小地圖不用底板，只有走得到的形狀
+  const { c, g } = makeCanvas(m.width * RADAR_PX, m.height * RADAR_PX);
   g.setTransform(RADAR_PX, 0, 0, RADAR_PX, 0, 0);
   const p = new Path2D();
   for (const l of loops) addLoop(p, l, 0);

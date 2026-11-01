@@ -1,13 +1,15 @@
 /* 攻防戰（CS 射擊）試玩與觀戰頁：天使金語彙（色票複製自 web/sketch/angel.css，那邊掛在 #stage 底下，這裡掛在 .setup 與 .sg）。
    配色：墨黑中性色占九成；金只給我方、選中、主要行動；介面文字對手紅；紅只給對手與警示；其他白灰。世界裡的對手藍只在畫布上（見 render.ts）。
-   字型：中文 Noto Sans TC；數字與英文 Barlow Condensed 斜體 800；小標籤 Share Tech Mono。離線退回系統字。
-   材質：面板左緣一條金邊、右下切角；由左上往右下的深藍灰漸層加細斜紋。 */
+   字型：中文 Noto Sans TC；對局數字 Barlow Condensed 700；標題數字斜體 800；小標籤 Share Tech Mono。離線退回系統字。
+   材質：對局 HUD 照 CS，半透明墨黑、細線，不用切角和金邊，字小，不擋視野；開局畫面的卡片才用深色面板、左緣金邊、右下切角。 */
 .setup, .sg {
   --ink: #0b0e14; --ink-rgb: 11, 14, 20; --ink2: #131823; --white: #eef2f6; --grey: #8b95a4; --grey2: #5b6574;
   --gold: #f0b54a; --gold-rgb: 240, 181, 74; --gold2: #ffd98a; --gold3: #b9832a; --red: #ff5d5d; --red-rgb: 255, 93, 93;
   --zh: "Noto Sans TC", "Microsoft JhengHei", sans-serif; --en: "Barlow Condensed", "Noto Sans TC", "Microsoft JhengHei", sans-serif; --mono: "Share Tech Mono", Consolas, monospace;
   --panel: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 12px), linear-gradient(150deg, rgba(34, 42, 57, 0.96), rgba(13, 17, 24, 0.97));
   --line: rgba(238, 242, 246, 0.14);
+  /* 對局 HUD：半透明底、細線、壓在亮地面上的字陰影 */
+  --glass: rgba(var(--ink-rgb), 0.48); --hair: rgba(255, 255, 255, 0.2); --txs: 0 1px 3px rgba(0, 0, 0, 0.75);
   /* 介面單位：1920×1080 時 1px，畫面變小時等比縮 */
   --u: min(calc(100vw / 1920), calc(100vh / 1080));
   --accent: var(--gold);
@@ -82,89 +84,85 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sg-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .sg-canvas.aiming { cursor: none; }
 
-/* 小地圖：世界亮、HUD 暗，像壓在桌面上的深色鐵牌 */
-.sg-radar { position: absolute; right: calc(var(--u) * 28); top: calc(var(--u) * 24); width: calc(var(--u) * 282); box-sizing: border-box; padding: calc(var(--u) * 6); background: var(--panel); box-shadow: inset 3px 0 0 var(--accent); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%); pointer-events: none; }
-.sg-mini { display: block; width: 100%; aspect-ratio: 1; background: #141821; }
-.sg-radar .rz { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: calc(var(--u) * 6) calc(var(--u) * 8) calc(var(--u) * 4) calc(var(--u) * 10); min-height: 1.4em; }
-.sg-radar .rz b { font-size: max(12px, calc(var(--u) * 18)); letter-spacing: 0.1em; font-weight: 700; white-space: nowrap; overflow: hidden; }
-.sg-radar .rz span { font-family: var(--mono); font-size: max(10px, calc(var(--u) * 12)); color: var(--grey); letter-spacing: 0.2em; white-space: nowrap; }
+/* 小地圖：沒有底板，只有走得到的形狀 */
+.sg-radar { position: absolute; left: calc(var(--u) * 20); top: calc(var(--u) * 20); width: calc(var(--u) * 236); pointer-events: none; }
+.sg-mini { display: block; width: 100%; aspect-ratio: 1; opacity: 0.82; }
+.sg-radar .rz { padding-top: calc(var(--u) * 4); min-height: 1.4em; }
+.sg-radar .rz b { font-size: max(11px, calc(var(--u) * 13)); font-weight: 500; letter-spacing: 0.04em; white-space: nowrap; text-shadow: var(--txs); }
 
-/* 頂列 */
-.sg-top { position: absolute; top: calc(var(--u) * 22); left: 50%; transform: translateX(-50%); display: flex; align-items: stretch; filter: drop-shadow(0 6px 14px rgba(30, 20, 30, 0.45)); pointer-events: none; }
-.sg-top .tm { display: flex; align-items: center; gap: calc(var(--u) * 12); height: calc(var(--u) * 74); padding: 0 calc(var(--u) * 18); background: var(--panel); color: var(--c); }
-.sg-top .tm.l { clip-path: polygon(16px 0, 100% 0, 100% 100%, 0 100%); box-shadow: inset 0 -3px 0 var(--c); padding-left: calc(var(--u) * 30); }
-.sg-top .tm.r { flex-direction: row-reverse; clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 100%, 0 100%); box-shadow: inset 0 -3px 0 var(--c); padding-right: calc(var(--u) * 30); }
-.sg-top .n { font-size: max(14px, calc(var(--u) * 26)); font-weight: 900; letter-spacing: 0.12em; white-space: nowrap; }
-.sg-top small { font-family: var(--mono); font-size: max(10px, calc(var(--u) * 13)); color: var(--grey); letter-spacing: 0.12em; }
-.sg-top .sc { font-family: var(--en); font-style: italic; font-weight: 800; font-size: calc(var(--u) * 60); line-height: 1; min-width: calc(var(--u) * 44); text-align: center; color: var(--white); font-variant-numeric: tabular-nums; }
-.sg-top .pips { display: flex; gap: calc(var(--u) * 4); }
-.sg-top .pips i { width: calc(var(--u) * 8); height: calc(var(--u) * 22); transform: skewX(-14deg); background: rgba(255, 255, 255, 0.14); display: block; }
-.sg-top .pips i.on { background: var(--c); }
-.sg-top .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: calc(var(--u) * 190); padding: 0 calc(var(--u) * 10); background: var(--ink); }
-.sg-top .clock { font-family: var(--en); font-style: italic; font-weight: 800; font-size: calc(var(--u) * 46); line-height: 1; font-variant-numeric: tabular-nums; min-height: 1em; }
-.sg-top .mid.planted .clock { color: var(--red); }
-.sg-top .rd { font-size: max(10px, calc(var(--u) * 12)); color: var(--grey); letter-spacing: 0.08em; margin-top: 2px; white-space: nowrap; }
+/* 頂部計分：頭像夾著時間與比分 */
+.sg-top { position: absolute; top: calc(var(--u) * 8); left: 50%; transform: translateX(-50%); display: flex; align-items: flex-start; gap: calc(var(--u) * 3); pointer-events: none; }
+.sg-top .av { position: relative; width: calc(var(--u) * 46); height: calc(var(--u) * 46); }
+.sg-top .av svg { display: block; width: 100%; height: 100%; opacity: 0.92; }
+.sg-top .av u { position: absolute; left: 0; right: 0; bottom: calc(var(--u) * -5); height: max(2px, calc(var(--u) * 3)); background: rgba(255, 255, 255, 0.14); text-decoration: none; }
+.sg-top .av i { display: block; height: 100%; background: var(--c); }
+.sg-top .av i.low { background: var(--red); }
+.sg-top .av.dead svg { filter: grayscale(1); opacity: 0.28; }
+.sg-top .av.dead u { opacity: 0; }
+.sg-top .mid { display: grid; grid-template-columns: 1fr 1fr; min-width: calc(var(--u) * 112); margin: 0 calc(var(--u) * 5); background: var(--glass); font-family: var(--en); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; text-align: center; }
+.sg-top .clock { grid-column: 1 / -1; min-height: 1em; padding: calc(var(--u) * 3) 0; font-size: calc(var(--u) * 25); border-bottom: 1px solid var(--hair); }
+.sg-top .sc { padding: calc(var(--u) * 3) 0 calc(var(--u) * 4); font-size: calc(var(--u) * 22); }
+.sg-top .sc + .sc { border-left: 1px solid var(--hair); }
+.sg-top .mid[data-phase="planted"] .clock { color: var(--red); }
+.sg-top .mid[data-phase="freeze"] .clock { color: var(--grey); }
 
 /* 擊殺訊息 */
-.sg-feed { position: absolute; right: calc(var(--u) * 28); top: calc(var(--u) * 356); display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 6); pointer-events: none; }
-.sg-feed .k { display: flex; gap: calc(var(--u) * 10); align-items: center; padding: calc(var(--u) * 7) calc(var(--u) * 16); background: var(--panel); box-shadow: inset 3px 0 0 var(--grey2); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%); font-size: max(12px, calc(var(--u) * 17)); font-weight: 700; }
-.sg-feed .k.mine { box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px rgba(var(--gold-rgb), 0.4); }
-.sg-feed .w { font-family: var(--en); font-style: italic; font-weight: 800; font-size: max(12px, calc(var(--u) * 18)); color: var(--grey); padding: 0 calc(var(--u) * 8); }
+.sg-feed { position: absolute; right: calc(var(--u) * 18); top: calc(var(--u) * 16); display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 4); pointer-events: none; }
+.sg-feed .k { display: flex; gap: calc(var(--u) * 8); align-items: center; padding: calc(var(--u) * 3) calc(var(--u) * 10); background: var(--glass); font-size: max(11px, calc(var(--u) * 13)); font-weight: 700; }
+.sg-feed .k.mine { box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.75); }
+.sg-feed img { width: calc(var(--u) * 44); height: calc(var(--u) * 15); }
+.sg-feed .w { font-weight: 500; color: var(--grey); }
 
 /* 回合橫幅 */
-.sg-banner { position: absolute; top: 24%; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: calc(var(--u) * 16) calc(var(--u) * 90); background: linear-gradient(90deg, transparent, rgba(var(--ink-rgb), 0.9) 18%, rgba(var(--ink-rgb), 0.9) 82%, transparent); box-shadow: 0 -2px 0 0 transparent; pointer-events: none; text-align: center; white-space: nowrap; }
-.sg-banner::before, .sg-banner::after { content: ""; position: absolute; left: 12%; right: 12%; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); }
-.sg-banner::before { top: 0; }
-.sg-banner::after { bottom: 0; }
-.sg-banner span { font-size: max(20px, calc(var(--u) * 38)); font-weight: 900; letter-spacing: 0.14em; color: var(--white); transform: skewX(-7deg); }
-.sg-banner small { font-size: max(12px, calc(var(--u) * 16)); color: #dfe4ea; letter-spacing: 0.08em; }
-.sg-banner small b { color: var(--accent); font-family: var(--en); font-style: italic; font-weight: 800; }
-.sg-banner.pop { animation: sgPop 0.3s ease-out; }
-@keyframes sgPop { from { transform: translateX(-50%) scaleX(0.7); opacity: 0; } to { transform: translateX(-50%) scaleX(1); opacity: 1; } }
+.sg-banner { position: absolute; top: calc(var(--u) * 84); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: calc(var(--u) * 6) calc(var(--u) * 70); background: linear-gradient(90deg, transparent, var(--glass) 18%, var(--glass) 82%, transparent); pointer-events: none; text-align: center; white-space: nowrap; }
+.sg-banner span { font-size: max(15px, calc(var(--u) * 22)); font-weight: 900; letter-spacing: 0.08em; color: var(--white); }
+.sg-banner small { font-size: max(11px, calc(var(--u) * 13)); color: #dfe4ea; letter-spacing: 0.04em; }
+.sg-banner small b { color: var(--accent); }
+.sg-banner.pop { animation: sgPop 0.22s ease-out; }
+@keyframes sgPop { from { opacity: 0; } to { opacity: 1; } }
 
-/* 提示列 */
-.sg-hint { position: absolute; top: calc(var(--u) * 106); left: 50%; transform: translateX(-50%) skewX(-14deg); display: flex; gap: 6px; align-items: center; padding: calc(var(--u) * 4) calc(var(--u) * 18); background: rgba(var(--ink-rgb), 0.76); font-size: max(11px, calc(var(--u) * 15)); font-weight: 700; letter-spacing: 0.06em; color: var(--white); pointer-events: none; white-space: nowrap; }
+/* 提示列：下方中央、血條上面 */
+.sg-hint { position: absolute; bottom: calc(var(--u) * 112); left: 50%; transform: translateX(-50%); display: flex; gap: 6px; align-items: center; padding: calc(var(--u) * 3) calc(var(--u) * 14); background: var(--glass); font-size: max(11px, calc(var(--u) * 14)); font-weight: 700; color: var(--white); pointer-events: none; white-space: nowrap; }
 .sg-hint:empty { display: none; }
-.sg-hint .sep { width: 4px; height: 4px; background: var(--grey); margin: 0 8px; }
+.sg-hint .sep { width: 1px; height: 1em; background: var(--hair); margin: 0 8px; }
 
-/* 血、甲、錢 */
-.sg-left { position: absolute; left: calc(var(--u) * 28); bottom: calc(var(--u) * 24); display: flex; align-items: flex-end; column-gap: calc(var(--u) * 26); padding: calc(var(--u) * 10) calc(var(--u) * 26) calc(var(--u) * 12) calc(var(--u) * 22); background: var(--panel); box-shadow: inset 4px 0 0 var(--accent); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%); pointer-events: none; }
-.sg-left .stat { min-width: calc(var(--u) * 118); }
-.sg-left .lb { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: max(10px, calc(var(--u) * 13)); letter-spacing: 0.24em; color: var(--grey); white-space: nowrap; }
-.sg-left .lb em { font-family: var(--zh); font-style: normal; font-size: max(10px, calc(var(--u) * 11)); letter-spacing: 0.04em; color: var(--ink); background: var(--white); padding: 0 5px; }
-.sg-left b { display: block; font-family: var(--en); font-style: italic; font-weight: 800; font-size: calc(var(--u) * 62); line-height: 0.98; font-variant-numeric: tabular-nums; }
-.sg-left .mo { min-width: 0; }
-.sg-left .mo b { color: var(--accent); font-size: calc(var(--u) * 42); line-height: 1.2; }
-.sg-left .bar { display: block; height: calc(var(--u) * 5); margin-top: calc(var(--u) * 4); background: rgba(255, 255, 255, 0.12); transform: skewX(-20deg); }
-.sg-left .bar u { display: block; height: 100%; background: var(--white); text-decoration: none; }
-.sg-left .ar .bar u { background: var(--grey); }
-.sg-left .low b { color: var(--red); animation: sgBlink 0.8s ease-in-out infinite; }
-.sg-left .low .bar u { background: var(--red); }
-@keyframes sgBlink { 50% { opacity: 0.55; } }
+/* 下方中央：血、甲、武器、彈藥 */
+.sg-vitals { position: absolute; bottom: calc(var(--u) * 14); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: calc(var(--u) * 26); height: calc(var(--u) * 44); padding: 0 calc(var(--u) * 56); background: linear-gradient(90deg, transparent, var(--glass) 16%, var(--glass) 84%, transparent); font-family: var(--en); font-variant-numeric: tabular-nums; line-height: 1; pointer-events: none; }
+.sg-vitals .st { display: flex; align-items: center; gap: calc(var(--u) * 7); min-width: calc(var(--u) * 68); }
+.sg-vitals svg { width: calc(var(--u) * 16); height: calc(var(--u) * 16); fill: var(--grey); }
+.sg-vitals b { font-weight: 700; font-size: calc(var(--u) * 30); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+.sg-vitals .ar b { color: #cfd5dd; }
+.sg-vitals .low b { color: var(--red); }
+.sg-vitals .low svg { fill: var(--red); }
+.sg-vitals em { font-family: var(--zh); font-style: normal; font-weight: 700; font-size: max(10px, calc(var(--u) * 11)); padding: 0 calc(var(--u) * 3); background: var(--white); color: var(--ink); }
+.sg-vitals .sep { width: 1px; height: calc(var(--u) * 24); background: var(--hair); }
+.sg-vitals .gun { display: flex; align-items: center; justify-content: center; width: calc(var(--u) * 92); height: calc(var(--u) * 30); }
+.sg-vitals .gun img { width: 100%; height: 100%; opacity: 0.9; }
+.sg-vitals .gun small { font-family: var(--zh); font-weight: 700; font-size: max(12px, calc(var(--u) * 15)); }
+.sg-vitals .am { display: flex; align-items: baseline; gap: calc(var(--u) * 6); min-width: calc(var(--u) * 76); }
+.sg-vitals .am small { font-weight: 700; font-size: calc(var(--u) * 17); color: var(--grey); }
 
-/* 武器 */
-.sg-right { position: absolute; right: calc(var(--u) * 28); bottom: calc(var(--u) * 24); display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 8); pointer-events: none; }
-.sg-right .am { display: flex; align-items: baseline; gap: calc(var(--u) * 12); min-height: calc(var(--u) * 78); box-sizing: border-box; padding: calc(var(--u) * 4) calc(var(--u) * 20) calc(var(--u) * 6) calc(var(--u) * 26); background: var(--panel); clip-path: polygon(16px 0, 100% 0, 100% 100%, 0 100%); }
-.sg-right .wn { font-family: var(--en); font-style: italic; font-weight: 800; font-size: max(14px, calc(var(--u) * 24)); color: var(--accent); letter-spacing: 0.04em; }
-.sg-right .wn small { margin-left: 8px; font-family: var(--zh); font-style: normal; font-weight: 500; font-size: max(11px, calc(var(--u) * 13)); color: var(--grey); }
-.sg-right .am b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: calc(var(--u) * 72); line-height: 0.98; font-variant-numeric: tabular-nums; }
-.sg-right .res { font-family: var(--en); font-style: italic; font-weight: 700; font-size: calc(var(--u) * 28); color: var(--grey); font-variant-numeric: tabular-nums; }
-.sg-right .wbar { display: flex; gap: calc(var(--u) * 3); }
-.sg-right .ws { display: flex; align-items: center; gap: calc(var(--u) * 8); height: calc(var(--u) * 42); padding: 0 calc(var(--u) * 14) 0 calc(var(--u) * 10); font-size: max(11px, calc(var(--u) * 15)); font-weight: 700; background: var(--panel); transform: skewX(-14deg); white-space: nowrap; }
-.sg-right .ws > * { transform: skewX(14deg); }
-.sg-right .ws kbd { border: 0; background: none; color: var(--grey); padding: 0; font-size: max(10px, calc(var(--u) * 12)); }
-.sg-right .ws .nm { display: flex; gap: 8px; }
-.sg-right .ws .nm .on { text-decoration: underline; text-underline-offset: 3px; }
-.sg-right .ws.sel { background: var(--accent); color: var(--ink); }
-.sg-right .ws.sel kbd { color: var(--ink); }
-.sg-right .ws.empty { color: var(--grey2); }
-.sg-right .cd { width: 100%; height: 3px; background: rgba(var(--ink-rgb), 0.5); overflow: hidden; }
-.sg-right .cd i { display: block; height: 100%; background: var(--white); }
+/* 左下：金錢 */
+.sg-money { position: absolute; left: calc(var(--u) * 22); bottom: calc(var(--u) * 18); display: flex; align-items: center; gap: calc(var(--u) * 8); pointer-events: none; white-space: nowrap; }
+.sg-money b { font-family: var(--en); font-weight: 700; font-size: calc(var(--u) * 24); line-height: 1; color: var(--gold); font-variant-numeric: tabular-nums; text-shadow: var(--txs); }
+.sg-money kbd { font-size: max(10px, calc(var(--u) * 11)); background: var(--glass); }
+.sg-money span { padding: calc(var(--u) * 2) calc(var(--u) * 8); background: var(--glass); font-size: max(11px, calc(var(--u) * 13)); font-weight: 700; }
 
-/* 炸彈狀態 */
-.sg-bombbar { position: absolute; bottom: calc(var(--u) * 120); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: calc(var(--u) * 6) calc(var(--u) * 18); background: var(--panel); box-shadow: inset 4px 0 0 var(--red); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%); font-size: max(12px, calc(var(--u) * 15)); font-weight: 700; letter-spacing: 0.06em; pointer-events: none; white-space: nowrap; }
-.sg-bombbar b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: max(18px, calc(var(--u) * 28)); color: var(--red); font-variant-numeric: tabular-nums; }
-.sg-bombbar .bar { width: calc(var(--u) * 220); height: 6px; background: rgba(255, 255, 255, 0.14); transform: skewX(-20deg); overflow: hidden; }
+/* 右下：武器欄 */
+.sg-slots { position: absolute; right: calc(var(--u) * 18); bottom: calc(var(--u) * 18); display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 6); pointer-events: none; }
+.sg-slots .ws { display: flex; align-items: center; gap: calc(var(--u) * 7); opacity: 0.42; font-size: max(11px, calc(var(--u) * 13)); font-weight: 700; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.75)); white-space: nowrap; }
+.sg-slots .ws.sel { opacity: 1; }
+.sg-slots .ws img { width: calc(var(--u) * 72); height: calc(var(--u) * 24); }
+.sg-slots .ws small { font-family: var(--en); font-size: max(10px, calc(var(--u) * 13)); font-weight: 700; min-width: 0.8em; text-align: right; }
+.sg-slots .ws span { margin-left: calc(var(--u) * 6); }
+.sg-slots .ws span.on { text-decoration: underline; text-underline-offset: 3px; }
+.sg-slots .cd { width: 100%; height: 2px; overflow: hidden; }
+.sg-slots .cd i { display: block; height: 100%; background: var(--white); }
+
+/* 炸彈狀態：血條上方 */
+.sg-bombbar { position: absolute; bottom: calc(var(--u) * 66); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: calc(var(--u) * 10); padding: calc(var(--u) * 3) calc(var(--u) * 14); background: var(--glass); font-size: max(11px, calc(var(--u) * 14)); font-weight: 700; pointer-events: none; white-space: nowrap; }
+.sg-bombbar b { font-family: var(--en); font-weight: 700; font-size: max(16px, calc(var(--u) * 22)); line-height: 1; color: var(--red); font-variant-numeric: tabular-nums; }
+.sg-bombbar .bar { width: calc(var(--u) * 180); height: 4px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
 .sg-bombbar .bar i { display: block; height: 100%; background: var(--red); }
 
 /* 全螢幕面板共用 */
@@ -292,13 +290,12 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sg-pause p { margin: 0; line-height: 1.6; }
 
 /* 觀戰：小地圖在左上、擊殺訊息在右上、兩隊列表在左右、下方是時間軸加控制列；血甲錢都在列表裡，玩家用的血甲與武器面板收起來 */
-.sg.spectate .sg-left, .sg.spectate .sg-right { display: none; }
+.sg.spectate .sg-vitals, .sg.spectate .sg-money, .sg.spectate .sg-slots { display: none; }
 .sg.spectate .sg-canvas { cursor: grab; }
 .sg.spectate .sg-canvas.pick { cursor: pointer; }
 .sg.spectate .sg-canvas.drag { cursor: grabbing; }
-.sg.spectate .sg-radar { right: auto; left: calc(var(--u) * 28); pointer-events: auto; }
+.sg.spectate .sg-radar { pointer-events: auto; }
 .sg.spectate .sg-mini { cursor: pointer; }
-.sg.spectate .sg-feed { top: calc(var(--u) * 24); }
 .sg.spectate .sg-bombbar { bottom: calc(var(--u) * 164); }
 .sg .tg { margin-left: 6px; font-size: max(10px, calc(var(--u) * 12)); color: var(--grey); font-weight: 400; }
 
