@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ShooterObservation } from '../src/shooter/api.ts';
 import type { FullState } from '../src/web/shooter/protocol.ts';
-import { clockText, clockTicks, visibleHp } from '../src/web/shooter/hudinfo.ts';
+import { clockText, clockTicks, seesAll, visibleHp } from '../src/web/shooter/hudinfo.ts';
 import { buyToggle } from '../src/web/shooter/shop.ts';
 
 describe('商店開關', () => {
@@ -11,6 +11,15 @@ describe('商店開關', () => {
     expect(buyToggle(false, false)).toBe('deny');
     expect(buyToggle(true, true)).toBe('close');
     expect(buyToggle(true, false)).toBe('close');
+  });
+});
+
+describe('觀戰視野', () => {
+  it('自由鏡頭照透視開關，維持所看選手的視野；只有全圖一律看全部', () => {
+    expect(seesAll(false, 'follow')).toBe(false);
+    expect(seesAll(false, 'free')).toBe(false);
+    expect(seesAll(true, 'free')).toBe(true);
+    expect(seesAll(false, 'overview')).toBe(true);
   });
 });
 

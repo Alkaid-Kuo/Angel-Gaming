@@ -1,9 +1,9 @@
-// 觀戰介面：滑鼠操作（點人跟隨、拖曳自由鏡頭、滾輪縮放、雙擊回跟隨）、兩隊選手列表、回合時間軸、按鍵表、跳回合提示。
+// 觀戰介面：滑鼠操作（點人跟隨、拖曳自由鏡頭、滾輪縮放、雙擊回跟隨）、兩隊選手列表、按鍵表、跳回合提示。
 // 試玩觀戰與經營層觀戰（#watch）共用同一套。資料來自 FullState（觀戰本來就有全狀態）與計分板。
-// 面板是 DOM，30 Hz 更新，只有內容變了才寫（hud.ts 的 setHtml）。列表與時間軸的內容會一直換，所以吃 pointerdown 不吃 click：按下到放開之間子元素被換掉就不會有 click。
-import type { GrenadeId, RoundEndReason, ShooterObservation, WeaponId } from '../../shooter/api.ts';
+// 面板是 DOM，30 Hz 更新，只有內容變了才寫（hud.ts 的 setHtml）。列表的內容會一直換，所以吃 pointerdown 不吃 click：按下到放開之間子元素被換掉就不會有 click。
+import type { GrenadeId, WeaponId } from '../../shooter/api.ts';
 import { DRAG_PX, SpectateCamera, pickPlayer, type CamEnv, type CamMode, type CamView } from './camera.ts';
-import { REASON, TEAM_COLOR, setHtml, type RoundMark, type ShooterHud } from './hud.ts';
+import { setHtml, type ShooterHud } from './hud.ts';
 import type { BoardRow, FullPlayer, FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
 import { GRENADE_TAG, interp } from './render.ts';
 
@@ -15,19 +15,9 @@ const ZOOM_SPECTATE = 1;
 /** 滾輪每 100 單位的縮放量 */
 const WHEEL_RATE = 0.0016;
 /** 全圖要留給面板的邊（介面單位，1080p 的 px）：左右兩隊列表、上比分、下控制列 */
-const PAD_X = 380;
-const PAD_Y = 128;
+const PAD_X = 280;
+const PAD_Y = 78;
 const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-
-/** 回合結束原因的圖示（16×16，currentColor） */
-const REASON_ICON: Readonly<Record<RoundEndReason, string>> = {
-  elimination: '<circle cx="8" cy="8" r="4.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 1v4M8 11v4M1 8h4M11 8h4" stroke="currentColor" stroke-width="1.8"/>',
-  bomb: '<circle cx="7" cy="9.5" r="5" fill="currentColor"/><path d="M10 5.5 12.5 3" stroke="currentColor" stroke-width="1.8"/><path d="M13 1.2v1.6M14.8 3h-1.6" stroke="currentColor" stroke-width="1.2"/>',
-  defuse: '<path d="M3 3l10 10M13 3 3 13" stroke="currentColor" stroke-width="2"/><circle cx="3.4" cy="12.6" r="2" fill="currentColor"/><circle cx="12.6" cy="12.6" r="2" fill="currentColor"/>',
-  timeout: '<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 4.4V8l2.6 1.8" fill="none" stroke="currentColor" stroke-width="1.8"/>',
-};
-
-const reasonIcon = (r: RoundEndReason): string => `<svg viewBox="0 0 16 16" aria-hidden="true">${REASON_ICON[r]}</svg>`;
 
 const HELP: readonly { readonly title: string; readonly rows: readonly (readonly [string, string])[] }[] = [
   {
@@ -38,7 +28,6 @@ const HELP: readonly { readonly title: string; readonly rows: readonly (readonly
       ['滾輪', '以游標為中心縮放'],
       ['雙擊空地', '回到跟隨'],
       ['點小地圖空地', '自由鏡頭移到那裡'],
-      ['點回合時間軸', '跳到那一回合開始'],
     ],
   },
   {
@@ -49,11 +38,10 @@ const HELP: readonly { readonly title: string; readonly rows: readonly (readonly
       ['P　N', '上一回合／下一回合'],
       ['←　→', '換跟隨的人'],
       ['M', '全圖鏡頭'],
-      ['X', '全圖透視'],
-      ['T', '戰術疊層'],
+      ['X', '透視'],
       ['-　=', '縮放'],
       ['Tab', '按住看計分板'],
-      ['F', '全螢幕'],
+      ['F11　Esc', '進入／離開全螢幕'],
       ['?　H', '這張按鍵表'],
     ],
   },
@@ -82,17 +70,10 @@ export class SpectateUi {
   /** 上次畫列表時當 T 的組 */
   private sides: 0 | 1 = 0;
   private readonly heads: [HTMLElement, HTMLElement];
-  private readonly timeline: HTMLElement;
-  private readonly cells: HTMLElement;
-  private readonly tlHead: HTMLElement;
-  private readonly tlBar: HTMLElement;
   private readonly help: HTMLElement;
   private readonly seekBox: HTMLElement;
-  /** 看過的回合結果：跳回去之後時間軸還留著後面的回合 */
-  private readonly known = new Map<number, RoundMark>();
   private lastT = 0;
   private lastPanel = 0;
-  private cellKey = '';
   /** 按下的位置；drag 表示已經超過拖曳門檻 */
   private press: { x: number; y: number; lastX: number; lastY: number; drag: boolean } | null = null;
   /** 滑鼠在畫布上的位置（畫面座標）；不在畫布上為 null */
@@ -127,11 +108,6 @@ export class SpectateUi {
         this.bodies.set(id, div('bd', row));
       }
     });
-    this.timeline = div('sg-timeline', root);
-    this.tlHead = div('th', this.timeline);
-    this.tlBar = div('tb', this.timeline);
-    this.tlBar.appendChild(document.createElement('i'));
-    this.cells = div('tc', this.timeline);
     this.help = div('sg-help hidden', root);
     this.help.innerHTML =
       `<div class="box"><small class="en">CONTROLS</small><b>觀戰操作</b><div class="cols">` +
@@ -190,6 +166,7 @@ export class SpectateUi {
   private bind(): void {
     const c = this.canvas;
     c.addEventListener('pointerdown', (e) => {
+      this.hud.closeMenu();
       if (e.button !== 0 && e.button !== 1) return;
       const p = this.canvasPos(e);
       this.press = { x: p.x, y: p.y, lastX: p.x, lastY: p.y, drag: false };
@@ -250,10 +227,6 @@ export class SpectateUi {
         if (id !== undefined) this.follow(Number(id));
       });
     }
-    this.cells.addEventListener('pointerdown', (e) => {
-      const n = (e.target as HTMLElement).closest<HTMLElement>('[data-round]')?.dataset.round;
-      if (n !== undefined) this.host.seek(Number(n));
-    });
     this.help.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('.box') === null || (e.target as HTMLElement).closest('button') !== null) this.setHelp(false);
     });
@@ -267,13 +240,6 @@ export class SpectateUi {
   zoomStep(step: number): void {
     const e = this.env();
     this.cam.zoomAt(1.2 ** step, e.w / 2, e.h / 2);
-  }
-
-  /** 戰術疊層的距離環：全圖與自由鏡頭時跟著滑鼠 */
-  rings(): { x: number; y: number } | null {
-    if (this.cam.mode === 'follow' || this.pointer === null) return null;
-    const [x, y] = this.worldAt(this.pointer);
-    return { x, y };
   }
 
   helpOpen(): boolean {
@@ -320,7 +286,6 @@ export class SpectateUi {
   private panels(f: ShooterFrame): void {
     const full = f.full;
     if (full === null) return;
-    for (const r of this.hud.rounds) this.known.set(r.number, r);
     if (this.sides !== this.hud.sides) this.paintRows();
     this.hud.leftRight(f.board).forEach((team, side) => {
       const list = full.players.filter((p) => p.team === team);
@@ -334,7 +299,6 @@ export class SpectateUi {
       row.classList.toggle('sel', p.id === f.viewId);
       setHtml(this.bodies.get(p.id) as HTMLElement, this.rowHtml(p, b));
     }
-    this.renderTimeline(f.view);
   }
 
   private weaponName(id: WeaponId): string {
@@ -361,32 +325,5 @@ export class SpectateUi {
     const tail = work !== null ? `<span class="st">${work[0]}</span>` : `${chips}${armor}`;
     const prog = work !== null ? `<i class="pg" style="width:${Math.min(100, Math.round(Number(work[1]) * 100))}%"></i>` : '';
     return `<i class="hpf${p.hp <= 30 ? ' low' : ''}" style="width:${Math.max(0, p.hp)}%"></i>${head}<div class="l2"><span class="wn">${this.weaponName(p.weapon)}</span><span class="am">${ammo}</span>${nades}<span class="sp"></span>${tail}</div>${prog}`;
-  }
-
-  /** 回合時間軸：已打完的格子是勝方顏色加結束原因；目前回合高亮；還沒看過的空格也能點（往後快轉） */
-  private renderTimeline(view: ShooterObservation): void {
-    const r = view.round;
-    const rules = this.meta.rules;
-    const reg = rules.roundsPerHalf * 2;
-    const total = Math.max(reg, r.number, ...this.known.keys());
-    const key = `${r.number}|${r.phase === 'over'}|${[...this.known.keys()].join()}|${total}`;
-    if (key !== this.cellKey) {
-      this.cellKey = key;
-      let html = '';
-      for (let n = 1; n <= total; n++) {
-        const m = this.known.get(n);
-        const cls = `${n === r.number ? ' cur' : ''}${m !== undefined ? ' won' : ''}${n > r.number ? ' later' : ''}`;
-        if (n === rules.roundsPerHalf + 1 || (n > reg && (n - reg - 1) % (rules.overtime === false ? 1 : rules.overtime.roundsPerHalf) === 0)) html += '<span class="gap"></span>';
-        const g = m?.winnerGroup ?? (m?.winner === 'T' ? 0 : 1);
-        const style = m !== undefined ? ` style="--c:${TEAM_COLOR[m.winner]}"` : '';
-        const title = m !== undefined ? `第 ${n} 回合：${this.hud.groupLabel(g)}勝・${REASON[m.reason]}` : `第 ${n} 回合`;
-        html += `<button type="button" class="tr${cls}" data-round="${n}" title="${title}"${style}><small>${n}</small>${m !== undefined ? reasonIcon(m.reason) : ''}</button>`;
-      }
-      this.cells.innerHTML = html;
-    }
-    const of = r.number > reg ? `第 ${r.number} 回合・加時` : `第 ${r.number}／${reg} 回合`;
-    setHtml(this.tlHead, `<span>${of}</span><span class="pt">點回合跳過去</span>`);
-    const done = r.phase === 'freeze' ? 0 : r.phase === 'live' ? 1 - r.phaseTicksLeft / rules.roundTicks : 1;
-    (this.tlBar.firstElementChild as HTMLElement).style.width = `${Math.round(done * 100)}%`;
   }
 }

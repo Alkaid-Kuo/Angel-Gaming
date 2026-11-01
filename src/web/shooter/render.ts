@@ -121,14 +121,12 @@ export interface DrawInput {
   readonly zoom: number;
   /** 觀戰模式的全圖透視 */
   readonly xray: boolean;
-  /** 觀戰模式：戰術疊層（距離環、引線標註） */
-  readonly tactical: boolean;
+  /** 觀戰的全圖鏡頭：遠看時每個人一條引線標註，加上區域名 */
+  readonly tags: boolean;
   /** 觀戰模式的鏡頭（camera.ts 算好的）；null＝玩家模式，鏡頭跟著自己與滑鼠 */
   readonly camera: CamView | null;
-  /** 第一人稱的效果（致盲白幕、受傷暗角、聲音箭頭、傷害數字）；觀戰的全圖與自由鏡頭不是誰的視角，不畫 */
+  /** 第一人稱的效果（致盲白幕、受傷暗角、聲音箭頭、傷害數字）；觀戰的全圖與自由鏡頭不畫 */
   readonly pov: boolean;
-  /** 戰術疊層距離環的圓心（座標單位）；null＝所看的選手 */
-  readonly rings: { readonly x: number; readonly y: number } | null;
   /** 觀戰：滑鼠指著的選手 */
   readonly hover: number | null;
   readonly charge: ThrowPreview | null;
@@ -142,7 +140,7 @@ export interface DrawInput {
   readonly hurts: readonly HurtMark[];
   /** 別人的子彈（觀察資料 tracers） */
   readonly others: readonly OtherTracer[];
-  /** 全狀態的所有子彈：全圖與自由鏡頭畫（pov 為 false） */
+  /** 全狀態的所有子彈：全圖與開透視的自由鏡頭畫 */
   readonly allShots: readonly OtherTracer[];
   readonly pops: readonly DamagePop[];
   readonly corpses: readonly Corpse[];
@@ -290,7 +288,7 @@ export class ShooterRenderer {
   /** 開鏡鏡頭的過渡進度 0～1 */
   private scopeBlend = 0;
   private lastDraw = 0;
-  /** 我方組別（戰術標註往哪邊拉） */
+  /** 我方組別（全圖標註往哪邊拉） */
   private readonly mine: 0 | 1 | null;
   /** 爆炸：上一個 tick 看得見的手雷與閃光彈，下一個 tick 不見了又聽到爆炸才算炸了 */
   private lastNades: readonly { readonly kind: GrenadeId; readonly x: number; readonly y: number }[] = [];
@@ -298,7 +296,7 @@ export class ShooterRenderer {
   private lastRound = -1;
   private lastBomb = '';
   private blasts: Blast[] = [];
-  /** 戰術疊層標註往上疊的高度（依 playerId，平滑用） */
+  /** 全圖標註往上疊的高度（依 playerId，平滑用） */
   private readonly tagLift: number[];
   private scorches: { x: number; y: number; r: number; seed: number }[] = [];
   /** 目前當 T 的組 */
@@ -445,7 +443,7 @@ export class ShooterRenderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.blit(ctx, this.baked.walls, cam, dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.drawCorpses(cam, view, full, d.corpses, lod);
+    this.drawCorpses(cam, view, seeAll ? full : null, d.corpses, lod);
     this.drawItems(cam, seeAll ? full.items : view.items);
     this.drawBomb(cam, view, full, d.xray, d.now);
     // 煙在單位之下：觀察資料裡有的人不能被煙蓋掉，蓋了等於改了看得到什麼
@@ -453,8 +451,9 @@ export class ShooterRenderer {
 
     // 人
     const groupOfMe = this.meta.groups[view.me.id];
-    if (full !== null) {
-      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tactical, d.hover, !d.pov);
+    // 觀戰沒開透視時和玩家一樣，只畫所看選手看得到的人
+    if (full !== null && seeAll) {
+      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tags, d.hover, !d.pov);
     } else {
       const us = this.sideOf(groupOfMe);
       for (const t of view.teammates) {
@@ -502,9 +501,9 @@ export class ShooterRenderer {
       paintBlast(ctx, sx, sy, r, x.seed, (d.now - x.t) / BLAST_MS, x.kind);
     }
     // 子彈彈道：別人的（隊友、看得見的敵人）與所看選手自己的；全圖與自由鏡頭不是誰的視角，畫所有人的
-    this.drawOtherTracers(cam, d.pov ? d.others : d.allShots, d.now);
+    this.drawOtherTracers(cam, d.pov || !seeAll ? d.others : d.allShots, d.now);
     if (d.pov && view.me.alive) this.drawTracers(cam, meNow, view.me.weapon, d);
-    if (d.tactical && full !== null) this.drawTactical(cam, full, d.rings ?? meNow, view.me.id);
+    if (d.tags && full !== null) this.drawTags(cam, full, view.me.id);
     paintVignette(ctx, w, h);
     // 投擲預估與準心（玩家模式、活著）
     if (mine && view.me.alive) {
@@ -781,7 +780,7 @@ export class ShooterRenderer {
         ctx.stroke();
       }
     }
-    // 名字、血條（遠看只留細血條，戰術疊層另有引線標註）
+    // 名字、血條（遠看只留細血條，全圖另有引線標註）
     if (o.label === null && o.hp === null) return;
     const top = sy - ppc * 1.05;
     if (o.label !== null && !lod) {
@@ -832,30 +831,14 @@ export class ShooterRenderer {
     paintChip(ctx, name, sx, sy + r + 12);
   }
 
-  /** 戰術疊層（觀戰）：所看選手的距離環、每個人一條引線標註，全圖鏡頭時加上區域名 */
-  private drawTactical(cam: Camera, full: FullState, center: { x: number; y: number }, viewId: number): void {
+  /** 全圖鏡頭的標註：區域名，每個人一條引線標名字與血量 */
+  private drawTags(cam: Camera, full: FullState, viewId: number): void {
     const ctx = this.ctx;
     const ppc = cam.scale * UNIT;
-    const [mx, my] = toScreen(cam, center.x, center.y);
-    ctx.setLineDash([2, 5]);
-    ctx.lineWidth = 1;
-    ctx.font = `13px "Share Tech Mono", monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    for (const r of [10, 20, 30]) {
-      ctx.strokeStyle = 'rgba(29, 26, 34, 0.6)';
-      ctx.beginPath();
-      ctx.arc(mx, my, r * ppc, 0, Math.PI * 2);
-      ctx.stroke();
-      const ty = my - r * ppc;
-      ctx.fillStyle = 'rgba(11, 14, 20, 0.8)';
-      ctx.fillRect(mx - 20, ty - 9, 40, 18);
-      ctx.fillStyle = '#eef2f6';
-      ctx.fillText(`${r}格`, mx, ty);
-    }
-    ctx.setLineDash([]);
     if (ppc < LOD_PPC) {
       ctx.font = `700 12px ${ZH}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       for (const l of this.baked.labels) {
         const [sx, sy] = toScreen(cam, l.x * UNIT, l.y * UNIT);
         ctx.lineJoin = 'round';
@@ -1221,7 +1204,7 @@ export class ShooterRenderer {
       g.lineWidth = 1;
       g.strokeRect(this.camera.cx * k - vw / 2, this.camera.cy * k - vh / 2, vw, vh);
     }
-    if (d.cur.full !== null) {
+    if (d.cur.full !== null && d.xray) {
       for (const p of d.cur.full.players) if (p.alive) dot(p.x, p.y, this.meta.groups[p.id] === groupOfMe ? usColor : foeColor, 3);
     } else {
       for (const t of view.teammates) if (t.alive) dot(t.x, t.y, usColor, 3);

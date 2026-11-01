@@ -14,6 +14,7 @@ import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { BotLevel, FromShooterWorker, Lineup, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
+import { seesAll } from './hudinfo.ts';
 import { BUY_CLOSED_NOTE, buyToggle } from './shop.ts';
 import { SpectateUi } from './spectate.ts';
 import { WATCH_HASH, readTicket, ticketVersionError, type WatchTicket } from './watch.ts';
@@ -97,9 +98,8 @@ class Game {
   private lastHurtTick = -1;
   private zoomIdx: number = ZOOM_PLAY;
   private speedIdx = 1;
-  /** 觀戰：使用者開的透視（全圖與自由鏡頭一律看全狀態，見 seeAll）、戰術疊層；經營層觀戰預設開透視，看的是整場比賽不是某個人 */
+  /** 觀戰：使用者開的透視（全圖一律看全部，見 seeAll）；經營層觀戰預設開，看的是整場比賽不是某個人 */
   private xray: boolean;
-  private tactical = false;
   /** 這回合看著倒下的敵人 */
   private corpses: Corpse[] = [];
   /** 每幀畫面毫秒（最近 60 幀平均，除錯掛勾讀）；frameMs 含面板更新 */
@@ -169,7 +169,6 @@ class Game {
       },
       toggleXray: () => this.toggleMap('xray'),
       toggleOverview: () => this.toggleMap('overview'),
-      toggleTactical: () => this.toggleMap('tactical'),
       speed: (step) => this.setSpeed(this.speedIdx + step),
       skipRound: () => this.skipRound(),
       prevRound: () => this.prevRound(),
@@ -179,17 +178,19 @@ class Game {
     this.hud.ctl?.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('button');
       if (b === null || b.disabled) return;
-      if (b.dataset.act === 'pause') this.togglePause();
-      else if (b.dataset.act === 'speed') this.setSpeed(Number(b.dataset.i));
-      else if (b.dataset.act === 'skip') this.skipRound();
-      else if (b.dataset.act === 'prev') this.prevRound();
-      else if (b.dataset.act === 'cam-follow') this.spec?.cam.follow();
-      else if (b.dataset.act === 'cam-free') this.spec?.cam.free();
-      else if (b.dataset.act === 'zoom-in') this.spec?.zoomStep(1);
-      else if (b.dataset.act === 'zoom-out') this.spec?.zoomStep(-1);
-      else if (b.dataset.act === 'help') this.spec?.setHelp(!this.spec.helpOpen());
-      else if (b.dataset.act === 'xray' || b.dataset.act === 'overview' || b.dataset.act === 'tactical') this.toggleMap(b.dataset.act);
-      else if (b.dataset.act === 'quit') home();
+      const act = b.dataset.act;
+      if (act === 'menu') this.hud.toggleMenu(b.dataset.m === 'speed' ? 'speed' : 'cam');
+      else this.hud.closeMenu();
+      if (act === 'pause') this.togglePause();
+      else if (act === 'speed') this.setSpeed(Number(b.dataset.i));
+      else if (act === 'skip') this.skipRound();
+      else if (act === 'cam-follow') this.spec?.cam.follow();
+      else if (act === 'cam-free') this.spec?.cam.free();
+      else if (act === 'cam-map') this.spec?.cam.overview();
+      else if (act === 'help') this.spec?.setHelp(!this.spec.helpOpen());
+      else if (act === 'xray') this.toggleMap('xray');
+      else if (act === 'fullscreen') toggleFullscreen();
+      else if (act === 'quit') home();
       // 按鈕不留焦點：空白鍵是暫停，不要再觸發一次按鈕
       b.blur();
     });
@@ -230,25 +231,18 @@ class Game {
     return { frameMs: (performance.now() - t0) / n, n };
   }
 
-  /** 觀戰的全圖開關：全圖與自由鏡頭不是誰的視角，一律看全狀態；關透視就回跟隨 */
-  private toggleMap(which: 'xray' | 'overview' | 'tactical'): void {
+  /** 觀戰的全圖與透視開關；全圖一律看全部，透視在全圖時不作用 */
+  private toggleMap(which: 'xray' | 'overview'): void {
     const cam = this.spec?.cam;
     if (cam === undefined) return;
     if (which === 'overview') {
       if (cam.mode === 'overview') cam.follow();
       else cam.overview();
-    } else if (which === 'tactical') {
-      this.tactical = !this.tactical;
-      if (this.tactical) this.xray = true;
-    } else if (this.seeAll()) {
-      this.xray = false;
-      this.tactical = false;
-      cam.follow();
-    } else this.xray = true;
+    } else if (cam.mode !== 'overview') this.xray = !this.xray;
   }
 
   private seeAll(): boolean {
-    return this.xray || (this.spec !== null && this.spec.mode !== 'follow');
+    return this.spec !== null && seesAll(this.xray, this.spec.mode);
   }
 
   private togglePause(): void {
@@ -402,7 +396,7 @@ class Game {
   }
 
   private lastInput(f: ShooterFrame): DrawInput {
-    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.seeAll(), tactical: this.tactical, camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', rings: this.spec?.rings() ?? null, hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, allShots: this.allShots, pops: this.pops, corpses: this.corpses };
+    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.seeAll(), tags: this.spec?.mode === 'overview', camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, allShots: this.allShots, pops: this.pops, corpses: this.corpses };
   }
 
   private updateCursor(f: ShooterFrame): void {
@@ -429,7 +423,7 @@ class Game {
     this.renderer.drawMinimap(this.mini, input);
     const cam: CamMode = this.spec?.mode ?? 'follow';
     this.hud.update(f, t, { throwCdFrac: throwCd, grenade: this.input.grenade, bomb: this.input.bomb, speed: SPEEDS[this.speedIdx], xray: this.seeAll(), cam, buyOpen: this.buy.isOpen() });
-    this.hud.updateCtl(SPEEDS[this.speedIdx], this.paused, this.over !== null, { xray: this.seeAll(), tactical: this.tactical, cam });
+    this.hud.updateCtl(SPEEDS[this.speedIdx], this.paused, this.over !== null, { xray: this.seeAll(), cam });
     this.frameMs += (performance.now() - start - this.frameMs) / 60;
   }
 
@@ -474,15 +468,18 @@ class Game {
   }
 }
 
-/** 自己按 F／選單離開全螢幕時不自動暫停 */
+/** 自己按 F11／選單離開全螢幕時不自動暫停 */
 let leavingFullscreen = false;
 
-/** 全螢幕＋鎖鍵盤（Chrome 系）：Ctrl＋W 等組合鍵交給網頁，Ctrl 蹲著前進不會關分頁 */
-function enterFullscreen(): void {
+/**
+ * 全螢幕。對局要鎖鍵盤（Chrome 系）：Ctrl＋W 等組合鍵交給網頁，Ctrl 蹲著前進不會關分頁，代價是 Esc 要長按才離開全螢幕。
+ * 觀戰不用打字移動，不鎖，Esc 直接離開。
+ */
+function enterFullscreen(lockKeys: boolean): void {
   if (document.fullscreenElement !== null) return;
   void document.documentElement
     .requestFullscreen()
-    .then(() => (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard?.lock?.())
+    .then(() => (lockKeys ? (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard?.lock?.() : undefined))
     .catch(() => undefined);
 }
 
@@ -492,7 +489,7 @@ function toggleFullscreen(): void {
     void document.exitFullscreen();
     return;
   }
-  enterFullscreen();
+  enterFullscreen(game?.meta.spectate !== true);
 }
 
 function randomSeed(): number {
@@ -624,7 +621,7 @@ function init(): void {
   });
   $('start').addEventListener('click', () => {
     // 開始是使用者點擊，可以直接進全螢幕並鎖鍵盤（Ctrl＋W 不會關分頁）
-    if ($<HTMLInputElement>('fullscreen').checked) enterFullscreen();
+    if ($<HTMLInputElement>('fullscreen').checked) enterFullscreen(!$<HTMLInputElement>('spectate').checked);
     const team = (document.querySelector('input[name="team"]:checked') as HTMLInputElement | null)?.value === 'CT' ? 'CT' : 'T';
     const n = Number(seed.value);
     start({ team, seed: Number.isFinite(n) && n >= 0 ? Math.floor(n) : randomSeed(), spectate: $<HTMLInputElement>('spectate').checked, lineup: selectedLineup(), mapId: $<HTMLSelectElement>('map').value });

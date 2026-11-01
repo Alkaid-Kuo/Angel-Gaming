@@ -25,6 +25,7 @@ const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeA
 const BANNER_MS = 3200;
 const CUE_MS = 1600;
 
+const CAM_NAME: Readonly<Record<CamMode, string>> = { follow: '跟隨', free: '自由', overview: '全圖' };
 /** 血與甲的小圖示 */
 const ICON_HP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2h4v8h8v4h-8v8h-4v-8H2v-4h8z"/></svg>';
 const ICON_AR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l9 3v7c0 5-3.6 8.6-9 10-5.4-1.4-9-5-9-10V5z"/></svg>';
@@ -95,6 +96,8 @@ export class ShooterHud {
   private feedItems: { item: KillFeedItem; t: number }[] = [];
   private bannerUntil = 0;
   private cueText = '';
+  /** 控制列開著的選單 */
+  private menu: 'speed' | 'cam' | null = null;
   private cueUntil = 0;
   private boardShown = false;
   /** 這回合自己是被誰、用什麼打死的（擊殺訊息是公開資訊） */
@@ -132,9 +135,9 @@ export class ShooterHud {
     this.pause.innerHTML =
       `<div class="box"><small class="en">PAUSED</small><b>暫停</b>` +
       `<div class="col"><button type="button" class="primary" data-act="resume">${resume}</button>` +
-      `<button type="button" data-act="fullscreen">全螢幕（F）</button>` +
+      `<button type="button" data-act="fullscreen">全螢幕（F11）</button>` +
       `<button type="button" data-act="quit">${quit}</button></div>` +
-      `<p class="muted small">全螢幕時 Ctrl 蹲著按 W 不會關掉分頁（按住 Esc 離開全螢幕）。${meta.spectate ? '' : '離開比賽＝直接回開局畫面，不計成績。'}</p></div>`;
+      `<p class="muted small">${meta.spectate ? '' : '全螢幕時 Ctrl 蹲著按 W 不會關掉分頁（按住 Esc 離開全螢幕）。離開比賽＝直接回開局畫面，不計成績。'}</p></div>`;
   }
 
   /** 短暫提示（按了但現在不能做的事） */
@@ -267,20 +270,32 @@ export class ShooterHud {
     return best;
   }
 
-  /** 觀戰控制列：回合、暫停、速度、鏡頭模式、全圖疊層、縮放、按鍵表（按鈕的 data-act 由 main.ts 處理）；鍵盤熱鍵寫在 title 與按鍵表 */
-  updateCtl(speed: number, paused: boolean, over: boolean, map: { xray: boolean; tactical: boolean; cam: CamMode }): void {
+  /** 開關控制列的選單 */
+  toggleMenu(m: 'speed' | 'cam'): void {
+    this.menu = this.menu === m ? null : m;
+  }
+
+  closeMenu(): void {
+    this.menu = null;
+  }
+
+  /** 觀戰控制列：暫停、下一回合、速度與鏡頭選單、透視、全螢幕、按鍵表、離開（按鈕的 data-act 由 main.ts 處理）；鍵盤熱鍵寫在 title 與按鍵表 */
+  updateCtl(speed: number, paused: boolean, over: boolean, map: { xray: boolean; cam: CamMode }): void {
     if (this.ctl === null) return;
-    const sp = SPEEDS.map((s, i) => `<button type="button" class="${s === speed ? 'on' : ''}" data-act="speed" data-i="${i}" title="[ ]">${s}×</button>`).join('');
-    const tg = (act: string, on: boolean, label: string, key: string): string => `<button type="button" class="${on ? 'on' : ''}" data-act="${act}" title="${key}">${label}</button>`;
+    const item = (act: string, on: boolean, label: string, extra = ''): string => `<button type="button" class="${on ? 'on' : ''}" data-act="${act}" ${extra}>${label}</button>`;
+    const menu = (m: 'speed' | 'cam', label: string, title: string, items: string): string =>
+      `<span class="mn"><button type="button" data-act="menu" data-m="${m}" title="${title}">${label}<small>▾</small></button>${this.menu === m ? `<span class="pop">${items}</span>` : ''}</span>`;
+    const speeds = SPEEDS.map((s, i) => item('speed', s === speed, `${s}×`, `data-i="${i}"`)).reverse().join('');
+    const cams = item('cam-follow', map.cam === 'follow', CAM_NAME.follow) + item('cam-free', map.cam === 'free', CAM_NAME.free) + item('cam-map', map.cam === 'overview', CAM_NAME.overview);
     setHtml(
       this.ctl,
-      `<span class="sp"><button type="button" data-act="prev" title="上一回合（P）">◀◀</button>` +
-        `<button type="button" class="pp" data-act="pause" title="空白鍵" ${over ? 'disabled' : ''}>${paused ? '▶ 播放' : 'Ⅱ 暫停'}</button>` +
-        `<button type="button" data-act="skip" title="下一回合（N）" ${over ? 'disabled' : ''}>▶▶</button></span>` +
-        `<span class="sp">${sp}</span>` +
-        `<span class="sp">${tg('cam-follow', map.cam === 'follow', '跟隨', '← → 換人')}${tg('cam-free', map.cam === 'free', '自由', '拖曳畫面')}${tg('overview', map.cam === 'overview', '全圖', 'M')}</span>` +
-        `<span class="sp">${tg('xray', map.xray, '透視', 'X')}${tg('tactical', map.tactical, '戰術', 'T')}</span>` +
-        `<span class="sp"><button type="button" data-act="zoom-out" title="-">−</button><button type="button" data-act="zoom-in" title="=">＋</button></span>` +
+      `<button type="button" data-act="pause" title="暫停（空白鍵）" ${over ? 'disabled' : ''}>${paused ? '▶' : 'Ⅱ'}</button>` +
+        `<button type="button" data-act="skip" title="下一回合（N）" ${over ? 'disabled' : ''}>▶▶</button><i></i>` +
+        menu('speed', `${speed}×`, '速度（[ ]）', speeds) +
+        menu('cam', CAM_NAME[map.cam], '鏡頭（M 全圖）', cams) +
+        item('xray', map.xray, '透視', `title="X" ${map.cam === 'overview' ? 'disabled' : ''}`) +
+        `<i></i>` +
+        item('fullscreen', document.fullscreenElement !== null, '⛶', 'title="全螢幕（F11）"') +
         `<button type="button" data-act="help" title="? 或 H">?</button>` +
         `<button type="button" data-act="quit">${this.meta.watch ? '回經營' : '離開'}</button>`,
     );
