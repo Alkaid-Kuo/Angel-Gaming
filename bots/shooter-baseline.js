@@ -3508,11 +3508,19 @@ class Tactics {
       const near = st !== null && dist(me.x, me.y, st.x, st.y) < 6 * UNIT;
       const supportFirst = role !== SUPPORT && this.isAlive(obs, this.roles.who(SUPPORT)) && this.smokeHeard < 0 && sinceExec < 8;
       if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
-        const sp = supportFirst ? null : [this.smokePoint(exec, ent), { x: ent.ix, y: ent.iy }].find((q) => q !== null && this.util.solve(me.x, me.y, q.x, q.y) !== null);
-        if (sp !== undefined && sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
+        const sp = supportFirst ? null : this.smokeTarget(obs, p, exec, ent);
+        if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
       } else if (this.util.has(me, 'flash') && (idx === 0 || (sinceExec > 2.5 && this.flashHeard < 0)) && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5)) && !(role === ENTRY && smokeFirst && !near)) {
         const fp = this.flashPoint(obs, exec, ent, smokeFirst ? 2 : 5);
         if (fp !== null && (smokeFirst || this.viewer(fp, exec))) wish = { kind: 'flash', x: fp.x, y: fp.y, why: '閃進點' };
+      }
+      const smoker = this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p) && !supportFirst;
+      const flasher = this.util.has(me, 'flash') && smokeFirst && role !== ENTRY && sinceExec > 2.5 && this.flashHeard < 0;
+      if (wish === null && (smoker || flasher) && sinceExec < 7 && dist(me.x, me.y, ent.ox, ent.oy) > 3 * UNIT) {
+        out.goal = { x: ent.ox, y: ent.oy };
+        out.walk = true;
+        out.role = '找丟道具的位置';
+        return null;
       }
       const pending = this.mateFlash.some((x) => t <= x.pop);
       const waiting = smokeFirst && near && wish === null && (pending || (sinceExec < 3 && this.flashHeard < 0 && !this.util.used.has('flash')));

@@ -905,13 +905,22 @@ export class Tactics {
       const supportFirst = role !== SUPPORT && this.isAlive(obs, this.roles.who(SUPPORT)) && this.smokeHeard < 0 && sinceExec < 8;
       if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
         // 封架點；從這裡丟不到就改封入口內側
-        const sp = supportFirst ? null : [this.smokePoint(exec, ent), { x: ent.ix, y: ent.iy }].find((q) => q !== null && this.util.solve(me.x, me.y, q.x, q.y) !== null);
-        if (sp !== undefined && sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
+        const sp = supportFirst ? null : this.smokeTarget(obs, p, exec, ent);
+        if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
       } else if (this.util.has(me, 'flash') && (idx === 0 || (sinceExec > 2.5 && this.flashHeard < 0)) && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5)) && !(role === ENTRY && smokeFirst && !near)) {
         // 突破手只在待命格丟閃（離開了就直接進點，不停下來丟）
         const fp = this.flashPoint(obs, exec, ent, smokeFirst ? 2 : 5);
         // 照計畫執行（隊友在待命格等）照例先閃；其他時候（rush）要可能有人看得到爆點才丟
         if (fp !== null && (smokeFirst || this.viewer(fp, exec))) wish = { kind: 'flash', x: fp.x, y: fp.y, why: '閃進點' };
+      }
+      // 待命格丟不到（轉角後面）：往入口走到丟得到為止，別帶著道具直接進點
+      const smoker = this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p) && !supportFirst;
+      const flasher = this.util.has(me, 'flash') && smokeFirst && role !== ENTRY && sinceExec > 2.5 && this.flashHeard < 0;
+      if (wish === null && (smoker || flasher) && sinceExec < 7 && dist(me.x, me.y, ent.ox, ent.oy) > 3 * UNIT) {
+        out.goal = { x: ent.ox, y: ent.oy };
+        out.walk = true;
+        out.role = '找丟道具的位置';
+        return null;
       }
       // 等閃光：還在待命格附近、閃光還沒丟、執行不到 3 秒
       const pending = this.mateFlash.some((x) => t <= x.pop);
