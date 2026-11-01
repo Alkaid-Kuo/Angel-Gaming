@@ -1,15 +1,16 @@
 // 試玩頁的陣容 → 驅動選項（純函式，不碰 DOM、不碰 Worker；Worker 與測試都只呼叫這裡）。
 // 基準 Bot 座位走經營層同一條路：角色照 BALANCED_ROLES 排、每位一份 PlayerSpec → 閘道的 seatOf、seatController、seatKnobs。
-// 人類佔掉的座位（0 或 5，突破手）空著不衍生；陪練座位維持原樣（不吃屬性、最短反應延遲、保留逾時判定）。
+// 人類佔掉的座位（0 或 5，突破手）空著不衍生；陪練座位不吃屬性，全陪練場是最短反應延遲，和基準 Bot 混打時用全 50 屬性的 8 tick（與強度表量測同條件）。
+// 所有 Bot 座位都關掉逾時判定（與閘道相同）：結果只由種子與人類操作決定，與機器快慢無關。
 // habit 由種子與座位號雜湊（範圍同經營層的 ±60），同種子同陣容的選手完全相同。
 import type { PlayerSpec } from '../../manage/gateway.ts';
 import type { CompiledBot } from '../../sandbox/compile.ts';
-import { MIN_REACTION_TICKS, TEAM_SIZE } from '../../shooter/config.ts';
+import { TEAM_SIZE } from '../../shooter/config.ts';
 import { LEAGUE_FORMAT_ID, formatOptions, seatController, seatKnobs, seatOf } from '../../shooter/gateway.ts';
 import { DEFAULT_MAP_ID, MAPS } from '../../shooter/map.ts';
-import { BALANCED_ROLES, ROLE_TABLE } from '../../shooter/players.ts';
+import { BALANCED_ROLES, ROLE_TABLE, reactionTicksFor } from '../../shooter/players.ts';
 import { ShooterBatchController, type ShooterController, type ShooterRunOptions } from '../../shooter/runner.ts';
-import { PLAYER_COUNT } from '../../shooter/sim.ts';
+import { DEFAULT_ATTRIBUTES, PLAYER_COUNT } from '../../shooter/sim.ts';
 import { Prng } from '../../shared/prng.ts';
 import type { BotLevel, Lineup, ShooterSetup } from './protocol.ts';
 
@@ -51,16 +52,17 @@ export function trialRunOptions(s: ShooterSetup, bots: { readonly practice: Comp
       if (human === null) throw new Error('人類座位沒有控制器');
       return human;
     }
-    return seatCtl[pid] ?? new ShooterBatchController(bots.practice, 'shooter-practice.js', s.seed, pid, map);
+    return seatCtl[pid] ?? new ShooterBatchController(bots.practice, 'shooter-practice.js', s.seed, pid, map, { timeLimits: false });
   });
   // 賽制跟聯賽同一份；凍結時間只有觀戰（Bot 對打）照賽制，有人類用引擎預設
   const { freezeTicks, ...format } = formatOptions(LEAGUE_FORMAT_ID);
   const base = { seed: s.seed, mapId: map.id, ...format, controllers, record: true, ...(human === null ? { freezeTicks } : {}), ...(s.loadout !== undefined ? { defaultLoadout: { T: s.loadout, CT: s.loadout } } : {}) };
   if (seats.every((seat) => seat === null)) return base;
   const knobs = seats.map((seat, pid) => (seat !== null ? seatKnobs(seatCtl[pid]!, seat) : {}));
-  // 有 attributes 時驅動層會替沒給延遲的座位用預設屬性算，所以陪練座位要明講原本的最短延遲
+  // 混打：陪練座位用全 50 屬性的延遲（8 tick）；人類座位驅動層一律 0，這裡給的值不會用到
   const mixed = levels.some((l) => l?.kind === 'practice');
-  return { ...base, knobs, attributes: seats.map((seat) => seat?.attributes), ...(mixed ? { reactionTicks: seats.map((seat) => seat?.reactionTicks ?? MIN_REACTION_TICKS) } : {}) };
+  const practiceTicks = reactionTicksFor(DEFAULT_ATTRIBUTES);
+  return { ...base, knobs, attributes: seats.map((seat) => seat?.attributes), ...(mixed ? { reactionTicks: seats.map((seat) => seat?.reactionTicks ?? practiceTicks) } : {}) };
 }
 
 /** 依 playerId 的顯示名：「你」、陪練沿用原名、基準 Bot「v3 支援α」 */

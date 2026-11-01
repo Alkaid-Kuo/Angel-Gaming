@@ -6,6 +6,7 @@
 import type { BuyItem, ShooterCommand } from '../../shooter/api.ts';
 import { DEFAULT_MAP_ID, MAPS } from '../../shooter/map.ts';
 import { BAKE_PX, bakeMap } from './bake.ts';
+import { hidesCursor } from './cursor.ts';
 import { BuyMenu } from './buy.ts';
 import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
@@ -28,7 +29,7 @@ let ticket: WatchTicket | null = null;
 
 /** 下拉的選項（value：practice 或版本號） */
 const LEVELS: readonly { readonly value: string; readonly name: string; readonly hint: string }[] = [
-  { value: 'practice', name: '陪練 v5', hint: '對照組：會買槍打包，但沒有指揮與輪轉；反應固定最短，對上基準 Bot 不算弱' },
+  { value: 'practice', name: '陪練 v5', hint: '對照組：會買槍打包，但沒有指揮與輪轉；全陪練場反應最快（5 tick），和基準 Bot 混打時 8 tick' },
   { value: '1', name: '基準 v1', hint: '有指揮、喊話與輪轉，基準裡瞄準與反應最慢' },
   { value: '2', name: '基準 v2', hint: '屬性比角色基準低一級' },
   { value: '3', name: '基準 v3', hint: '角色基準屬性，中段選手' },
@@ -326,10 +327,16 @@ class Game {
     return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.xray, tactical: this.tactical, overview: this.overview, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, pops: this.pops, corpses: this.corpses };
   }
 
+  private updateCursor(f: ShooterFrame): void {
+    const aiming = hidesCursor({ spectate: this.meta.spectate, over: this.over !== null, paused: this.paused, buyOpen: this.buy.isOpen(), alive: f.self.me.alive, focused: document.hasFocus() });
+    this.canvas.classList.toggle('aiming', aiming);
+  }
+
   private frame(t: number): void {
     this.raf = requestAnimationFrame((x) => this.frame(x));
     const f = this.patch !== null && this.cur !== null ? this.patch(this.cur) : this.cur;
     if (f === null) return;
+    this.updateCursor(f);
     const tickMs = 1000 / this.meta.rules.ticksPerSecond / (this.meta.spectate ? SPEEDS[this.speedIdx] : 1);
     const alpha = this.paused ? 1 : Math.min(1, (t - this.recvAt) / tickMs);
     this.input.update(t);
