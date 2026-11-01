@@ -1,6 +1,6 @@
 // CS 射擊可玩版的 HUD：頂部計分（scorebar.ts）、下方中央血甲彈藥、角落的金錢與武器欄、炸彈狀態、回合提示、擊殺訊息、計分板、結束畫面。
 // 全部從觀察資料（與計分板的公開資訊）取值。對局中的介面照 CS：半透明、不擋視野，重要的靠中間，次要的放角落，不放教學文字（web/shooter.css）。
-// 介面文字的顏色跟組別走：我方金、對手紅；別隊的比賽主隊白、客隊灰（金只給我方）。世界裡的隊色是另一條規則（對手藍，見 render.ts）。
+// 隊色照 CS：T 黃、CT 藍，敵我都一樣，換邊時跟著換，介面與世界一致（render.ts）。組別固定，隊色看這組現在打哪一邊。
 // 我方永遠在左；經營層觀戰顯示隊名、選手名、角色與版本。
 import type { RoundEndReason, ShooterObservation, Team, WeaponId } from '../../shooter/api.ts';
 import { mineGroup } from './render.ts';
@@ -11,7 +11,10 @@ import { ScoreBar, avatarHtml, gunIconUrl } from './scorebar.ts';
 import type { WatchTicket } from './watch.ts';
 
 /** 天使金色票（web/sketch/angel.css） */
-export const ANGEL = { gold: '#f0b54a', red: '#ff5d5d', white: '#eef2f6', grey: '#8b95a4' } as const;
+export const ANGEL = { gold: '#f0b54a', blue: '#57aef5', red: '#ff5d5d', white: '#eef2f6', grey: '#8b95a4' } as const;
+/** 隊色 */
+export const TEAM_COLOR: Readonly<Record<Team, string>> = { T: ANGEL.gold, CT: ANGEL.blue };
+const TEAM_JERSEY: Readonly<Record<Team, string>> = { T: '#b9832a', CT: '#2f6db0' };
 /** 觀戰速度（[ ] 或控制列切換） */
 export const SPEEDS = [0.5, 1, 2, 4, 8] as const;
 
@@ -96,14 +99,17 @@ export class ShooterHud {
   private boardShown = false;
   /** 這回合自己是被誰、用什麼打死的（擊殺訊息是公開資訊） */
   private myDeath: KillFeedItem | null = null;
-  private readonly faces = new Map<number, string>();
+  private readonly faces = new Map<string, string>();
+  /** 目前當 T 的組 */
+  private tGroup: 0 | 1 = 0;
   readonly rounds: RoundMark[] = [];
 
   constructor(root: HTMLElement, meta: ShooterMeta, ticket: WatchTicket | null = null) {
     this.meta = meta;
     this.mine = mineGroup(meta);
     this.ticket = meta.watch ? ticket : null;
-    this.score = new ScoreBar(root, meta, this.mine ?? 0, (g) => this.groupColor(g), (g) => this.groupJersey(g));
+    this.score = new ScoreBar(root, meta, this.mine ?? 0);
+    this.score.paint((g) => this.groupColor(g), (id) => this.face(id));
     this.feed = el('div', 'sg-feed', root);
     this.banner = el('div', 'sg-banner hidden', root);
     this.hint = el('div', 'sg-hint', root);
@@ -199,24 +205,29 @@ export class ShooterHud {
     return this.groupName(g);
   }
 
-  /** 組別的介面文字顏色：我方金、對手紅；別隊的比賽主隊白、客隊灰 */
+  /** 組別的隊色 */
   groupColor(g: 0 | 1): string {
-    if (this.mine === null) return g === 0 ? ANGEL.white : ANGEL.grey;
-    return g === this.mine ? ANGEL.gold : ANGEL.red;
+    return TEAM_COLOR[this.teamNow(g)];
   }
 
-  /** 頭像的球衣色 */
-  private groupJersey(g: 0 | 1): string {
-    if (this.mine === null) return g === 0 ? '#aab2bd' : '#59636f';
-    return g === this.mine ? '#b9832a' : '#a33a3a';
+  /** 這組現在打哪一邊 */
+  private teamNow(g: 0 | 1): Team {
+    return g === this.tGroup ? 'T' : 'CT';
   }
 
-  /** 選手頭像（同一個人只產生一次） */
+  /** 目前當 T 的組（換邊時要重畫頭像的地方比對用） */
+  get sides(): 0 | 1 {
+    return this.tGroup;
+  }
+
+  /** 選手頭像，球衣是隊色（同一個人同一邊只產生一次） */
   face(id: number): string {
-    let html = this.faces.get(id);
+    const team = this.teamNow(this.meta.groups[id]);
+    const key = `${id}${team}`;
+    let html = this.faces.get(key);
     if (html === undefined) {
-      html = avatarHtml(this.meta.names[id] ?? `#${id}`, this.groupJersey(this.meta.groups[id]));
-      this.faces.set(id, html);
+      html = avatarHtml(this.meta.names[id] ?? `#${id}`, TEAM_JERSEY[team]);
+      this.faces.set(key, html);
     }
     return html;
   }
@@ -306,7 +317,12 @@ export class ShooterHud {
     const r = view.round;
     // 頂部：我方（左）｜時間與比分｜對手（右）；回合資訊在 Tab 計分板
     const leftGroup: 0 | 1 = this.mine ?? 0;
-    const leftTeam: Team = this.groupOfTeam('T', f.board) === leftGroup ? 'T' : 'CT';
+    const tGroup = this.groupOfTeam('T', f.board);
+    if (tGroup !== this.tGroup) {
+      this.tGroup = tGroup;
+      this.score.paint((g) => this.groupColor(g), (id) => this.face(id));
+    }
+    const leftTeam: Team = tGroup === leftGroup ? 'T' : 'CT';
     const rightTeam: Team = leftTeam === 'T' ? 'CT' : 'T';
     const scoreOf = (team: Team): number => (team === 'T' ? r.scoreT : r.scoreCT);
     const boardHead = { round: `第 ${r.number} 回合・${halfLabel(r.half, r.overtime)}`, score: `${scoreOf(leftTeam)} : ${scoreOf(rightTeam)}` };
@@ -405,7 +421,7 @@ export class ShooterHud {
     const w = this.meta.watch;
     const marks: readonly RoundMark[] = summary !== null ? summary.rounds.map((x) => ({ number: x.number, winner: x.winner, reason: x.reason as RoundEndReason, winnerGroup: x.winnerGroup })) : this.rounds;
     const groupOfMark = (m: RoundMark): 0 | 1 => m.winnerGroup ?? (m.winner === 'T' ? 0 : 1);
-    const hist = marks.map((m) => `<i title="第 ${m.number} 回合：${this.groupName(groupOfMark(m))}勝・${REASON[m.reason]}" style="background:${this.groupColor(groupOfMark(m))}"><b>${m.reason === 'bomb' ? '炸' : m.reason === 'defuse' ? '拆' : m.reason === 'timeout' ? '時' : ''}</b></i>`).join('');
+    const hist = marks.map((m) => `<i title="第 ${m.number} 回合：${this.groupName(groupOfMark(m))}勝・${REASON[m.reason]}" style="background:${TEAM_COLOR[m.winner]}"><b>${m.reason === 'bomb' ? '炸' : m.reason === 'defuse' ? '拆' : m.reason === 'timeout' ? '時' : ''}</b></i>`).join('');
     const first: 0 | 1 = this.mine ?? 0;
     const keys: readonly (0 | 1)[] = [first, first === 0 ? 1 : 0];
     const cols = keys
@@ -506,9 +522,8 @@ export function roundBanner(prev: ShooterObservation | null, cur: ShooterObserva
   if (prev.round.ended === null && cur.round.ended !== null) {
     const w = cur.round.ended.winner;
     // 玩家模式講我方／對手；觀戰講陣營
-    if (meta.spectate) return `<span>${w} 勝</span><small>${REASON[cur.round.ended.reason]}</small>`;
-    const won = w === cur.me.team;
-    return `<span style="color:${won ? ANGEL.gold : ANGEL.red}">${won ? '我方勝' : '對手勝'}</span><small>${REASON[cur.round.ended.reason]}</small>`;
+    if (meta.spectate) return `<span style="color:${TEAM_COLOR[w]}">${w} 勝</span><small>${REASON[cur.round.ended.reason]}</small>`;
+    return `<span style="color:${TEAM_COLOR[w]}">${w === cur.me.team ? '我方勝' : '對手勝'}</span><small>${REASON[cur.round.ended.reason]}</small>`;
   }
   return null;
 }

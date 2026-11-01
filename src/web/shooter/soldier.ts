@@ -1,10 +1,10 @@
 // 俯視模型兵：底座＋肩膀＋手臂與槍＋頭。隊色在底座環與肩膀；明暗永遠跟著世界的西北光，不跟著身體轉。
 // 畫在格座標（1 單位＝1 格），原點是單位中心；模型比碰撞大（底座半徑 0.68 格），命中判定不變。
-import type { WeaponId } from '../../shooter/api.ts';
+import type { Team, WeaponId } from '../../shooter/api.ts';
 import { PAL, rng } from './materials.ts';
 
-/** 世界裡的隊色：我方金、對手藍；別隊的比賽（我方不在場）主隊用白，金只給我方 */
-export type Side = 'us' | 'them' | 'home';
+/** 世界裡的隊色照 CS：T 黃、CT 藍，敵我不分；換邊時跟著換 */
+export type Side = Team;
 export type Pose = 'stand' | 'crouch' | 'work';
 
 /** 模型放大倍率：碰撞半徑 0.3 格在畫面上才 8 px，放大到肩寬約 1 格才讀得出姿態 */
@@ -22,9 +22,8 @@ interface Tone {
 }
 
 const TONE: Readonly<Record<Side, Tone>> = {
-  us: { main: PAL.gold, dark: PAL.goldDark, light: PAL.goldLight, cloth: '#6d4c22', shade: '#c98f33', helmet: '#fff3d9', helmetDark: '#d3b98c' },
-  them: { main: PAL.blue, dark: PAL.blueDark, light: PAL.blueLight, cloth: '#0f3050', shade: '#2271b8', helmet: '#e3f1fb', helmetDark: '#9fc0d8' },
-  home: { main: '#eef2f6', dark: '#7b8494', light: '#ffffff', cloth: '#3a4252', shade: '#c2c9d3', helmet: '#ffffff', helmetDark: '#c2c9d3' },
+  T: { main: PAL.gold, dark: PAL.goldDark, light: PAL.goldLight, cloth: '#6d4c22', shade: '#c98f33', helmet: '#fff3d9', helmetDark: '#d3b98c' },
+  CT: { main: PAL.blue, dark: PAL.blueDark, light: PAL.blueLight, cloth: '#0f3050', shade: '#2271b8', helmet: '#e3f1fb', helmetDark: '#9fc0d8' },
 };
 
 export const sideColor = (s: Side): string => TONE[s].main;

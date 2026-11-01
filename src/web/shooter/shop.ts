@@ -74,8 +74,8 @@ export function shopState(d: ShopData, e: ShopEntry, s: ShooterObservation): Sho
 }
 
 /** 點了買不了時的說明 */
-export function stateNote(e: ShopEntry, st: ShopState, money: number): string {
-  if (st === 'poor') return `${e.name}：還差 $${e.price - money}`;
+export function stateNote(e: ShopEntry, st: ShopState): string {
+  if (st === 'poor') return `${e.name}：金錢不足`;
   if (st === 'owned') return e.grenade !== null ? `${e.name}：已達攜帶上限` : e.id === 'armor' || e.id === 'ammo' ? `${e.name}：已經是滿的` : `${e.name}：已持有`;
   if (st === 'locked') return isIssued(e) ? `${e.name}：開局配發，不能購買` : `${e.name}：限 ${e.teams.join('／')} 購買`;
   if (st === 'closed') return BUY_CLOSED_NOTE;

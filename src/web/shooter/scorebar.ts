@@ -28,6 +28,7 @@ export const avatarHtml = (name: string, jersey: string): string => avatarSvg(na
 
 interface Cell {
   readonly id: number;
+  readonly group: 0 | 1;
   readonly el: HTMLElement;
   readonly bar: HTMLElement;
   hp: number;
@@ -39,30 +40,41 @@ export class ScoreBar {
   private readonly left: HTMLElement;
   private readonly right: HTMLElement;
   private readonly mid: HTMLElement;
+  private readonly groups: readonly [0 | 1, 0 | 1];
 
-  constructor(root: HTMLElement, meta: ShooterMeta, leftGroup: 0 | 1, color: (g: 0 | 1) => string, jersey: (g: 0 | 1) => string) {
+  constructor(root: HTMLElement, meta: ShooterMeta, leftGroup: 0 | 1) {
     const top = document.createElement('div');
     top.className = 'sg-top';
     root.appendChild(top);
+    const rightGroup: 0 | 1 = leftGroup === 0 ? 1 : 0;
     const side = (g: 0 | 1): void => {
       for (const id of meta.names.keys()) {
         if (meta.groups[id] !== g) continue;
         const el = document.createElement('div');
         el.className = 'av';
-        el.style.setProperty('--c', color(g));
-        el.innerHTML = `${avatarHtml(meta.names[id], jersey(g))}<u><i></i></u>`;
+        el.innerHTML = '<svg></svg><u><i></i></u>';
         top.appendChild(el);
-        this.cells.push({ id, el, bar: el.querySelector('i') as HTMLElement, hp: -1 });
+        this.cells.push({ id, group: g, el, bar: el.querySelector('i') as HTMLElement, hp: -1 });
       }
     };
-    const rightGroup: 0 | 1 = leftGroup === 0 ? 1 : 0;
     side(leftGroup);
     this.mid = document.createElement('div');
     this.mid.className = 'mid';
-    this.mid.innerHTML = `<span class="clock"></span><b class="sc" style="color:${color(leftGroup)}"></b><b class="sc" style="color:${color(rightGroup)}"></b>`;
+    this.mid.innerHTML = '<span class="clock"></span><b class="sc"></b><b class="sc"></b>';
     top.appendChild(this.mid);
     side(rightGroup);
     [this.clock, this.left, this.right] = [...this.mid.children] as HTMLElement[];
+    this.groups = [leftGroup, rightGroup];
+  }
+
+  /** 開局與換邊：隊色與球衣跟著這組現在打的那一邊 */
+  paint(color: (g: 0 | 1) => string, face: (id: number) => string): void {
+    for (const c of this.cells) {
+      c.el.style.setProperty('--c', color(c.group));
+      (c.el.firstElementChild as Element).outerHTML = face(c.id);
+    }
+    this.left.style.color = color(this.groups[0]);
+    this.right.style.color = color(this.groups[1]);
   }
 
   update(board: readonly BoardRow[], hpOf: (id: number) => number | null, clock: string, phase: string, scoreLeft: number, scoreRight: number): void {

@@ -9,7 +9,7 @@ import { BAKE_PX, bakeMap, type Baked } from './bake.ts';
 import { BLAST_MS, paintBlast, paintBombMark, paintChip, paintFlame, paintHurtVignette, paintKit, paintMuzzle, paintProjectile, paintScorch, paintSmoke, paintTracer, paintVignette } from './fx.ts';
 import { PAL, hash2 } from './materials.ts';
 import type { CamView } from './camera.ts';
-import type { FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
+import type { BoardRow, FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
 import { muzzleReach, paintCorpse, paintDroppedGun, paintSoldier, sideColor, type Pose, type Side } from './soldier.ts';
 
 export const WEAPON_TAG: Readonly<Record<WeaponId, string>> = { pistol: 'P', deagle: 'DE', smg: 'SMG', shotgun: 'SG', ak: 'AK', m4: 'M4', awp: 'AWP', knife: '刀' };
@@ -290,7 +290,7 @@ export class ShooterRenderer {
   /** 開鏡鏡頭的過渡進度 0～1 */
   private scopeBlend = 0;
   private lastDraw = 0;
-  /** 我方組別（世界隊色） */
+  /** 我方組別（戰術標註往哪邊拉） */
   private readonly mine: 0 | 1 | null;
   /** 爆炸：上一個 tick 看得見的手雷與閃光彈，下一個 tick 不見了又聽到爆炸才算炸了 */
   private lastNades: readonly { readonly kind: GrenadeId; readonly x: number; readonly y: number }[] = [];
@@ -301,6 +301,8 @@ export class ShooterRenderer {
   /** 戰術疊層標註往上疊的高度（依 playerId，平滑用） */
   private readonly tagLift: number[];
   private scorches: { x: number; y: number; r: number; seed: number }[] = [];
+  /** 目前當 T 的組 */
+  private tGroup: 0 | 1 = 0;
 
   constructor(canvas: HTMLCanvasElement, meta: ShooterMeta) {
     this.canvas = canvas;
@@ -315,10 +317,15 @@ export class ShooterRenderer {
     this.fctx = this.fog.getContext('2d')!;
   }
 
-  /** 組別 → 世界隊色 */
+  /** 組別 → 世界隊色：看這組現在打哪一邊 */
   private sideOf(group: 0 | 1): Side {
-    if (this.mine === null) return group === 0 ? 'home' : 'them';
-    return group === this.mine ? 'us' : 'them';
+    return group === this.tGroup ? 'T' : 'CT';
+  }
+
+  /** 從計分板更新目前當 T 的組 */
+  private syncSides(board: readonly BoardRow[]): void {
+    const row = board.find((b) => b.team === 'T');
+    if (row !== undefined) this.tGroup = this.meta.groups[row.id];
   }
 
   /** 調整畫布大小（含高 DPI）；回傳 CSS 尺寸 */
@@ -393,6 +400,7 @@ export class ShooterRenderer {
   }
 
   draw(d: DrawInput): void {
+    this.syncSides(d.cur.board);
     const { w, h, dpr } = this.fit();
     const ctx = this.ctx;
     const view = d.cur.view;
@@ -868,7 +876,7 @@ export class ShooterRenderer {
       const [sx, sy] = toScreen(cam, p.x, p.y);
       if (sx < 0 || sy < 0 || sx > cam.w || sy > cam.h) continue;
       const side = this.sideOf(this.meta.groups[p.id]);
-      const dir = side === 'us' || side === 'home' ? -1 : 1;
+      const dir = this.meta.groups[p.id] === (this.mine ?? 0) ? -1 : 1;
       const text = `${this.meta.names[p.id]} ${p.hp}`;
       const tw = ctx.measureText(text).width + 12;
       const lx = sx + dir * 36;
@@ -1202,8 +1210,9 @@ export class ShooterRenderer {
       }
     };
     const groupOfMe = this.meta.groups[view.me.id];
-    const usColor = sideColor(this.sideOf(groupOfMe));
-    const foeColor = PAL.blueLight;
+    const radarColor = (s: Side): string => (s === 'T' ? PAL.gold : PAL.blueLight);
+    const usColor = radarColor(this.sideOf(groupOfMe));
+    const foeColor = radarColor(this.sideOf(groupOfMe === 0 ? 1 : 0));
     // 全圖與自由鏡頭：框出畫面看到的範圍
     if (d.camera !== null && !d.pov) {
       const vw = (this.camera.w / this.camera.scale) * k;

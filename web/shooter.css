@@ -1,5 +1,5 @@
 /* 攻防戰（CS 射擊）試玩與觀戰頁：天使金語彙（色票複製自 web/sketch/angel.css，那邊掛在 #stage 底下，這裡掛在 .setup 與 .sg）。
-   配色：墨黑中性色占九成；金只給我方、選中、主要行動；介面文字對手紅；紅只給對手與警示；其他白灰。世界裡的對手藍只在畫布上（見 render.ts）。
+   配色：墨黑中性色占九成；隊色照 CS，T 黃、CT 藍，介面與世界一致，換邊時跟著換；金另外給選中與主要行動；紅只給警示；其他白灰。
    字型：中文 Noto Sans TC；對局數字 Barlow Condensed 700；標題數字斜體 800；小標籤 Share Tech Mono。離線退回系統字。
    材質：對局 HUD 照 CS，半透明墨黑、細線，不用切角和金邊，字小，不擋視野；開局畫面的卡片才用深色面板、左緣金邊、右下切角。 */
 .setup, .sg {
@@ -144,7 +144,7 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 
 /* 左下：金錢 */
 .sg-money { position: absolute; left: calc(var(--u) * 22); bottom: calc(var(--u) * 18); display: flex; align-items: center; gap: calc(var(--u) * 8); pointer-events: none; white-space: nowrap; }
-.sg-money b { font-family: var(--en); font-weight: 700; font-size: calc(var(--u) * 24); line-height: 1; color: var(--gold); font-variant-numeric: tabular-nums; text-shadow: var(--txs); }
+.sg-money b { font-family: var(--en); font-weight: 700; font-size: calc(var(--u) * 24); line-height: 1; font-variant-numeric: tabular-nums; text-shadow: var(--txs); }
 .sg-money kbd { font-size: max(10px, calc(var(--u) * 11)); background: var(--glass); }
 .sg-money span { padding: calc(var(--u) * 2) calc(var(--u) * 8); background: var(--glass); font-size: max(11px, calc(var(--u) * 13)); font-weight: 700; }
 
@@ -172,6 +172,7 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sg-buy { position: absolute; left: calc(var(--u) * 270); right: calc(var(--u) * 270); top: calc(var(--u) * 104); bottom: calc(var(--u) * 104); display: flex; flex-direction: column; box-sizing: border-box; padding: calc(var(--u) * 14) calc(var(--u) * 18); z-index: 5; }
 .sb-head { display: flex; align-items: center; gap: calc(var(--u) * 16); margin-bottom: calc(var(--u) * 10); }
 .sb-head > b { font-size: max(14px, calc(var(--u) * 20)); font-weight: 900; letter-spacing: 0.1em; }
+.sb-head .nt { font-size: max(11px, calc(var(--u) * 14)); font-weight: 700; color: var(--red); }
 .sb-head .tm { display: flex; align-items: center; gap: calc(var(--u) * 10); margin-left: auto; font-size: max(11px, calc(var(--u) * 13)); font-weight: 500; color: var(--grey); font-variant-numeric: tabular-nums; }
 .sb-head .tb { display: block; width: calc(var(--u) * 140); height: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
 .sb-head .tb u { display: block; height: 100%; background: var(--accent); text-decoration: none; }
@@ -227,14 +228,6 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sb-info .rw.gr b { text-align: left; font-family: var(--zh); font-weight: 500; font-size: max(11px, calc(var(--u) * 14)); white-space: normal; }
 .sb-info .rw em { font-family: var(--en); font-style: normal; font-weight: 600; font-size: max(10px, calc(var(--u) * 13)); white-space: nowrap; text-align: right; }
 .sb-info p { margin: calc(var(--u) * 10) 0 0; font-size: max(11px, calc(var(--u) * 14)); line-height: 1.6; color: #dfe4ea; }
-.sb-foot { display: flex; align-items: center; gap: calc(var(--u) * 14); margin-top: calc(var(--u) * 8); padding-top: calc(var(--u) * 6); border-top: 1px solid var(--line); }
-.sb-foot .fm { display: flex; align-items: baseline; gap: 8px; }
-.sb-foot small { font-size: max(10px, calc(var(--u) * 13)); color: var(--grey); white-space: nowrap; }
-.sb-foot b { font-family: var(--en); font-weight: 700; font-size: max(16px, calc(var(--u) * 22)); color: var(--accent); font-variant-numeric: tabular-nums; }
-.sb-foot .af { color: var(--white); }
-.sb-foot .af.poor { color: var(--red); }
-.sb-foot .ar { color: var(--grey); }
-.sb-foot .nt { margin-left: auto; font-size: max(12px, calc(var(--u) * 15)); font-weight: 700; color: var(--red); }
 
 /* 計分板 */
 .sg-board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(calc(var(--u) * 1240), calc(100% - 32px)); box-sizing: border-box; padding: calc(var(--u) * 20) calc(var(--u) * 28) calc(var(--u) * 22); z-index: 6; pointer-events: none; }

@@ -3,7 +3,7 @@
 // 面板是 DOM，30 Hz 更新，只有內容變了才寫（hud.ts 的 setHtml）。列表與時間軸的內容會一直換，所以吃 pointerdown 不吃 click：按下到放開之間子元素被換掉就不會有 click。
 import type { GrenadeId, RoundEndReason, ShooterObservation, WeaponId } from '../../shooter/api.ts';
 import { DRAG_PX, SpectateCamera, pickPlayer, type CamEnv, type CamMode, type CamView } from './camera.ts';
-import { REASON, setHtml, type RoundMark, type ShooterHud } from './hud.ts';
+import { REASON, TEAM_COLOR, setHtml, type RoundMark, type ShooterHud } from './hud.ts';
 import type { BoardRow, FullPlayer, FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
 import { GRENADE_TAG, interp } from './render.ts';
 
@@ -79,6 +79,8 @@ export class SpectateUi {
   private readonly rosters: readonly [HTMLElement, HTMLElement];
   private readonly rows = new Map<number, HTMLElement>();
   private readonly bodies = new Map<number, HTMLElement>();
+  /** 上次畫列表時當 T 的組 */
+  private sides: 0 | 1 = 0;
   private readonly heads: [HTMLElement, HTMLElement];
   private readonly timeline: HTMLElement;
   private readonly cells: HTMLElement;
@@ -119,9 +121,8 @@ export class SpectateUi {
         if (meta.groups[id] !== g) continue;
         const row = div('ro', this.rosters[side]);
         row.dataset.pid = String(id);
-        row.style.setProperty('--c', hud.groupColor(g));
-        // 頭像固定不動，內容只換右邊那塊
-        row.innerHTML = hud.face(id);
+        // 頭像只在換邊時換，內容只換右邊那塊
+        row.innerHTML = '<svg></svg>';
         this.rows.set(id, row);
         this.bodies.set(id, div('bd', row));
       }
@@ -137,7 +138,17 @@ export class SpectateUi {
       HELP.map((h) => `<section><h4>${h.title}</h4>${h.rows.map(([k, v]) => `<div class="kr"><span class="k">${k}</span><span>${v}</span></div>`).join('')}</section>`).join('') +
       `</div><button type="button" class="primary" data-act="close">知道了</button></div>`;
     this.seekBox = div('sg-seek hidden', root);
+    this.paintRows();
     this.bind();
+  }
+
+  /** 開局與換邊：列表的隊色與球衣 */
+  private paintRows(): void {
+    this.sides = this.hud.sides;
+    for (const [id, row] of this.rows) {
+      row.style.setProperty('--c', this.hud.groupColor(this.meta.groups[id]));
+      (row.firstElementChild as Element).outerHTML = this.hud.face(id);
+    }
   }
 
   /** 鏡頭環境：畫面大小與全圖留給面板的邊 */
@@ -310,6 +321,7 @@ export class SpectateUi {
     const full = f.full;
     if (full === null) return;
     for (const r of this.hud.rounds) this.known.set(r.number, r);
+    if (this.sides !== this.hud.sides) this.paintRows();
     this.hud.leftRight(f.board).forEach((team, side) => {
       const list = full.players.filter((p) => p.team === team);
       const money = list.reduce((a, p) => a + (p.money ?? 0), 0);
@@ -366,7 +378,7 @@ export class SpectateUi {
         const cls = `${n === r.number ? ' cur' : ''}${m !== undefined ? ' won' : ''}${n > r.number ? ' later' : ''}`;
         if (n === rules.roundsPerHalf + 1 || (n > reg && (n - reg - 1) % (rules.overtime === false ? 1 : rules.overtime.roundsPerHalf) === 0)) html += '<span class="gap"></span>';
         const g = m?.winnerGroup ?? (m?.winner === 'T' ? 0 : 1);
-        const style = m !== undefined ? ` style="--c:${this.hud.groupColor(g)}"` : '';
+        const style = m !== undefined ? ` style="--c:${TEAM_COLOR[m.winner]}"` : '';
         const title = m !== undefined ? `第 ${n} 回合：${this.hud.groupLabel(g)}勝・${REASON[m.reason]}` : `第 ${n} 回合`;
         html += `<button type="button" class="tr${cls}" data-round="${n}" title="${title}"${style}><small>${n}</small>${m !== undefined ? reasonIcon(m.reason) : ''}</button>`;
       }

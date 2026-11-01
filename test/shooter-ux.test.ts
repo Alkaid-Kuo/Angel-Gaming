@@ -244,9 +244,9 @@ describe('商店數值換算', () => {
     expect(shopState(DATA, by('kit'), obs({ team: 'CT', kit: true }))).toBe('owned');
     expect(shopState(DATA, by('flash'), obs({ grenades: ['flash', 'flash'] }))).toBe('owned');
     expect(shopState(DATA, by('he'), obs({ grenades: ['flash', 'flash', 'smoke', 'molotov'] }))).toBe('owned');
-    expect(stateNote(by('ak'), 'poor', 100)).toBe('AK：還差 $2600');
-    expect(stateNote(by('kit'), 'locked', 100)).toBe('拆彈器：限 CT 購買');
-    expect(stateNote(by('pistol'), 'locked', 100)).toContain('開局配發');
+    expect(stateNote(by('ak'), 'poor')).toBe('AK：金錢不足');
+    expect(stateNote(by('kit'), 'locked')).toBe('拆彈器：限 CT 購買');
+    expect(stateNote(by('pistol'), 'locked')).toContain('開局配發');
   });
 
   it('道具數值全部照開局資料換算', () => {
