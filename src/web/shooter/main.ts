@@ -88,14 +88,16 @@ class Game {
   private tracers: Tracer[] = [];
   private hurts: HurtMark[] = [];
   private others: OtherTracer[] = [];
+  /** 全狀態的所有子彈（全圖與自由鏡頭畫） */
+  private allShots: OtherTracer[] = [];
   private pops: DamagePop[] = [];
   private lastOtherTick = -1;
   private lastShotTick = -1;
   private lastHurtTick = -1;
   private zoomIdx: number = ZOOM_PLAY;
   private speedIdx = 1;
-  /** 觀戰：使用者開的透視（全圖與自由鏡頭一律看全狀態，見 seeAll）、戰術疊層 */
-  private xray = false;
+  /** 觀戰：使用者開的透視（全圖與自由鏡頭一律看全狀態，見 seeAll）、戰術疊層；經營層觀戰預設開透視，看的是整場比賽不是某個人 */
+  private xray: boolean;
   private tactical = false;
   /** 這回合看著倒下的敵人 */
   private corpses: Corpse[] = [];
@@ -117,6 +119,7 @@ class Game {
   constructor(meta: ShooterMeta, post: (m: ToShooterWorker) => void) {
     this.meta = meta;
     this.post = post;
+    this.xray = meta.watch !== undefined;
     this.root = $('game');
     this.root.innerHTML = `<canvas class="sg-canvas"></canvas><div class="sg-radar"><canvas class="sg-mini"></canvas><div class="rz"><b></b><span>${esc(meta.map.name)}</span></div></div><div class="sg-buy hidden"></div>`;
     this.root.classList.remove('hidden');
@@ -209,7 +212,7 @@ class Game {
     // 比賽中關分頁、重新整理、上一頁：瀏覽器先問一次
     window.addEventListener('beforeunload', this.onUnload);
     // 除錯掛勾（瀏覽器驗收用，開發模式或網址帶 ?debug）：只有主執行緒本來就有的畫面資料，沒有引擎
-    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length }), perf: () => ({ drawMs: this.drawMs, frameMs: this.frameMs, bakeMs: this.renderer.baked.ms, bakePx: BAKE_PX }), baked: () => this.renderer.baked, patch: (fn: ((f: ShooterFrame) => ShooterFrame) | null) => (this.patch = fn), bench: (n: number) => this.bench(n), stage: (v: Partial<DrawInput> | null) => (this.staged = v), hud: this.hud, spec: this.spec, buy: this.buy };
+    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length, allShots: this.allShots.length }), perf: () => ({ drawMs: this.drawMs, frameMs: this.frameMs, bakeMs: this.renderer.baked.ms, bakePx: BAKE_PX }), baked: () => this.renderer.baked, patch: (fn: ((f: ShooterFrame) => ShooterFrame) | null) => (this.patch = fn), bench: (n: number) => this.bench(n), stage: (v: Partial<DrawInput> | null) => (this.staged = v), hud: this.hud, spec: this.spec, buy: this.buy };
   }
 
   /** 除錯：同步連畫 n 幀量每幀毫秒（最後讀一個像素，逼畫布把指令畫完）；分頁在背景時 rAF 不跑也量得到 */
@@ -291,6 +294,7 @@ class Game {
     this.tracers = [];
     this.hurts = [];
     this.others = [];
+    this.allShots = [];
     this.pops = [];
     this.lastOtherTick = -1;
     this.lastShotTick = -1;
@@ -357,6 +361,8 @@ class Game {
     for (const s of f.view.tracers) if (s.tick > this.lastOtherTick) this.others.push({ x0: s.x0, y0: s.y0, x1: s.x1, y1: s.y1, friendly: s.friendly, t: now });
     this.lastOtherTick = Math.max(this.lastOtherTick, ...f.view.tracers.map((s) => s.tick));
     this.others = this.others.filter((t) => now - t.t < TRACER_MS);
+    for (const s of f.full?.shots ?? []) this.allShots.push({ x0: s.x0, y0: s.y0, x1: s.x1, y1: s.y1, friendly: false, t: now });
+    this.allShots = this.allShots.filter((t) => now - t.t < TRACER_MS);
     // 子彈與受傷：觀察資料給的是上一次決策以來的紀錄，同一筆會出現在好幾個 frame，依 tick 去重
     // 傷害數字：同一個 tick 的彈丸（霰彈）合成一個數字，畫在最後一顆打中的位置
     const dmgByTick = new Map<number, { x: number; y: number; amount: number; kill: boolean }>();
@@ -392,7 +398,7 @@ class Game {
   }
 
   private lastInput(f: ShooterFrame): DrawInput {
-    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.seeAll(), tactical: this.tactical, camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', rings: this.spec?.rings() ?? null, hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, pops: this.pops, corpses: this.corpses };
+    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.seeAll(), tactical: this.tactical, camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', rings: this.spec?.rings() ?? null, hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, allShots: this.allShots, pops: this.pops, corpses: this.corpses };
   }
 
   private updateCursor(f: ShooterFrame): void {

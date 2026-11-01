@@ -125,7 +125,7 @@ export interface DrawInput {
   readonly tactical: boolean;
   /** 觀戰模式的鏡頭（camera.ts 算好的）；null＝玩家模式，鏡頭跟著自己與滑鼠 */
   readonly camera: CamView | null;
-  /** 第一人稱的全畫面效果（致盲白幕、受傷暗角、聲音箭頭）；觀戰的全圖與自由鏡頭不是誰的視角，不畫 */
+  /** 第一人稱的效果（致盲白幕、受傷暗角、聲音箭頭、傷害數字）；觀戰的全圖與自由鏡頭不是誰的視角，不畫 */
   readonly pov: boolean;
   /** 戰術疊層距離環的圓心（座標單位）；null＝所看的選手 */
   readonly rings: { readonly x: number; readonly y: number } | null;
@@ -142,6 +142,8 @@ export interface DrawInput {
   readonly hurts: readonly HurtMark[];
   /** 別人的子彈（觀察資料 tracers） */
   readonly others: readonly OtherTracer[];
+  /** 全狀態的所有子彈：全圖與自由鏡頭畫（pov 為 false） */
+  readonly allShots: readonly OtherTracer[];
   readonly pops: readonly DamagePop[];
   readonly corpses: readonly Corpse[];
 }
@@ -444,7 +446,7 @@ export class ShooterRenderer {
     // 人
     const groupOfMe = this.meta.groups[view.me.id];
     if (full !== null) {
-      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tactical, d.hover);
+      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tactical, d.hover, !d.pov);
     } else {
       const us = this.sideOf(groupOfMe);
       for (const t of view.teammates) {
@@ -491,9 +493,9 @@ export class ShooterRenderer {
       const r = (x.kind === 'bomb' ? 9 : x.kind === 'he' ? 3.5 : 2.4) * ppc;
       paintBlast(ctx, sx, sy, r, x.seed, (d.now - x.t) / BLAST_MS, x.kind);
     }
-    // 子彈彈道：別人的（隊友、看得見的敵人）與所看選手自己的
-    this.drawOtherTracers(cam, d);
-    if (view.me.alive) this.drawTracers(cam, meNow, view.me.weapon, d);
+    // 子彈彈道：別人的（隊友、看得見的敵人）與所看選手自己的；全圖與自由鏡頭不是誰的視角，畫所有人的
+    this.drawOtherTracers(cam, d.pov ? d.others : d.allShots, d.now);
+    if (d.pov && view.me.alive) this.drawTracers(cam, meNow, view.me.weapon, d);
     if (d.tactical && full !== null) this.drawTactical(cam, full, d.rings ?? meNow, view.me.id);
     paintVignette(ctx, w, h);
     // 投擲預估與準心（玩家模式、活著）
@@ -504,7 +506,7 @@ export class ShooterRenderer {
       this.drawAmmoTag(d, view);
       this.drawHitMarker(d);
     }
-    this.drawDamagePops(cam, d);
+    if (d.pov) this.drawDamagePops(cam, d);
     if (d.pov) this.drawSoundArrows(cam, meNow, d.sounds, d.now);
     if (d.pov && view.me.alive) this.drawHurt(cam, meNow, d, view.me.hp);
     // 致盲：暖白幕，最後 0.8 秒淡出
@@ -725,7 +727,7 @@ export class ShooterRenderer {
   }
 
   /** 模型兵與名牌：隊友有名字與血條，敵人沒有血量（觀察資料沒有） */
-  private drawPlayer(cam: Camera, p: { x: number; y: number; facing: number; moving?: boolean }, side: Side, o: { weapon: WeaponId; hp: number | null; hasBomb: boolean; blind: boolean; label: string | null; self?: boolean; crouch?: boolean; work?: boolean; firing?: boolean; recoil?: number }, lod: boolean): void {
+  private drawPlayer(cam: Camera, p: { x: number; y: number; facing: number; moving?: boolean }, side: Side, o: { weapon: WeaponId; hp: number | null; hasBomb: boolean; blind: boolean; label: string | null; self?: boolean; crouch?: boolean; work?: boolean; firing?: boolean; recoil?: number; flashAlways?: boolean }, lod: boolean): void {
     const ctx = this.ctx;
     const [sx, sy] = toScreen(cam, p.x, p.y);
     if (sx < -120 || sy < -120 || sx > cam.w + 120 || sy > cam.h + 120) return;
@@ -736,7 +738,7 @@ export class ShooterRenderer {
     ctx.scale(ppc, ppc);
     paintSoldier(ctx, { facing: p.facing, side, weapon: o.weapon, pose, bomb: o.hasBomb, recoil: o.recoil ?? (o.firing === true ? 0.6 : 0), walk: p.moving === true ? (Math.abs(p.x) + Math.abs(p.y)) / 260 : null }, lod);
     ctx.restore();
-    if (o.firing === true && pose !== 'work' && !lod && o.weapon !== 'knife') {
+    if (o.firing === true && pose !== 'work' && (!lod || o.flashAlways === true) && o.weapon !== 'knife') {
       const a = rad(p.facing);
       const reach = muzzleReach(o.weapon) * ppc;
       // 槍在身體中線右邊一點
@@ -794,11 +796,11 @@ export class ShooterRenderer {
     }
   }
 
-  private drawFullPlayers(cam: Camera, full: FullState, prev: FullState | null, alpha: number, viewId: number, lod: boolean, tagged: boolean, hover: number | null): void {
+  private drawFullPlayers(cam: Camera, full: FullState, prev: FullState | null, alpha: number, viewId: number, lod: boolean, tagged: boolean, hover: number | null, flashAlways: boolean): void {
     for (const p of full.players) {
       if (!p.alive) continue;
       const q = interp(p, prev?.players, alpha);
-      this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: tagged ? null : p.hp, hasBomb: p.hasBomb, blind: p.blind, label: tagged ? null : this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing }, lod);
+      this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: tagged ? null : p.hp, hasBomb: p.hasBomb, blind: p.blind, label: tagged ? null : this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing, flashAlways }, lod);
       if (p.id === hover) this.drawHover(cam, q, this.meta.names[p.id]);
     }
   }
@@ -1034,14 +1036,14 @@ export class ShooterRenderer {
   }
 
   /** 別人的子彈：同樣的暖色亮線，細一點 */
-  private drawOtherTracers(cam: Camera, d: DrawInput): void {
+  private drawOtherTracers(cam: Camera, list: readonly OtherTracer[], now: number): void {
     const ppc = cam.scale * UNIT;
-    for (const t of d.others) {
-      const age = d.now - t.t;
+    for (const t of list) {
+      const age = now - t.t;
       if (age > TRACER_MS) continue;
       const [ax, ay] = toScreen(cam, t.x0, t.y0);
       const [bx, by] = toScreen(cam, t.x1, t.y1);
-      paintTracer(this.ctx, ax, ay, bx, by, Math.min(1, age / 55 + 0.2), Math.max(0, (age - 35) / (TRACER_MS - 35)), Math.max(1.5, Math.min(3, ppc * 0.1)), t.friendly ? 0.75 : 1);
+      paintTracer(this.ctx, ax, ay, bx, by, Math.min(1, age / 55 + 0.2), Math.max(0, (age - 35) / (TRACER_MS - 35)), Math.max(ppc < LOD_PPC ? 2.2 : 1.5, Math.min(3, ppc * 0.1)), t.friendly ? 0.75 : 1);
     }
   }
 

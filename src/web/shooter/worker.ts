@@ -16,6 +16,7 @@ import { compileBot, type CompiledBot } from '../../sandbox/compile.ts';
 import { gatewayDriverOptions, outcomeOf } from '../../shooter/gateway.ts';
 import { humanSeat, seatLabels, seatNames, trialRunOptions } from './lineup.ts';
 import { seekDriver } from './seek.ts';
+import { recentShots } from './shots.ts';
 import type { BoardRow, FromShooterWorker, FullState, KillFeedItem, ShooterFrame, ShooterSetup, ToShooterWorker, WatchInfo, WatchSetup } from './protocol.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -45,6 +46,8 @@ let overSent = false;
 let watching: WatchInfo | null = null;
 /** 跳回合略過的回合結果，下一個 frame 帶出去 */
 let skipped: NonNullable<ShooterFrame['skipped']>[number][] = [];
+/** 全狀態已經送過的子彈到哪個 tick */
+let shotTick = -1;
 /** 跳回合剛完成，下一個 frame 要帶 rewound */
 let rewound = false;
 /** 重建同一場比賽（觀戰才有；玩家模式有人類操作，不能重跑） */
@@ -80,6 +83,7 @@ function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string
   pendingSounds = [];
   skipped = [];
   rewound = false;
+  shotTick = d.match.tick - 1;
   overSent = false;
   const m = d.match;
   // 規則照這場的賽制（短賽制的半場長度、加時與否）
@@ -114,6 +118,7 @@ function skipRound(): void {
   while (!m.over && m.roundNumber < target) d.step();
   skipped.push(...m.rounds.slice(before).map((r) => ({ number: r.number, winner: r.winner, winnerGroup: r.winnerGroup, reason: r.reason })));
   feedIdx = m.kills.length;
+  shotTick = m.tick - 1;
   pendingSounds = [];
   acc = 0;
   last = performance.now();
@@ -130,6 +135,7 @@ function seek(round: number): void {
   const m = next.match;
   skipped = m.rounds.map((r) => ({ number: r.number, winner: r.winner, winnerGroup: r.winnerGroup, reason: r.reason }));
   rewound = true;
+  shotTick = m.tick - 1;
   feedIdx = m.kills.length;
   pendingSounds = [];
   overSent = false;
@@ -165,7 +171,10 @@ function cycleView(step: number): void {
 }
 
 function fullState(m: ShooterMatch): FullState {
+  const shots = recentShots(m, shotTick);
+  shotTick = shots.reduce((a, s) => Math.max(a, s.tick), shotTick);
   return {
+    shots,
     players: m.players.map((p) => {
       const held = p.active === 'primary' ? p.primary : p.active === 'secondary' ? p.secondary : null;
       return { id: p.id, team: p.team, alive: p.alive, x: p.x, y: p.y, facing: Math.round(p.facing / 100) % 360, hp: p.hp, weapon: activeWeaponId(p), hasBomb: p.hasBomb, blind: p.blindTicks > 0, scoped: p.scoped, firing: m.tick - p.lastShotTick <= 3, crouching: p.crouching, working: p.plantTicks > 0 || p.defuseTicks > 0, armor: p.armor, kit: p.kit, money: p.money, primary: p.primary?.id ?? null, secondary: p.secondary?.id ?? null, grenades: p.grenades.slice(), ammoMag: held?.mag ?? 0, ammoReserve: held?.reserve ?? 0, reloading: p.reloadLeft > 0, plantTicks: p.plantTicks, defuseTicks: p.defuseTicks };

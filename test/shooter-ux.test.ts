@@ -13,6 +13,7 @@ import { BOUND_CELLS, MAX_PPC, SpectateCamera, approach, clampCenter, followTau,
 import { trialHabit, trialRunOptions } from '../src/web/shooter/lineup.ts';
 import type { ShooterSetup } from '../src/web/shooter/protocol.ts';
 import { seekDriver } from '../src/web/shooter/seek.ts';
+import { recentShots } from '../src/web/shooter/shots.ts';
 import { accuracyFrac, bodyDamage, buyTicksLeft, cellsPerSecond, compareRow, compareTarget, grenadeRows, reloadSeconds, rpmOf, shopEntries, shopState, speedPercent, stateNote, weaponRows, type ShopData, type ShopEntry, type StatRow } from '../src/web/shooter/shop.ts';
 
 const UNIT = 1000;
@@ -272,6 +273,38 @@ describe('商店數值換算', () => {
     expect(buyTicksLeft(round('live', r.roundTicks - (r.buyTicks - r.freezeTicks)), r)).toBe(0);
     expect(buyTicksLeft(round('live', 10), r)).toBe(0);
     expect(buyTicksLeft(round('planted', 500), r)).toBe(0);
+  });
+});
+
+describe('全狀態彈道', () => {
+  const practice = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'shooter-practice.js');
+  const bots = { practice, baseline: (): never => { throw new Error('不該用到基準 Bot'); } };
+  const s: ShooterSetup = { team: 'T', seed: 321, spectate: true };
+  const build = (): ShooterDriver => new ShooterDriver(trialRunOptions(s, bots, null));
+
+  it('取到真的子彈：欄位齊全、起點是開槍位置、不重複不漏，比賽狀態不受影響', () => {
+    const watched = build();
+    const plain = build();
+    let sent = -1;
+    let total = 0;
+    const seen = new Set<string>();
+    while (watched.match.roundNumber < 3 && !watched.match.over) {
+      watched.step();
+      plain.step();
+      const shots = recentShots(watched.match, sent);
+      for (const x of shots) {
+        for (const v of [x.tick, x.x0, x.y0, x.x1, x.y1]) expect(Number.isFinite(v)).toBe(true);
+        expect(Math.hypot(x.x1 - x.x0, x.y1 - x.y0)).toBeGreaterThan(0);
+        seen.add(`${x.tick}|${x.x0}|${x.y0}|${x.x1}|${x.y1}`);
+      }
+      total += shots.length;
+      sent = shots.reduce((a, x) => Math.max(a, x.tick), sent);
+    }
+    // 打了兩回合一定有開火；霰彈同位置同終點的極少，幾乎每筆都不同
+    expect(total).toBeGreaterThan(20);
+    expect(seen.size).toBeGreaterThan(total * 0.9);
+    expect(recentShots(watched.match, sent)).toEqual([]);
+    expect(watched.match.hash()).toBe(plain.match.hash());
   });
 });
 
