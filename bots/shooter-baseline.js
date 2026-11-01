@@ -135,6 +135,7 @@ const P = {
   smokeOff: 4.5,
   nadeCluster: 3.5,
   molotovNear: 16,
+  afterPistol: 'force',
   yieldNear: 6,
   yieldMax: 3,
   stageLead: 5,
@@ -2378,6 +2379,7 @@ class Economy {
     const half = this.cost('smg') + this.data.rules.armorPrice;
     if (critical && avg >= half * 0.8) return 'force';
     if (this.roundInHalf === 2 && this.lastWon === true && avg >= half) return 'half';
+    if (this.roundInHalf === 2 && this.lastWon === false) return /** @type {BuyCall} */ (P.afterPistol);
     if (canNext >= n - 1) return 'eco';
     if (this.opts.economy === 2 && avg >= half) return 'force';
     if (this.opts.economy !== 1 && avg >= half + 600) return 'half';
