@@ -48,7 +48,7 @@ export default class ShooterBaseline {
   declare() {
     return {
       name: 'shooter-baseline',
-      version: '2.4',
+      version: '2.4.1',
       style: '基準',
       knobs: [
         { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
@@ -123,6 +123,7 @@ export default class ShooterBaseline {
       this.combat.clearTargets();
     }
     this.combat.track(obs);
+    const ev = this.combat.evade(obs);
     const tac = this.tactics.update(obs);
     /** @type {import('./base.js').Command[]} */
     const out = [];
@@ -131,7 +132,6 @@ export default class ShooterBaseline {
     for (const c of tac.cmds) (c.type === 'plant' || c.type === 'defuse' ? late : out).push(c);
     if (tac.goal !== null) this.nav.setGoal(tac.goal.x, tac.goal.y, tac.route);
     else this.nav.clearGoal();
-    const ev = this.combat.evade(obs);
     const holding = tac.hold !== null && dist(me.x, me.y, tac.hold.x, tac.hold.y) < 900;
     const fight = this.combat.engage(obs, { holding, objective: tac.objective });
     const w = this.combat.weapon(me.weapon);
@@ -178,7 +178,7 @@ export default class ShooterBaseline {
     if (walk !== me.walking) out.push({ type: 'walk', on: walk });
     out.push(...late);
     const reason = this.mission?.reason ?? '';
-    this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
+    this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
     return out;
   }
 }

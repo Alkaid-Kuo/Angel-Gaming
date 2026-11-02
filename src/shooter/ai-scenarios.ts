@@ -1837,11 +1837,13 @@ function postNadeScenario(bot: CompiledBot, seed: number, mapId: string, kind: '
   return { pass: thrown === 1 && own.length > 0 && (kind !== 'smoke' || gap > 5) && kept, detail: `投擲 ${thrown}、效果 ${own.length}、離包 ${gap.toFixed(1)} 格、支援保留燃燒 ${kept}` };
 }
 
-const entranceMemo = new Map<string, number>();
+const entranceMemos = new WeakMap<CompiledBot, Map<string, number>>();
 /** T18：T 全買照計畫執行，每個人第一次走到包點 4 步內的位置；彼此隔 8 格以上算不同入口（同一個區域可能有兩個口，走進矩形才算的話守位在矩形外的人算不到） */
 function entrancesOf(bot: CompiledBot, seed: number, mapId: string, plan: number): number {
-  const key = `${mapId}:${seed}:${plan}`;
-  const hit = entranceMemo.get(key);
+  let memo = entranceMemos.get(bot);
+  if (memo === undefined) { memo = new Map(); entranceMemos.set(bot, memo); }
+  const key = `${mapId}:${seed}:${plan}:${scenarioFreeze}`;
+  const hit = memo.get(key);
   if (hit !== undefined) return hit;
   const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], knobs: { plan }, opts: { roundMoney: [16000, null] } });
   toLive(d);
@@ -1861,7 +1863,7 @@ function entrancesOf(bot: CompiledBot, seed: number, mapId: string, plan: number
   });
   const groups: Pt[] = [];
   for (const q of from.values()) if (groups.every((g) => d2(g, q) >= 8 * UNIT)) groups.push(q);
-  entranceMemo.set(key, groups.length);
+  memo.set(key, groups.length);
   return groups.length;
 }
 

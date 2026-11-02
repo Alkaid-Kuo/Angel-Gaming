@@ -184,6 +184,7 @@ export class Tactics {
     this.flankGo = false;
     this.flanked = false;
     this.steppedIn = false;
+    this.rushReady = false;
     /** 收到但還沒處理的喊話（警覺低的晚一點反應） @type {{ ready: number, from: number, text: string }[]} */
     this.inbox = [];
     /** 收到的接觸：區域 → 人數與時間；接觸 → 所屬包點 @type {Map<string, { n: number, tick: number }>} */
@@ -267,6 +268,7 @@ export class Tactics {
     this.flankGo = false;
     this.flanked = false;
     this.steppedIn = false;
+    this.rushReady = false;
     this.inbox = [];
     this.contacts = new Map();
     this.contactSite = new Map();
@@ -395,6 +397,7 @@ export class Tactics {
       out.walk = true;
       out.role += '・讓突破手先走';
     }
+    if (this.mission?.avoidFire(obs, out, this.combat?.fires, this.nav)) wish = null;
     this.mission?.assess(obs, out);
     if (wish === null && !out.commit) wish = this.anyNade(obs);
     this.overlay(obs, out);
@@ -1018,7 +1021,17 @@ export class Tactics {
       out.stop = true;
       out.look = { x: site.cx, y: site.cy };
       out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
+      const st = this.memberStage(obs, me.id, p);
+      if (this.roles.of(me.id) === AWP && st !== null) out.hold = { ...st, x: me.x, y: me.y };
       return wish;
+    }
+    // rush 先通過共同入口再分配各自的下包／守位；路線偏好本身不能保證入口一致。
+    if (p.kind === 'rush' && ent !== null && !this.rushReady) {
+      if (this.inRectSite(me.x, me.y, exec) || dist(me.x, me.y, ent.ix, ent.iy) < 900) this.rushReady = true;
+      else {
+        out.goal = dist(me.x, me.y, ent.ox, ent.oy) > 2 * UNIT ? { x: ent.ox, y: ent.oy } : { x: ent.ix, y: ent.iy };
+        return wish;
+      }
     }
     if (me.hasBomb) {
       const spot = site.plants[0];
@@ -1717,28 +1730,21 @@ export class Tactics {
     out.allowPeek = false;
     const left = (b.ticksLeft ?? 0) / this.tps;
     const myD = dist(me.x, me.y, bx, by);
-    const defuseS = (/** @type {boolean} */ k) => (k ? this.data.rules.defuseKitTicks : this.data.rules.defuseTicks) / this.tps;
-    // 拆的人：有拆彈器的人（離炸彈不比最近的人遠 8 格以上），否則最近的人；已經在拆的人繼續
+    // 全隊共用完成時間判準；正在拆的人用剩餘進度，不可完成者不能佔住拆包分工。
     const field = this.judge?.field(bx, by);
     const team = this.alive(obs).map((m) => ({ ...m, weapon: m.id === me.id ? me.weapon : obs.teammates.find((q) => q.id === m.id)?.weapon, kit: m.id === me.id ? me.loadout.kit : this.kits.has(m.id), d: field === undefined ? dist(m.x, m.y, bx, by) : field[this.g.cellOf(m.x, m.y)] / 10 * UNIT, defusing: m.id === me.id ? me.defuseTicks > 0 : obs.teammates.some((x) => x.id === m.id && x.defusing) }));
-    const closest = Math.min(...team.map((m) => m.d));
     const clear = obs.enemiesAlive === 0;
-    let defuser = team.find((m) => m.defusing);
-    if (defuser === undefined && clear) {
-      // 敵人全滅：誰拆得最快（走過去＋拆）誰去
-      const eta = (/** @type {typeof team[number]} */ m) => (this.judge?.travel(m, bx, by) ?? m.d / UNIT / 4.6) + defuseS(m.kit);
-      defuser = [...team].sort((a, c) => eta(a) - eta(c) || a.id - c.id)[0];
-    } else if (defuser === undefined) {
-      const withKit = team.filter((m) => m.kit && m.d <= closest + 8 * UNIT).sort((a, c) => a.d - c.d || a.id - c.id);
-      defuser = withKit[0] ?? [...team].sort((a, c) => a.d - c.d || a.id - c.id)[0];
-    }
-    // 保槍：誰都來不及（最快的人走過去＋拆）；或 1 對 3 以上、紀律高、下回合買不起
-    const fastest = Math.min(...team.map((m) => (this.judge?.travel(m, bx, by) ?? m.d / UNIT / 4.6) + defuseS(m.kit)));
+    const eta = (/** @type {typeof team[number]} */ m) => {
+      const progress = !m.defusing ? 0 : m.id === me.id ? me.defuseTicks : t - (this.defuseStarted.get(m.id) ?? t);
+      const remaining = Math.max(1, (m.kit ? this.data.rules.defuseKitTicks : this.data.rules.defuseTicks) - progress + 1) / this.tps;
+      return remaining + (m.defusing ? 0 : (this.judge?.travel(m, bx, by) ?? m.d / UNIT / 4.6) + this.data.rules.decisionInterval / this.tps);
+    };
+    const feasible = team.filter((m) => eta(m) < left).sort((a, c) => eta(a) - eta(c) || a.id - c.id);
+    const defuser = feasible.find((m) => m.defusing) ?? feasible[0];
+    // 保槍：全隊都拆不完；或尚未開始、1 對 3 以上且下回合買不起。
     const outnumbered = team.length === 1 && obs.enemiesAlive >= 3 && this.attrs.discipline >= 0.5 && this.attrs.aggression < 0.6 && this.econ.shortOf(me.money + 1400, me.loadout.primary, 'CT') > 0;
     // 隊友已經在拆（而且拆得完）就不保槍，留下來掩護
-    const mateDefusing = obs.teammates.some((m) => m.alive && m.defusing && left > defuseS(this.kits.has(m.id)) - (t - (this.defuseStarted.get(m.id) ?? t)) / this.tps + 0.1);
-    const hopeless = me.defuseTicks > 0 && left * this.tps <= (me.loadout.kit ? this.data.rules.defuseKitTicks : this.data.rules.defuseTicks) - me.defuseTicks;
-    if (hopeless || (me.defuseTicks === 0 && !mateDefusing && (left < fastest + 0.5 || outnumbered))) {
+    if (defuser === undefined || (!defuser.defusing && outnumbered)) {
       this.saving = true;
       const away = this.saveSpot(obs, bx, by);
       if (away !== null) out.goal = away;
@@ -1750,6 +1756,10 @@ export class Tactics {
       return null;
     }
     this.saving = false;
+    if (me.defuseTicks > 0 && defuser.id !== me.id) {
+      out.objective = false;
+      out.cmds.push({ type: 'move', x: me.x, y: me.y }); // 明確交接；stop 不會取消引擎拆包。
+    }
     const inside = this.inSite(me.x, me.y, s, bx, by);
     const stage = this.stageSpots('CT', s, 0);
     // 敵人全滅不等指揮的 go（喊話有延遲），也不等突破手

@@ -2,7 +2,7 @@
 // 感知層（每次決策）：把 enemies／radar／tracers／sounds／me.hurt／隊友陣亡整合成敵情記憶。
 // 看到的敵人記 id 與位置；雷達記位置；彈道起點、隊友陣亡處記成不知道是誰的點；聲音與受傷只有方向與遠近，記成扇形不記點。
 // 信心每秒衰減（警覺高衰得慢），低於門檻就是「未確認」；敵人數以 enemiesAlive 校正。
-// 另外維護「已清空」格（自己或隊友的視錐掃過的時間）與每秒重算的危險格成本（導航用）。
+// 另外維護「已清空」格（本人可靠視錐掃過的時間）與每秒重算的危險格成本（導航用）。
 import { P, UNIT, adiff, angleTo, cosd, dist, lerp, sind } from './base.js';
 import { Belief } from './belief.js';
 
@@ -167,11 +167,8 @@ export class Perception {
       const list = [...this.known.values()].filter((k) => k.tick !== t).sort((a, b) => a.conf - b.conf || a.id - b.id);
       while (this.known.size > obs.enemiesAlive && list.length > 0) this.known.delete(/** @type {Known} */ (list.shift()).id);
     }
-    // ── 已清空：自己的視錐每次、隊友的每 P.mateScanEvery 次 ──
+    // 可靠清點只用本人視錐。隊友朝向不能證明沒有本人看不到的煙；雷達仍是正面接敵證據。
     if (me.alive && me.blindTicks === 0) this.scan(me.x, me.y, me.facing, me.scoped ? this.rules.scopedFovDeg : this.rules.fovDeg, me.scoped ? (this.rules.scopedViewRange ?? 60) : this.rules.viewRange, t);
-    if (this.updates % P.mateScanEvery === 0) {
-      for (const m of obs.teammates) if (m.alive && !m.blind) this.scan(m.x, m.y, m.facing, m.weapon === 'awp' ? this.rules.scopedFovDeg : this.rules.fovDeg, this.rules.viewRange, t);
-    }
     this.belief.update(obs, this);
     if (this.dangerDirty || t - this.dangerTick >= this.rules.ticksPerSecond) this.computeDanger(t);
   }
