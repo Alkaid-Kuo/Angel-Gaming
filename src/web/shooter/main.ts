@@ -157,7 +157,10 @@ class Game {
         this.buy.setOpen(false);
         return true;
       },
-      setBoard: (show) => this.hud.setBoard(show),
+      setBoard: (show) => {
+        this.hud.setBoard(show);
+        this.root.classList.toggle('board-on', show);
+      },
       togglePause: () => this.togglePause(),
       cycleView: (step) => {
         this.spec?.cam.follow();
@@ -324,7 +327,10 @@ class Game {
     }
     // 回合提示、回合紀錄
     const banner = roundBanner(old?.view ?? null, f.view, this.meta);
-    if (banner !== null) this.hud.showBanner(banner, now);
+    if (banner !== null) {
+      this.hud.showBanner(banner, now);
+      this.buy.setRound(banner);
+    }
     // 跳回合略過的回合先補上（它們的結束 frame 沒送過來）
     for (const r of f.skipped ?? []) this.hud.rounds.push(r);
     if (old !== null && old.view.round.ended === null && f.view.round.ended !== null) {

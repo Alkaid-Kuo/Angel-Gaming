@@ -24,6 +24,10 @@ import { marketScreen, playerScreen, squadScreen } from './squad.ts';
 import { createScreen, titleScreen, type Draft } from './title.ts';
 
 initStage();
+// 舞台等比縮放後字會跟著變小：小字設下限，實際顯示不低於 11 px（1920 時不影響）
+const fitFont = (): void => document.getElementById('stage')?.style.setProperty('--fmin', `${(11 / Math.min(1, innerWidth / 1920, innerHeight / 1080)).toFixed(2)}px`);
+addEventListener('resize', fitFont);
+fitFont();
 const app = document.getElementById('app') as HTMLElement;
 const cineEl = document.getElementById('cine') as HTMLElement;
 const toastEl = document.getElementById('toasts') as HTMLElement;

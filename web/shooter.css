@@ -172,6 +172,11 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sg-buy { position: absolute; left: calc(var(--u) * 270); right: calc(var(--u) * 270); top: calc(var(--u) * 104); bottom: calc(var(--u) * 104); display: flex; flex-direction: column; box-sizing: border-box; padding: calc(var(--u) * 14) calc(var(--u) * 18); z-index: 5; }
 .sb-head { display: flex; align-items: center; gap: calc(var(--u) * 16); margin-bottom: calc(var(--u) * 10); }
 .sb-head > b { font-size: max(14px, calc(var(--u) * 20)); font-weight: 900; letter-spacing: 0.1em; }
+.sb-head .rd { display: flex; align-items: baseline; gap: calc(var(--u) * 10); font-size: max(11px, calc(var(--u) * 14)); font-weight: 700; white-space: nowrap; }
+.sb-head .rd small { font-size: max(11px, calc(var(--u) * 13)); font-weight: 500; color: #dfe4ea; }
+/* 商店開著：回合資訊併進商店標題；按住 Tab：計分板取代商店，不互相穿透 */
+.sg-buy:not(.hidden) ~ .sg-banner { display: none; }
+.sg.board-on .sg-buy { visibility: hidden; }
 .sb-head .nt { font-size: max(11px, calc(var(--u) * 14)); font-weight: 700; color: var(--red); }
 .sb-head .tm { display: flex; align-items: center; gap: calc(var(--u) * 10); margin-left: auto; font-size: max(11px, calc(var(--u) * 13)); font-weight: 500; color: var(--grey); font-variant-numeric: tabular-nums; }
 .sb-head .tb { display: block; width: calc(var(--u) * 140); height: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }

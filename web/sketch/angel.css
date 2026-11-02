@@ -19,21 +19,21 @@
 .top .team { display: flex; align-items: center; gap: 16px; }
 .top .team .crest { filter: drop-shadow(0 0 16px rgba(var(--gold-rgb), 0.45)); }
 .top .team b { display: block; font-size: 36px; font-weight: 900; letter-spacing: 0.14em; line-height: 1.1; }
-.top .team small { font-family: var(--mono); font-size: 13px; letter-spacing: 0.28em; color: var(--grey); }
+.top .team small { font-family: var(--mono); font-size: max(13px, var(--fmin, 0px)); letter-spacing: 0.28em; color: var(--grey); }
 .top .slash { width: 3px; height: 56px; background: linear-gradient(var(--gold), transparent); transform: skewX(-22deg); margin: 0 6px; }
 .top .wk { display: flex; align-items: baseline; gap: 10px; }
 .top .wk b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 56px; line-height: 1; color: var(--gold); }
 .top .wk span { font-family: var(--en); font-weight: 600; font-size: 21px; letter-spacing: 0.2em; color: var(--grey); }
 .top .res { margin-left: auto; display: flex; align-items: center; gap: 28px; }
 .top .funds { text-align: right; }
-.top .funds .lb { font-family: var(--mono); font-size: 12px; letter-spacing: 0.3em; color: var(--grey); }
+.top .funds .lb { font-family: var(--mono); font-size: max(12px, var(--fmin, 0px)); letter-spacing: 0.3em; color: var(--grey); }
 .top .funds b { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 52px; line-height: 0.9; }
 .top .funds b small { font-family: var(--zh); font-style: normal; font-size: 18px; color: var(--grey); margin-left: 4px; }
-.top .funds .dl { font-family: var(--mono); font-size: 13px; color: var(--red); letter-spacing: 0.1em; }
+.top .funds .dl { font-family: var(--mono); font-size: max(13px, var(--fmin, 0px)); color: var(--red); letter-spacing: 0.1em; }
 .top .gauge { position: relative; width: 70px; height: 70px; }
 .top .gauge svg { position: absolute; inset: 0; transform: rotate(-90deg); }
 .top .gauge b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--en); font-style: italic; font-weight: 800; font-size: 27px; }
-.top .gl { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; color: var(--grey); line-height: 1.5; }
+.top .gl { font-family: var(--mono); font-size: max(12px, var(--fmin, 0px)); letter-spacing: 0.2em; color: var(--grey); line-height: 1.5; }
 .top .gl b { display: block; font-family: var(--zh); font-size: 16px; letter-spacing: 0.1em; color: var(--white); }
 .top .icon-btn { position: relative; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; border: 2px solid rgba(255, 255, 255, 0.25); color: var(--white); }
 .top .icon-btn em { position: absolute; right: -4px; top: -4px; min-width: 24px; height: 24px; border-radius: 12px; background: var(--red); font-style: normal; font-family: var(--en); font-weight: 700; font-size: 16px; display: grid; place-items: center; }

@@ -37,14 +37,15 @@ export function hubTags(ctx: Ctx): string {
   const title = v.phase === 'offseason' ? '季前準備' : v.phase === 'ended' ? '賽段落幕' : v.phase === 'bankrupt' ? '戰隊解散' : f ? '比賽日' : '觀戰週';
   const vs = f && foe ? `${esc(v.me.name)}<i>VS</i><em>${esc(teamName(v, foe))}</em>` : v.phase === 'offseason' ? '第 1 週開打前，先把戰隊整頓好' : v.phase === 'ended' ? `最終第 ${v.seasonResult?.humanRank ?? '?'} 名` : v.phase === 'bankrupt' ? '現金跌破零' : '本週沒有我方的比賽';
   const arena = anchorOf('arena');
+  const over = v.phase === 'ended' || v.phase === 'bankrupt';
   return `<div class="mcard" style="left:${arena.x.toFixed(1)}px;top:${arena.y.toFixed(1)}px"><i class="ln"></i><div class="bx">
       <div class="lb">MATCH DAY // ${wl.short} · 中央競技場</div><h1>${title}</h1><div class="vs">${vs}</div></div></div>
     ${tag(ctx, 'finance', 'L', 60, 'FINANCE', '財務', 'CASH FLOW', `<i>${net >= 0 ? '+' : '−'}${wan(Math.abs(net))}</i>萬／週`, v.me.runwayWeeks !== null && v.me.runwayWeeks < 3 ? 'warn' : '')}
     ${tag(ctx, 'market', 'R', 70, 'RECRUIT', '轉會市場', 'MARKET', `${scouting ? '<span class="new"></span>' : ''}<i>${free}</i>名自由球員${scouting ? ` · 球探 ${scouting}` : ''}`)}
-    ${tag(ctx, 'training', 'L', 100, `LV${v.me.trainingLevel}`, '訓練基地', 'TRAINING', `<i>${left}</i>／${cap} 場可排`)}
-    ${tag(ctx, 'league', 'L', 60, 'LEAGUE', '聯賽', 'STANDINGS', row && row.played > 0 ? `第 <i>${rank}</i> 名 · ${row.points} 分` : '尚未開賽')}
-    ${tag(ctx, 'betting', 'R', 100, 'BETTING', '賭盤', 'ODDS', v.phase === 'season' ? `<i>${open}</i>場開盤 · 已押 ${v.bets.length} 注` : '賽季中開盤')}
-    ${tag(ctx, 'rival', 'R', 70, foe ? 'TARGET' : 'RIVAL HQ', foe ? esc(teamName(v, foe)) : '對手總部', 'RIVAL HQ', foe ? `評分約 <i>${publicRating(ctx, foe)}</i> · 情報 ${foeIntel}` : '本週沒有對手', foe ? 'op' : 'idle')}`;
+    ${tag(ctx, 'training', 'L', 100, `LV${v.me.trainingLevel}`, '訓練基地', 'TRAINING', over ? '賽段已結束' : `<i>${left}</i>／${cap} 場可排`)}
+    ${tag(ctx, 'league', 'L', 60, 'LEAGUE', '聯賽', 'STANDINGS', v.seasonResult ? `最終第 <i>${v.seasonResult.humanRank}</i> 名` : row && row.played > 0 ? `第 <i>${rank}</i> 名 · ${row.points} 分` : '尚未開賽')}
+    ${tag(ctx, 'betting', 'R', 100, 'BETTING', '賭盤', 'ODDS', over ? '賽段已結束' : v.phase === 'season' ? `<i>${open}</i>場開盤 · 已押 ${v.bets.length} 注` : '賽季中開盤')}
+    ${tag(ctx, 'rival', 'R', 70, foe ? 'TARGET' : 'RIVAL HQ', foe ? esc(teamName(v, foe)) : '對手總部', 'RIVAL HQ', foe ? `評分約 <i>${publicRating(ctx, foe)}</i> · 情報 ${foeIntel}` : over ? '賽段已結束' : '本週沒有對手', foe ? 'op' : 'idle')}`;
 }
 
 /** 屋頂上的三塊：我方出賽名單（人數依內容包）、比賽日按鈕、對手情報 */
@@ -65,7 +66,7 @@ export function hubPanels(ctx: Ctx, busy: boolean, unread: number): string {
     })
     .join('');
   const go = over
-    ? `<button class="go" data-act="new-season"><b>新的賽季</b><span>NEW SEASON</span><span class="chev"><i></i><i></i><i></i></span></button>`
+    ? `<button class="go over" data-act="new-season"><b>新的賽季</b><span>NEW SEASON</span><span class="chev"><i></i><i></i><i></i></span></button>`
     : `<button class="go" data-act="advance" ${busy ? 'disabled' : ''}><b>${v.phase === 'offseason' ? '開幕' : '開戰'}</b><span>${v.phase === 'offseason' ? 'KICK OFF' : 'DEPLOY'}</span><span class="chev"><i></i><i></i><i></i></span></button>`;
   const cdLine = over ? (v.phase === 'bankrupt' ? '現金跌破零，戰隊解散' : '這個賽段結束了') : `${wl.long}${myOdds ? ` · 押我方贏 ×${(myOdds / 100).toFixed(2)}` : ''}`;
   const lock = over ? '帶著經驗開一支新的戰隊' : lu.auto ? `名單是自動的：評分最高的 ${n} 人` : '名單已排定 · 對手名單比賽日才公開';
