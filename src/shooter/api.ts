@@ -119,8 +119,9 @@ export interface RulesInfo {
   /** 角色碰撞半徑（座標單位）：活人之間圓心距不得小於 2 × bodyRadius（v1.0，不分敵我，死人不擋） */
   readonly bodyRadius: number;
   /**
-   * 自己的反應延遲（tick，v1.0 引擎強制）：在 tick t 回傳的指令從 tick t + reactionTicks 起才生效。
-   * Bot 至少 5（167 毫秒）；人類玩家為 0
+   * 自己反應延遲的公開整數值（tick）。明確指定整數延遲時是確切值；
+   * 屬性驅動時為四捨五入值，實際每批指令依精確八分之一 tick 機率進位，可能比此值小或大一 tick。
+   * 實際 Bot 延遲至少 5（167 毫秒）；人類玩家為 0。公開值不是通用的上下界。
    */
   readonly reactionTicks: number;
   readonly footstepRange: number;

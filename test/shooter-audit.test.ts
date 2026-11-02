@@ -4,10 +4,12 @@ import { parse } from 'acorn';
 import { compileBot } from '../src/sandbox/compile.ts';
 import type ShooterBaseline from '../bots/shooter-src/baseline.js';
 import type { CTPlan, TacOut } from '../bots/shooter-src/tactics.js';
-import type { ShooterObservation } from '../src/shooter/api.ts';
+import type { ShooterInitData, ShooterObservation } from '../src/shooter/api.ts';
 import { dist } from '../bots/shooter-src/base.js';
-import { burnCells, ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
-import { ScriptController, ShooterDriver, shooterHelpers } from '../src/shooter/runner.ts';
+import { burnCells, DEFAULT_ATTRIBUTES, ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
+import { ScriptController, ShooterDriver, shooterHelpers, type ShooterController } from '../src/shooter/runner.ts';
+import { MAPS } from '../src/shooter/map.ts';
+import { Roles } from '../bots/shooter-src/roles.js';
 import { compactIndent, stripComments } from '../scripts/build-shooter-bots.ts';
 
 const compiled = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'audit-regression');
@@ -383,4 +385,157 @@ describe('Bot 2.4.2 複審：強起護甲預算', () => {
     const keep = bot.tactics.econ.items({ ...obs, me: { ...obs.me, loadout: { ...obs.me.loadout, primary: rifle } } }, 'force', 1, false);
     expect(keep.some((x) => x === 'ak' || x === 'm4' || x === 'smg')).toBe(false);
   });
+});
+
+function rally(site: 'A' | 'B' = 'B', farKit = false): ReturnType<typeof fixture> & { next: ShooterObservation; p: { x: number; y: number }; left: number } {
+  const f = fixture();
+  const p = f.bot.intel.sites[site].plants[0];
+  const stage = f.bot.tactics.stageSpots('CT', site, 0);
+  expect(stage.length).toBeGreaterThan(0);
+  const travel = f.bot.judge!.travel({ ...stage[0], weapon: 'm4' }, p.x, p.y);
+  const left = Math.ceil((travel + 11) * 30);
+  const i = [...Array(f.bot.g.N).keys()].find((j) => {
+    if (!f.bot.g.walkable(j)) return false;
+    const q = f.bot.g.center(j);
+    const eta = f.bot.judge!.travel({ ...q, weapon: 'm4' }, p.x, p.y);
+    return !f.bot.tactics.inSite(q.x, q.y, site, p.x, p.y) && eta + (farKit ? 5 : 10) > left / 30 && (farKit || eta + 7 < left / 30) && stage.every((s) => dist(q.x, q.y, s.x, s.y) > 4000);
+  });
+  expect(i).not.toBeUndefined();
+  const q = f.bot.g.center(i!);
+  const next: ShooterObservation = { ...f.obs, round: { ...f.obs.round, phase: 'planted', phaseTicksLeft: left }, me: { ...f.obs.me, x: stage[0].x, y: stage[0].y, weapon: 'm4', loadout: { ...f.obs.me.loadout, primary: 'm4', kit: false, grenades: [] } }, teammates: f.obs.teammates.map((m) => ({ ...m, ...q, alive: m.id === 6, weapon: 'm4' })), bomb: { state: 'planted', ...p, site, ticksLeft: left } };
+  f.bot.tactics.setPlan({ ...plan, rot: site, go: false }, next);
+  if (farKit) f.bot.tactics.kits.add(6);
+  return { ...f, next, p, left };
+}
+
+describe('Bot 2.4.3 複審：集結與拆包使用同一套逐人判準', () => {
+  it('死亡 kit 持有人即使仍在記憶，也不能降低其他人的拆包時間', () => {
+    const { bot, next, p } = rally();
+    bot.tactics.kits.add(7); // 曾公開喊過 kit，現在已死亡；先於 trackTeam 清理測判斷本身。
+    const team = bot.tactics.defuseTeam(next, p.x, p.y);
+    expect(team.map((m) => m.id)).toEqual([5, 6]);
+    expect(team.every((m) => !m.kit)).toBe(true);
+    expect(team.find((m) => m.id === 6)!.eta).toBeGreaterThan(next.bomb.ticksLeft! / 30);
+    expect(bot.tactics.retakeReady(next, 'B')).toBe(true);
+    bot.decide(next);
+    expect(bot.tactics.kits.has(7)).toBe(false);
+    expect(bot.tactics.plan?.kind === 'hold' && bot.tactics.plan.go).toBe(true);
+    expect(bot.why).not.toContain('回防集結');
+  });
+  it.each(['A', 'B'] as const)('真實引擎 %s 點：死亡 kit 歷史不延後 go，無 kit 者實際拆成功', (site) => {
+    const f = rally(site);
+    let goTick = -1;
+    const controllers = Array.from({ length: 10 }, (_, id) => new ScriptController(`rally-${id}`, (obs) => {
+      if (id !== 5) return [];
+      const commands = f.bot.decide(obs);
+      if (goTick < 0 && f.bot.tactics.plan?.kind === 'hold' && f.bot.tactics.plan.go) goTick = obs.tick;
+      return commands;
+    }));
+    const d = new ShooterDriver({ seed: 11, mapId: 'redrock', controllers, record: false, reactionTicks: Array<number>(10).fill(5), defaultLoadout: { CT: 'm4', T: 'ak' } });
+    const m = d.match;
+    m.tick = 600; m.phase = 'planted'; m.phaseEnd = 600 + f.left;
+    for (const a of m.players) { a.hasBomb = false; if (![0, 5, 6].includes(a.id)) m.kill(a.id); }
+    m.teleport(5, f.next.me.x, f.next.me.y, 0);
+    const mate = f.next.teammates.find((q) => q.id === 6)!;
+    m.teleport(6, mate.x, mate.y, 0);
+    m.players[5].kit = false; m.players[6].kit = false; m.players[5].grenades = [];
+    Object.assign(m.bomb, { state: 'planted', carrier: -1, ...f.p, site, explodeTick: m.phaseEnd, planter: 0, defuser: -1 });
+    f.bot.newRound(m.observe(5));
+    f.bot.tactics.setPlan({ ...plan, rot: site, go: false }, m.observe(5));
+    f.bot.tactics.kits.add(7);
+    finish(d, f.left + 10);
+    expect(goTick).toBe(600);
+    expect(m.rounds[0]?.reason).toBe('defuse');
+  });
+  it('存活 kit 者太遠仍排除；不能因有人有 kit 而讓近處無 kit 者繼續等', () => {
+    const { bot, next, p } = rally('B', true);
+    const team = bot.tactics.defuseTeam(next, p.x, p.y);
+    expect(team.find((m) => m.id === 6)?.kit).toBe(true);
+    expect(team.find((m) => m.id === 6)!.eta).toBeGreaterThan(next.bomb.ticksLeft! / 30);
+    expect(bot.tactics.retakeReady(next, 'B')).toBe(true);
+  });
+  it('遠方無 kit 者來不及拆，不因其仍存活就等待', () => {
+    const { bot, next, p } = rally();
+    const team = bot.tactics.defuseTeam(next, p.x, p.y);
+    expect(team.find((m) => m.id === 5)!.eta).toBeLessThan(next.bomb.ticksLeft! / 30);
+    expect(team.find((m) => m.id === 6)!.eta).toBeGreaterThan(next.bomb.ticksLeft! / 30);
+    expect(bot.tactics.retakeReady(next, 'B')).toBe(true);
+  });
+  it('正常多人有充足時間則等集結，皆就位後才 go', () => {
+    const { bot, next } = rally();
+    const plenty = { ...next, bomb: { ...next.bomb, ticksLeft: 1800 } };
+    expect(bot.tactics.retakeReady(plenty, 'B')).toBe(false);
+    const sp = bot.tactics.stageSpots('CT', 'B', 0)[1];
+    const ready = { ...plenty, teammates: plenty.teammates.map((m) => ({ ...m, x: sp.x, y: sp.y })) };
+    expect(bot.tactics.retakeReady(ready, 'B')).toBe(true);
+  });
+  it('已進行中的拆包不再等待遠方可加入的隊友', () => {
+    const { bot, next, p } = rally();
+    const active = { ...next, me: { ...next.me, ...p, defuseTicks: 60, loadout: { ...next.me.loadout, kit: true } }, bomb: { ...next.bomb, state: 'defusing' as const, ticksLeft: 900 } };
+    expect(bot.tactics.retakeReady(active, 'B')).toBe(true);
+  });
+  it('來不及完成的突破手不能在 go 後再擋住入口等待', () => {
+    const { bot, next, p } = rally();
+    bot.tactics.roles = new Roles(bot.tactics.ids, 5, 4, 4);
+    bot.tactics.roles.hear(6, 1);
+    expect(bot.tactics.roles.who(1)).toBe(6);
+    const out = output();
+    bot.tactics.retake(next, out, plan, p.x, p.y, 'B');
+    expect(out.role).not.toBe('等突破手先進');
+    expect(out.task).toBe('defuse');
+  });
+  it('死亡者延遲抵達的 kit 喊話不重新污染記憶', () => {
+    const { bot, next } = rally();
+    bot.tactics.readChat({ ...next, chat: [{ from: 7, text: 'E:kit' }] });
+    bot.tactics.readChat({ ...next, tick: 660 });
+    expect(bot.tactics.kits.has(7)).toBe(false);
+  });
+});
+
+function attributedDefuse(seed: number, reaction: number, left: number, control: boolean): { driver: ShooterDriver; bot: ShooterBaseline; sent: number } {
+  const bot = new Bot();
+  let sent = 0;
+  const map = MAPS.redrock();
+  const controllers: ShooterController[] = Array.from({ length: 10 }, (_, id) => {
+    const script = new ScriptController(`delay-${id}`, (obs) => {
+      if (id !== 5) return [];
+      if (control) return obs.tick === 600 ? [{ type: 'defuse' }] : [];
+      const commands = bot.decide(obs);
+      sent += commands.filter((c) => c.type === 'defuse').length;
+      return commands;
+    });
+    if (id !== 5) return script;
+    return { label: script.label, declaration: bot.declare(), init: (data: ShooterInitData) => { bot.init(data, shooterHelpers(map, seed, id)); return script.init(); }, decide: (obs: ShooterObservation) => script.decide(obs) };
+  });
+  const d = new ShooterDriver({ seed, mapId: 'redrock', controllers, record: false, defaultLoadout: { CT: 'm4', T: 'ak' }, attributes: Array.from({ length: 10 }, () => ({ ...DEFAULT_ATTRIBUTES, reaction })) });
+  const m = d.match;
+  m.tick = 600; m.phase = 'planted'; m.phaseEnd = 600 + left;
+  for (const a of m.players) { a.hasBomb = false; if (![0, 5].includes(a.id)) m.kill(a.id); }
+  const p = bot.intel.sites.A.plants[0];
+  m.teleport(5, p.x, p.y, 0); m.players[5].kit = true; m.players[5].grenades = [];
+  Object.assign(m.bomb, { state: 'planted', carrier: -1, ...p, site: 'A', explodeTick: m.phaseEnd, planter: 0, defuser: -1 });
+  bot.newRound(m.observe(5)); bot.tactics.setPlan(plan, m.observe(5));
+  finish(d, left + 10);
+  return { driver: d, bot, sent };
+}
+
+describe('Bot 2.4.3：真正屬性驅動的機率式延遲', () => {
+  it.each([69, 66].flatMap((reaction) => [154, 155].map((left) => ({ reaction, left }))))('reaction=$reaction，倒數 $left tick：臨界盡力嘗試，結果與相同種子的單次拆包對照一致', ({ reaction, left }) => {
+    const endings = new Set<number>();
+    const reasons = new Set<string>();
+    for (let seed = 1; seed <= 24; seed++) {
+      const control = attributedDefuse(seed, reaction, left, true);
+      const actual = attributedDefuse(seed, reaction, left, false);
+      expect(actual.bot.data.rules.reactionTicks).toBe(reaction === 69 ? 5 : 6);
+      expect(actual.bot.tactics.delayMin).toBe(5);
+      expect(actual.bot.tactics.delayMax).toBe(6);
+      expect(actual.sent).toBe(1);
+      const a = actual.driver.match.rounds[0], c = control.driver.match.rounds[0];
+      expect(a?.reason).toBe(c?.reason);
+      expect(a?.endTick).toBe(c?.endTick);
+      endings.add(c!.endTick); reasons.add(c!.reason);
+    }
+    if (left === 155) { expect(reasons).toEqual(new Set(['defuse'])); expect(endings).toEqual(new Set([754, 755])); }
+    else expect(reasons).toEqual(new Set(['defuse', 'bomb']));
+  }, 30000);
 });
