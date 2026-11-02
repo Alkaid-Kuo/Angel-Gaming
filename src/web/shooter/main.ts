@@ -17,7 +17,7 @@ import type { ShooterReplay } from '../../shooter/runner.ts';
 import { seesAll } from './hudinfo.ts';
 import { BUY_CLOSED_NOTE, buyToggle } from './shop.ts';
 import { SpectateUi } from './spectate.ts';
-import { WATCH_HASH, readTicket, ticketVersionError, type WatchTicket } from './watch.ts';
+import { EMBED, WATCH_HASH, loadLiveSpeed, readTicket, saveLiveSpeed, tellManage, ticketVersionError, type WatchTicket } from './watch.ts';
 import { DAMAGE_MS, HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type Corpse, type DamagePop, type DrawInput, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -209,6 +209,8 @@ class Game {
       else if (act === 'review') this.hud.hideEnd();
       else if (act === 'replay') this.post({ type: 'getReplay' });
     });
+    const liveSpeed = EMBED ? loadLiveSpeed() : null;
+    if (liveSpeed !== null) this.setSpeed(liveSpeed);
     this.raf = requestAnimationFrame((t) => this.frame(t));
     // 切到別的分頁：玩家模式自動暫停（Worker 不會停，回來時不要已經被打死）
     document.addEventListener('visibilitychange', this.onHidden);
@@ -258,6 +260,7 @@ class Game {
   private setSpeed(i: number): void {
     if (!this.meta.spectate || !Number.isFinite(i)) return;
     this.speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, i));
+    if (EMBED) saveLiveSpeed(this.speedIdx);
     this.post({ type: 'speed', speed: SPEEDS[this.speedIdx] });
   }
 
@@ -391,6 +394,11 @@ class Game {
     this.over = summary;
     this.buy.setOpen(false);
     this.input.releaseAll();
+    if (EMBED) {
+      // 留一下最後一回合的畫面，再回經營頁看結果
+      setTimeout(() => tellManage('over'), 2500);
+      return;
+    }
     const myGroup = this.meta.groups[this.meta.playerId];
     this.hud.showEnd(summary, this.cur?.board ?? [], myGroup);
   }
@@ -563,10 +571,14 @@ function startWatch(t: WatchTicket): void {
   void fontsReady.then(() => setTimeout(paintBackdrop, 30));
   const stale = ticketVersionError(t);
   if (stale !== null) {
+    if (EMBED) {
+      tellManage('skip');
+      return;
+    }
     $('setup').innerHTML = `<section class="card sg-loading"><h2>無法觀戰</h2><p class="muted">${esc(stale)}</p><div class="row"><a class="primary" href="./game.html">回經營頁</a></div></section>`;
     return;
   }
-  $('setup').innerHTML = `<section class="card sg-loading"><h2>準備觀戰</h2><p class="muted">${esc(t.teams[0])} VS ${esc(t.teams[1])}・${esc(t.title)}：載入基準 Bot、用存檔的請求單重跑這一場…</p></section>`;
+  $('setup').innerHTML = `<section class="card sg-loading"><h2>比賽即將開始</h2><p class="muted">${esc(t.teams[0])} VS ${esc(t.teams[1])}・${esc(t.title)}</p></section>`;
   ensureWorker().postMessage({ type: 'watch', watch: { request: t.request, names: t.names, tags: t.tags, teams: t.teams, mine: t.mine } } satisfies ToShooterWorker);
 }
 
@@ -575,7 +587,8 @@ function startWatch(t: WatchTicket): void {
  * 同分頁開的（新分頁被擋）回上一頁；直接開網址的導到 game.html。
  */
 function backToManage(): void {
-  if (window.opener !== null) {
+  if (EMBED) tellManage('skip');
+  else if (window.opener !== null) {
     window.close();
     // 關不掉時（瀏覽器不允許）退回導頁
     setTimeout(() => {
@@ -604,6 +617,7 @@ function init(): void {
     document.title = '天使戰隊 攻防戰 觀戰';
     ticket = readTicket();
     if (ticket !== null) startWatch(ticket);
+    else if (EMBED) tellManage('skip');
     else $('setup').innerHTML = '<section class="card"><h2>沒有要觀戰的比賽</h2><p class="muted">從經營頁（web/game.html）比賽日的結果畫面或聯賽頁點「觀戰」，會在這裡重播那一場。</p><div class="row"><a class="primary" href="./game.html">回經營頁</a><a href="./shooter.html">攻防戰試玩</a></div></section>';
     return;
   }

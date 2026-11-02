@@ -330,6 +330,7 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sg-ctl { position: absolute; bottom: calc(var(--u) * 14); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: calc(var(--u) * 4); padding: calc(var(--u) * 5); background: var(--glass2); z-index: 4; white-space: nowrap; }
 .sg-ctl button { display: flex; align-items: center; justify-content: center; gap: calc(var(--u) * 5); box-sizing: border-box; height: calc(var(--u) * 32); min-height: 24px; min-width: calc(var(--u) * 34); padding: 0 calc(var(--u) * 9); background: rgba(255, 255, 255, 0.06); box-shadow: none; font-size: max(11px, calc(var(--u) * 14)); letter-spacing: 0.02em; }
 .sg-ctl button:disabled { color: var(--grey2); }
+.sg .sg-ctl button.skipm { background: var(--gold); color: var(--ink); font-weight: 900; }
 .sg-ctl button small { font-size: 0.7em; color: var(--grey); }
 .sg-ctl > i { width: 1px; height: calc(var(--u) * 20); background: var(--hair); margin: 0 calc(var(--u) * 3); }
 .sg-ctl .mn { position: relative; display: block; }

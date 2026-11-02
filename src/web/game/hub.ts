@@ -3,11 +3,19 @@
 import { anchorOf } from '../sketch/city.ts';
 import { lineupOf, myFixture, publicRating, rankOf, teamForm } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
-import { avatar, crestRing, esc, foeOf, glyph, slotName, teamName, wan, weekLabel } from './kit.ts';
+import { lockedUntil, nextHint } from './guide.ts';
+import type { Screen } from './kit.ts';
+import { avatar, crestRing, esc, foeOf, glyph, icon, slotName, teamName, wan, weekLabel } from './kit.ts';
 
-function tag(id: string, side: 'L' | 'R', L: number, no: string, title: string, en: string, st: string, extra = ''): string {
+/** 地標對應的畫面 */
+export const LAND_SCREEN: Readonly<Record<string, Screen>> = { finance: 'finance', market: 'market', training: 'training', league: 'league', betting: 'betting', rival: 'squad', arena: 'league' };
+
+function tag(ctx: Ctx, id: string, side: 'L' | 'R', L: number, no: string, title: string, en: string, st: string, extra = ''): string {
   const a = anchorOf(id);
-  return `<div class="tag ${side === 'R' ? 'R' : ''} ${extra}" data-at="${id}" data-act="go" data-to="${id === 'finance' ? 'finance' : id === 'market' ? 'market' : id === 'training' ? 'training' : id === 'league' ? 'league' : id === 'betting' ? 'betting' : 'squad'}" style="left:${a.x.toFixed(1)}px;top:${a.y.toFixed(1)}px;--k:${a.k.toFixed(3)};--L:${L}px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">${no}</span><b>${title}</b><span class="en">${en}</span><span class="st">${st}</span></div></div>`;
+  const to = LAND_SCREEN[id];
+  const lock = lockedUntil(to, ctx.v, ctx.prefs.guide);
+  const status = lock !== null ? `${icon('lock', 15)}第 ${lock} 週開放` : st;
+  return `<div class="tag ${side === 'R' ? 'R' : ''} ${lock !== null ? 'locked' : extra}" data-at="${id}" data-act="${lock !== null ? 'locked' : 'go'}" data-to="${to}" style="left:${a.x.toFixed(1)}px;top:${a.y.toFixed(1)}px;--k:${a.k.toFixed(3)};--L:${L}px"><i class="pin"></i><i class="stem"></i><div class="card"><span class="no">${no}</span><b>${title}</b><span class="en">${en}</span><span class="st">${status}</span></div></div>`;
 }
 
 /** 疊在城市上的標籤與比賽卡（放進城市的 .world 裡，跟著鏡頭飄） */
@@ -31,16 +39,16 @@ export function hubTags(ctx: Ctx): string {
   const arena = anchorOf('arena');
   return `<div class="mcard" style="left:${arena.x.toFixed(1)}px;top:${arena.y.toFixed(1)}px"><i class="ln"></i><div class="bx">
       <div class="lb">MATCH DAY // ${wl.short} · 中央競技場</div><h1>${title}</h1><div class="vs">${vs}</div></div></div>
-    ${tag('finance', 'L', 60, 'FINANCE', '財務', 'CASH FLOW', `<i>${net >= 0 ? '+' : '−'}${wan(Math.abs(net))}</i>萬／週`, v.me.runwayWeeks !== null && v.me.runwayWeeks < 3 ? 'warn' : '')}
-    ${tag('market', 'R', 70, 'RECRUIT', '轉會市場', 'MARKET', `${scouting ? '<span class="new"></span>' : ''}<i>${free}</i>名自由球員${scouting ? ` · 球探 ${scouting}` : ''}`)}
-    ${tag('training', 'L', 100, `LV${v.me.trainingLevel}`, '訓練基地', 'TRAINING', `<i>${left}</i>／${cap} 場可排`)}
-    ${tag('league', 'L', 60, 'LEAGUE', '聯賽', 'STANDINGS', row && row.played > 0 ? `第 <i>${rank}</i> 名 · ${row.points} 分` : '尚未開賽')}
-    ${tag('betting', 'R', 100, 'BETTING', '賭盤', 'ODDS', v.phase === 'season' ? `<i>${open}</i>場開盤 · 已押 ${v.bets.length} 注` : '賽季中開盤')}
-    ${tag('rival', 'R', 70, foe ? 'TARGET' : 'RIVAL HQ', foe ? esc(teamName(v, foe)) : '對手總部', 'RIVAL HQ', foe ? `評分約 <i>${publicRating(ctx, foe)}</i> · 情報 ${foeIntel}` : '本週沒有對手', foe ? 'op' : 'idle')}`;
+    ${tag(ctx, 'finance', 'L', 60, 'FINANCE', '財務', 'CASH FLOW', `<i>${net >= 0 ? '+' : '−'}${wan(Math.abs(net))}</i>萬／週`, v.me.runwayWeeks !== null && v.me.runwayWeeks < 3 ? 'warn' : '')}
+    ${tag(ctx, 'market', 'R', 70, 'RECRUIT', '轉會市場', 'MARKET', `${scouting ? '<span class="new"></span>' : ''}<i>${free}</i>名自由球員${scouting ? ` · 球探 ${scouting}` : ''}`)}
+    ${tag(ctx, 'training', 'L', 100, `LV${v.me.trainingLevel}`, '訓練基地', 'TRAINING', `<i>${left}</i>／${cap} 場可排`)}
+    ${tag(ctx, 'league', 'L', 60, 'LEAGUE', '聯賽', 'STANDINGS', row && row.played > 0 ? `第 <i>${rank}</i> 名 · ${row.points} 分` : '尚未開賽')}
+    ${tag(ctx, 'betting', 'R', 100, 'BETTING', '賭盤', 'ODDS', v.phase === 'season' ? `<i>${open}</i>場開盤 · 已押 ${v.bets.length} 注` : '賽季中開盤')}
+    ${tag(ctx, 'rival', 'R', 70, foe ? 'TARGET' : 'RIVAL HQ', foe ? esc(teamName(v, foe)) : '對手總部', 'RIVAL HQ', foe ? `評分約 <i>${publicRating(ctx, foe)}</i> · 情報 ${foeIntel}` : '本週沒有對手', foe ? 'op' : 'idle')}`;
 }
 
 /** 屋頂上的三塊：我方出賽名單（人數依內容包）、比賽日按鈕、對手情報 */
-export function hubPanels(ctx: Ctx, busy: boolean): string {
+export function hubPanels(ctx: Ctx, busy: boolean, unread: number): string {
   const { v } = ctx;
   const lu = lineupOf(ctx);
   const f = myFixture(v);
@@ -73,7 +81,10 @@ export function hubPanels(ctx: Ctx, busy: boolean): string {
     target = `<section class="panel target idle"><div class="hd"><span class="no">LEAGUE</span><b>${over ? '最終排名' : '聯賽前段'}</b></div>
       <div class="tb list">${top.map((r, i) => `<div class="tr"><span class="num">${i + 1}</span>${crestRing(ctx, r.teamId, 40)}<b>${esc(teamName(v, r.teamId))}</b><span class="num">${r.points}</span></div>`).join('')}</div></section>`;
   }
-  return `<section class="panel squad n${n}" data-act="go" data-to="squad"><div class="hd"><span class="no">01</span><b>戰隊</b><span class="en">SQUAD</span><span class="st">${v.me.roster.length}／${ctx.c.economy.rosterMax} · ${lu.auto ? '名單自動' : '名單已排'}</span></div><div class="units">${units}</div></section>
+  const reports = v.inbox.slice(unread > 0 ? v.inbox.length - unread : v.inbox.length).filter((m) => m.kind === 'report').length;
+  const hint = nextHint({ v, guide: ctx.prefs.guide, unread: reports, foe: foe ? teamName(v, foe) : null, capacity: ctx.c.economy.scrimCapacity[v.me.trainingLevel - 1] });
+  const hintEl = `<${hint.to ? `button data-act="go" data-to="${hint.to}"` : 'div'} class="next-hint"><i>下一步</i><span>${esc(hint.text)}</span></${hint.to ? 'button' : 'div'}>`;
+  return `${hintEl}<section class="panel squad n${n}" data-act="go" data-to="squad"><div class="hd"><span class="no">01</span><b>戰隊</b><span class="en">SQUAD</span><span class="st">${v.me.roster.length}／${ctx.c.economy.rosterMax} · ${lu.auto ? '名單自動' : '名單已排'}</span></div><div class="units">${units}</div></section>
     <div class="glowline"></div>
     <section class="deploy"><div class="cd"><span>${cdLine}</span></div>${go}<div class="lock">${lock}</div></section>
     ${target}`;

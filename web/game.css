@@ -3,7 +3,7 @@
    每個畫面的樣式都掛在 .v-畫面名 底下，避免設計稿裡重複的短類名（.list、.big、.sel…）互相打架。
    配色規則同設計稿：金只給我方、選中、主要行動；紅只給對手與警示；其餘一律白、灰、墨黑。 */
 
-#stage { background: var(--ink); }
+#stage { background: var(--ink); overflow: clip; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
 button:disabled { cursor: default; }
 a { color: inherit; }
@@ -14,9 +14,9 @@ input, select { font: inherit; color: inherit; }
 #city { position: absolute; inset: 0; z-index: 1; background: var(--ink); }
 #app { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 #app > *, .scr > * { pointer-events: auto; }
-.scr { position: absolute; inset: 0; pointer-events: none; }
+#app > .scr { position: absolute; inset: 0; pointer-events: none; }
 .scr:not(.fresh) .in { animation: none; }
-#cine { position: absolute; inset: 0; z-index: 50; }
+#cine { position: absolute; inset: 0; z-index: 50; background: #07090d; }
 #toasts { position: absolute; left: 50%; top: 128px; z-index: 70; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
 
 /* ── 共用元件的互動狀態 ── */
@@ -87,10 +87,46 @@ p.big { font-size: 17px; line-height: 1.7; }
 .toast.bad .ic { color: var(--red); }
 .toast.out { opacity: 0; translate: 0 -12px; }
 
+/* ═════ 新手引導、看比賽 ═════ */
+#coach { position: absolute; inset: 0; z-index: 45; pointer-events: none; }
+#coach[hidden] { display: none; }
+#coach.center { background: rgba(4, 6, 11, 0.72); }
+.co-block { position: absolute; pointer-events: auto; }
+.co-ring { position: absolute; box-shadow: 0 0 0 2400px rgba(4, 6, 11, 0.68), inset 0 0 0 2px var(--gold), 0 0 26px rgba(var(--gold-rgb), 0.55); pointer-events: none; animation: co-pulse 1.8s ease-in-out infinite; }
+@keyframes co-pulse { 50% { box-shadow: 0 0 0 2400px rgba(4, 6, 11, 0.68), inset 0 0 0 2px var(--gold2), 0 0 44px rgba(var(--gold-rgb), 0.8); } }
+.co-card { position: absolute; width: 500px; box-sizing: border-box; padding: 24px 28px 22px 32px; background: var(--ink); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.5), inset 6px 0 0 var(--gold), 0 30px 70px rgba(0, 0, 0, 0.7); pointer-events: auto; animation: fade 0.2s both; }
+.co-card .tag { position: static; display: block; width: auto; height: auto; transform: none; font-family: var(--mono); font-size: 14px; letter-spacing: 0.3em; color: var(--gold2); cursor: default; }
+.co-card h3 { margin: 8px 0 10px; font-size: 36px; font-weight: 900; letter-spacing: 0.08em; color: #fff; transform: skewX(-7deg); transform-origin: 0 50%; }
+.co-card p { margin: 0; font-size: 20px; line-height: 1.65; color: #d6dce5; }
+.co-card p b { color: var(--gold2); font-weight: 700; }
+.co-card .acts { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 20px; flex-wrap: wrap; }
+.co-card .acts:empty { display: none; }
+.co-card .lnk { margin-right: auto; font-size: 15px; color: var(--grey); }
+.help-list { margin: 8px 0 0; padding: 0 0 0 22px; font-size: 19px; line-height: 1.65; color: #d6dce5; }
+.help-list li { margin-bottom: 8px; }
+.help-list b { color: var(--gold2); }
+.next-hint { position: absolute; left: 960px; top: 146px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; max-width: 1000px; padding: 10px 26px 10px 14px; background: var(--panel); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.4); font-size: 20px; font-weight: 700; letter-spacing: 0.04em; color: var(--white); white-space: nowrap; }
+button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(var(--gold-rgb), 0.3); }
+.next-hint i { padding: 2px 10px; background: var(--gold); color: var(--ink); font-style: normal; font-size: 16px; font-weight: 900; letter-spacing: 0.1em; }
+.rail button.locked { color: var(--grey2); gap: 3px; }
+.rail button.locked small { font-size: 13px; font-weight: 500; letter-spacing: 0.06em; }
+.rail button.locked:hover { background: none; color: var(--grey); }
+.tag.locked { --tc: rgba(var(--white-rgb), 0.2); opacity: 0.72; }
+.tag.locked .st svg { vertical-align: -2px; margin-right: 6px; }
+.tag.hot { --tc: var(--gold); z-index: 5; }
+.tag.hot .card { box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.55), 0 0 40px rgba(var(--gold-rgb), 0.18); }
+.tag.hot b { color: #fff; text-shadow: 0 0 18px rgba(var(--gold-rgb), 0.6); }
+#live { position: fixed; inset: 0; z-index: 100; width: 100vw; height: 100vh; border: 0; background: var(--ink); }
+.md-pre .sc { padding: 0 44px; }
+.md-pre .vs2 { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 56px; color: var(--gold); }
+.md-pre .mid2 { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.md-pre .mid2 .meter { width: 300px; height: 8px; }
+.md-pre .mid2 .meter i { transition: width 0.3s; }
+
 /* ═════ 基地：夜城（標籤與比賽卡在 #city 裡，跟著鏡頭飄） ═════ */
 #city .cam { position: absolute; inset: 0; transform: translate(calc(var(--mx) * -26px), calc(var(--my) * -14px)); }
 #city .world { position: absolute; left: -64px; top: -36px; width: 2048px; height: 1152px; animation: drone 9s ease-in-out infinite; }
-@keyframes drone { 50% { translate: 0 -7px; } }
+@keyframes drone { 50% { translate: 0 -2px; } }
 #city .world canvas { position: absolute; inset: 0; }
 #city .world.lights { animation: drone 9s ease-in-out infinite, lights 1.6s ease-out both; }
 @keyframes lights { from { filter: brightness(0.15) saturate(0); } }

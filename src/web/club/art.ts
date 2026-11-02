@@ -69,6 +69,7 @@ const ICONS = {
   calendar: 'M4 6 H20 V20 H4 Z M4 10 H20 M8 3.5 V7.5 M16 3.5 V7.5',
   shield: 'M12 3 L20 6 V12 C20 16.5 16.5 19.5 12 21 C7.5 19.5 4 16.5 4 12 V6 Z',
   swap: 'M4 8 H18 M14 4 L18 8 L14 12 M20 16 H6 M10 12 L6 16 L10 20',
+  lock: 'M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3',
   skip: 'M5 5 L13 12 L5 19 Z M13 5 L21 12 L13 19 Z',
 } as const;
 

@@ -8,7 +8,7 @@ import type { CamMode } from './camera.ts';
 import type { BoardRow, FullState, KillFeedItem, ShooterFrame, ShooterMeta, ShooterSummary } from './protocol.ts';
 import { clockText, clockTicks, visibleHp } from './hudinfo.ts';
 import { ScoreBar, avatarHtml, gunIconUrl } from './scorebar.ts';
-import type { WatchTicket } from './watch.ts';
+import { EMBED, type WatchTicket } from './watch.ts';
 
 /** 天使金色票（web/sketch/angel.css） */
 export const ANGEL = { gold: '#f0b54a', blue: '#57aef5', red: '#ff5d5d', white: '#eef2f6', grey: '#8b95a4' } as const;
@@ -131,7 +131,7 @@ export class ShooterHud {
     this.pause = el('div', 'sg-pause hidden', root);
     this.ctl = meta.spectate ? el('div', 'sg-ctl', root) : null;
     const resume = meta.spectate ? '繼續（空白鍵）' : '繼續（Esc）';
-    const quit = meta.watch ? '回經營' : meta.spectate ? '離開觀戰' : '離開比賽';
+    const quit = EMBED ? '跳過比賽' : meta.watch ? '回經營' : meta.spectate ? '離開觀戰' : '離開比賽';
     this.pause.innerHTML =
       `<div class="box"><small class="en">PAUSED</small><b>暫停</b>` +
       `<div class="col"><button type="button" class="primary" data-act="resume">${resume}</button>` +
@@ -297,7 +297,7 @@ export class ShooterHud {
         `<i></i>` +
         item('fullscreen', document.fullscreenElement !== null, '⛶', 'title="全螢幕（F11）"') +
         `<button type="button" data-act="help" title="? 或 H">?</button>` +
-        `<button type="button" data-act="quit">${this.meta.watch ? '回經營' : '離開'}</button>`,
+        `<button type="button" class="${EMBED ? 'skipm' : ''}" data-act="quit">${EMBED ? '跳過比賽' : this.meta.watch ? '回經營' : '離開'}</button>`,
     );
   }
 
