@@ -10,7 +10,7 @@ function myPlayers(view: KnownView): KnownPlayer[] {
   return view.players.filter((p) => mine.has(p.id));
 }
 
-/** 休賽期：依個性簽自由選手，並保留數週的固定支出當緩衝 */
+/** 開局：依個性簽自由選手，並保留數週的固定支出當緩衝 */
 export function npcOffseason(view: KnownView, persona: Persona, spec: PersonaSpec, content: ContentPack): Command[] {
   const e = content.economy;
   const cmds: Command[] = [];

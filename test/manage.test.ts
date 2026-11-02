@@ -16,8 +16,9 @@ import { knownView } from '../src/manage/view.ts';
 const content = STUB_CONTENT;
 const gateway = new FakeGateway(content);
 
+/** 內容包定的起始資金：NPC 開局就簽約，所以不能拿開局後的現金當起點 */
 function startCashes(state: GameState): Map<string, number> {
-  return new Map(state.teams.map((t) => [t.id, t.cash]));
+  return new Map(state.teams.map((t) => [t.id, t.persona === null ? content.economy.humanStartCash : content.personas[t.persona].startCash]));
 }
 
 describe('評分', () => {
@@ -92,12 +93,13 @@ describe('賽程', () => {
 });
 
 describe('開新局', () => {
-  it('8 隊、1 位玩家、各隊 lineupSize 人、10 名自由選手、28 場例行賽，同種子結果相同', () => {
+  it('8 隊、1 位玩家、各隊至少 lineupSize 人、共發 10 名自由選手、28 場例行賽，同種子結果相同', () => {
     const s = newGame(7, content);
     expect(s.teams).toHaveLength(8);
     expect(s.teams.filter((t) => t.human)).toHaveLength(1);
-    for (const t of s.teams) expect(rosterOf(s, t.id)).toHaveLength(content.lineupSize);
-    expect(s.players.filter((p) => p.teamId === null)).toHaveLength(content.economy.freeAgentCount);
+    expect(rosterOf(s, s.humanTeamId)).toHaveLength(content.lineupSize);
+    for (const t of s.teams) expect(rosterOf(s, t.id).length).toBeGreaterThanOrEqual(content.lineupSize);
+    expect(s.players).toHaveLength(8 * content.lineupSize + content.economy.freeAgentCount);
     expect(s.fixtures).toHaveLength(28);
     expect(serialize(newGame(7, content))).toBe(serialize(s));
     expect(serialize(newGame(8, content))).not.toBe(serialize(s));

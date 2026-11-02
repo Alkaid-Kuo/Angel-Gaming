@@ -50,7 +50,7 @@ async function play(job: Job): Promise<JobResult> {
   const gateway = new ShooterGateway();
   const content = job.format === undefined ? SHOOTER_CONTENT : { ...SHOOTER_CONTENT, formatId: job.format };
   let state = newGame(job.seed, content, { gateway });
-  const start = new Map(state.teams.map((t) => [t.id, t.cash]));
+  const start = new Map(state.teams.map((t) => [t.id, t.persona === null ? content.economy.humanStartCash : content.personas[t.persona].startCash]));
   const eloSum = state.players.reduce((s, p) => s + p.elo, 0);
   let error: string | null = null;
   try {

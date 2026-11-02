@@ -170,6 +170,11 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
   }
   for (let i = 0; i < e.freeAgentCount; i++) makePlayer(state, content, rng, handles, null, rng.range(1, 3));
   createRegularSeason(state);
+  // NPC 開局先簽一輪：玩家看到的是已被挑過的市場，不能零成本把高品階自由選手撿光
+  for (const team of state.teams) {
+    if (team.persona === null) continue;
+    applyAll(state, content, team.id, npcOffseason(knownView(state, content, team.id), team.persona, content.personas[team.persona], content));
+  }
   state.inbox.push({ week: 0, kind: 'system', text: `${humanTeam(state).name} 成立。休賽期：簽選手、排訓練，準備好就推進到第 1 週。` });
   return state;
 }
@@ -297,10 +302,6 @@ export async function advance(state: GameState, content: ContentPack, gateway: B
   const summary: AdvanceSummary = { week: state.week, results: [] };
 
   if (state.phase === 'offseason') {
-    for (const team of state.teams) {
-      if (team.persona === null) continue;
-      applyAll(state, content, team.id, npcOffseason(knownView(state, content, team.id), team.persona, content.personas[team.persona], content));
-    }
     await processJobs(state, content, gateway, opts.onProgress);
     state.phase = 'season';
     state.week = 1;

@@ -101,14 +101,15 @@ describe('開局抽品階', () => {
     for (const pack of PACKS) {
       for (let seed = 1; seed <= 100; seed++) {
         const s = newGame(seed, pack);
-        for (const p of s.players) {
+        s.players.forEach((p, i) => {
           expect(p.version, `${pack.id}/${seed}/${p.id}`).toBeLessThanOrEqual(raritySpec(pack, p.rarity).maxVersion);
           expect((pack.lineages.find((l) => l.id === p.lineageId) as ContentPack['lineages'][number]).power.length).toBeGreaterThanOrEqual(p.version);
-          const team = s.teams.find((t) => t.id === p.teamId);
+          // 名單前段是各隊原班人馬，後段是自由選手（可能已被 NPC 簽走）
+          const team = i < 8 * pack.lineupSize ? s.teams.find((t) => t.id === p.teamId) : undefined;
           const [lo, hi] = team === undefined ? [1, 3] : team.persona === null ? pack.economy.humanVersions : pack.personas[team.persona].versions;
           expect(p.version).toBeGreaterThanOrEqual(lo);
           expect(p.version).toBeLessThanOrEqual(hi);
-        }
+        });
       }
     }
   });
@@ -206,8 +207,11 @@ describe('NPC 簽約估值與公開視圖', () => {
   it('Elo 與薪資都相同時，高品階先被簽走；估值只改簽約，不改品階', () => {
     const s = newGame(9, SHOOTER_CONTENT);
     const npc = s.teams.find((t) => t.persona === 'whale') as GameState['teams'][number];
-    const free = s.players.filter((p) => p.teamId === null);
+    npc.cash = SHOOTER_CONTENT.personas.whale.startCash;
+    // 把開局那一輪還原：所有自由選手回到市場，再比一次
+    const free = s.players.slice(8 * SHOOTER_CONTENT.lineupSize);
     free.forEach((p) => {
+      p.teamId = null;
       p.elo = 1500;
       p.weeklySalary = 50;
       p.rarity = 'N';
@@ -226,5 +230,59 @@ describe('NPC 簽約估值與公開視圖', () => {
       expect(kp.maxVersion).toBe(playerMaxVersion(content, p));
     }
     expect(JSON.stringify(v)).not.toContain('"habit"');
+  });
+});
+
+describe('NPC 開局先簽一輪', () => {
+  it('開局就簽完：還在休賽期第 0 週，帳本與現金對得上，陣容不超過目標', () => {
+    for (const pack of PACKS) {
+      let signed = 0;
+      for (let seed = 1; seed <= 30; seed++) {
+        const s = newGame(seed, pack);
+        expect(s.phase).toBe('offseason');
+        expect(s.week).toBe(0);
+        for (const t of s.teams) {
+          if (t.persona === null) {
+            expect(t.ledger).toEqual([]);
+            continue;
+          }
+          const spec = pack.personas[t.persona];
+          const roster = rosterOf(s, t.id).length;
+          expect(t.ledger.every((e) => e.week === 0)).toBe(true);
+          expect(t.ledger.filter((e) => e.category === 'signing')).toHaveLength(roster - pack.lineupSize);
+          expect(t.cash).toBe(spec.startCash + t.ledger.reduce((x, e) => x + e.amount, 0));
+          expect(roster).toBeLessThanOrEqual(Math.max(pack.lineupSize, spec.rosterTarget));
+          signed += roster - pack.lineupSize;
+        }
+      }
+      expect(signed).toBeGreaterThan(0);
+    }
+  });
+
+  it('玩家搶不到這一輪：簽光市場再推進，NPC 陣容與現金都不變，第一次推進不再簽約', async () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const s = newGame(seed, content);
+      const npcs = (): unknown => s.teams.filter((t) => !t.human).map((t) => [t.id, t.cash, t.trainingLevel, rosterOf(s, t.id).map((p) => p.id)]);
+      const before = npcs();
+      const me = humanTeam(s);
+      me.cash = 100_000;
+      for (const p of s.players.filter((x) => x.teamId === null)) applyCommand(s, content, me.id, { type: 'sign', playerId: p.id });
+      await advance(s, content, gateway);
+      expect(s.week).toBe(1);
+      expect(npcs()).toEqual(before);
+    }
+  });
+
+  it('玩家看到的市場已被挑過：100 個種子，自由選手裡的 SSR 大多已被 NPC 簽走', () => {
+    let total = 0;
+    let taken = 0;
+    for (let seed = 1; seed <= 100; seed++) {
+      const s = newGame(seed, SHOOTER_CONTENT);
+      const ssr = s.players.slice(8 * SHOOTER_CONTENT.lineupSize).filter((p) => p.rarity === 'SSR');
+      total += ssr.length;
+      taken += ssr.filter((p) => p.teamId !== null).length;
+    }
+    expect(total).toBeGreaterThan(50);
+    expect(taken / total).toBeGreaterThan(0.8);
   });
 });
