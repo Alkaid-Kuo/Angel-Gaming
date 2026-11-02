@@ -28,13 +28,13 @@ export const GATEWAY_MAP_ID = 'redrock';
 /** 聯賽賽制（規則 1.2 起）；MR12 留作賽制選項（季後賽日後用） */
 export const LEAGUE_FORMAT_ID = 'shooter-mr6';
 
-/** 經營層看得到的賽制（estMsPerRound：Node 單執行緒、兩隊基準 Bot 2.1 的量測平均，見步驟 8 交付報告） */
+/** 經營層看得到的賽制（estMsPerRound：基準 Bot 2.4.3 整季 7 個 worker 同時跑的量測平均，貼近瀏覽器 4 個 Worker 實際等待；Node 單執行緒約 1256，見 Bot 2.4.3 強度與耗時重量報告） */
 export const SHOOTER_FORMATS: readonly MatchFormat[] = [
-  { id: 'shooter-mr6', name: '攻防戰 MR6（先到 7 勝、MR3 加時）', rounds: 12, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
+  { id: 'shooter-mr6', name: '攻防戰 MR6（先到 7 勝、MR3 加時）', rounds: 12, estMsPerRound: 1500, lineupSize: TEAM_SIZE, watchable: true },
   // 量測用（MR6 對 MR8 對照），聯賽賽制不是這個
-  { id: 'shooter-mr8', name: '攻防戰 MR8（先到 9 勝、MR3 加時）', rounds: 16, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
-  { id: 'shooter-mr12', name: '攻防戰 MR12（先到 13 勝、MR3 加時）', rounds: 24, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
-  { id: 'shooter-short', name: '攻防戰短賽制（測試用：每半場 1 回合、先到 2 勝、不加時，1:1 平手）', rounds: 2, estMsPerRound: 730, lineupSize: TEAM_SIZE, watchable: true },
+  { id: 'shooter-mr8', name: '攻防戰 MR8（先到 9 勝、MR3 加時）', rounds: 16, estMsPerRound: 1500, lineupSize: TEAM_SIZE, watchable: true },
+  { id: 'shooter-mr12', name: '攻防戰 MR12（先到 13 勝、MR3 加時）', rounds: 24, estMsPerRound: 1500, lineupSize: TEAM_SIZE, watchable: true },
+  { id: 'shooter-short', name: '攻防戰短賽制（測試用：每半場 1 回合、先到 2 勝、不加時，1:1 平手）', rounds: 2, estMsPerRound: 1500, lineupSize: TEAM_SIZE, watchable: true },
 ];
 
 type FormatOptions = Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'overtime' | 'freezeTicks'>;

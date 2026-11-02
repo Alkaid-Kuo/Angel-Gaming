@@ -7,13 +7,13 @@ import { ROLE_TABLE, SHOOTER_ROLES, type ShooterRole } from '../shooter/players.
 import { STUB_CONTENT, type ContentPack, type Economy, type PersonaSpec } from './content.ts';
 import type { Persona } from './types.ts';
 
-/** 隱藏強度表：索引＝版本 − 1（scripts/shooter-strength.ts 的「採用值」；基準 Bot 2.2.1：赤岩舊城、MR6、凍結 3 秒，基準 Bot 2.1；回合→整場 k = 11.96；量測見規則 1.2 交付報告） */
+/** 隱藏強度表：索引＝版本 − 1（scripts/shooter-strength.ts 的「採用值」；基準 Bot 2.4.3：赤岩舊城、MR6、凍結 3 秒；回合→整場 k = 12.22；量測見 Bot 2.4.3 強度與耗時重量報告） */
 export const SHOOTER_POWER: Readonly<Record<ShooterRole, readonly number[]>> = {
-  entry: [1081, 1280, 1500, 1575, 1641],
-  awp: [1081, 1280, 1500, 1859, 2207],
-  support: [1081, 1280, 1500, 1690, 1870],
-  anchor: [1081, 1280, 1500, 1684, 1857],
-  lurk: [1081, 1280, 1500, 1694, 1879],
+  entry: [1153, 1239, 1500, 1570, 1681],
+  awp: [1153, 1239, 1500, 1679, 1899],
+  support: [1153, 1239, 1500, 1677, 1895],
+  anchor: [1153, 1239, 1500, 1657, 1855],
+  lurk: [1153, 1239, 1500, 1699, 1940],
 };
 
 const STUB_PERSONAS = STUB_CONTENT.personas;
