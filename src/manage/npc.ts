@@ -1,6 +1,7 @@
 // NPC 戰隊：與玩家一樣只讀「已知層」視圖、只發同一套指令。個性＝數值組合＋出賽排序風格。
 import type { ContentPack, PersonaSpec } from './content.ts';
 import type { Prng } from '../shared/prng.ts';
+import { raritySpec } from './state.ts';
 import type { KnownPlayer, KnownView } from './view.ts';
 import type { Command, Persona } from './types.ts';
 
@@ -23,10 +24,12 @@ export function npcOffseason(view: KnownView, persona: Persona, spec: PersonaSpe
     fixed += e.facilityMaintenance[view.me.trainingLevel] - e.facilityMaintenance[view.me.trainingLevel - 1];
   }
 
+  // 估值＝公開 Elo＋品階加成：品階代表成長空間，不讓玩家零成本把高品階自由選手撿光
+  const value = (p: KnownPlayer): number => p.elo + raritySpec(content, p.rarity).npcEloBonus;
   const pool = view.players.filter((p) => p.teamId === null);
-  if (persona === 'whale') pool.sort((a, b) => b.elo - a.elo || a.weeklySalary - b.weeklySalary);
-  else if (persona === 'youth') pool.sort((a, b) => a.weeklySalary - b.weeklySalary || b.elo - a.elo);
-  else pool.sort((a, b) => ((b.elo - 1400) * 100) / b.weeklySalary - ((a.elo - 1400) * 100) / a.weeklySalary);
+  if (persona === 'whale') pool.sort((a, b) => value(b) - value(a) || a.weeklySalary - b.weeklySalary);
+  else if (persona === 'youth') pool.sort((a, b) => a.weeklySalary - b.weeklySalary || value(b) - value(a));
+  else pool.sort((a, b) => ((value(b) - 1400) * 100) / b.weeklySalary - ((value(a) - 1400) * 100) / a.weeklySalary);
 
   for (const p of pool) {
     if (count >= Math.min(spec.rosterTarget, e.rosterMax)) break;

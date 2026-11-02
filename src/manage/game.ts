@@ -2,7 +2,7 @@
 // 一週的順序：補出賽名單 → 比賽日（經對戰閘道）→ 開獎 → 背景工作 → 週結算 → 升版完成 → 破產檢查 → 換階段。
 import { settleBets } from './betting.ts';
 import { applyCommand } from './commands.ts';
-import type { ContentPack } from './content.ts';
+import type { ContentPack, RaritySpec } from './content.ts';
 import type { BattleGateway, MatchRequest } from './gateway.ts';
 import { assertFormat, finalScore } from './gateway.ts';
 import { processJobs } from './jobs.ts';
@@ -14,18 +14,19 @@ import {
   buildSide,
   humanTeam,
   lineupValid,
-  maxVersion,
   notify,
+  playerMaxVersion,
   playerOf,
   post,
   publicPrior,
+  raritySpec,
   rosterOf,
   salaryForVersion,
   teamOf,
   weeklySalaries,
   weeklySponsor,
 } from './state.ts';
-import type { Command, Fixture, GameState, Persona, Player, PlayerId, TeamId } from './types.ts';
+import type { Command, Fixture, GameState, Persona, Player, PlayerId, Rarity, TeamId } from './types.ts';
 import { REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from './types.ts';
 import { knownView } from './view.ts';
 import type { Prng } from '../shared/prng.ts';
@@ -47,11 +48,39 @@ export interface AdvanceSummary {
   results: { fixtureId: string; stage: Fixture['stage']; home: TeamId; away: TeamId; homeScore: number; awayScore: number; winner: TeamId | null }[];
 }
 
-function makePlayer(state: GameState, content: ContentPack, rng: Prng, teamId: TeamId | null, version: number): PlayerId {
-  const used = new Set(state.players.map((p) => p.name));
-  const pickName = (): string => content.surnames[rng.nextInt(content.surnames.length)] + content.givenNames[rng.nextInt(content.givenNames.length)];
-  let name = pickName();
-  while (used.has(name)) name = pickName();
+/** 7 支 NPC 戰隊的個性 */
+const NPC_PERSONAS: readonly Persona[] = ['whale', 'youth', 'youth', 'data', 'data', 'miser', 'miser'];
+
+function assertContent(content: ContentPack): void {
+  if (content.slotNames.length !== content.lineupSize) throw new Error(`內容包 ${content.id} 的出賽位名稱數與名單人數不符`);
+  const e = content.economy;
+  if (e.humanStartRarities.length !== content.lineupSize) throw new Error(`內容包 ${content.id} 的玩家起手品階數與名單人數不符`);
+  for (const r of e.humanStartRarities) {
+    if (raritySpec(content, r).maxVersion < e.humanVersions[1]) throw new Error(`內容包 ${content.id} 的玩家起手版本可能超過 ${r} 階上限`);
+  }
+  const dup = content.handles.find((h, i) => content.handles.indexOf(h) !== i);
+  if (dup !== undefined) throw new Error(`內容包 ${content.id} 的名字庫有重複：${dup}`);
+  const need = (NPC_PERSONAS.length + 1) * content.lineupSize + e.freeAgentCount;
+  if (content.handles.length < need) throw new Error(`內容包 ${content.id} 的名字庫只有 ${content.handles.length} 個，開局需要 ${need} 個`);
+}
+
+/** 依權重抽品階：只從上限 ≥ version 的品階裡抽，所以開局版本範圍不受品階影響 */
+function pickRarity(content: ContentPack, rng: Prng, version: number): Rarity {
+  const pool = content.rarities.filter((r) => r.maxVersion >= version);
+  const total = pool.reduce((s, r) => s + r.weight, 0);
+  if (total === 0) throw new Error(`沒有品階的上限到得了 v${version}`);
+  let roll = rng.nextInt(total);
+  const hit = pool.find((r) => {
+    roll -= r.weight;
+    return roll < 0;
+  });
+  return (hit as RaritySpec).id;
+}
+
+/** handles：這局洗好的名字庫，依序發放（第 n 位選手拿第 n 個，數量由 assertContent 保證）；rarity：不給就依權重抽 */
+function makePlayer(state: GameState, content: ContentPack, rng: Prng, handles: readonly string[], teamId: TeamId | null, version: number, rarity?: Rarity): PlayerId {
+  const name = handles[state.players.length];
+  const picked = rarity ?? pickRarity(content, rng, version);
   const candidates = content.lineages.filter((l) => l.power.length >= version);
   const lineage = candidates[rng.nextInt(candidates.length)];
   const habit = Math.max(-60, Math.min(60, Math.round(gauss(rng) * 25)));
@@ -61,6 +90,7 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, teamId: T
     id,
     name,
     lineageId: lineage.id,
+    rarity: picked,
     version,
     habit,
     elo: publicPrior(version),
@@ -75,7 +105,7 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, teamId: T
 }
 
 export function newGame(seed: number, content: ContentPack, opts: NewGameOptions = {}): GameState {
-  if (content.slotNames.length !== content.lineupSize) throw new Error(`內容包 ${content.id} 的出賽位名稱數與名單人數不符`);
+  assertContent(content);
   if (opts.gateway) assertFormat(opts.gateway, content.formatId, content.lineupSize);
   const e = content.economy;
   const rng = rngFor(seed, STREAM.newGame);
@@ -96,11 +126,11 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
     humanTeamId: '',
     seasonResult: null,
   };
-  const personas: Persona[] = ['whale', 'youth', 'youth', 'data', 'data', 'miser', 'miser'];
   const npcNames = rng.shuffle([...content.teamNames]);
-  const humanSeat = rng.nextInt(personas.length + 1);
+  const humanSeat = rng.nextInt(NPC_PERSONAS.length + 1);
+  const handles = rng.shuffle([...content.handles]);
   let npcIndex = 0;
-  for (let i = 0; i < personas.length + 1; i++) {
+  for (let i = 0; i < NPC_PERSONAS.length + 1; i++) {
     const id = `t${i + 1}`;
     if (i === humanSeat) {
       state.humanTeamId = id;
@@ -117,9 +147,9 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         intel: [],
         scrims: [],
       });
-      for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, id, rng.range(e.humanVersions[0], e.humanVersions[1]));
+      for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, id, rng.range(e.humanVersions[0], e.humanVersions[1]), e.humanStartRarities[k]);
     } else {
-      const persona = personas[npcIndex];
+      const persona = NPC_PERSONAS[npcIndex];
       const spec = content.personas[persona];
       state.teams.push({
         id,
@@ -134,11 +164,11 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         intel: [],
         scrims: [],
       });
-      for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, id, rng.range(spec.versions[0], spec.versions[1]));
+      for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, id, rng.range(spec.versions[0], spec.versions[1]));
       npcIndex++;
     }
   }
-  for (let i = 0; i < e.freeAgentCount; i++) makePlayer(state, content, rng, null, rng.range(1, 3));
+  for (let i = 0; i < e.freeAgentCount; i++) makePlayer(state, content, rng, handles, null, rng.range(1, 3));
   createRegularSeason(state);
   state.inbox.push({ week: 0, kind: 'system', text: `${humanTeam(state).name} 成立。休賽期：簽選手、排訓練，準備好就推進到第 1 週。` });
   return state;
@@ -222,7 +252,7 @@ function completeUpgrades(state: GameState, content: ContentPack): void {
   const e = content.economy;
   for (const p of state.players) {
     if (p.teamId === null || p.upgradeUntilWeek === null || state.week < p.upgradeUntilWeek) continue;
-    if (p.version < maxVersion(content, p.lineageId)) {
+    if (p.version < playerMaxVersion(content, p)) {
       p.version++;
       p.weeklySalary = Math.round((p.weeklySalary * e.salaryGrowthPct) / 100);
       p.presets = [];

@@ -34,6 +34,7 @@ const VERSION_NOTE: Readonly<Record<number, string>> = {
   1: '三個 1 對 1 對位',
   2: '比賽沒有保存請求單，不能觀戰回放',
   3: '地圖與賽制已更新，舊存檔無法沿用',
+  4: '新增選手品階與 ID，舊存檔無法沿用',
 };
 /** 舊存檔鍵（SAVE_VERSION 1，三個 1 對 1 對位的年代）；只拿來告訴玩家舊檔不能用了 */
 const OLD_SAVE_KEYS = ['angel-gaming-m4-save-v1'];
@@ -90,7 +91,7 @@ function parseSave(json: string): { state: GameState; content: ContentPack } {
   }
   if (raw.version !== SAVE_VERSION) {
     const note = typeof raw.version === 'number' ? VERSION_NOTE[raw.version] : undefined;
-    if (raw.version === 3) throw new Error(`${note}（存檔第 3 版，目前第 ${SAVE_VERSION} 版）`);
+    if (raw.version === 3 || raw.version === 4) throw new Error(`${note}（存檔第 ${raw.version} 版，目前第 ${SAVE_VERSION} 版）`);
     throw new Error(`存檔是第 ${String(raw.version)} 版${note ? `（${note}）` : ''}，目前是第 ${SAVE_VERSION} 版，舊存檔不能繼續`);
   }
   const kind = kindOf(String(raw.contentId));

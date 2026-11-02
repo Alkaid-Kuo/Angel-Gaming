@@ -2,7 +2,7 @@
 // 指令直接修改傳入的 state（純 JSON 物件）；要保留舊狀態請先 structuredClone。
 import { betLimit, fixtureOdds } from './betting.ts';
 import type { ContentPack } from './content.ts';
-import { capacityLeft, findPlayer, lineageOf, maxVersion, post, rosterOf, teamOf } from './state.ts';
+import { capacityLeft, findPlayer, lineageOf, maxVersion, playerMaxVersion, post, raritySpec, rosterOf, teamOf } from './state.ts';
 import type { Command, CommandResult, GameState, TeamId } from './types.ts';
 
 const OK: CommandResult = { ok: true };
@@ -58,7 +58,11 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       const p = findPlayer(state, cmd.playerId);
       if (!p || p.teamId !== teamId) return fail('不是自己的選手');
       if (p.upgradeUntilWeek !== null) return fail('已經在升版中');
-      if (p.version >= maxVersion(content, p.lineageId)) return fail(`${lineageOf(content, p.lineageId).name}已是最高版本`);
+      if (p.version >= playerMaxVersion(content, p)) {
+        // 兩個上限相等時算卡在品階
+        const cap = raritySpec(content, p.rarity).maxVersion;
+        return fail(cap <= maxVersion(content, p.lineageId) ? `${p.rarity} 階選手最高只能到 v${cap}` : `${lineageOf(content, p.lineageId).name}已是最高版本`);
+      }
       const cost = p.weeklySalary * e.upgradeCostWeeks;
       if (team.cash < cost) return fail('資金不足');
       post(state, team, 'training', -cost, `${p.name} 升版培訓`);

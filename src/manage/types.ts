@@ -2,7 +2,7 @@
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
 import type { MatchRequest } from './gateway.ts';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -13,6 +13,8 @@ export type PlayerId = string;
 export type FixtureId = string;
 
 export type Persona = 'whale' | 'youth' | 'data' | 'miser';
+/** 選手品階：只決定版本上限，不影響薪資與當下強度（數值在內容包的 rarities） */
+export type Rarity = 'N' | 'R' | 'SR' | 'SSR';
 export type Phase = 'offseason' | 'season' | 'ended' | 'bankrupt';
 export type Stage = 'regular' | 'semi' | 'third' | 'final';
 export type Side = 'home' | 'away';
@@ -44,6 +46,8 @@ export interface Player {
   id: PlayerId;
   name: string;
   lineageId: string;
+  /** 公開：品階，開局決定、之後不變 */
+  rarity: Rarity;
   version: number;
   /** 隱藏：個人習慣，對真實強度的小偏移 */
   habit: number;

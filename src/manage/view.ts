@@ -6,15 +6,18 @@ import type { ContentPack } from './content.ts';
 import type { MatchFormat } from './gateway.ts';
 import type { StandingRow } from './league.ts';
 import { standings } from './league.ts';
-import { capacityLeft, rosterOf, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
-import type { Bet, FixtureId, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, ScrimReport, SeasonResult, Stage, TeamId, Winner } from './types.ts';
+import { capacityLeft, playerMaxVersion, rosterOf, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
+import type { Bet, FixtureId, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, ScrimReport, SeasonResult, Stage, TeamId, Winner } from './types.ts';
 import { TOTAL_WEEKS } from './types.ts';
 
 export interface KnownPlayer {
   id: PlayerId;
   name: string;
   lineageId: string;
+  rarity: Rarity;
   version: number;
+  /** 個人版本上限（品階與流派取小） */
+  maxVersion: number;
   elo: number;
   games: number;
   weeklySalary: number;
@@ -114,7 +117,9 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       id: p.id,
       name: p.name,
       lineageId: p.lineageId,
+      rarity: p.rarity,
       version: p.version,
+      maxVersion: playerMaxVersion(content, p),
       elo: p.elo,
       games: p.games,
       weeklySalary: p.weeklySalary,

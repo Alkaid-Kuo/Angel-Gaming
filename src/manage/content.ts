@@ -1,7 +1,7 @@
 // 內容包：流派（真實強度表）、經濟數值、NPC 個性、名字庫。
 // 這份是「暫代內容」：流派曲線與數值都是為了讓經營層能跑起來的假資料，全部待審。
 // 正式內容（軍備競賽產出的流派與離線算好的真實強度）之後以同樣的型別換入。
-import type { Persona } from './types.ts';
+import type { Persona, Rarity } from './types.ts';
 
 export interface Lineage {
   readonly id: string;
@@ -9,6 +9,17 @@ export interface Lineage {
   readonly style: string;
   /** 真實強度（隱藏）：依版本，索引＝版本 − 1；長度＝最高版本 */
   readonly power: readonly number[];
+}
+
+/** 品階表一列 */
+export interface RaritySpec {
+  readonly id: Rarity;
+  /** 開局抽取權重 */
+  readonly weight: number;
+  /** 品階版本上限；選手個人上限再與流派上限取小（state.ts 的 playerMaxVersion） */
+  readonly maxVersion: number;
+  /** NPC 簽約估值時把品階當成多少 Elo 看待 */
+  readonly npcEloBonus: number;
 }
 
 export type LineupStyle = 'strongest-first' | 'ace-last' | 'random';
@@ -27,6 +38,8 @@ export interface PersonaSpec {
 export interface Economy {
   readonly humanStartCash: number;
   readonly humanVersions: readonly [number, number];
+  /** 玩家起手名單的品階，長度＝lineupSize；版本仍照 humanVersions 抽，所以每個品階的上限都要 ≥ humanVersions 的高標 */
+  readonly humanStartRarities: readonly Rarity[];
   readonly rosterMax: number;
   readonly freeAgentCount: number;
   readonly salaryBase: number;
@@ -74,14 +87,44 @@ export interface ContentPack {
   /** 出賽位的名稱，長度＝lineupSize（只供顯示） */
   readonly slotNames: readonly string[];
   readonly lineages: readonly Lineage[];
+  /** 品階表，固定順序（N → SSR） */
+  readonly rarities: readonly RaritySpec[];
   readonly personas: Readonly<Record<Persona, PersonaSpec>>;
   readonly economy: Economy;
   /** 7 支 NPC 戰隊名 */
   readonly teamNames: readonly string[];
   readonly humanTeamName: string;
-  readonly surnames: readonly string[];
-  readonly givenNames: readonly string[];
+  /** 選手 ID 名字庫：不得重複，數量要夠開局所有選手用（newGame 檢查） */
+  readonly handles: readonly string[];
 }
+
+/** 品階表（初值，全部待審） */
+export const RARITIES: readonly RaritySpec[] = [
+  { id: 'N', weight: 45, maxVersion: 2, npcEloBonus: 0 },
+  { id: 'R', weight: 30, maxVersion: 3, npcEloBonus: 10 },
+  { id: 'SR', weight: 20, maxVersion: 4, npcEloBonus: 25 },
+  { id: 'SSR', weight: 5, maxVersion: 5, npcEloBonus: 45 },
+];
+
+/** 選手 ID（見 docs/2026-11-03_選手ID名字庫草案.md）：只用英文字母與數字、長度不超過 11 字元 */
+export const HANDLES: readonly string[] = [
+  // 英文 ID（84）
+  'Vesper', 'Kestrel', 'Nyx', 'Cinder', 'Rook', 'Onyx', 'Lumen', 'Ember', 'Sable', 'Talon',
+  'Quill', 'Vale', 'Drift', 'Ashen', 'Corvus', 'Lark', 'Flint', 'Zephyr', 'Nova', 'Echo',
+  'Orbit', 'Cobalt', 'Fable', 'Glint', 'Thorne', 'Sparrow', 'Wren', 'Harrier', 'Merlin', 'Solace',
+  'Hollow', 'Vanta', 'Ion', 'Argent', 'Pyre', 'Frost', 'Gale', 'Tempest', 'Mistral', 'Sirocco',
+  'Cipher', 'Vector', 'Pixel', 'Static', 'Trace', 'Relay', 'Signal', 'Kernel', 'Daemon', 'Proxy',
+  'Lynx', 'Ocelot', 'Jackal', 'Heron', 'Osprey', 'Raven', 'Magpie', 'Shrike', 'Moth', 'Hornet',
+  'Basalt', 'Slate', 'Quartz', 'Garnet', 'Jasper', 'Obsidian', 'Marrow', 'Bramble', 'Thistle', 'Sorrel',
+  'Aster', 'Juno', 'Indigo', 'Sienna', 'Umber', 'Saffron', 'Crimson', 'Azure', 'Noctis', 'Aurora',
+  'Comet', 'Eclipse', 'Zenith', 'Meridian',
+  // 網路帳號（18）
+  'NeonFox', 'Mika404', 'SleepyGhost', 'xKuro', 'GGWind', 'NoobKai', 'AfkTim', 'LagKing', 'PingPong88',
+  'NotABot', 'TiltProof', 'CtrlZ', '404Error', 'RusherB', 'OneTapPls', 'MomCalling', 'NapTime', 'BrbSnack',
+  // 天使神話（18）
+  'Seraph', 'Azrael', 'Uriel', 'Lilith', 'Nephil', 'Cherub', 'Raziel', 'Metatron', 'Sariel',
+  'Samael', 'Ophan', 'Abaddon', 'Lucifer', 'Remiel', 'Haniel', 'Zadkiel', 'Jophiel', 'Malakh',
+];
 
 export const STUB_CONTENT: ContentPack = {
   id: 'stub-1',
@@ -98,6 +141,7 @@ export const STUB_CONTENT: ContentPack = {
     { id: 'turtle', name: '龜守流', style: '大器晚成，要養很多版', power: [1440, 1480, 1520, 1560, 1600, 1640] },
     { id: 'balance', name: '均衡流', style: '沒有明顯弱點也沒有明顯強項', power: [1450, 1500, 1550, 1600, 1650] },
   ],
+  rarities: RARITIES,
   personas: {
     whale: { label: '豪門', startCash: 4000, versions: [3, 4], rosterTarget: 5, lineup: 'strongest-first' },
     youth: { label: '青訓派', startCash: 1800, versions: [1, 2], rosterTarget: 4, lineup: 'random' },
@@ -107,6 +151,7 @@ export const STUB_CONTENT: ContentPack = {
   economy: {
     humanStartCash: 1500,
     humanVersions: [1, 2],
+    humanStartRarities: ['SR', 'R', 'N'],
     rosterMax: 5,
     freeAgentCount: 10,
     salaryBase: 40,
@@ -141,6 +186,5 @@ export const STUB_CONTENT: ContentPack = {
   },
   teamNames: ['雷霆電競', '北辰戰隊', '赤焰俱樂部', '蒼穹電競', '暗影工作室', '星河戰隊', '鐵壁電競'],
   humanTeamName: '天使戰隊',
-  surnames: ['林', '陳', '張', '黃', '李', '王', '吳', '劉', '蔡', '楊', '許', '鄭', '謝', '郭', '洪', '曾', '邱', '廖', '賴', '徐'],
-  givenNames: ['宇軒', '子翔', '承恩', '冠廷', '柏翰', '家豪', '俊傑', '紹軒', '品睿', '奕辰', '彥廷', '哲瑋', '昱翔', '子睿', '懷恩', '星宇', '政宏', '志明', '信宏', '明哲'],
+  handles: HANDLES,
 };
