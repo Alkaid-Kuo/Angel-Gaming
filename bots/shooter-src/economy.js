@@ -14,19 +14,19 @@ export function parseBuy(text) {
   return m === null ? null : /** @type {BuyCall} */ (m[1]);
 }
 
-/** 道具購買順序（依角色，索引＝roles.js 的代碼：0 無、1 突破、2 支援、3 錨點、4 狙擊、5 游擊）：突破手閃 2、支援煙 1 閃 1（＋燃燒）、錨點燃燒 1 閃 1、游擊閃 1 手雷 */
+/** 道具購買順序（角色 0 無、1 突破、2 支援、3 錨點、4 狙擊、5 游擊）。配合 Utility 每種每回合一次，採購不重複買閃。 */
 const UTIL = {
   T: [
     ['flash', 'smoke', 'he'],
-    ['flash', 'flash', 'he', 'smoke'],
-    ['smoke', 'flash', 'molotov', 'flash'],
+    ['flash', 'he', 'smoke'],
+    ['smoke', 'flash', 'molotov'],
     ['molotov', 'flash', 'smoke'],
     ['smoke', 'flash'],
     ['flash', 'he', 'smoke'],
   ],
   CT: [
     ['flash', 'he'],
-    ['flash', 'flash', 'he'],
+    ['flash', 'he'],
     ['flash', 'incendiary', 'smoke'],
     ['incendiary', 'flash', 'he'],
     ['flash', 'smoke'],
@@ -168,7 +168,8 @@ export class Economy {
       money -= price;
       return true;
     };
-    const armor = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') && take('armor', rules.armorPrice);
+    const armorLeft = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') ? rules.armorPrice : 0;
+    const armor = () => armorLeft() > 0 && take('armor', rules.armorPrice);
     const kit = () => team === 'CT' && !me.loadout.kit && !items.includes('kit') && take('kit', rules.kitPrice);
     const util = (/** @type {number} */ max) => {
       const owned = [...me.loadout.grenades];
@@ -176,7 +177,7 @@ export class Economy {
       for (const g of UTIL[team][role] ?? UTIL[team][0]) {
         if (n >= max || owned.length >= rules.grenadeSlots) break;
         const def = this.data.grenades.find((x) => x.id === g);
-        if (def === undefined || owned.filter((x) => x === g).length >= def.maxCarry) continue;
+        if (def === undefined || def.maxCarry < 1 || owned.some((x) => x === g)) continue;
         if (take(/** @type {import('./base.js').BuyItem} */ (g), def.price)) {
           owned.push(/** @type {import('./base.js').GrenadeId} */ (g));
           n++;
@@ -198,8 +199,8 @@ export class Economy {
       util(4);
     } else if (mode === 'force') {
       if (role === 1) armor();
-      if (!good && money >= this.cost(rifle) + rules.armorPrice) take(rifle, this.cost(rifle));
-      else if (!good && money >= this.cost('smg') + rules.armorPrice) take('smg', this.cost('smg'));
+      if (!good && money >= this.cost(rifle) + armorLeft()) take(rifle, this.cost(rifle));
+      else if (!good && money >= this.cost('smg') + armorLeft()) take('smg', this.cost('smg'));
       armor();
       if (!good && primary === null && items.length === 1 && money >= this.cost('deagle')) take('deagle', this.cost('deagle'));
       kit();

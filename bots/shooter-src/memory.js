@@ -2,8 +2,9 @@
 // 感知層（每次決策）：把 enemies／radar／tracers／sounds／me.hurt／隊友陣亡整合成敵情記憶。
 // 看到的敵人記 id 與位置；雷達記位置；彈道起點、隊友陣亡處記成不知道是誰的點；聲音與受傷只有方向與遠近，記成扇形不記點。
 // 信心每秒衰減（警覺高衰得慢），低於門檻就是「未確認」；敵人數以 enemiesAlive 校正。
-// 另外維護「已清空」格（自己或隊友的視錐掃過的時間）與每秒重算的危險格成本（導航用）。
+// 另外維護「已清空」格（本人可靠視錐掃過的時間）與每秒重算的危險格成本（導航用）。
 import { P, UNIT, adiff, angleTo, cosd, dist, lerp, sind } from './base.js';
+import { Belief } from './belief.js';
 
 /** 有 id 的敵人 @typedef {{ id: number, x: number, y: number, vx: number, vy: number, facing: number, weapon: string, tick: number, seenTick: number, conf: number, src: 'see' | 'radar' | 'tracer' }} Known */
 /** 不知道是誰的點：彈道起點、隊友陣亡處（敵人看得到這裡） @typedef {{ x: number, y: number, tick: number, conf: number, src: 'tracer' | 'death' }} Anon */
@@ -58,10 +59,14 @@ export class Perception {
     /** @type {number[]} */
     this.newIds = [];
     this.myTeam = /** @type {import('./base.js').Team} */ ('T');
+    /** @type {import('./base.js').Observation['effects']} */
+    this.effects = [];
+    this.belief = new Belief(g, intel, data);
   }
 
   /** 回合開始：清空記憶 */
   reset() {
+    this.belief.reset();
     this.known.clear();
     this.anon.length = 0;
     this.sectors.length = 0;
@@ -76,6 +81,7 @@ export class Perception {
     this.liveStart = -1;
     this.lastHurt = null;
     this.lastSound = null;
+    this.effects = [];
   }
 
   /** @param {import('./base.js').Observation} obs */
@@ -83,6 +89,7 @@ export class Perception {
     const me = obs.me;
     const t = obs.tick;
     this.myTeam = me.team;
+    this.effects = obs.effects;
     this.updates++;
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
     const dt = this.lastTick < 0 ? 0 : (t - this.lastTick) / this.rules.ticksPerSecond;
@@ -94,7 +101,7 @@ export class Perception {
       k.conf -= loss;
       if (k.conf <= 0) this.known.delete(id);
     }
-    this.anon = this.anon.filter((a) => (a.conf -= loss) > 0);
+    this.anon = this.anon.filter((a) => (a.conf -= loss * (a.src === 'death' ? 0.35 : 1)) > 0);
     this.sectors = this.sectors.filter((s) => (s.conf -= loss * 1.5) > 0);
     // ── 看到的敵人：位置、朝向、武器、信心 100 ──
     for (const e of obs.enemies) {
@@ -145,6 +152,12 @@ export class Perception {
     for (const m of obs.teammates) {
       if (this.mateAlive.get(m.id) === true && !m.alive) {
         this.anon.push({ x: m.x, y: m.y, tick: t, conf: P.confDeath, src: 'death' });
+        // 剛交火／死人處不能沿用幾秒前的「安全」；只撤銷安全標記，不假造敵人座標。
+        for (let i = 0; i < this.g.N; i++) {
+          if (this.seenTick[i] < t - this.clearTtl) continue;
+          const p = this.g.center(i);
+          if (dist(p.x, p.y, m.x, m.y) < 12 * UNIT) this.seenTick[i] = -1000000;
+        }
         this.dangerDirty = true;
       }
       this.mateAlive.set(m.id, m.alive);
@@ -154,21 +167,22 @@ export class Perception {
       const list = [...this.known.values()].filter((k) => k.tick !== t).sort((a, b) => a.conf - b.conf || a.id - b.id);
       while (this.known.size > obs.enemiesAlive && list.length > 0) this.known.delete(/** @type {Known} */ (list.shift()).id);
     }
-    // ── 已清空：自己的視錐每次、隊友的每 P.mateScanEvery 次 ──
+    // 可靠清點只用本人視錐。隊友朝向不能證明沒有本人看不到的煙；雷達仍是正面接敵證據。
     if (me.alive && me.blindTicks === 0) this.scan(me.x, me.y, me.facing, me.scoped ? this.rules.scopedFovDeg : this.rules.fovDeg, me.scoped ? (this.rules.scopedViewRange ?? 60) : this.rules.viewRange, t);
-    if (this.updates % P.mateScanEvery === 0) {
-      for (const m of obs.teammates) if (m.alive && !m.blind) this.scan(m.x, m.y, m.facing, this.rules.fovDeg, this.rules.viewRange, t);
-    }
+    this.belief.update(obs, this);
     if (this.dangerDirty || t - this.dangerTick >= this.rules.ticksPerSecond) this.computeDanger(t);
   }
 
   /** 我打死的目標：從記憶刪掉 @param {number} id */
   forget(id) {
+    this.belief.tracks.delete(id);
+    this.belief.next = -1;
     if (this.known.delete(id)) this.dangerDirty = true;
   }
 
   /** 敵人全滅：記得的位置、聲音、危險格都作廢 */
   clearEnemies() {
+    this.belief.reset();
     if (this.known.size === 0 && this.anon.length === 0 && this.sectors.length === 0) return;
     this.known.clear();
     this.anon.length = 0;
@@ -176,6 +190,8 @@ export class Perception {
     this.lastSound = null;
     this.lastHurt = null;
     this.dangerDirty = true;
+    this.danger.fill(0);
+    this.portalThreat.fill(0);
   }
 
   /** @param {number} x @param {number} y @param {number} conf @param {number} t */
@@ -245,7 +261,9 @@ export class Perception {
       const s = sind(facing + a) * (UNIT / 2);
       for (let k = 1; k <= range * 2; k++) {
         const i = g.cellOf(x + c * k, y + s * k);
-        if (i < 0 || wall[i] === 1) break;
+        if (i < 0 || wall[i] === 1 || g.low[i] === 1) break;
+        const p = g.center(i);
+        if (this.effects.some((e) => e.kind === 'smoke' && dist(p.x, p.y, e.x, e.y) < e.radius)) break;
         seen[i] = t;
       }
     }
@@ -321,7 +339,7 @@ export class Perception {
         const d = dist(a.x, a.y, p.x, p.y) / UNIT;
         if (a.src === 'tracer' && d < 10) v = Math.max(v, a.conf * (1 - d / 10));
       }
-      this.portalThreat[p.id] = v;
+      this.portalThreat[p.id] = Math.max(v, this.belief.risk[g.cellOf(p.x, p.y)] ?? 0);
     }
     // 區域的已看過比例
     const n = this.intel.regionCount;

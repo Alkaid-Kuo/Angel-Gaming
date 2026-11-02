@@ -4,6 +4,7 @@
 // 用法：node scripts/build-shooter-bots.ts          產生
 //       node scripts/build-shooter-bots.ts --check  只檢查產生的檔案是否和原始碼一致（不一致時結束碼為 1）
 import { readFileSync, writeFileSync } from 'node:fs';
+import { tokenizer } from 'acorn';
 
 export const SHOOTER_BOTS = [{ entry: 'baseline.js', out: 'bots/shooter-baseline.js' }] as const;
 
@@ -41,9 +42,18 @@ function body(file: string, entry: boolean): string[] {
  * 只動整行，不碰行內的字串、正規表示式與行內型別轉換。
  */
 export function stripComments(src: readonly string[]): string[] {
+  const source = src.join('\n');
+  const literals: [number, number][] = [];
+  for (const token of tokenizer(source, { ecmaVersion: 2020, sourceType: 'module' })) {
+    if (source.slice(token.start, token.end).includes('\n')) literals.push([token.start, token.end]);
+  }
+  const offsets: number[] = [];
+  let offset = 0;
+  for (const l of src) { offsets.push(offset); offset += l.length + 1; }
   const out: string[] = [];
   for (let i = 0; i < src.length; i++) {
     const l = src[i];
+    if (literals.some(([a, b]) => offsets[i] >= a && offsets[i] < b)) { out.push(l); continue; }
     const t = l.trim();
     if (t === '' || (t.startsWith('//') && t !== '// @ts-check')) continue;
     if (t.startsWith('/**') && !t.includes('*/')) {
@@ -55,7 +65,10 @@ export function stripComments(src: readonly string[]): string[] {
       i = j;
       continue;
     }
-    if (t.startsWith('/**') && t.endsWith('*/') && !t.includes('@')) continue;
+    if (t.startsWith('/**') && t.endsWith('*/')) {
+      if (t.includes('@')) out.push(`${l.slice(0, l.indexOf('/**') + 3)} ${l.slice(l.indexOf('@'))}`);
+      continue;
+    }
     out.push(l);
   }
   return out;
@@ -74,7 +87,16 @@ export function buildShooterBot(entry: string): string {
     ...stripComments(files.filter((f) => f !== entry).flatMap((f) => body(f, false))),
     ...stripComments(head.slice(firstCode)),
   ];
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+  return compactIndent(out.join('\n').trimEnd()) + '\n';
+}
+
+/** 產物移除縮排以留給行為邏輯空間；詞法分析保留多行字串／template 的原始空白，換行與 JSDoc 都保留。 */
+export function compactIndent(source: string): string {
+  const protectedRanges: [number, number][] = [];
+  for (const token of tokenizer(source, { ecmaVersion: 2020, sourceType: 'module' })) {
+    if (source.slice(token.start, token.end).includes('\n')) protectedRanges.push([token.start, token.end]);
+  }
+  return source.replace(/^ +/gm, (spaces: string, offset: number) => protectedRanges.some(([a, b]) => offset >= a && offset < b) ? spaces : '');
 }
 
 function current(path: string): string {

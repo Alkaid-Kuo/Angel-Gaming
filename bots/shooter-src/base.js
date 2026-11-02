@@ -601,9 +601,9 @@ export class Heap {
 
 /**
  * 多源 Dijkstra（8 方向、不斜穿牆角；成本 ×10）：回傳每格到最近來源的路徑長（×10），走不到為 Infinity
- * @param {Grid} g @param {readonly number[]} sources
+ * @param {Grid} g @param {readonly number[]} sources @param {number} [limit]
  */
-export function dijkstra(g, sources) {
+export function dijkstra(g, sources, limit = Infinity) {
   const d = new Float64Array(g.N).fill(Infinity);
   const heap = new Heap();
   for (const s of sources) {
@@ -625,7 +625,7 @@ export function dijkstra(g, sources) {
       if (dx !== 0 && dy !== 0 && (g.isBlock(x + dx, y) || g.isBlock(x, y + dy))) continue;
       const j = ny * W + nx;
       const nd = di + c;
-      if (nd < d[j]) {
+      if (nd <= limit && nd < d[j]) {
         d[j] = nd;
         heap.push(j, nd);
       }

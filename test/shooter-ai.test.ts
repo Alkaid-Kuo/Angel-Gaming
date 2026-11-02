@@ -22,6 +22,14 @@ const baseline = compileBot(source, 'shooter-baseline.js');
 const practice = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'shooter-practice.js');
 
 describe('射擊基準 Bot：檔案與宣告', () => {
+  it('T18 多入口量測的快取依選手隔離，陪練不能繼承基準的通過結果', () => {
+    const filter = (id: string): boolean => id === 'T18';
+    const a = runAiScenarios(baseline, filter, practice, ['redrock', 'dust']);
+    const b = runAiScenarios(practice, filter, undefined, ['redrock', 'dust']);
+    expect(a[0]?.pass, a[0]?.detail).toBe(true);
+    expect(b[0]?.pass, b[0]?.detail).toBe(false);
+  }, 120000);
+
   it('bots/shooter-baseline.js 與 bots/shooter-src/ 的原始碼一致（改原始碼後要執行 scripts/build-shooter-bots.ts）', () => {
     for (const b of SHOOTER_BOTS) expect(readFileSync(b.out, 'utf8').replaceAll('\r\n', '\n')).toBe(buildShooterBot(b.entry));
   });
@@ -30,7 +38,7 @@ describe('射擊基準 Bot：檔案與宣告', () => {
     expect(baseline.sizeBytes).toBeLessThanOrEqual(200 * 1024);
     const c = new ShooterBatchController(baseline, 'baseline', 1, 0, MAPS.redrock());
     expect(c.declaration.name).toBe('shooter-baseline');
-    expect(c.declaration.version).toBe('2.2');
+    expect(c.declaration.version).toBe('2.4.3');
     expect(c.declaration.style).toBe('基準');
     expect(c.declaration.knobs.length).toBeGreaterThanOrEqual(3);
     expect(c.declaration.knobs.length).toBeLessThanOrEqual(6);

@@ -76,12 +76,17 @@ export class Combat {
     this.trailTick = -1000000;
     /** 被閃時要退回的點 @type {import('./base.js').Pt | null} */
     this.blindBack = null;
-    /** 看過的火：位置 → 燒的格與燒完的 tick @type {Map<string, { cells: readonly number[], until: number }>} */
+    /** 看過的火；座標與半徑用於判斷煙霧撲滅 @type {Map<string, { x: number, y: number, radius: number, cells: readonly number[], until: number }>} */
     this.fires = new Map();
+    /** 看過的煙：只依公開擴散規則與到期時間外推 @type {Map<string, { x: number, y: number, radius: number, tick: number, until: number }>} */
+    this.smokes = new Map();
+    this.smokeRadius = data.grenades.find((e) => e.id === 'smoke')?.radius ?? 0;
+    this.smokeGrowth = this.smokeRadius / Math.max(1, data.rules.grenadeRules.smokeBloomTicks);
   }
 
   reset() {
     this.fires = new Map();
+    this.smokes.clear();
     this.noticed = new Map();
     this.targetId = -1;
     this.seen = 0;
@@ -146,11 +151,17 @@ export class Combat {
     const me = obs.me;
     const g = this.g;
     // 站在火上：走到最近不著火的格。看過的火記到燒完（轉身看不到了也不走回去）
-    for (const e of obs.effects) if (e.kind === 'fire' && e.cells !== undefined) this.fires.set(`${e.x},${e.y}`, { cells: e.cells, until: obs.tick + e.ticksLeft });
+    for (const e of obs.effects) {
+      if (e.kind === 'fire' && e.cells !== undefined) this.fires.set(`${e.x},${e.y}`, { x: e.x, y: e.y, radius: e.radius, cells: e.cells, until: obs.tick + e.ticksLeft });
+      if (e.kind === 'smoke' && e.radius > 0 && e.ticksLeft > 0) this.smokes.set(`${e.x},${e.y},${obs.tick + e.ticksLeft}`, { x: e.x, y: e.y, radius: e.radius, tick: obs.tick, until: obs.tick + e.ticksLeft });
+    }
+    for (const [key, s] of this.smokes) if (obs.tick >= s.until) this.smokes.delete(key);
     /** @type {Set<number>} */
     const fire = new Set();
     for (const [key, f] of this.fires) {
-      if (obs.tick >= f.until) this.fires.delete(key);
+      // 與引擎相同：兩圓心距嚴格小於半徑和，整團火熄滅；缺少本次觀察不代表熄滅。
+      const quenched = [...this.smokes.values()].some((s) => dist(s.x, s.y, f.x, f.y) < f.radius + Math.max(s.radius, Math.min(this.smokeRadius, s.radius + Math.floor((obs.tick - s.tick) * this.smokeGrowth))));
+      if (obs.tick >= f.until || quenched) this.fires.delete(key);
       else for (const c of f.cells) fire.add(c);
     }
     this.nav.hazard = fire;

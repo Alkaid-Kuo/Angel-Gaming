@@ -9,8 +9,10 @@ import { angleDiff, iatan2, offset } from '../shared/geom.ts';
 import type { ShooterCommand, ShooterObservation, Team } from './api.ts';
 import { GRENADES, ROUND, TEAM_SIZE, TPS, UNIT, WEAPONS, ticks, type WeaponId } from './config.ts';
 import { MAPS, blocksMove, inRect, isLowCell, isSolidCell, regionsAt, type Rect, type ShooterMap } from './map.ts';
-import { ScriptController, ShooterBatchController, ShooterDriver } from './runner.ts';
-import { PLAYER_COUNT, burnCells, type ShooterMatch, type ShooterMatchOptions } from './sim.ts';
+import { ScriptController, ShooterBatchController, ShooterDriver, shooterHelpers } from './runner.ts';
+import { Grid, dijkstra, initTrig } from '../../bots/shooter-src/base.js';
+import { MapIntel } from '../../bots/shooter-src/analysis.js';
+import { PLAYER_COUNT, burnCells, shooterInitData, type ShooterMatch, type ShooterMatchOptions } from './sim.ts';
 import { lineOfSight } from './vision.ts';
 
 export interface AiScenarioResult {
@@ -210,6 +212,7 @@ interface Setup {
   readonly seatKnobs?: Partial<Record<number, Readonly<Record<string, number>>>>;
   /** 收集受測座位的喊話 */
   readonly log?: Said[];
+  readonly onCommands?: (pid: number, obs: ShooterObservation, commands: readonly ShooterCommand[]) => void;
   /** 對手選手坐的座位（其他非受測座位照舊是腳本） */
   readonly opp?: { readonly bot: CompiledBot; readonly seats: readonly number[] };
 }
@@ -226,16 +229,19 @@ class SpyController extends ShooterBatchController {
   private readonly who: number;
   private readonly log: Said[] | undefined;
   private readonly now: () => number;
+  private readonly onCommands: Setup['onCommands'];
 
-  constructor(bot: CompiledBot, seed: number, pid: number, map: ShooterMap, log: Said[] | undefined, now: () => number) {
+  constructor(bot: CompiledBot, seed: number, pid: number, map: ShooterMap, log: Said[] | undefined, now: () => number, onCommands?: Setup['onCommands']) {
     super(bot, 'baseline', seed, pid, map);
     this.who = pid;
     this.log = log;
     this.now = now;
+    this.onCommands = onCommands;
   }
 
   override decide(obs: ShooterObservation): ReturnType<ShooterBatchController['decide']> {
     const out = super.decide(obs);
+    if (Array.isArray(out.value)) this.onCommands?.(this.who, obs, out.value as ShooterCommand[]);
     if (this.log !== undefined && Array.isArray(out.value)) for (const c of out.value as ShooterCommand[]) if (c.type === 'say') this.log.push({ tick: this.now(), from: this.who, text: c.text });
     return out;
   }
@@ -246,7 +252,7 @@ function driver(bot: CompiledBot, s: Setup): ShooterDriver {
   const map = MAPS[mapId]();
   let d: ShooterDriver | null = null;
   const now = (): number => d?.match.tick ?? 0;
-  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => (s.seats.includes(pid) ? new SpyController(bot, s.seed, pid, map, s.log, now) : s.opp?.seats.includes(pid) === true ? new ShooterBatchController(s.opp.bot, 'opponent', s.seed, pid, map) : new ScriptController(`script-${pid}`, s.scripts?.[pid] ?? idle)));
+  const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => (s.seats.includes(pid) ? new SpyController(bot, s.seed, pid, map, s.log, now, s.onCommands) : s.opp?.seats.includes(pid) === true ? new ShooterBatchController(s.opp.bot, 'opponent', s.seed, pid, map) : new ScriptController(`script-${pid}`, s.scripts?.[pid] ?? idle)));
   const knobs = controllers.map((c, pid) => resolveKnobs(c.declaration, c instanceof SpyController ? { ...s.knobs, ...s.seatKnobs?.[pid] } : undefined, c.label));
   d = new ShooterDriver({ seed: s.seed, mapId, freezeTicks: scenarioFreeze, ...s.opts, controllers, knobs, record: false });
   if (s.alive !== undefined) killExcept(d.match, s.alive);
@@ -1608,10 +1614,13 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'T17',
     name: 'CT 全滅 T 守包不追',
-    expect: 'T 下包後最後一個 CT 陣亡：接下來 10 秒沒有 T 離炸彈超過 16 格、不丟道具、不開槍；兩張圖',
+    expect: 'T 下包後最後一個 CT 陣亡：接下來 10 秒沒有 T 離炸彈超過 16 格、不再決策丟道具、不開槍（陣亡前已排入反應延遲的道具可落地）；兩張圖',
     run: (bot, seed) =>
       onBoth((mapId) => {
-        const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], opts: { roundMoney: [16000, null] } });
+        let orders = 0;
+        const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], opts: { roundMoney: [16000, null] }, onCommands: (_pid, obs, cmds) => {
+          if (obs.enemiesAlive === 0) orders += cmds.filter((c) => c.type === 'throw').length;
+        } });
         toLive(d);
         const m = d.match;
         park(m, CT0);
@@ -1636,7 +1645,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
           });
         });
         const shot = TS.filter((pid, i) => ammo(m, pid) < ammoAt[i]).length;
-        return { pass: thrown === 0 && far === 0 && shot === 0, detail: `丟道具 ${thrown}、離炸彈太遠 ${far} tick、開槍 ${shot} 人` };
+        return { pass: orders === 0 && far === 0 && shot === 0, detail: `新投擲指令 ${orders}、排隊道具 ${thrown}、離炸彈太遠 ${far} tick、開槍 ${shot} 人` };
       }),
   },
   {
@@ -1681,11 +1690,160 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   },
 ];
 
-const entranceMemo = new Map<string, number>();
+const SITUATION_SCENARIOS: readonly AiScenario[] = [
+  {
+    id: 'T20',
+    name: '守包倒數撤離保槍',
+    expect: 'T 單人守包，CT 在遠處不拆：保持前段守包，最後依實際路程撤離，炸彈引爆時存活且在傷害半徑外；兩張圖',
+    run: (bot, seed) => onBoth((mapId) => {
+      const d = driver(bot, { seed, map: mapId, seats: [T0], alive: [T0, CT0], opts: { roundMoney: [16000, null] } });
+      toLive(d);
+      const m = d.match;
+      park(m, CT0);
+      const bomb = forcePlant(m, 'B');
+      m.teleport(T0, bomb[0], bomb[1], 0);
+      let early = 0;
+      const start = m.tick;
+      run(d, 41 * TPS, () => {
+        if (m.tick - start < 20 * TPS && d2([m.players[T0].x, m.players[T0].y], bomb) > 16 * UNIT) early++;
+      });
+      const p = m.players[T0];
+      const gap = d2([p.x, p.y], bomb) / UNIT;
+      return { pass: early === 0 && p.alive && gap >= ROUND.bombBlastRadius && m.rounds.at(-1)?.reason === 'bomb', detail: `前段離守 ${early} tick、引爆距離 ${gap.toFixed(1)} 格、存活 ${p.alive}、回合 ${m.rounds.at(-1)?.reason}` };
+    }),
+  },
+  {
+    id: 'T21',
+    name: '守包主動煙封回防入口',
+    expect: 'T 有剩餘煙霧，守包前段從可投擲位置封回防入口；煙落點離炸彈至少 5 格，不以包煙掩護拆包；兩張圖',
+    run: (bot, seed) => onBoth((mapId) => postNadeScenario(bot, seed, mapId, 'smoke')),
+  },
+  {
+    id: 'T22',
+    name: '守包燃燒限制回防並保留反拆手',
+    expect: 'T 看見敵人在回防入口，自己有燃燒且另一名支援保留燃燒：向入口投擲，避免重複；兩張圖',
+    run: (bot, seed) => onBoth((mapId) => postNadeScenario(bot, seed, mapId, 'molotov')),
+  },
+  {
+    id: 'T23',
+    name: '下包期限中斷失聯架槍',
+    expect: '持彈狙擊槍看見敵人後敵人消失，剩七秒：立即恢復目標移動／下包，並在期限內完成；兩張圖',
+    run: (bot, seed) => onBoth((mapId) => {
+      const log: Said[] = [];
+      let deadline = -1, first = -1, saw = false;
+      const d = driver(bot, { seed, map: mapId, seats: [T0], alive: [T0, CT0], knobs: { plan: 2 }, log, opts: { defaultLoadout: { T: 'awp' } }, onCommands: (_pid, obs, cmds) => {
+        if (obs.enemies.length > 0) saw = true;
+        if (deadline >= 0 && first < 0 && cmds.some((c) => c.type === 'move' || c.type === 'plant')) first = obs.tick - deadline;
+      } });
+      toLive(d);
+      const m = d.match;
+      const site = (/^P:rush([AB])/.exec(log.find((x) => x.text.startsWith('P:rush'))?.text ?? '')?.[1] ?? 'A') as 'A' | 'B';
+      const data = shooterInitData(m.map, T0, {});
+      initTrig(shooterHelpers(m.map, seed, T0));
+      const g = new Grid(data.map), intel = new MapIntel(data.map, g);
+      const si = intel.sites[site];
+      const enemy = si.plants[0];
+      const field = dijkstra(g, [enemy.cell]);
+      let from = -1;
+      for (let i = 0; i < g.N; i++) {
+        if (!g.walkable(i) || (from >= 0 && field[i] >= field[from])) continue;
+        const p = g.center(i);
+        if (!inSiteRect(m.map, site, p.x, p.y) && g.walkLine(p.x, p.y, enemy.x, enemy.y)) from = i;
+      }
+      if (from < 0) return { pass: false, detail: '沒有能觀察點內的入口' };
+      const origin = g.center(from);
+      const ent = { ox: origin.x, oy: origin.y };
+      m.teleport(T0, ent.ox, ent.oy, ang([ent.ox, ent.oy], [enemy.x, enemy.y]));
+      m.teleport(CT0, enemy.x, enemy.y, 0);
+      m.players[CT0].hp = 100000;
+      m.players[T0].grenades = [];
+      for (const p of m.players) p.hasBomb = p.id === T0;
+      Object.assign(m.bomb, { state: 'carried', carrier: T0 });
+      run(d, Math.round(0.5 * TPS));
+      park(m, CT0);
+      deadline = m.tick;
+      m.phaseEnd = deadline + 7 * TPS;
+      run(d, 8 * TPS, (mm) => mm.bomb.state === 'planted');
+      const planted = m.bomb.state === 'planted';
+      return { pass: saw && first >= 0 && first <= 0.4 * TPS && planted, detail: `${site} 曾接敵 ${saw}、恢復任務 ${(first / TPS).toFixed(2)} 秒、期限內下包 ${planted}、通路 ${(field[from] / 10).toFixed(1)} 格` };
+    }),
+  },
+  {
+    id: 'T24',
+    name: '回防不等待來不及到場的隊友',
+    expect: 'CT 已在入口、有拆彈器，遠處隊友依通路來不及回防：兩秒內開始推進，十二秒內拆除；兩張圖',
+    run: (bot, seed) => onBoth((mapId) => {
+      let start = -1, enter = -1;
+      const d = driver(bot, { seed, map: mapId, seats: [CT0], alive: [CT0, CT1, T0], onCommands: (_pid, obs, cmds) => {
+        if (start >= 0 && enter < 0 && cmds.some((c) => c.type === 'move' || c.type === 'defuse')) enter = obs.tick - start;
+      } });
+      toLive(d);
+      const m = d.match;
+      const data = shooterInitData(m.map, CT0, {});
+      initTrig(shooterHelpers(m.map, seed, CT0));
+      const g = new Grid(data.map), intel = new MapIntel(data.map, g);
+      const bomb = forcePlant(m, 'A');
+      const field = dijkstra(g, [g.cellOf(...bomb)]);
+      let far = -1;
+      for (let i = 0; i < g.N; i++) if (g.walkable(i) && Number.isFinite(field[i]) && (far < 0 || field[i] > field[far])) far = i;
+      const q = g.center(far);
+      m.teleport(CT1, q.x, q.y, 0);
+      park(m, T0);
+      const ent = [...intel.sites.A.entrances].sort((a, b) => a.ctDist - b.ctDist)[0];
+      m.teleport(CT0, ent.ox, ent.oy, ang([ent.ox, ent.oy], bomb));
+      m.players[CT0].kit = true;
+      m.players[CT0].grenades = [];
+      m.bomb.explodeTick = m.tick + 20 * TPS; m.phaseEnd = m.bomb.explodeTick;
+      start = m.tick;
+      run(d, 12 * TPS);
+      const defused = m.rounds.at(-1)?.reason === 'defuse';
+      return { pass: enter >= 0 && enter <= 2 * TPS && defused, detail: `開始推進 ${(enter / TPS).toFixed(2)} 秒、拆除 ${defused}、遠方隊友通路 ${(field[far] / 10).toFixed(1)} 格` };
+    }),
+  },
+];
+
+/** 真實控制器、延遲指令、投擲與效果的端到端情境；位置由包點與入口幾何推導。 */
+function postNadeScenario(bot: CompiledBot, seed: number, mapId: string, kind: 'smoke' | 'molotov'): AiScenarioResult {
+  let thrown = 0;
+  const d = driver(bot, { seed, map: mapId, seats: [T0], alive: [T0, T1, CT0], opts: { roundMoney: [16000, null] }, onCommands: (pid, _obs, cmds) => {
+    if (pid === T0) thrown += cmds.filter((c) => c.type === 'throw' && c.grenade === kind).length;
+  } });
+  toLive(d);
+  const m = d.match;
+  park(m, T1);
+  park(m, CT0);
+  const data = shooterInitData(m.map, T0, {});
+  initTrig(shooterHelpers(m.map, seed, T0));
+  const g = new Grid(data.map);
+  const intel = new MapIntel(data.map, g);
+  const site = intel.sites.B;
+  const e = [...site.entrances].sort((a, b) => a.ctDist - b.ctDist || a.portal - b.portal)[0];
+  const spot = site.holds.find((p) => d2([p.x, p.y], [e.ox, e.oy]) > 4 * UNIT && d2([p.x, p.y], [e.ox, e.oy]) < 18 * UNIT && g.los(p.x, p.y, e.ox, e.oy));
+  if (spot === undefined) return { pass: false, detail: '沒有可投擲守位' };
+  const bomb = forcePlant(m, 'B');
+  m.teleport(T0, spot.x, spot.y, ang([spot.x, spot.y], [e.ox, e.oy]));
+  m.players[T0].grenades = [kind];
+  m.players[T0].hp = 100000;
+  m.players[T1].grenades = ['molotov'];
+  if (kind === 'molotov') {
+    m.teleport(CT0, e.ox, e.oy, 180);
+    m.players[CT0].hp = 100000;
+  }
+  run(d, 7 * TPS);
+  const effects = kind === 'smoke' ? m.smokes : m.fires;
+  const own = effects.filter((p) => p.owner === T0);
+  const gap = own.length > 0 ? Math.min(...own.map((p) => d2([p.x, p.y], bomb))) / UNIT : 0;
+  const kept = m.players[T1].grenades.includes('molotov');
+  return { pass: thrown === 1 && own.length > 0 && (kind !== 'smoke' || gap > 5) && kept, detail: `投擲 ${thrown}、效果 ${own.length}、離包 ${gap.toFixed(1)} 格、支援保留燃燒 ${kept}` };
+}
+
+const entranceMemos = new WeakMap<CompiledBot, Map<string, number>>();
 /** T18：T 全買照計畫執行，每個人第一次走到包點 4 步內的位置；彼此隔 8 格以上算不同入口（同一個區域可能有兩個口，走進矩形才算的話守位在矩形外的人算不到） */
 function entrancesOf(bot: CompiledBot, seed: number, mapId: string, plan: number): number {
-  const key = `${mapId}:${seed}:${plan}`;
-  const hit = entranceMemo.get(key);
+  let memo = entranceMemos.get(bot);
+  if (memo === undefined) { memo = new Map(); entranceMemos.set(bot, memo); }
+  const key = `${mapId}:${seed}:${plan}:${scenarioFreeze}`;
+  const hit = memo.get(key);
   if (hit !== undefined) return hit;
   const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], knobs: { plan }, opts: { roundMoney: [16000, null] } });
   toLive(d);
@@ -1705,7 +1863,7 @@ function entrancesOf(bot: CompiledBot, seed: number, mapId: string, plan: number
   });
   const groups: Pt[] = [];
   for (const q of from.values()) if (groups.every((g) => d2(g, q) >= 8 * UNIT)) groups.push(q);
-  entranceMemo.set(key, groups.length);
+  memo.set(key, groups.length);
   return groups.length;
 }
 
@@ -1896,7 +2054,7 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
   },
 ];
 
-export const AI_SCENARIOS: readonly AiScenario[] = [...SOLO_SCENARIOS, ...TEAM_SCENARIOS, ...ROLE_SCENARIOS];
+export const AI_SCENARIOS: readonly AiScenario[] = [...SOLO_SCENARIOS, ...TEAM_SCENARIOS, ...ROLE_SCENARIOS, ...SITUATION_SCENARIOS];
 
 /** 跑一組情境（每個 5 個種子）；filter 只跑指定的情境 */
 export function runAiScenarios(bot: CompiledBot, filter?: (id: string) => boolean, opponent?: CompiledBot, maps?: readonly string[], o: { readonly soloMap?: string; readonly freezeTicks?: number } = {}): { id: string; name: string; pass: boolean; detail: string }[] {
