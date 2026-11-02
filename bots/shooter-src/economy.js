@@ -168,7 +168,8 @@ export class Economy {
       money -= price;
       return true;
     };
-    const armor = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') && take('armor', rules.armorPrice);
+    const armorLeft = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') ? rules.armorPrice : 0;
+    const armor = () => armorLeft() > 0 && take('armor', rules.armorPrice);
     const kit = () => team === 'CT' && !me.loadout.kit && !items.includes('kit') && take('kit', rules.kitPrice);
     const util = (/** @type {number} */ max) => {
       const owned = [...me.loadout.grenades];
@@ -198,8 +199,8 @@ export class Economy {
       util(4);
     } else if (mode === 'force') {
       if (role === 1) armor();
-      if (!good && money >= this.cost(rifle) + rules.armorPrice) take(rifle, this.cost(rifle));
-      else if (!good && money >= this.cost('smg') + rules.armorPrice) take('smg', this.cost('smg'));
+      if (!good && money >= this.cost(rifle) + armorLeft()) take(rifle, this.cost(rifle));
+      else if (!good && money >= this.cost('smg') + armorLeft()) take('smg', this.cost('smg'));
       armor();
       if (!good && primary === null && items.length === 1 && money >= this.cost('deagle')) take('deagle', this.cost('deagle'));
       kit();

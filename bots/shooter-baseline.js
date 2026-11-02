@@ -1939,11 +1939,16 @@ this.trail = [];
 this.trailTick = -1000000;
 /** @type {Pt | null} */
 this.blindBack = null;
-/** @type {Map<string, { cells: readonly number[], until: number }>} */
+/** @type {Map<string, { x: number, y: number, radius: number, cells: readonly number[], until: number }>} */
 this.fires = new Map();
+/** @type {Map<string, { x: number, y: number, radius: number, tick: number, until: number }>} */
+this.smokes = new Map();
+this.smokeRadius = data.grenades.find((e) => e.id === 'smoke')?.radius ?? 0;
+this.smokeGrowth = this.smokeRadius / Math.max(1, data.rules.grenadeRules.smokeBloomTicks);
 }
 reset() {
 this.fires = new Map();
+this.smokes.clear();
 this.noticed = new Map();
 this.targetId = -1;
 this.seen = 0;
@@ -2000,11 +2005,16 @@ if (this.trail.length > 8) this.trail.shift();
 evade(obs) {
 const me = obs.me;
 const g = this.g;
-for (const e of obs.effects) if (e.kind === 'fire' && e.cells !== undefined) this.fires.set(`${e.x},${e.y}`, { cells: e.cells, until: obs.tick + e.ticksLeft });
+for (const e of obs.effects) {
+if (e.kind === 'fire' && e.cells !== undefined) this.fires.set(`${e.x},${e.y}`, { x: e.x, y: e.y, radius: e.radius, cells: e.cells, until: obs.tick + e.ticksLeft });
+if (e.kind === 'smoke' && e.radius > 0 && e.ticksLeft > 0) this.smokes.set(`${e.x},${e.y},${obs.tick + e.ticksLeft}`, { x: e.x, y: e.y, radius: e.radius, tick: obs.tick, until: obs.tick + e.ticksLeft });
+}
+for (const [key, s] of this.smokes) if (obs.tick >= s.until) this.smokes.delete(key);
 /** @type {Set<number>} */
 const fire = new Set();
 for (const [key, f] of this.fires) {
-if (obs.tick >= f.until) this.fires.delete(key);
+const quenched = [...this.smokes.values()].some((s) => dist(s.x, s.y, f.x, f.y) < f.radius + Math.max(s.radius, Math.min(this.smokeRadius, s.radius + Math.floor((obs.tick - s.tick) * this.smokeGrowth))));
+if (obs.tick >= f.until || quenched) this.fires.delete(key);
 else for (const c of f.cells) fire.add(c);
 }
 this.nav.hazard = fire;
@@ -2552,7 +2562,8 @@ items.push(id);
 money -= price;
 return true;
 };
-const armor = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') && take('armor', rules.armorPrice);
+const armorLeft = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') ? rules.armorPrice : 0;
+const armor = () => armorLeft() > 0 && take('armor', rules.armorPrice);
 const kit = () => team === 'CT' && !me.loadout.kit && !items.includes('kit') && take('kit', rules.kitPrice);
 const util = (/** @type {number} */ max) => {
 const owned = [...me.loadout.grenades];
@@ -2581,8 +2592,8 @@ kit();
 util(4);
 } else if (mode === 'force') {
 if (role === 1) armor();
-if (!good && money >= this.cost(rifle) + rules.armorPrice) take(rifle, this.cost(rifle));
-else if (!good && money >= this.cost('smg') + rules.armorPrice) take('smg', this.cost('smg'));
+if (!good && money >= this.cost(rifle) + armorLeft()) take(rifle, this.cost(rifle));
+else if (!good && money >= this.cost('smg') + armorLeft()) take('smg', this.cost('smg'));
 armor();
 if (!good && primary === null && items.length === 1 && money >= this.cost('deagle')) take('deagle', this.cost('deagle'));
 kit();
@@ -3149,6 +3160,7 @@ this.adapt = new Adaptation();
 this.rotSince = -1;
 /** @type {Map<number, number>} */
 this.defuseStarted = new Map();
+this.defuseIssued = -1;
 this.fakeProbe = false;
 /** @type {{ x: number, y: number, until: number }[]} */
 this.burns = [];
@@ -3316,6 +3328,7 @@ this.postSmokers.clear();
 this.coop.reset();
 this.rotSince = -1;
 this.defuseStarted.clear();
+this.defuseIssued = -1;
 this.fakeProbe = false;
 }
 /** @param {Observation} obs */
@@ -3412,6 +3425,8 @@ this.lastKind = this.plan.kind === 'hold' ? '' : this.plan.kind;
 if (this.plan.kind !== 'hold') this.lastSite = this.plan.exec ?? this.plan.site;
 if (this.adapt.sample !== null) this.adapt.sample.plan = this.lastKind;
 }
+if (out.cmds.some((c) => c.type === 'defuse')) this.defuseIssued = t;
+else if (!out.objective || me.defuseTicks > 0 || t > this.defuseIssued + this.data.rules.reactionTicks + this.data.rules.decisionInterval) this.defuseIssued = -1;
 return out;
 }
 /**
@@ -4584,15 +4599,24 @@ out.task = 'retake';
 out.allowPeek = false;
 const left = (b.ticksLeft ?? 0) / this.tps;
 const myD = dist(me.x, me.y, bx, by);
+const pending = this.defuseIssued >= 0 && t <= this.defuseIssued + this.data.rules.reactionTicks + this.data.rules.decisionInterval;
 const field = this.judge?.field(bx, by);
 const team = this.alive(obs).map((m) => ({ ...m, weapon: m.id === me.id ? me.weapon : obs.teammates.find((q) => q.id === m.id)?.weapon, kit: m.id === me.id ? me.loadout.kit : this.kits.has(m.id), d: field === undefined ? dist(m.x, m.y, bx, by) : field[this.g.cellOf(m.x, m.y)] / 10 * UNIT, defusing: m.id === me.id ? me.defuseTicks > 0 : obs.teammates.some((x) => x.id === m.id && x.defusing) }));
 const clear = obs.enemiesAlive === 0;
 const eta = (/** @type {typeof team[number]} */ m) => {
-const progress = !m.defusing ? 0 : m.id === me.id ? me.defuseTicks : t - (this.defuseStarted.get(m.id) ?? t);
-const remaining = Math.max(1, (m.kit ? this.data.rules.defuseKitTicks : this.data.rules.defuseTicks) - progress + 1) / this.tps;
-return remaining + (m.defusing ? 0 : (this.judge?.travel(m, bx, by) ?? m.d / UNIT / 4.6) + this.data.rules.decisionInterval / this.tps);
+const r = this.data.rules;
+const duration = m.kit ? r.defuseKitTicks : r.defuseTicks;
+if (m.defusing) {
+const progress = m.id === me.id ? me.defuseTicks : 1 + t - (this.defuseStarted.get(m.id) ?? t);
+return Math.max(0, duration - progress) / this.tps;
+}
+if (m.id === me.id && pending) return Math.max(0, this.defuseIssued + r.reactionTicks + duration - 1 - t) / this.tps;
+const travel = dist(m.x, m.y, bx, by) < 1300 ? 0 : (this.judge?.travel(m, bx, by) ?? m.d / UNIT / 4.6) * this.tps;
+const ready = travel === 0 ? 0 : Math.ceil(travel / r.decisionInterval) * r.decisionInterval;
+const handoff = team.some((q) => q.defusing) ? Math.ceil(r.reactionTicks / r.decisionInterval) * r.decisionInterval : 0;
+return (Math.max(ready, handoff) + r.reactionTicks + duration - 1) / this.tps;
 };
-const feasible = team.filter((m) => eta(m) < left).sort((a, c) => eta(a) - eta(c) || a.id - c.id);
+const feasible = team.filter((m) => eta(m) <= left).sort((a, c) => eta(a) - eta(c) || a.id - c.id);
 const defuser = feasible.find((m) => m.defusing) ?? feasible[0];
 const outnumbered = team.length === 1 && obs.enemiesAlive >= 3 && this.attrs.discipline >= 0.5 && this.attrs.aggression < 0.6 && this.econ.shortOf(me.money + 1400, me.loadout.primary, 'CT') > 0;
 if (defuser === undefined || (!defuser.defusing && outnumbered)) {
@@ -4636,8 +4660,9 @@ if (defuser.id === me.id) {
 out.goal = { x: bx, y: by };
 out.role = '拆包';
 out.task = 'defuse';
+if (pending) out.objective = true;
 const clear = obs.enemies.length === 0;
-if (myD < 1300 && b.state === 'planted' && me.defuseTicks === 0 && clear) {
+if (myD < 1300 && b.state === 'planted' && me.defuseTicks === 0 && clear && !pending) {
 out.cmds.push({ type: 'defuse' });
 out.objective = true;
 }
@@ -5197,7 +5222,7 @@ this.why = '';
 declare() {
 return {
 name: 'shooter-baseline',
-version: '2.4.1',
+version: '2.4.2',
 style: '基準',
 knobs: [
 { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },

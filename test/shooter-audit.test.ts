@@ -115,10 +115,11 @@ describe('Bot 2.4.1：下／拆包的致命中斷與續作', () => {
   });
 });
 
-function rig(options: { pair?: boolean; progress?: number; fire?: boolean; left?: number }): { driver: ShooterDriver; bots: Map<number, ShooterBaseline>; moves: number[] } {
+function rig(options: { pair?: boolean; progress?: number; fire?: boolean; left?: number; kit?: boolean; singleDefuse?: boolean }): { driver: ShooterDriver; bots: Map<number, ShooterBaseline>; moves: number[] } {
   const bots = new Map<number, ShooterBaseline>();
   const moves = Array<number>(10).fill(0);
   const controllers = Array.from({ length: 10 }, (_, id) => new ScriptController(`audit-${id}`, (obs) => {
+    if (id === 5 && options.singleDefuse) return obs.tick === 600 ? [{ type: 'defuse' }] : [];
     const commands = bots.get(id)?.decide(obs) ?? [];
     moves[id] += commands.filter((c) => c.type === 'move').length;
     return commands;
@@ -130,7 +131,7 @@ function rig(options: { pair?: boolean; progress?: number; fire?: boolean; left?
   const probe = fixture().bot;
   const p = probe.intel.sites.A.plants[0];
   m.teleport(5, p.x, p.y, 0);
-  m.players[5].kit = !options.pair;
+  m.players[5].kit = !options.pair && (options.kit ?? true);
   m.players[5].defuseTicks = options.progress ?? 0;
   if (options.pair) {
     const field = probe.judge!.field(p.x, p.y);
@@ -242,5 +243,144 @@ describe('Bot 建置：刪除註解說明不改語意', () => {
     expect(packed).toContain('/** @type {string} */');
     expect(packed).toContain('/** @type {number} */');
     expect(packed).toContain('文字 @type {string} */\n\n\n結束');
+  });
+});
+
+describe('Bot 2.4.2 複審：火區資訊更新', () => {
+  it('真實煙已滅火：本次決策先解除記憶與導航危險，八秒內實際拆成功', () => {
+    const { driver, bots } = rig({ left: 240 });
+    const m = driver.match;
+    const bot = bots.get(5)!;
+    const p = bot.intel.sites.A.plants[0];
+    m.fires.push({ ...p, kind: 'molotov', owner: 0, startTick: 594, endTick: 810, cells: burnCells(m.map, p.x, p.y, 3000) });
+    driver.step();
+    expect(bot.combat.fires.size).toBe(1);
+    m.smokes.push({ ...p, owner: 5, startTick: 500, endTick: 1000 });
+    while (m.tick <= 603) driver.step();
+    expect(m.fires).toHaveLength(0);
+    expect(m.observe(5).effects.some((e) => e.kind === 'smoke')).toBe(true);
+    expect(bot.combat.fires.size).toBe(0);
+    expect(bot.nav.hazard.size).toBe(0);
+    expect(bot.why).not.toContain('避火待拆包');
+    finish(driver, 250);
+    expect(m.rounds[0]?.reason).toBe('defuse');
+  });
+
+  it('轉身或被閃而 effects 沒火，不能清除已觀察的火區', () => {
+    const { bot, obs, match } = fixture();
+    const p = bot.intel.sites.A.plants[0];
+    const cells = burnCells(match.map, p.x, p.y, 3000);
+    bot.combat.evade({ ...obs, me: { ...obs.me, ...p }, effects: [{ kind: 'fire', ...p, radius: 3000, cells, ticksLeft: 210 }] });
+    for (const blindTicks of [0, 30]) {
+      bot.combat.evade({ ...obs, tick: 603, me: { ...obs.me, x: p.x + 10000, y: p.y, facing: 0, blindTicks }, effects: [] });
+      expect(bot.combat.fires.size).toBe(1);
+      expect(bot.nav.hazard.has(bot.g.cellOf(p.x, p.y))).toBe(true);
+    }
+  });
+
+  it.each([-1, 0, 1])('兩圓相切邊界偏移 %s 單位：只有嚴格重疊才熄滅整團火', (delta) => {
+    const { bot, obs, match } = fixture();
+    const p = bot.intel.sites.A.plants[0];
+    const cells = burnCells(match.map, p.x, p.y, 3000);
+    bot.combat.evade({ ...obs, effects: [{ kind: 'fire', ...p, radius: 3000, cells, ticksLeft: 210 }] });
+    bot.combat.evade({ ...obs, tick: 603, effects: [{ kind: 'smoke', x: p.x + 6000 + delta, y: p.y, radius: 3000, ticksLeft: 400 }] });
+    expect(bot.combat.fires.size).toBe(delta < 0 ? 0 : 1);
+    expect(cells.some((c) => bot.nav.hazard.has(c))).toBe(delta >= 0);
+  });
+
+  it('已觀察的煙依公開規則擴散，離開視野後在真正重疊時解除；到期不掩蓋新火', () => {
+    const { bot, obs, match } = fixture();
+    const p = bot.intel.sites.A.plants[0];
+    const cells = burnCells(match.map, p.x, p.y, 3000);
+    bot.combat.evade({ ...obs, effects: [{ kind: 'fire', ...p, radius: 3000, cells, ticksLeft: 210 }, { kind: 'smoke', x: p.x + 5000, y: p.y, radius: 1000, ticksLeft: 530 }] });
+    expect(bot.combat.fires.size).toBe(1);
+    bot.combat.evade({ ...obs, tick: 610, effects: [] });
+    expect(bot.combat.fires.size).toBe(1); // 2000 + 3000 恰好相切。
+    bot.combat.evade({ ...obs, tick: 611, effects: [] });
+    expect(bot.combat.fires.size).toBe(0);
+    expect(bot.nav.hazard.size).toBe(0);
+    bot.combat.evade({ ...obs, tick: 1130, effects: [{ kind: 'fire', ...p, radius: 3000, cells, ticksLeft: 210 }] });
+    expect(bot.combat.fires.size).toBe(1);
+  });
+
+  it('不相交的另一團火仍有危險；新回合不能用舊煙壓掉新火', () => {
+    const { bot, obs, match } = fixture();
+    const p = bot.intel.sites.A.plants[0];
+    const j = [...Array(bot.g.N).keys()].find((i) => bot.g.walkable(i) && dist(p.x, p.y, bot.g.center(i).x, bot.g.center(i).y) > 15000)!;
+    const q = bot.g.center(j);
+    const fire = { kind: 'fire' as const, ...p, radius: 3000, cells: burnCells(match.map, p.x, p.y, 3000), ticksLeft: 210 };
+    bot.combat.evade({ ...obs, effects: [fire, { kind: 'fire', ...q, radius: 3000, cells: [j], ticksLeft: 210 }] });
+    bot.combat.evade({ ...obs, tick: 603, effects: [{ kind: 'smoke', ...p, radius: 3000, ticksLeft: 400 }] });
+    expect(bot.combat.fires.size).toBe(1);
+    expect(bot.nav.hazard.has(j)).toBe(true);
+    bot.newRound({ ...obs, round: { ...obs.round, number: obs.round.number + 1 } });
+    bot.combat.evade({ ...obs, effects: [fire] });
+    expect(bot.combat.fires.size).toBe(1);
+    expect(bot.nav.hazard.has(bot.g.cellOf(p.x, p.y))).toBe(true);
+  });
+});
+
+const deadlines = [true, false].flatMap((kit) => [true, false].flatMap((active) => [-1, 0, 1].map((slack) => {
+  const duration = kit ? 150 : 300;
+  const progress = active ? duration - 90 : 0;
+  const completion = active ? 90 : 5 + duration - 1;
+  return { kit, active, slack, progress, completion, left: completion + slack };
+})));
+describe('Bot 2.4.2 複審：完成／爆炸逐 tick 邊界', () => {
+  it.each(deadlines)('kit=$kit，進行中=$active，期限餘量=$slack tick', ({ kit, active, progress, completion, left, slack }) => {
+    const candidate = rig({ kit, progress, left });
+    const control = rig({ kit, progress, left, singleDefuse: !active });
+    if (active) control.bots.clear(); // 讓既有拆包自然繼續；不發任何新指令。
+    finish(candidate.driver, left + 10);
+    finish(control.driver, left + 10);
+    const expected = slack >= 0 ? 'defuse' : 'bomb';
+    expect(control.driver.match.rounds[0]?.reason).toBe(expected);
+    expect(candidate.driver.match.rounds[0]?.reason).toBe(expected);
+    expect(candidate.driver.match.rounds[0]?.endTick).toBe(600 + (slack >= 0 ? completion : left));
+    if (active && slack >= 0) expect(candidate.moves[5]).toBe(0);
+  });
+  it('引爆當 tick 已到最後一步，仍先完成拆包，不能因倒數零而取消', () => {
+    const { driver, moves } = rig({ kit: true, progress: 150, left: 0 });
+    finish(driver, 10);
+    expect(driver.match.rounds[0]?.reason).toBe('defuse');
+    expect(driver.match.rounds[0]?.endTick).toBe(600);
+    expect(moves[5]).toBe(0);
+  });
+});
+
+describe('Bot 2.4.2 複審：強起護甲預算', () => {
+  it.each([0, 5])('陣營代表 id %s：突破／支援在可負擔邊界買槍，已有滿甲不再預留甲錢', (pid) => {
+    const { bot, obs } = fixture(pid);
+    bot.tactics.econ.roundInHalf = 2;
+    const rifle = pid === 0 ? 'ak' : 'm4';
+    const rifleCost = bot.tactics.econ.cost(rifle);
+    const smgCost = bot.tactics.econ.cost('smg');
+    for (const role of [1, 2]) for (const armor of [0, 50, 100]) for (const gun of [rifle, 'smg'] as const) {
+      const price = gun === 'smg' ? smgCost : rifleCost;
+      const budget = price + (armor < 100 ? 650 : 0);
+      const next = { ...obs, me: { ...obs.me, money: budget, loadout: { ...obs.me.loadout, primary: null, armor, kit: false, grenades: [] } } };
+      const items = bot.tactics.econ.items(next, 'force', role, false);
+      expect(items, JSON.stringify({ role, armor, gun, budget })).toContain(gun);
+      expect(items.filter((x) => x === 'armor')).toHaveLength(armor < 100 ? 1 : 0);
+      const short = bot.tactics.econ.items({ ...next, me: { ...next.me, money: budget - 1 } }, 'force', role, false);
+      expect(short).not.toContain(gun);
+    }
+  });
+  it.each([0, 5])('id %s：真正引擎以 1900 買得起一甲一衝鋒槍，已有步槍則保留', (pid) => {
+    const m = new ShooterMatch({ seed: 11, mapId: 'redrock' });
+    m.players[pid].money = 1900; m.players[pid].armor = 0; m.players[pid].primary = null; m.players[pid].kit = false;
+    const bot = new Bot();
+    bot.init(shooterInitData(m.map, pid, {}), shooterHelpers(m.map, 11, pid));
+    bot.tactics.econ.roundInHalf = 2;
+    const obs = m.observe(pid);
+    const items = bot.tactics.econ.items(obs, 'force', 1, false);
+    expect(items.slice(0, 2)).toEqual(['armor', 'smg']);
+    m.applyCommands(pid, [{ type: 'buy', items }]);
+    expect(m.observe(pid).me.loadout.primary).toBe('smg');
+    expect(m.players[pid].armor).toBe(100);
+    expect(m.players[pid].money).toBe(0);
+    const rifle = pid === 0 ? 'ak' as const : 'm4' as const;
+    const keep = bot.tactics.econ.items({ ...obs, me: { ...obs.me, loadout: { ...obs.me.loadout, primary: rifle } } }, 'force', 1, false);
+    expect(keep.some((x) => x === 'ak' || x === 'm4' || x === 'smg')).toBe(false);
   });
 });

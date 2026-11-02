@@ -141,6 +141,7 @@ export class Tactics {
     this.rotSince = -1;
     /** @type {Map<number, number>} */
     this.defuseStarted = new Map();
+    this.defuseIssued = -1;
     this.fakeProbe = false;
     /** @type {{ x: number, y: number, until: number }[]} */
     this.burns = [];
@@ -316,6 +317,7 @@ export class Tactics {
     this.coop.reset();
     this.rotSince = -1;
     this.defuseStarted.clear();
+    this.defuseIssued = -1;
     this.fakeProbe = false;
   }
 
@@ -421,6 +423,8 @@ export class Tactics {
       if (this.plan.kind !== 'hold') this.lastSite = this.plan.exec ?? this.plan.site;
       if (this.adapt.sample !== null) this.adapt.sample.plan = this.lastKind;
     }
+    if (out.cmds.some((c) => c.type === 'defuse')) this.defuseIssued = t;
+    else if (!out.objective || me.defuseTicks > 0 || t > this.defuseIssued + this.data.rules.reactionTicks + this.data.rules.decisionInterval) this.defuseIssued = -1;
     return out;
   }
 
@@ -1730,16 +1734,27 @@ export class Tactics {
     out.allowPeek = false;
     const left = (b.ticksLeft ?? 0) / this.tps;
     const myD = dist(me.x, me.y, bx, by);
+    const pending = this.defuseIssued >= 0 && t <= this.defuseIssued + this.data.rules.reactionTicks + this.data.rules.decisionInterval;
     // 全隊共用完成時間判準；正在拆的人用剩餘進度，不可完成者不能佔住拆包分工。
     const field = this.judge?.field(bx, by);
     const team = this.alive(obs).map((m) => ({ ...m, weapon: m.id === me.id ? me.weapon : obs.teammates.find((q) => q.id === m.id)?.weapon, kit: m.id === me.id ? me.loadout.kit : this.kits.has(m.id), d: field === undefined ? dist(m.x, m.y, bx, by) : field[this.g.cellOf(m.x, m.y)] / 10 * UNIT, defusing: m.id === me.id ? me.defuseTicks > 0 : obs.teammates.some((x) => x.id === m.id && x.defusing) }));
     const clear = obs.enemiesAlive === 0;
     const eta = (/** @type {typeof team[number]} */ m) => {
-      const progress = !m.defusing ? 0 : m.id === me.id ? me.defuseTicks : t - (this.defuseStarted.get(m.id) ?? t);
-      const remaining = Math.max(1, (m.kit ? this.data.rules.defuseKitTicks : this.data.rules.defuseTicks) - progress + 1) / this.tps;
-      return remaining + (m.defusing ? 0 : (this.judge?.travel(m, bx, by) ?? m.d / UNIT / 4.6) + this.data.rules.decisionInterval / this.tps);
+      const r = this.data.rules;
+      const duration = m.kit ? r.defuseKitTicks : r.defuseTicks;
+      // 本 tick 的 actions 也會推進，且先於爆炸判定；進行中不再加送指令延遲。
+      if (m.defusing) {
+        const progress = m.id === me.id ? me.defuseTicks : 1 + t - (this.defuseStarted.get(m.id) ?? t);
+        return Math.max(0, duration - progress) / this.tps;
+      }
+      if (m.id === me.id && pending) return Math.max(0, this.defuseIssued + r.reactionTicks + duration - 1 - t) / this.tps;
+      // 已到本 Bot 會送拆包指令的範圍：當下即可送。遠方還需移動、等下一次決策、再送指令。
+      const travel = dist(m.x, m.y, bx, by) < 1300 ? 0 : (this.judge?.travel(m, bx, by) ?? m.d / UNIT / 4.6) * this.tps;
+      const ready = travel === 0 ? 0 : Math.ceil(travel / r.decisionInterval) * r.decisionInterval;
+      const handoff = team.some((q) => q.defusing) ? Math.ceil(r.reactionTicks / r.decisionInterval) * r.decisionInterval : 0;
+      return (Math.max(ready, handoff) + r.reactionTicks + duration - 1) / this.tps;
     };
-    const feasible = team.filter((m) => eta(m) < left).sort((a, c) => eta(a) - eta(c) || a.id - c.id);
+    const feasible = team.filter((m) => eta(m) <= left).sort((a, c) => eta(a) - eta(c) || a.id - c.id);
     const defuser = feasible.find((m) => m.defusing) ?? feasible[0];
     // 保槍：全隊都拆不完；或尚未開始、1 對 3 以上且下回合買不起。
     const outnumbered = team.length === 1 && obs.enemiesAlive >= 3 && this.attrs.discipline >= 0.5 && this.attrs.aggression < 0.6 && this.econ.shortOf(me.money + 1400, me.loadout.primary, 'CT') > 0;
@@ -1788,8 +1803,9 @@ export class Tactics {
       out.goal = { x: bx, y: by };
       out.role = '拆包';
       out.task = 'defuse';
+      if (pending) out.objective = true;
       const clear = obs.enemies.length === 0;
-      if (myD < 1300 && b.state === 'planted' && me.defuseTicks === 0 && clear) {
+      if (myD < 1300 && b.state === 'planted' && me.defuseTicks === 0 && clear && !pending) {
         out.cmds.push({ type: 'defuse' });
         out.objective = true;
       }
