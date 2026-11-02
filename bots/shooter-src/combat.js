@@ -336,17 +336,7 @@ export class Combat {
       return out;
     }
     // 隊友在彈道上（自己在走的話，加上反應延遲內會走的距離：開火時位置已經變了）
-    let block = false;
-    const drift = (Math.abs(me.vx) + Math.abs(me.vy)) * this.rules.reactionTicks;
-    for (const m of obs.teammates) {
-      if (!m.alive) continue;
-      // 到瞄準點與到敵人本人兩條線都要避開隊友（瞄準點還帶著誤差）
-      for (const q of [aim, e]) {
-        const s = segDist(m.x, m.y, me.x, me.y, q.x, q.y);
-        if (s.t > 0 && s.t < 1 && s.d < this.friendClear + drift) block = true;
-      }
-    }
-    if (block) {
+    if (!this.lineClear(obs, [aim, e])) {
       this.blocked++;
       out.why = '隊友擋線';
       if (this.blocked >= 2 && !ctx.holding) {
@@ -389,6 +379,30 @@ export class Combat {
     out.fire = ok;
     out.why = ok ? '開火' : '等散佈';
     return this.finishMove(obs, out, e, ok, d, ctx);
+  }
+
+  /**
+   * 開火線上沒有隊友：到每個目標點的線，加上實際朝向（子彈走 facing，瞄準點可能還沒轉到）。
+   * 淨空寬度＝固定值＋自己的漂移（反應延遲內會走的距離）＋隨距離放大的散佈；目標後方也要看（友傷多半是沒打中、飛到後面的隊友）
+   * @param {import('./base.js').Observation} obs @param {import('./base.js').Pt[]} pts
+   */
+  lineClear(obs, pts) {
+    const me = obs.me;
+    const drift = (Math.abs(me.vx) + Math.abs(me.vy)) * this.rules.reactionTicks;
+    const far = Math.max(...pts.map((q) => dist(me.x, me.y, q.x, q.y)), 8 * UNIT);
+    const lines = [...pts, { x: me.x + cosd(me.facing) * far, y: me.y + sind(me.facing) * far }];
+    for (const m of obs.teammates) {
+      if (!m.alive) continue;
+      for (const q of lines) {
+        const d = Math.max(dist(me.x, me.y, q.x, q.y), 1);
+        const reach = d + P.friendBehind * UNIT;
+        const s = segDist(m.x, m.y, me.x, me.y, me.x + ((q.x - me.x) * reach) / d, me.y + ((q.y - me.y) * reach) / d);
+        if (s.t <= 0 || s.t >= 1) continue;
+        const along = s.t * reach;
+        if (along <= d ? s.d < this.friendClear + drift + along * P.friendSpread : s.d < P.friendBehindClear * UNIT && this.g.los(me.x, me.y, m.x, m.y)) return false;
+      }
+    }
+    return true;
   }
 
   /**

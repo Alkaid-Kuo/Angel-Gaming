@@ -2000,7 +2000,7 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'R5',
     name: '游擊走第二組／中路',
-    expect: 'T default（全買）：指揮喊執行以前，游擊到過另一點 30 步內、而且那時離另一點比離主力的點近；CT（手槍局）開打 25 秒後游擊在兩點 9 步外（中路）；兩張圖',
+    expect: 'T default（全買）：指揮喊執行以前，游擊到過另一點 36 步內（2.5 待命位退到守位視線外）、而且那時離另一點比離主力的點近；CT（手槍局）開打 25 秒後游擊在兩點 9 步外（中路）；兩張圖',
     run: (bot, seed) =>
       onBoth((mapId) => {
         const roles = rolesFor(seed);
@@ -2031,7 +2031,7 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
         });
         const site = (/^P:default ([AB])/.exec(plan)?.[1] ?? 'A') as 'A' | 'B';
         const away = site === 'A' ? 'B' : 'A';
-        const tOk = dAway < dMain && dAway <= 30;
+        const tOk = dAway < dMain && dAway <= 36;
         const dc = driver(bot, { seed, map: mapId, seats: CTS, alive: [...CTS, T0], seatKnobs: roleKnobs(CTS, roles) });
         toLive(dc);
         park(dc.match, T0);

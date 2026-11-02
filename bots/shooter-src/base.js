@@ -170,6 +170,25 @@ export const P = {
   plantRequireClear: true,
   /** T 待命點：在包點入口外面這麼多格（距離場差） */
   stageBack: 9,
+  /** 待命位找不到安全格時，往後多找幾次、每次退幾格 */
+  stageRetreatSteps: 5,
+  stageRetreat: 4,
+  /** 進場間距：入口幾格內才排、前一人領先幾格才走、每回合最多等幾秒 */
+  entryZone: 9,
+  entryGap: 2.6,
+  entryWaitMax: 2.5,
+  /** split 第二組估路程用的移速（格／秒） */
+  routeSpeed: 3.9,
+  /** 閃光：離入口幾格內才丟（引信 1.5 秒，炸開後 2 秒內要到入口） */
+  flashNear: 12,
+  /** 守包：離炸彈至少幾格、彼此至少隔幾格 */
+  postMin: 5,
+  postGap: 6,
+  /** 友軍淨空：每格距離多留的寬度（格），涵蓋散佈 */
+  friendSpread: 0.05,
+  /** 友軍淨空：沒打中的子彈會繼續飛，目標後方幾格內有隊友、寬度幾格內也算擋線 */
+  friendBehind: 20,
+  friendBehindClear: 0.7,
   /** 待命點附近每人分到的格彼此至少隔幾格 */
   stageGap: 1.6,
   /** split：等第二組到待命點最多幾秒（從開打算）；fake：佯攻組製造聲音後幾秒主力執行 */
@@ -224,6 +243,8 @@ export const P = {
   /** T 執行：不是突破手的人離包點這麼近（格）就等突破手先進；每回合最多等幾秒 */
   yieldNear: 6,
   yieldMax: 3,
+  /** 兩路同時進點時，近的一路最多等幾秒 */
+  yieldMaxSplit: 7,
   /** 照計畫執行：其他人在待命格等突破手先走，執行後最多幾秒 */
   stageLead: 5,
   /** 開打時和突破手同組的人在出生區（離出生區這麼多格內）慢走讓突破手先走，最多幾秒 */
