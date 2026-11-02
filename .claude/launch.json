@@ -46,6 +46,19 @@
         "--strictPort"
       ],
       "port": 5186
+    },
+    {
+      "name": "game-ui",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5214",
+        "--strictPort",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 5214
     }
   ]
 }
