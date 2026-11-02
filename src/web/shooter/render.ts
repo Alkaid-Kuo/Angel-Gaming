@@ -9,7 +9,7 @@ import { BAKE_PX, bakeMap, type Baked } from './bake.ts';
 import { BLAST_MS, paintBlast, paintBombMark, paintChip, paintFlame, paintHurtVignette, paintKit, paintMuzzle, paintProjectile, paintScorch, paintSmoke, paintTracer, paintVignette } from './fx.ts';
 import { PAL, hash2 } from './materials.ts';
 import type { CamView } from './camera.ts';
-import type { FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
+import type { BoardRow, FullState, ShooterFrame, ShooterMeta } from './protocol.ts';
 import { muzzleReach, paintCorpse, paintDroppedGun, paintSoldier, sideColor, type Pose, type Side } from './soldier.ts';
 
 export const WEAPON_TAG: Readonly<Record<WeaponId, string>> = { pistol: 'P', deagle: 'DE', smg: 'SMG', shotgun: 'SG', ak: 'AK', m4: 'M4', awp: 'AWP', knife: '刀' };
@@ -121,14 +121,12 @@ export interface DrawInput {
   readonly zoom: number;
   /** 觀戰模式的全圖透視 */
   readonly xray: boolean;
-  /** 觀戰模式：戰術疊層（距離環、引線標註） */
-  readonly tactical: boolean;
+  /** 觀戰的全圖鏡頭：遠看時每個人一條引線標註，加上區域名 */
+  readonly tags: boolean;
   /** 觀戰模式的鏡頭（camera.ts 算好的）；null＝玩家模式，鏡頭跟著自己與滑鼠 */
   readonly camera: CamView | null;
-  /** 第一人稱的效果（致盲白幕、受傷暗角、聲音箭頭、傷害數字）；觀戰的全圖與自由鏡頭不是誰的視角，不畫 */
+  /** 第一人稱的效果（致盲白幕、受傷暗角、聲音箭頭、傷害數字）；觀戰的全圖與自由鏡頭不畫 */
   readonly pov: boolean;
-  /** 戰術疊層距離環的圓心（座標單位）；null＝所看的選手 */
-  readonly rings: { readonly x: number; readonly y: number } | null;
   /** 觀戰：滑鼠指著的選手 */
   readonly hover: number | null;
   readonly charge: ThrowPreview | null;
@@ -142,7 +140,7 @@ export interface DrawInput {
   readonly hurts: readonly HurtMark[];
   /** 別人的子彈（觀察資料 tracers） */
   readonly others: readonly OtherTracer[];
-  /** 全狀態的所有子彈：全圖與自由鏡頭畫（pov 為 false） */
+  /** 全狀態的所有子彈：全圖與開透視的自由鏡頭畫 */
   readonly allShots: readonly OtherTracer[];
   readonly pops: readonly DamagePop[];
   readonly corpses: readonly Corpse[];
@@ -290,7 +288,7 @@ export class ShooterRenderer {
   /** 開鏡鏡頭的過渡進度 0～1 */
   private scopeBlend = 0;
   private lastDraw = 0;
-  /** 我方組別（世界隊色） */
+  /** 我方組別（全圖標註往哪邊拉） */
   private readonly mine: 0 | 1 | null;
   /** 爆炸：上一個 tick 看得見的手雷與閃光彈，下一個 tick 不見了又聽到爆炸才算炸了 */
   private lastNades: readonly { readonly kind: GrenadeId; readonly x: number; readonly y: number }[] = [];
@@ -298,9 +296,11 @@ export class ShooterRenderer {
   private lastRound = -1;
   private lastBomb = '';
   private blasts: Blast[] = [];
-  /** 戰術疊層標註往上疊的高度（依 playerId，平滑用） */
+  /** 全圖標註往上疊的高度（依 playerId，平滑用） */
   private readonly tagLift: number[];
   private scorches: { x: number; y: number; r: number; seed: number }[] = [];
+  /** 目前當 T 的組 */
+  private tGroup: 0 | 1 = 0;
 
   constructor(canvas: HTMLCanvasElement, meta: ShooterMeta) {
     this.canvas = canvas;
@@ -315,10 +315,15 @@ export class ShooterRenderer {
     this.fctx = this.fog.getContext('2d')!;
   }
 
-  /** 組別 → 世界隊色 */
+  /** 組別 → 世界隊色：看這組現在打哪一邊 */
   private sideOf(group: 0 | 1): Side {
-    if (this.mine === null) return group === 0 ? 'home' : 'them';
-    return group === this.mine ? 'us' : 'them';
+    return group === this.tGroup ? 'T' : 'CT';
+  }
+
+  /** 從計分板更新目前當 T 的組 */
+  private syncSides(board: readonly BoardRow[]): void {
+    const row = board.find((b) => b.team === 'T');
+    if (row !== undefined) this.tGroup = this.meta.groups[row.id];
   }
 
   /** 調整畫布大小（含高 DPI）；回傳 CSS 尺寸 */
@@ -393,6 +398,7 @@ export class ShooterRenderer {
   }
 
   draw(d: DrawInput): void {
+    this.syncSides(d.cur.board);
     const { w, h, dpr } = this.fit();
     const ctx = this.ctx;
     const view = d.cur.view;
@@ -437,7 +443,7 @@ export class ShooterRenderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.blit(ctx, this.baked.walls, cam, dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.drawCorpses(cam, view, full, d.corpses, lod);
+    this.drawCorpses(cam, view, seeAll ? full : null, d.corpses, lod);
     this.drawItems(cam, seeAll ? full.items : view.items);
     this.drawBomb(cam, view, full, d.xray, d.now);
     // 煙在單位之下：觀察資料裡有的人不能被煙蓋掉，蓋了等於改了看得到什麼
@@ -445,8 +451,9 @@ export class ShooterRenderer {
 
     // 人
     const groupOfMe = this.meta.groups[view.me.id];
-    if (full !== null) {
-      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tactical, d.hover, !d.pov);
+    // 觀戰沒開透視時和玩家一樣，只畫所看選手看得到的人
+    if (full !== null && seeAll) {
+      this.drawFullPlayers(cam, full, d.prev?.full ?? null, d.alpha, view.me.id, lod, d.tags, d.hover, !d.pov);
     } else {
       const us = this.sideOf(groupOfMe);
       for (const t of view.teammates) {
@@ -457,7 +464,7 @@ export class ShooterRenderer {
       if (view.me.alive) {
         const shot = d.tracers.reduce((a, t) => Math.max(a, t.t), 0);
         const age = d.now - shot;
-        this.drawPlayer(cam, { ...meNow, moving: view.me.vx !== 0 || view.me.vy !== 0 }, us, { weapon: view.me.weapon, hp: null, hasBomb: view.me.hasBomb, blind: view.me.blindTicks > 0, label: view.me.id === this.meta.playerId && !this.meta.spectate ? null : this.meta.names[view.me.id], self: true, crouch: view.me.crouching, work: view.me.plantTicks > 0 || view.me.defuseTicks > 0, firing: age < 70, recoil: Math.max(0, 1 - age / 110) }, lod);
+        this.drawPlayer(cam, { ...meNow, moving: view.me.vx !== 0 || view.me.vy !== 0 }, us, { weapon: view.me.weapon, hp: view.me.hp, armor: view.me.loadout.armor, hasBomb: view.me.hasBomb, blind: view.me.blindTicks > 0, label: view.me.id === this.meta.playerId && !this.meta.spectate ? null : this.meta.names[view.me.id], self: true, crouch: view.me.crouching, work: view.me.plantTicks > 0 || view.me.defuseTicks > 0, firing: age < 70, recoil: Math.max(0, 1 - age / 110) }, lod);
       }
       const them = this.sideOf(groupOfMe === 0 ? 1 : 0);
       for (const e of view.enemies) {
@@ -494,9 +501,9 @@ export class ShooterRenderer {
       paintBlast(ctx, sx, sy, r, x.seed, (d.now - x.t) / BLAST_MS, x.kind);
     }
     // 子彈彈道：別人的（隊友、看得見的敵人）與所看選手自己的；全圖與自由鏡頭不是誰的視角，畫所有人的
-    this.drawOtherTracers(cam, d.pov ? d.others : d.allShots, d.now);
+    this.drawOtherTracers(cam, d.pov || !seeAll ? d.others : d.allShots, d.now);
     if (d.pov && view.me.alive) this.drawTracers(cam, meNow, view.me.weapon, d);
-    if (d.tactical && full !== null) this.drawTactical(cam, full, d.rings ?? meNow, view.me.id);
+    if (d.tags && full !== null) this.drawTags(cam, full, view.me.id);
     paintVignette(ctx, w, h);
     // 投擲預估與準心（玩家模式、活著）
     if (mine && view.me.alive) {
@@ -726,8 +733,8 @@ export class ShooterRenderer {
     paintBombMark(this.ctx, sx, sy, cam.scale * UNIT, now, planted, planted && left !== null ? left / rules.bombTicks : null, planted && left !== null ? (left / rules.ticksPerSecond).toFixed(1) : null, state === 'defused');
   }
 
-  /** 模型兵與名牌：隊友有名字與血條，敵人沒有血量（觀察資料沒有） */
-  private drawPlayer(cam: Camera, p: { x: number; y: number; facing: number; moving?: boolean }, side: Side, o: { weapon: WeaponId; hp: number | null; hasBomb: boolean; blind: boolean; label: string | null; self?: boolean; crouch?: boolean; work?: boolean; firing?: boolean; recoil?: number; flashAlways?: boolean }, lod: boolean): void {
+  /** 模型兵與名牌：自己與隊友頭上有血條（自己多一條甲），隊友有名字；敵人沒有血量（觀察資料沒有） */
+  private drawPlayer(cam: Camera, p: { x: number; y: number; facing: number; moving?: boolean }, side: Side, o: { weapon: WeaponId; hp: number | null; armor?: number; hasBomb: boolean; blind: boolean; label: string | null; self?: boolean; crouch?: boolean; work?: boolean; firing?: boolean; recoil?: number; flashAlways?: boolean }, lod: boolean): void {
     const ctx = this.ctx;
     const [sx, sy] = toScreen(cam, p.x, p.y);
     if (sx < -120 || sy < -120 || sx > cam.w + 120 || sy > cam.h + 120) return;
@@ -773,26 +780,32 @@ export class ShooterRenderer {
         ctx.stroke();
       }
     }
-    // 名字、血條（遠看不畫，戰術疊層另有引線標註）
-    if (lod || (o.label === null && o.hp === null)) return;
+    // 名字、血條（遠看只留細血條，全圖另有引線標註）
+    if (o.label === null && o.hp === null) return;
     const top = sy - ppc * 1.05;
-    if (o.label !== null) {
-      ctx.font = `700 13px ${ZH}`;
+    if (o.label !== null && !lod) {
+      ctx.font = `700 12px ${ZH}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.lineJoin = 'round';
-      ctx.lineWidth = 3.5;
+      ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(29, 26, 34, 0.75)';
-      ctx.strokeText(o.label, sx, top - 6);
+      ctx.strokeText(o.label, sx, top - 8);
       ctx.fillStyle = '#fff6e2';
-      ctx.fillText(o.label, sx, top - 6);
+      ctx.fillText(o.label, sx, top - 8);
     }
     if (o.hp !== null) {
-      const bw = 30;
-      ctx.fillStyle = 'rgba(29, 26, 34, 0.75)';
-      ctx.fillRect(sx - bw / 2 - 1, top - 5, bw + 2, 5);
+      const bw = lod ? 20 : o.self === true ? 44 : 34;
+      const bh = lod ? 2 : 4;
+      const armor = !lod && o.armor !== undefined ? o.armor : null;
+      ctx.fillStyle = 'rgba(11, 14, 20, 0.55)';
+      ctx.fillRect(sx - bw / 2 - 1, top - 6, bw + 2, bh + 2 + (armor !== null ? 3 : 0));
       ctx.fillStyle = o.hp <= 30 ? PAL.warn : sideColor(side);
-      ctx.fillRect(sx - bw / 2, top - 4, (bw * Math.max(0, o.hp)) / 100, 3);
+      ctx.fillRect(sx - bw / 2, top - 5, (bw * Math.max(0, o.hp)) / 100, bh);
+      if (armor !== null) {
+        ctx.fillStyle = '#cfd5dd';
+        ctx.fillRect(sx - bw / 2, top, (bw * armor) / 100, 2);
+      }
     }
   }
 
@@ -800,7 +813,7 @@ export class ShooterRenderer {
     for (const p of full.players) {
       if (!p.alive) continue;
       const q = interp(p, prev?.players, alpha);
-      this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: tagged ? null : p.hp, hasBomb: p.hasBomb, blind: p.blind, label: tagged ? null : this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing, flashAlways }, lod);
+      this.drawPlayer(cam, q, this.sideOf(this.meta.groups[p.id]), { weapon: p.weapon, hp: tagged ? null : p.hp, armor: p.id === viewId ? p.armor : undefined, hasBomb: p.hasBomb, blind: p.blind, label: tagged ? null : this.meta.names[p.id], self: p.id === viewId, crouch: p.crouching, work: p.working, firing: p.firing, flashAlways }, lod);
       if (p.id === hover) this.drawHover(cam, q, this.meta.names[p.id]);
     }
   }
@@ -818,30 +831,14 @@ export class ShooterRenderer {
     paintChip(ctx, name, sx, sy + r + 12);
   }
 
-  /** 戰術疊層（觀戰）：所看選手的距離環、每個人一條引線標註，全圖鏡頭時加上區域名 */
-  private drawTactical(cam: Camera, full: FullState, center: { x: number; y: number }, viewId: number): void {
+  /** 全圖鏡頭的標註：區域名，每個人一條引線標名字與血量 */
+  private drawTags(cam: Camera, full: FullState, viewId: number): void {
     const ctx = this.ctx;
     const ppc = cam.scale * UNIT;
-    const [mx, my] = toScreen(cam, center.x, center.y);
-    ctx.setLineDash([2, 5]);
-    ctx.lineWidth = 1;
-    ctx.font = `13px "Share Tech Mono", monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    for (const r of [10, 20, 30]) {
-      ctx.strokeStyle = 'rgba(29, 26, 34, 0.6)';
-      ctx.beginPath();
-      ctx.arc(mx, my, r * ppc, 0, Math.PI * 2);
-      ctx.stroke();
-      const ty = my - r * ppc;
-      ctx.fillStyle = 'rgba(11, 14, 20, 0.8)';
-      ctx.fillRect(mx - 20, ty - 9, 40, 18);
-      ctx.fillStyle = '#eef2f6';
-      ctx.fillText(`${r}格`, mx, ty);
-    }
-    ctx.setLineDash([]);
     if (ppc < LOD_PPC) {
       ctx.font = `700 12px ${ZH}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       for (const l of this.baked.labels) {
         const [sx, sy] = toScreen(cam, l.x * UNIT, l.y * UNIT);
         ctx.lineJoin = 'round';
@@ -862,7 +859,7 @@ export class ShooterRenderer {
       const [sx, sy] = toScreen(cam, p.x, p.y);
       if (sx < 0 || sy < 0 || sx > cam.w || sy > cam.h) continue;
       const side = this.sideOf(this.meta.groups[p.id]);
-      const dir = side === 'us' || side === 'home' ? -1 : 1;
+      const dir = this.meta.groups[p.id] === (this.mine ?? 0) ? -1 : 1;
       const text = `${this.meta.names[p.id]} ${p.hp}`;
       const tw = ctx.measureText(text).width + 12;
       const lx = sx + dir * 36;
@@ -1179,6 +1176,7 @@ export class ShooterRenderer {
     }
     const g = mini.getContext('2d')!;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, size, size);
     g.drawImage(this.baked.radar, 0, 0, size, size);
     const k = size / (this.meta.map.width * UNIT);
     const view = d.cur.view;
@@ -1195,8 +1193,9 @@ export class ShooterRenderer {
       }
     };
     const groupOfMe = this.meta.groups[view.me.id];
-    const usColor = sideColor(this.sideOf(groupOfMe));
-    const foeColor = PAL.blueLight;
+    const radarColor = (s: Side): string => (s === 'T' ? PAL.gold : PAL.blueLight);
+    const usColor = radarColor(this.sideOf(groupOfMe));
+    const foeColor = radarColor(this.sideOf(groupOfMe === 0 ? 1 : 0));
     // 全圖與自由鏡頭：框出畫面看到的範圍
     if (d.camera !== null && !d.pov) {
       const vw = (this.camera.w / this.camera.scale) * k;
@@ -1205,7 +1204,7 @@ export class ShooterRenderer {
       g.lineWidth = 1;
       g.strokeRect(this.camera.cx * k - vw / 2, this.camera.cy * k - vh / 2, vw, vh);
     }
-    if (d.cur.full !== null) {
+    if (d.cur.full !== null && d.xray) {
       for (const p of d.cur.full.players) if (p.alive) dot(p.x, p.y, this.meta.groups[p.id] === groupOfMe ? usColor : foeColor, 3);
     } else {
       for (const t of view.teammates) if (t.alive) dot(t.x, t.y, usColor, 3);

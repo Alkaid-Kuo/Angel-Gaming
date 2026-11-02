@@ -30,9 +30,8 @@ export interface InputHost {
   zoom(step: number): void;
   /** 觀戰模式：全圖透視、播放速度 */
   toggleXray(): void;
-  /** 觀戰模式：全圖鏡頭、戰術疊層 */
+  /** 觀戰模式：全圖鏡頭 */
   toggleOverview(): void;
-  toggleTactical(): void;
   speed(step: number): void;
   /** 觀戰模式：跳到下一回合、上一回合 */
   skipRound(): void;
@@ -156,8 +155,8 @@ export class ShooterInput {
   private keyDown(e: KeyboardEvent): void {
     const code = e.code;
     // 遊戲中攔下瀏覽器快捷鍵（Ctrl＋S／D／F／R、F1／F3／F5／F7、Alt 選單、Backspace…），讓 Ctrl 蹲著也能按 A／S／D。
-    // Ctrl＋W／T／N 只有全螢幕鎖鍵盤時攔得住（瀏覽器限制）；F11、F12 保留
-    if (code !== 'F11' && code !== 'F12') e.preventDefault();
+    // Ctrl＋W／T／N 只有全螢幕鎖鍵盤時攔得住（瀏覽器限制）；F12 保留，F11 走自己的全螢幕
+    if (code !== 'F12') e.preventDefault();
     if (code === 'Tab') {
       this.host.setBoard(true);
       return;
@@ -179,7 +178,8 @@ export class ShooterInput {
     const s = this.alive();
     switch (code) {
       case 'Escape':
-        if (!this.host.closeBuy()) this.host.togglePause();
+        // 觀戰的 Esc 是離開全螢幕（瀏覽器處理），暫停用空白鍵
+        if (!this.host.closeBuy() && !this.host.meta.spectate) this.host.togglePause();
         return;
       case 'KeyB':
         this.host.toggleBuy();
@@ -204,9 +204,6 @@ export class ShooterInput {
       case 'KeyM':
         this.host.toggleOverview();
         return;
-      case 'KeyT':
-        this.host.toggleTactical();
-        return;
       case 'Space':
         if (this.host.meta.spectate) {
           e.preventDefault();
@@ -229,7 +226,7 @@ export class ShooterInput {
       case 'Slash':
         if (this.host.meta.spectate) this.host.toggleHelp();
         return;
-      case 'KeyF':
+      case 'F11':
         this.host.toggleFullscreen();
         return;
     }

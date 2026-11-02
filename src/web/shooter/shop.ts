@@ -13,11 +13,11 @@ export interface ShopData {
 }
 
 export type ShopCat = 'pistol' | 'primary' | 'gear' | 'nade';
-export const SHOP_CATS: readonly { readonly id: ShopCat; readonly name: string; readonly en: string }[] = [
-  { id: 'pistol', name: '手槍', en: 'PISTOL' },
-  { id: 'primary', name: '主武器', en: 'PRIMARY' },
-  { id: 'gear', name: '護甲與裝備', en: 'GEAR' },
-  { id: 'nade', name: '道具', en: 'GRENADE' },
+export const SHOP_CATS: readonly { readonly id: ShopCat; readonly name: string }[] = [
+  { id: 'pistol', name: '手槍' },
+  { id: 'primary', name: '主武器' },
+  { id: 'gear', name: '護甲與裝備' },
+  { id: 'nade', name: '道具' },
 ];
 
 export interface ShopEntry {
@@ -74,13 +74,18 @@ export function shopState(d: ShopData, e: ShopEntry, s: ShooterObservation): Sho
 }
 
 /** 點了買不了時的說明 */
-export function stateNote(e: ShopEntry, st: ShopState, money: number): string {
-  if (st === 'poor') return `${e.name}：還差 $${e.price - money}`;
+export function stateNote(e: ShopEntry, st: ShopState): string {
+  if (st === 'poor') return `${e.name}：金錢不足`;
   if (st === 'owned') return e.grenade !== null ? `${e.name}：已達攜帶上限` : e.id === 'armor' || e.id === 'ammo' ? `${e.name}：已經是滿的` : `${e.name}：已持有`;
   if (st === 'locked') return isIssued(e) ? `${e.name}：開局配發，不能購買` : `${e.name}：限 ${e.teams.join('／')} 購買`;
-  if (st === 'closed') return '不在購買時間或出生區';
+  if (st === 'closed') return BUY_CLOSED_NOTE;
   return '';
 }
+
+export const BUY_CLOSED_NOTE = '不在購買時間或出生區';
+
+/** 按 B：開著就關；不能買時不開（開了下一個 frame 就會被自動關掉，畫面閃一下），改給提示 */
+export const buyToggle = (open: boolean, canBuy: boolean): 'open' | 'close' | 'deny' => (open ? 'close' : canBuy ? 'open' : 'deny');
 
 /** 剩餘購買時間（tick）：購買時間從凍結開始算；回合階段算得出來，不讀引擎 */
 export function buyTicksLeft(round: RoundInfo, rules: RulesInfo): number {

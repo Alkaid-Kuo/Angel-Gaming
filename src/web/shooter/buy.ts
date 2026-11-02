@@ -1,9 +1,9 @@
-// CS 射擊可玩版的商店：左分類、中商品卡、右選中商品的數值、底部金錢與購買倒數。
+// CS 射擊可玩版的商店：左分類、中商品卡、右選中商品的數值、頂部購買倒數；金錢看 HUD 左下。
 // 商品與數值全部來自開局規則（shop.ts 換算），狀態只看自己的觀察資料；點卡片或按熱鍵送 buy 指令，合不合法由引擎判定，這裡只是提示。
 // 卡片四種狀態：買得起、買不起、已持有、陣營限定。買不了的卡片不是 disabled：點了要在底部說明為什麼。
 import type { BuyItem, GrenadeId, ShooterObservation, Team, WeaponInfo } from '../../shooter/api.ts';
 import type { ShooterMeta } from './protocol.ts';
-import { SHOP_CATS, compareRow, compareTarget, buyTicksLeft, gearNote, grenadeNote, grenadeRows, isIssued, shopEntries, shopState, stateNote, weaponRows, type ShopCat, type ShopEntry, type ShopState, type StatRow } from './shop.ts';
+import { BUY_CLOSED_NOTE, SHOP_CATS, compareRow, compareTarget, buyTicksLeft, gearNote, grenadeNote, grenadeRows, isIssued, shopEntries, shopState, stateNote, weaponRows, type ShopCat, type ShopEntry, type ShopState, type StatRow } from './shop.ts';
 import { paintGunIcon } from './soldier.ts';
 
 const KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'];
@@ -128,8 +128,6 @@ export class BuyMenu {
   /** 比較對象變了才重畫數值 */
   private cmpKey = '';
   private note = '';
-  private money!: HTMLElement;
-  private after!: HTMLElement;
   private noteEl!: HTMLElement;
   private timer!: HTMLElement;
   private timerBar!: HTMLElement;
@@ -168,12 +166,9 @@ export class BuyMenu {
     this.states.clear();
     this.cmpKey = '';
     this.el.innerHTML =
-      `<div class="sb-head"><b>購買</b><span class="sd">${team}</span><span class="tm"><i class="tb"><u></u></i><span class="tt"></span></span><span class="cl"><kbd>B</kbd> 關閉・<kbd>1</kbd>～<kbd>=</kbd> 快速購買</span></div>` +
-      `<div class="sb-body"><nav class="sb-cats"></nav><div class="sb-grid"></div><aside class="sb-info"></aside></div>` +
-      `<div class="sb-foot"><span class="fm"><small>目前金錢</small><b class="now"></b></span><span class="ar">→</span><span class="fm"><small>購買後</small><b class="af"></b></span><span class="nt"></span></div>`;
+      `<div class="sb-head"><b>購買</b><span class="nt"></span><span class="tm"><i class="tb"><u></u></i><span class="tt"></span></span><span class="cl"><kbd>B</kbd> 關閉・<kbd>1</kbd>～<kbd>=</kbd> 快速購買</span></div>` +
+      `<div class="sb-body"><nav class="sb-cats"></nav><div class="sb-grid"></div><aside class="sb-info"></aside></div>`;
     const q = <T extends HTMLElement>(s: string): T => this.el.querySelector(s) as T;
-    this.money = q('.now');
-    this.after = q('.af');
     this.noteEl = q('.nt');
     this.timer = q('.tt');
     this.timerBar = q('.tb u');
@@ -183,7 +178,7 @@ export class BuyMenu {
       const b = document.createElement('button');
       b.type = 'button';
       b.dataset.cat = c.id;
-      b.innerHTML = `<small>${c.en}</small><b>${c.name}</b>`;
+      b.textContent = c.name;
       b.addEventListener('click', () => this.pickCat(c.id));
       nav.appendChild(b);
     }
@@ -221,7 +216,6 @@ export class BuyMenu {
     this.sel = e;
     for (const [id, b] of this.cards) b.classList.toggle('sel', id === e.id);
     this.renderInfo();
-    if (this.last !== null) this.updateFoot(this.last);
   }
 
   private buy(e: ShopEntry): void {
@@ -232,7 +226,7 @@ export class BuyMenu {
     if (st === 'ok') {
       this.setNote('');
       this.send([e.id]);
-    } else this.setNote(stateNote(e, st, s.me.money));
+    } else this.setNote(stateNote(e, st));
   }
 
   /** 快捷鍵；回傳 true 表示是購買鍵 */
@@ -289,15 +283,6 @@ export class BuyMenu {
     paintIcon(box.querySelector('canvas') as HTMLCanvasElement, e);
   }
 
-  private updateFoot(s: ShooterObservation): void {
-    const st = shopState(this.meta, this.sel, s);
-    const money = `$${s.me.money}`;
-    if (this.money.textContent !== money) this.money.textContent = money;
-    const after = st === 'ok' ? `$${s.me.money - this.sel.price}` : st === 'poor' ? `差 $${this.sel.price - s.me.money}` : '—';
-    if (this.after.textContent !== after) this.after.textContent = after;
-    this.after.classList.toggle('poor', st === 'poor');
-  }
-
   update(s: ShooterObservation): void {
     this.last = s;
     if (this.team !== s.me.team) this.build(s.me.team);
@@ -313,7 +298,7 @@ export class BuyMenu {
     for (const e of this.entries) {
       const st = shopState(this.meta, e, s);
       const b = this.cards.get(e.id) as HTMLButtonElement;
-      const tag = st === 'poor' ? `差 $${e.price - me.money}` : st === 'owned' ? (e.id === 'armor' || e.id === 'ammo' ? '已滿' : e.grenade !== null ? '已達上限' : '已持有') : st === 'locked' ? (isIssued(e) ? '不能購買' : `限 ${e.teams.join('／')}`) : '';
+      const tag = st === 'owned' ? (e.id === 'armor' || e.id === 'ammo' ? '已滿' : e.grenade !== null ? '已達上限' : '已持有') : st === 'locked' ? (isIssued(e) ? '不能購買' : `限 ${e.teams.join('／')}`) : '';
       const old = this.states.get(e.id);
       if (old !== st) {
         if (old !== undefined) b.classList.remove(`st-${old}`);
@@ -323,10 +308,9 @@ export class BuyMenu {
       const tagEl = b.querySelector('.tg') as HTMLElement;
       if (tagEl.textContent !== tag) tagEl.textContent = tag;
     }
-    this.updateFoot(s);
     const rules = this.meta.rules;
     const left = s.round.canBuy ? buyTicksLeft(s.round, rules) : 0;
-    const text = s.round.canBuy ? `剩 ${Math.ceil(left / rules.ticksPerSecond)} 秒可購買` : '不在購買時間或出生區';
+    const text = s.round.canBuy ? `剩 ${Math.ceil(left / rules.ticksPerSecond)} 秒可購買` : BUY_CLOSED_NOTE;
     if (this.timer.textContent !== text) this.timer.textContent = text;
     this.timerBar.style.width = `${Math.round((left / rules.buyTicks) * 100)}%`;
     this.timerBar.parentElement?.classList.toggle('low', left < 5 * rules.ticksPerSecond);
