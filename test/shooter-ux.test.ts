@@ -277,8 +277,7 @@ describe('商店數值換算', () => {
 });
 
 describe('全狀態彈道', () => {
-  const practice = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'shooter-practice.js');
-  const bots = { practice, baseline: (): never => { throw new Error('不該用到基準 Bot'); } };
+  const bots = { baseline: () => compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'shooter-baseline.js') };
   const s: ShooterSetup = { team: 'T', seed: 321, spectate: true };
   const build = (): ShooterDriver => new ShooterDriver(trialRunOptions(s, bots, null));
 
@@ -309,15 +308,14 @@ describe('全狀態彈道', () => {
 });
 
 describe('跳回合', () => {
-  const practice = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'shooter-practice.js');
   const baselineBot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'shooter-baseline.js');
-  const bots = { practice, baseline: () => baselineBot };
+  const bots = { baseline: () => baselineBot };
   const runTo = (d: ShooterDriver, round: number): void => {
     while (!d.match.over && d.match.roundNumber < round) d.step();
   };
 
   it('試玩觀戰：往前跳與直接跑到該回合的狀態雜湊相同，之後繼續跑也相同', () => {
-    const s: ShooterSetup = { team: 'T', seed: 321, spectate: true, lineup: { team: { kind: 'practice' }, enemy: { kind: 'practice' } } };
+    const s: ShooterSetup = { team: 'T', seed: 321, spectate: true };
     const build = (): ShooterDriver => new ShooterDriver(trialRunOptions(s, bots, null));
     const direct = build();
     runTo(direct, 3);

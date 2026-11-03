@@ -1,24 +1,21 @@
-// 試玩頁的 Bot 等級：基準座位與經營層閘道同一條路（選項逐欄相同、整場雜湊相同）、預設陪練與改前相同、人類與陪練座位不受影響。
+// 試玩頁的 Bot 等級：基準座位與經營層閘道同一條路（選項逐欄相同、整場雜湊相同）、沒帶 lineup＝兩邊基準 v3、人類座位不受影響。陪練 Bot 不再出現在試玩。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { MatchRequest } from '../src/manage/gateway.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
 import { MIN_REACTION_TICKS, ticks } from '../src/shooter/config.ts';
-import { LEAGUE_FORMAT_ID, formatOptions, gatewayDriverOptions, outcomeOf, runGatewayMatch } from '../src/shooter/gateway.ts';
+import { LEAGUE_FORMAT_ID, gatewayDriverOptions, outcomeOf, runGatewayMatch } from '../src/shooter/gateway.ts';
 import { ShooterHumanController } from '../src/shooter/human.ts';
-import { DEFAULT_MAP_ID, MAPS } from '../src/shooter/map.ts';
 import { BALANCED_ROLES, ROLE_KNOB, type ShooterRole } from '../src/shooter/players.ts';
 import { ScriptController, ShooterBatchController, ShooterDriver, runShooterMatch, runShooterReplay, type ShooterReplay, type ShooterRunOptions } from '../src/shooter/runner.ts';
-import { DEFAULT_ATTRIBUTES, PLAYER_COUNT } from '../src/shooter/sim.ts';
+import { PLAYER_COUNT } from '../src/shooter/sim.ts';
 import { hidesCursor } from '../src/web/shooter/cursor.ts';
-import { humanSeat, seatLabels, seatLevels, seatNames, trialHabit, trialRunOptions, trialSpec } from '../src/web/shooter/lineup.ts';
+import { DEFAULT_LEVEL, humanSeat, seatLabels, seatLevels, seatNames, trialHabit, trialRunOptions, trialSpec } from '../src/web/shooter/lineup.ts';
 import type { BotLevel, ShooterSetup } from '../src/web/shooter/protocol.ts';
 
-const practice = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'shooter-practice.js');
 const baselineBot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'shooter-baseline.js');
-const bots = { practice, baseline: () => baselineBot };
+const bots = { baseline: () => baselineBot };
 const base = (v: 1 | 2 | 3 | 4 | 5): BotLevel => ({ kind: 'baseline', version: v });
-const PRACTICE: BotLevel = { kind: 'practice' };
 const SEED = 4242;
 
 /** 觀戰設定的等價請求單：10 個 PlayerSpec 與試玩同角色、同版本、同 habit */
@@ -72,34 +69,33 @@ describe('試玩基準座位與閘道同一條路', () => {
   });
 });
 
-describe('預設陪練與改前相同', () => {
-  const old = (seed: number): ShooterRunOptions => {
-    const map = MAPS[DEFAULT_MAP_ID]();
-    const controllers = Array.from({ length: PLAYER_COUNT }, (_, i) => new ShooterBatchController(practice, 'shooter-practice.js', seed, i, map, { timeLimits: false }));
-    return { seed, mapId: map.id, ...formatOptions(LEAGUE_FORMAT_ID), controllers, record: true };
-  };
-
-  it('全陪練場維持 5 tick；所有 Bot 座位都不做逾時判定', () => {
-    const noBaseline = { practice, baseline: () => { throw new Error('不該編譯基準 Bot'); } };
+describe('沒帶 lineup＝兩邊基準 v3', () => {
+  it('預設等級是 v3；沒帶 lineup 與明寫 v3 對 v3 逐欄相同、雜湊相同，所有 Bot 座位都不做逾時判定', () => {
+    expect(DEFAULT_LEVEL).toEqual(base(3));
+    const plain: ShooterSetup = { team: 'T', seed: 5, spectate: true };
+    const explicit: ShooterSetup = { ...plain, lineup: { team: base(3), enemy: base(3) } };
+    sameFields(trialRunOptions(plain, bots, null), trialRunOptions(explicit, bots, null));
+    expect(runShooterMatch({ ...trialRunOptions(plain, bots, null), roundsPerHalf: 2, winRounds: 3, overtime: false }).finalHash).toBe(runShooterMatch({ ...trialRunOptions(explicit, bots, null), roundsPerHalf: 2, winRounds: 3, overtime: false }).finalHash);
+    expect(seatLabels(plain).lineup).toEqual(Array.from({ length: PLAYER_COUNT }, () => '基準 v3'));
     for (const spectate of [true, false]) {
-      const o = trialRunOptions({ team: 'T', seed: 5, spectate }, noBaseline, spectate ? null : new ShooterHumanController());
-      const d = new ShooterDriver(o);
-      expect(d.reactionTicks.filter((t) => t !== 0).every((t) => t === MIN_REACTION_TICKS)).toBe(true);
+      const o = trialRunOptions({ team: 'T', seed: 5, spectate }, bots, spectate ? null : new ShooterHumanController());
       for (const c of o.controllers) if (c instanceof ShooterBatchController) expect(Reflect.get(c, 'decideMs')).toBe(Infinity);
+      const d = new ShooterDriver(o);
+      // 基準座位的延遲依屬性算（不低於最短延遲）；人類座位 0
+      expect(d.reactionTicks.filter((t) => t !== 0).every((t) => t >= MIN_REACTION_TICKS)).toBe(true);
+      expect(d.reactionTicks.filter((t) => t === 0).length).toBe(spectate ? 0 : 1);
     }
-    const mixed = trialRunOptions({ team: 'T', seed: 5, spectate: true, lineup: { team: PRACTICE, enemy: base(3) } }, bots, null);
-    for (const c of mixed.controllers) if (c instanceof ShooterBatchController) expect(Reflect.get(c, 'decideMs')).toBe(Infinity);
+    expect(seatNames({ team: 'CT', seed: 5, spectate: false })).toEqual(['v3 突破手α', 'v3 支援α', 'v3 錨點α', 'v3 游擊α', 'v3 狙擊手α', '你', 'v3 支援β', 'v3 錨點β', 'v3 游擊β', 'v3 狙擊手β']);
   });
 
-  it('沒帶 lineup 不碰基準 Bot、選項同改前，整場雜湊與改前相同', () => {
-    const noBaseline = { practice, baseline: () => { throw new Error('不該編譯基準 Bot'); } };
-    for (const lineup of [undefined, { team: PRACTICE, enemy: PRACTICE }]) {
-      const s: ShooterSetup = { team: 'T', seed: 5, spectate: true, lineup };
-      sameFields(trialRunOptions(s, noBaseline, null), old(5));
-      expect(runShooterMatch(trialRunOptions(s, noBaseline, null)).finalHash).toBe(runShooterMatch(old(5)).finalHash);
-      expect(seatLabels(s)).toEqual({});
+  it('試玩裡沒有陪練 Bot：等級只有基準 1～5，座位名與回放標籤都沒有「陪練」', () => {
+    for (const v of [1, 2, 3, 4, 5] as const) {
+      const s: ShooterSetup = { team: 'T', seed: 8, spectate: true, lineup: { team: base(v), enemy: base(3) } };
+      expect(seatLevels(s).every((l) => l !== null && l.kind === 'baseline')).toBe(true);
+      expect(seatNames(s).join(' ')).not.toContain('陪練');
+      expect(seatLabels(s).lineup.join(' ')).not.toContain('陪練');
+      expect(trialRunOptions(s, bots, null).controllers.map((c) => c.label).join(' ')).not.toContain('practice');
     }
-    expect(seatNames({ team: 'CT', seed: 5, spectate: false })).toEqual(['陪練 1α', '陪練 2α', '陪練 3α', '陪練 4α', '陪練 5α', '你', '陪練 2β', '陪練 3β', '陪練 4β', '陪練 5β']);
   });
 });
 
@@ -122,9 +118,9 @@ describe('人類與混合陣容', () => {
   });
 
   it('人類當 CT：隊友等級在 5～9、對手在 0～4；人類座位空著不衍生且不延遲', () => {
-    const s: ShooterSetup = { team: 'CT', seed: 9, spectate: false, lineup: { team: base(2), enemy: PRACTICE } };
+    const s: ShooterSetup = { team: 'CT', seed: 9, spectate: false, lineup: { team: base(2), enemy: base(4) } };
     expect(humanSeat(s)).toBe(5);
-    expect(seatLevels(s)).toEqual([PRACTICE, PRACTICE, PRACTICE, PRACTICE, PRACTICE, null, base(2), base(2), base(2), base(2)]);
+    expect(seatLevels(s)).toEqual([base(4), base(4), base(4), base(4), base(4), null, base(2), base(2), base(2), base(2)]);
     const human = new ShooterHumanController();
     const o = trialRunOptions(s, bots, human);
     expect(o.controllers[5]).toBe(human);
@@ -132,13 +128,13 @@ describe('人類與混合陣容', () => {
     expect(o.knobs?.[5]).toEqual({});
     const d = new ShooterDriver(o);
     expect(d.reactionTicks[5]).toBe(0);
-    // 混打：陪練用預設屬性、全 50 的 8 tick；基準照角色
-    expect(d.attributes[0]).toEqual(DEFAULT_ATTRIBUTES);
-    expect(d.reactionTicks.slice(0, 5)).toEqual([8, 8, 8, 8, 8]);
+    // 兩邊都是基準：屬性照角色與版本，v4 的反應比 v2 快；v2 都比最短延遲慢
+    expect(d.reactionTicks.slice(0, 5).every((t) => t >= MIN_REACTION_TICKS)).toBe(true);
     expect(d.reactionTicks.slice(6).every((t) => t > MIN_REACTION_TICKS)).toBe(true);
+    expect(o.attributes?.[1]?.reaction).toBeGreaterThan(o.attributes?.[6]?.reaction ?? Infinity);
     expect(o.knobs?.slice(6).map((k) => k.role)).toEqual((['support', 'anchor', 'lurk', 'awp'] as ShooterRole[]).map((r) => ROLE_KNOB[r]));
     expect(seatNames(s)[6]).toBe('v2 支援β');
-    expect(seatLabels(s).lineup?.slice(4, 7)).toEqual(['陪練 v5', '你', '基準 v2']);
+    expect(seatLabels(s).lineup.slice(4, 7)).toEqual(['基準 v4', '你', '基準 v2']);
   });
 
   it('基準隊友少一人（人類站著不動）也打得完，沒有 Bot 例外', () => {

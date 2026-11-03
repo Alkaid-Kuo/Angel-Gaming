@@ -6,7 +6,6 @@
 // 回放：每場都錄（record: true），比賽結束後主執行緒要才送（getReplay）。
 // 跳回合（seek）：觀戰模式記住建驅動的方式，往前跳就同設定同種子重跑（seek.ts）。
 import baselineSource from '../../../bots/shooter-baseline.js?raw';
-import practiceSource from '../../../bots/shooter-practice.js?raw';
 import type { ShooterObservation, SoundEvent, Team } from '../../shooter/api.ts';
 import { GRENADES, TPS, WEAPONS, WEAPON_IDS, type WeaponId } from '../../shooter/config.ts';
 import { ShooterHumanController } from '../../shooter/human.ts';
@@ -22,7 +21,6 @@ import type { BoardRow, FromShooterWorker, FullState, KillFeedItem, ShooterFrame
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (msg: FromShooterWorker): void => ctx.postMessage(msg);
 
-const practice = compileBot(practiceSource, 'shooter-practice.js');
 /** 基準 Bot（經營層觀戰與試玩的基準座位；第一次用到時才編譯） */
 let baseline: CompiledBot | null = null;
 const baselineBot = (): CompiledBot => (baseline ??= compileBot(baselineSource, 'shooter-baseline.js'));
@@ -42,7 +40,7 @@ let last = 0;
 let feedIdx = 0;
 let pendingSounds: SoundEvent[] = [];
 let overSent = false;
-/** 經營層觀戰的顯示資訊（null＝試玩或陪練觀戰） */
+/** 經營層觀戰的顯示資訊（null＝試玩） */
 let watching: WatchInfo | null = null;
 /** 跳回合略過的回合結果，下一個 frame 帶出去 */
 let skipped: NonNullable<ShooterFrame['skipped']>[number][] = [];
@@ -55,7 +53,7 @@ let rebuild: (() => ShooterDriver) | null = null;
 
 function begin(s: ShooterSetup): void {
   human = s.spectate ? null : new ShooterHumanController();
-  const build = (): ShooterDriver => new ShooterDriver(trialRunOptions(s, { practice, baseline: baselineBot }, human));
+  const build = (): ShooterDriver => new ShooterDriver(trialRunOptions(s, { baseline: baselineBot }, human));
   rebuild = s.spectate ? build : null;
   launch(s, build(), humanSeat(s) ?? 0, seatNames(s), null);
 }

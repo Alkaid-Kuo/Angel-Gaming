@@ -13,6 +13,7 @@ import { BuyMenu } from './buy.ts';
 import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
 import type { BotLevel, FromShooterWorker, Lineup, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
+import { DEFAULT_LEVEL } from './lineup.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
 import { seesAll } from './hudinfo.ts';
 import { BUY_CLOSED_NOTE, buyToggle } from './shop.ts';
@@ -31,9 +32,8 @@ let game: Game | null = null;
 /** 經營層觀戰的票（#watch 開啟時才有） */
 let ticket: WatchTicket | null = null;
 
-/** 下拉的選項（value：practice 或版本號） */
+/** 下拉的選項（value：版本號；預設 v3，陪練 Bot 已拿掉） */
 const LEVELS: readonly { readonly value: string; readonly name: string; readonly hint: string }[] = [
-  { value: 'practice', name: '陪練 v5', hint: '對照組：會買槍打包，但沒有指揮與輪轉；全陪練場反應最快（5 tick），和基準 Bot 混打時 8 tick' },
   { value: '1', name: '基準 v1', hint: '有指揮、喊話與輪轉，基準裡瞄準與反應最慢' },
   { value: '2', name: '基準 v2', hint: '屬性比角色基準低一級' },
   { value: '3', name: '基準 v3', hint: '角色基準屬性，中段選手' },
@@ -43,7 +43,7 @@ const LEVELS: readonly { readonly value: string; readonly name: string; readonly
 
 function levelOf(value: string | null): BotLevel {
   const v = Number(value);
-  return v === 1 || v === 2 || v === 3 || v === 4 || v === 5 ? { kind: 'baseline', version: v } : { kind: 'practice' };
+  return v === 1 || v === 2 || v === 3 || v === 4 || v === 5 ? { kind: 'baseline', version: v } : DEFAULT_LEVEL;
 }
 
 function selectedLineup(): Lineup {
@@ -54,7 +54,7 @@ function selectedLineup(): Lineup {
 function syncLineupCard(): void {
   const spectate = $<HTMLInputElement>('spectate').checked;
   const [teamName, enemyName] = spectate ? ['T 側（0～4）', 'CT 側（5～9）'] : ['我方隊友', '對手'];
-  const level = (id: string): (typeof LEVELS)[number] => LEVELS.find((l) => l.value === $<HTMLSelectElement>(id).value) ?? LEVELS[0];
+  const level = (id: string): (typeof LEVELS)[number] => LEVELS.find((l) => l.value === $<HTMLSelectElement>(id).value) ?? LEVELS[DEFAULT_LEVEL.version - 1];
   $('level-team-label').textContent = teamName;
   $('level-enemy-label').textContent = enemyName;
   $('level-team-hint').textContent = level('level-team').hint;
@@ -630,6 +630,7 @@ function init(): void {
   for (const id of ['level-team', 'level-enemy']) {
     const sel = $<HTMLSelectElement>(id);
     sel.innerHTML = LEVELS.map((l) => `<option value="${l.value}">${l.name}</option>`).join('');
+    sel.value = String(DEFAULT_LEVEL.version);
     sel.addEventListener('change', syncLineupCard);
   }
   $('spectate').addEventListener('change', syncLineupCard);
@@ -648,7 +649,7 @@ function init(): void {
   });
   // 頁面先出來，沙盤下一拍才烘（約半秒）
   if (new URLSearchParams(location.search).get('auto') === null) void fontsReady.then(() => setTimeout(paintBackdrop, 30));
-  // 除錯與自動驗收用：網址帶 ?auto=T|CT&seed=N 直接開局；&loadout=awp 讓雙方開局拿該武器（測狙擊鏡用）；&mate=3&foe=5 選基準版本（不帶＝陪練）；&map=代號 換地圖
+  // 除錯與自動驗收用：網址帶 ?auto=T|CT&seed=N 直接開局；&loadout=awp 讓雙方開局拿該武器（測狙擊鏡用）；&mate=3&foe=5 選基準版本（不帶＝v3）；&map=代號 換地圖
   const q = new URLSearchParams(location.search);
   const auto = q.get('auto');
   const loadout = q.get('loadout');
