@@ -184,8 +184,8 @@ export class Utility {
     return this.flashR;
   }
 
-  /** 閃光真正會致盲的距離：距離係數 1 − d／(2R) 到 2R 才歸零（座標單位） */
+  /** 閃光真正會致盲的距離：半徑外完全不致盲，半徑邊緣還有 flashEdgePct（座標單位） */
   get blindRange() {
-    return 2 * this.flashR;
+    return this.flashR;
   }
 }

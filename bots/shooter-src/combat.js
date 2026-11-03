@@ -529,6 +529,32 @@ export class Combat {
     return out;
   }
 
+  /** 聲音過了反應時間了沒 @param {import('./memory.js').Sector} snd */
+  heard(snd) {
+    if (this.soundSeen !== snd.tick) {
+      this.soundSeen = snd.tick;
+      this.soundWait = this.soundReact;
+    }
+    if (this.soundWait <= 0) return true;
+    this.soundWait--;
+    return false;
+  }
+
+  /**
+   * 挨打、或近處有聲音而來源在視野外：先轉過去（比行進預瞄優先，否則背身中彈也不回頭）
+   * 守位中只看挨打：近處腳步常在牆後，轉過去就沒人看入口了
+   * @param {import('./base.js').Observation} obs @param {boolean} holding @returns {import('./base.js').Pt | null}
+   */
+  alert(obs, holding) {
+    const me = obs.me;
+    const t = obs.tick;
+    const hurt = this.perc.lastHurt;
+    if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
+    const snd = this.perc.lastSound;
+    if (holding || snd === null || t - snd.tick >= this.tps || snd.r0 > 0 || Math.abs(adiff(snd.dir, me.facing)) <= this.rules.fovDeg / 2 || !this.heard(snd)) return null;
+    return { x: me.x + cosd(snd.dir) * 6 * UNIT, y: me.y + sind(snd.dir) * 6 * UNIT };
+  }
+
   /**
    * 沒看到敵人時看哪裡
    * @param {import('./base.js').Observation} obs
@@ -555,16 +581,9 @@ export class Combat {
     if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
     // 3. 敵方聲音（反應延遲後）
     const snd = this.perc.lastSound;
-    if (snd !== null && t - snd.tick < this.tps) {
-      if (this.soundSeen !== snd.tick) {
-        this.soundSeen = snd.tick;
-        this.soundWait = this.soundReact;
-      }
-      if (this.soundWait > 0) this.soundWait--;
-      else {
-        const r = clamp((snd.r0 + snd.r1) / 2, 4, 12);
-        return { x: me.x + cosd(snd.dir) * r * UNIT, y: me.y + sind(snd.dir) * r * UNIT };
-      }
+    if (snd !== null && t - snd.tick < this.tps && this.heard(snd)) {
+      const r = clamp((snd.r0 + snd.r1) / 2, 4, 12);
+      return { x: me.x + cosd(snd.dir) * r * UNIT, y: me.y + sind(snd.dir) * r * UNIT };
     }
     // 4. 記得的敵人（3 秒內、25 格內、信心 ≥ 50）
     for (const th of this.perc.threats(me.x, me.y, 50)) {

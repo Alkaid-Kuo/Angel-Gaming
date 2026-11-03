@@ -5,6 +5,7 @@ import type ShooterBaseline from '../bots/shooter-src/baseline.js';
 import type { TPlan } from '../bots/shooter-src/tactics.js';
 import { P, UNIT, dist } from '../bots/shooter-src/base.js';
 import { ENTRY } from '../bots/shooter-src/roles.js';
+import { parseEvent } from '../bots/shooter-src/tactics.js';
 import { ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
 import { shooterHelpers } from '../src/shooter/runner.ts';
 
@@ -156,5 +157,133 @@ describe('Bot 2.5：守包拉開、進點不排隊', () => {
     place(entry, 0.5);
     t.queueHeld = P.entryWaitMax * 30;
     expect(t.tooClose(obsOf(), 'B', ent)).toBe(false);
+  });
+});
+
+describe('Bot 2.5 第二批：背身與槍線', () => {
+  it('挨打時先轉向來源，近處聲音在視野外也轉；視野內的聲音不搶行進預瞄', () => {
+    const f = live(0);
+    const me = f.match.players[0];
+    const obs = f.match.observe(0);
+    f.bot.perc.update({ ...obs, me: { ...obs.me, hurt: [{ tick: obs.tick, dirDeg: 90 }] } });
+    const a = f.bot.combat.alert(obs, false);
+    expect(a?.y).toBeGreaterThan(me.y);
+    const g = live(0);
+    const o2 = g.match.observe(0);
+    const sound = (dirDeg: number): ReturnType<typeof g.match.observe>['sounds'][number] => ({ kind: 'footstep' as const, dirDeg, range: 'near' as const, weapon: null, friendly: false });
+    const facing = Math.round(o2.me.facing);
+    g.bot.perc.update({ ...o2, sounds: [sound(facing)] });
+    expect(g.bot.combat.alert(o2, false)).toBeNull();
+  });
+
+  it('隊友剛死的地方在前方：停下看著那裡，時間到就走，不無限等', () => {
+    const f = live(1);
+    const obs = f.match.observe(1);
+    const t = f.bot.tactics;
+    const me = obs.me;
+    f.match.players[1].grenades = [];
+    const clean = f.match.observe(1);
+    f.bot.nav.wps = [{ x: me.x + 10 * UNIT, y: me.y }];
+    f.bot.nav.wpIdx = 0;
+    f.bot.perc.anon.push({ x: me.x + 5 * UNIT, y: me.y, tick: obs.tick, conf: 50, src: 'death' });
+    const out = (): Parameters<typeof t.lineCheck>[1] => ({ goal: { x: me.x + 20 * UNIT, y: me.y }, route: null, hold: null, objective: false, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false });
+    const a = out();
+    t.lineCheck(clean, a);
+    expect(a.stop).toBe(true);
+    expect(a.look?.x).toBe(me.x + 5 * UNIT);
+    t.lineHeld = P.lineHold * 30;
+    const b = out();
+    t.lineCheck(clean, b);
+    expect(b.stop).toBe(false);
+  });
+
+  it('看到狙擊手的喊話解析得出來；狙擊線蓋住主力入口就換一條沒被蓋的路線', () => {
+    expect(parseEvent('E:awp 123 456')).toEqual({ kind: 'awp', x: 12300, y: 45600 });
+    const f = live(0);
+    const t = f.bot.tactics;
+    const obs = f.match.observe(0);
+    for (const s of ['A', 'B'] as const) {
+      const ent = t.entranceOf(s, 0);
+      if (ent === null) throw new Error('沒有入口');
+      const hold = bot2Hold(f, s, ent.portal);
+      if (hold === undefined) continue;
+      t.dodged = false;
+      t.awp = { x: hold.x, y: hold.y, tick: obs.tick };
+      const plan: TPlan = { kind: 'rush', site: s, r1: 0, r2: 0, exec: s };
+      const next = t.dodgeLine(obs, plan);
+      if (next === plan) continue;
+      expect(t.entranceOf(s, next.r1)?.portal).not.toBe(ent.portal);
+      expect(t.covers(t.awp, t.entranceOf(s, next.r1))).toBe(false);
+      return;
+    }
+    throw new Error('兩個點都換不了路');
+  });
+});
+
+function bot2Hold(f: { bot: ShooterBaseline }, s: 'A' | 'B', portal: number): ShooterBaseline['intel']['sites']['A']['holds'][number] | undefined {
+  const site = f.bot.intel.sites[s];
+  return site.holds.find((h) => site.entrances[h.entrance]?.portal === portal);
+}
+
+describe('Bot 2.5 第二批：道具與 eco', () => {
+  it('閃光致盲距離照引擎：半徑外不致盲', () => {
+    const f = live(0);
+    expect(f.bot.tactics.util.blindRange).toBe(f.bot.tactics.util.flashRadius);
+  });
+
+  it('eco 只打一個點：不抽 default、fake', () => {
+    const f = live(0);
+    const obs = f.match.observe(0);
+    f.bot.tactics.buyCall = 'eco';
+    const kinds = new Set(Array.from({ length: 200 }, () => f.bot.tactics.chooseT(obs).kind));
+    expect([...kinds].sort()).toEqual(['rush', 'split']);
+  });
+
+  it('CT：沒有壓力不丟；敵人接近入口就閃，兩人以上且手上有燃燒就燒', () => {
+    const f = live(5);
+    const t = f.bot.tactics;
+    const site = f.bot.intel.sites.A;
+    const hold = site.holds.find((h) => h.entrance >= 0) ?? site.holds[0];
+    const ent = site.entrances[hold.entrance];
+    const plan = t.chooseCT();
+    t.plan = plan;
+    f.match.players[5].grenades = ['flash', 'incendiary'];
+    f.match.teleport(5, hold.x, hold.y);
+    const obs = f.match.observe(5);
+    expect(t.ctUtility(obs, plan, 'A')).toBeNull();
+    const known = (id: number, dy: number): Parameters<typeof f.bot.perc.known.set>[1] => ({ id, x: ent.ox + (ent.ox - ent.ix), y: ent.oy + (ent.oy - ent.iy) + dy, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: obs.tick, seenTick: obs.tick, conf: 100, src: 'see' as const });
+    f.bot.perc.known.set(0, known(0, 0));
+    expect(t.ctUtility(obs, plan, 'A')?.kind).toBe('flash');
+    f.bot.perc.known.set(1, known(1, 500));
+    expect(t.ctUtility(obs, plan, 'A')?.kind).toBe('incendiary');
+  });
+});
+
+describe('Bot 2.5 第二批：站位', () => {
+  it('CT 守位依回合變化，全隊算出來一樣；變化後仍看得到原本的目標', () => {
+    const { bot } = make(5);
+    const seen = new Set<number>();
+    for (let round = 1; round <= 24; round++) {
+      const a = bot.tactics.pickHolds('A', 2, round);
+      expect(a).toEqual(make(6).bot.tactics.pickHolds('A', 2, round).map((s) => expect.objectContaining({ cell: s.cell })));
+      for (const s of a) {
+        const v = bot.tactics.varySpot(s, round);
+        seen.add(v.cell);
+        expect(bot.g.los(v.x, v.y, v.fx, v.fy)).toBe(true);
+      }
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(6);
+  });
+
+  it('T 待命位看的是看得到的走道，不是牆後的入口', () => {
+    const { bot } = make(0);
+    for (const s of ['A', 'B'] as const) {
+      bot.intel.routes.T[s].forEach((_, i) => {
+        for (const p of bot.tactics.stageSpots('T', s, i)) {
+          const ent = bot.intel.sites[s].entrances[p.entrance];
+          if (p.fx !== ent.x || p.fy !== ent.y) expect(bot.g.los(p.x, p.y, p.fx, p.fy)).toBe(true);
+        }
+      });
+    }
   });
 });

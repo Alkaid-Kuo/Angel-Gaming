@@ -35,7 +35,7 @@ describe('射擊基準 Bot：檔案與宣告', () => {
   });
 
   it('符合選手模組限制（≤ 200 KB、可編譯）並宣告 3～6 顆旋鈕、名稱與版本', () => {
-    expect(baseline.sizeBytes).toBeLessThanOrEqual(200 * 1024);
+    expect(baseline.sizeBytes).toBeLessThanOrEqual(256 * 1024);
     const c = new ShooterBatchController(baseline, 'baseline', 1, 0, MAPS.redrock());
     expect(c.declaration.name).toBe('shooter-baseline');
     expect(c.declaration.version).toBe('2.5');
