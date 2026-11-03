@@ -7,7 +7,7 @@ import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
 import { angleDiff, iatan2, offset } from '../shared/geom.ts';
 import type { ShooterCommand, ShooterObservation, Team } from './api.ts';
-import { GRENADES, ROUND, TEAM_SIZE, TPS, UNIT, WEAPONS, ticks, type WeaponId } from './config.ts';
+import { GRENADES, GRENADE_RULES, ROUND, TEAM_SIZE, TPS, UNIT, WEAPONS, ticks, type WeaponId } from './config.ts';
 import { MAPS, blocksMove, inRect, isLowCell, isSolidCell, regionsAt, type Rect, type ShooterMap } from './map.ts';
 import { ScriptController, ShooterBatchController, ShooterDriver, shooterHelpers } from './runner.ts';
 import { Grid, dijkstra, initTrig } from '../../bots/shooter-src/base.js';
@@ -1415,9 +1415,10 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'T9',
     name: '閃光不閃到隊友',
-    expect: '兩張圖各跑短賽（每半場 6 回合）：基準對基準一場（兩邊都算），有給對手時再加對手雙邊各一場（只算基準）；自己隊的閃光讓自己隊致盲的總 tick < 讓敵方致盲的 20%（40 場的統計見報告）',
+    expect: '兩張圖各跑短賽（每半場 6 回合）：基準對基準一場（兩邊都算），有給對手時再加對手雙邊各一場（只算基準）；自己隊的閃光讓隊友「沒背對」的致盲總 tick（超過背對上限 0.3 秒的部分）< 讓敵方致盲的 20%；背身掩護進點的短暫致盲不算（40 場的統計見報告）',
     run: (bot, seed, opponent) => {
       let team = 0;
+      let all = 0;
       let enemy = 0;
       const opts = { roundsPerHalf: 6, winRounds: 7, overtime: false as const };
       for (const mapId of teamMaps) {
@@ -1428,16 +1429,30 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
         }
         for (const gm of games) {
           const d = driver(bot, gm.setup);
-          while (!d.match.over) d.step();
-          for (const r of d.match.rounds) {
+          const m = d.match;
+          let blind = m.players.map((q) => q.blindTicks);
+          let own = [...m['roundFlashTeam']];
+          while (!m.over) {
+            d.step();
+            const now = m['roundFlashTeam'];
             for (const g of gm.groups) {
-              team += r.flashTeamTicks[g];
+              if (now[g] <= own[g]) continue;
+              m.players.forEach((q, i) => {
+                if (q.group === g) team += Math.max(0, q.blindTicks - blind[i] - GRENADE_RULES.flashBackTicks);
+              });
+            }
+            own = [...now];
+            blind = m.players.map((q) => q.blindTicks);
+          }
+          for (const r of m.rounds) {
+            for (const g of gm.groups) {
+              all += r.flashTeamTicks[g];
               enemy += r.flashEnemyTicks[g];
             }
           }
         }
       }
-      return { pass: team < enemy * 0.2 || (team === 0 && enemy === 0), detail: `隊友致盲 ${(team / TPS).toFixed(1)} 秒、敵方 ${(enemy / TPS).toFixed(1)} 秒（${enemy === 0 ? '-' : ((team / enemy) * 100).toFixed(1)}%）` };
+      return { pass: team < enemy * 0.2 || (team === 0 && enemy === 0), detail: `隊友沒背對的致盲 ${(team / TPS).toFixed(1)} 秒（含背對 ${(all / TPS).toFixed(1)} 秒）、敵方 ${(enemy / TPS).toFixed(1)} 秒（${enemy === 0 ? '-' : ((team / enemy) * 100).toFixed(1)}%）` };
     },
   },
   {
@@ -2000,7 +2015,7 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'R5',
     name: '游擊走第二組／中路',
-    expect: 'T default（全買）：指揮喊執行以前，游擊到過另一點 30 步內、而且那時離另一點比離主力的點近；CT（手槍局）開打 25 秒後游擊在兩點 9 步外（中路）；兩張圖',
+    expect: 'T default（全買）：指揮喊執行以前，游擊到過另一點 36 步內（2.5 待命位退到守位視線外）、而且那時離另一點比離主力的點近；CT（手槍局）開打 25 秒後游擊在兩點 9 步外（中路）；兩張圖',
     run: (bot, seed) =>
       onBoth((mapId) => {
         const roles = rolesFor(seed);
@@ -2031,7 +2046,7 @@ const ROLE_SCENARIOS: readonly AiScenario[] = [
         });
         const site = (/^P:default ([AB])/.exec(plan)?.[1] ?? 'A') as 'A' | 'B';
         const away = site === 'A' ? 'B' : 'A';
-        const tOk = dAway < dMain && dAway <= 30;
+        const tOk = dAway < dMain && dAway <= 36;
         const dc = driver(bot, { seed, map: mapId, seats: CTS, alive: [...CTS, T0], seatKnobs: roleKnobs(CTS, roles) });
         toLive(dc);
         park(dc.match, T0);

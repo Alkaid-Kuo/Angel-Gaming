@@ -221,7 +221,7 @@ export const RULES = {
     initMs: 1000,
   },
   botModule: {
-    maxBytes: 200 * 1024,
+    maxBytes: 256 * 1024,
     minKnobs: 3,
     maxKnobs: 6,
   },

@@ -13,6 +13,8 @@ export class Cooperation {
     this.alive = new Map();
     /** @type {Map<number, { x: number, y: number, facing: number, tick: number, dead: boolean }>} */
     this.cues = new Map();
+    /** 這次決策接手了補槍／跟進 */
+    this.acted = false;
   }
   reset() { this.alive.clear(); this.cues.clear(); }
   /** @param {import('./base.js').Observation} obs */
@@ -27,6 +29,7 @@ export class Cooperation {
   /** @param {import('./base.js').Observation} obs @param {import('./tactics.js').TacOut} out */
   apply(obs, out) {
     const me = obs.me;
+    this.acted = false;
     if (obs.round.phase === 'freeze' || obs.enemiesAlive === 0 || me.blindTicks > 0 || out.objective || out.commit || out.urgent || out.stop || obs.enemies.length > 0) return;
     if (out.task === 'execute' || out.task === 'retake') {
       const cues = [...this.cues].sort((a, b) => b[1].tick - a[1].tick || a[0] - b[0]);
@@ -65,6 +68,7 @@ export class Cooperation {
           out.walk = false;
           out.allowPeek = false;
           out.role += cue.dead ? '・補槍接替' : '・跟進掩護';
+          this.acted = true;
           return;
         }
       }

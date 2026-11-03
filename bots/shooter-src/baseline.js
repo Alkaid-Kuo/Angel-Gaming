@@ -48,7 +48,7 @@ export default class ShooterBaseline {
   declare() {
     return {
       name: 'shooter-baseline',
-      version: '2.4.3',
+      version: '2.5',
       style: '基準',
       knobs: [
         { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
@@ -164,10 +164,12 @@ export default class ShooterBaseline {
     }
     // ── 瞄準 ──
     const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
-    const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
+    const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : this.combat.alert(obs, holding) ?? check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
     if (aim !== null && (Math.abs(aim.x - me.x) > 50 || Math.abs(aim.y - me.y) > 50)) out.push({ type: 'aim', x: Math.round(aim.x), y: Math.round(aim.y) });
     // ── 開火與武器 ──
-    out.push({ type: 'fire', on: (fight.fire || (tac.noise && !fight.engaged)) && !tac.objective && !tac.hard });
+    // 所有開火分支（交戰、佯攻）都過同一道友軍檢查
+    const shoot = (fight.fire || (tac.noise && !fight.engaged)) && !tac.objective && !tac.hard;
+    out.push({ type: 'fire', on: shoot && this.combat.lineClear(obs, aim === null ? [] : [aim]) });
     out.push(...fight.cmds.filter((c) => !(tac.escape || (tac.commit && !fight.engaged)) || c.type !== 'scope' || !c.on));
     if (tac.commit && me.scoped && !fight.engaged) out.push({ type: 'scope', on: false });
     if (!fight.engaged) out.push(...this.combat.upkeep(obs, holding && !moving));

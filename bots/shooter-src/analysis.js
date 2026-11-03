@@ -446,6 +446,16 @@ export class MapIntel {
       for (const f of found) if (overlap(first.regions, f.regions) < overlap(first.regions, pick.regions)) pick = f;
       out.push({ site: id, team, regions: pick.regions, regionSet: new Set(pick.regions), portals: pick.portals, points: pick.points, length: Math.round(pick.length) });
     }
+    // T：區域重疊率看不出入口不同，被濾掉的入口補回最短的一條（排在後面，前面的路線序號不變）
+    if (team === 'T') {
+      const kept = new Set(out.map((r) => r.portals[r.portals.length - 1]));
+      for (const f of found) {
+        const last = f.portals[f.portals.length - 1];
+        if (kept.has(last)) continue;
+        kept.add(last);
+        out.push({ site: id, team, regions: f.regions, regionSet: new Set(f.regions), portals: f.portals, points: f.points, length: Math.round(f.length) });
+      }
+    }
     return out;
   }
 }

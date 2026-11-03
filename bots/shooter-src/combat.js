@@ -336,17 +336,7 @@ export class Combat {
       return out;
     }
     // 隊友在彈道上（自己在走的話，加上反應延遲內會走的距離：開火時位置已經變了）
-    let block = false;
-    const drift = (Math.abs(me.vx) + Math.abs(me.vy)) * this.rules.reactionTicks;
-    for (const m of obs.teammates) {
-      if (!m.alive) continue;
-      // 到瞄準點與到敵人本人兩條線都要避開隊友（瞄準點還帶著誤差）
-      for (const q of [aim, e]) {
-        const s = segDist(m.x, m.y, me.x, me.y, q.x, q.y);
-        if (s.t > 0 && s.t < 1 && s.d < this.friendClear + drift) block = true;
-      }
-    }
-    if (block) {
+    if (!this.lineClear(obs, [aim, e])) {
       this.blocked++;
       out.why = '隊友擋線';
       if (this.blocked >= 2 && !ctx.holding) {
@@ -389,6 +379,30 @@ export class Combat {
     out.fire = ok;
     out.why = ok ? '開火' : '等散佈';
     return this.finishMove(obs, out, e, ok, d, ctx);
+  }
+
+  /**
+   * 開火線上沒有隊友：到每個目標點的線，加上實際朝向（子彈走 facing，瞄準點可能還沒轉到）。
+   * 淨空寬度＝固定值＋自己的漂移（反應延遲內會走的距離）＋隨距離放大的散佈；目標後方也要看（友傷多半是沒打中、飛到後面的隊友）
+   * @param {import('./base.js').Observation} obs @param {import('./base.js').Pt[]} pts
+   */
+  lineClear(obs, pts) {
+    const me = obs.me;
+    const drift = (Math.abs(me.vx) + Math.abs(me.vy)) * this.rules.reactionTicks;
+    const far = Math.max(...pts.map((q) => dist(me.x, me.y, q.x, q.y)), 8 * UNIT);
+    const lines = [...pts, { x: me.x + cosd(me.facing) * far, y: me.y + sind(me.facing) * far }];
+    for (const m of obs.teammates) {
+      if (!m.alive) continue;
+      for (const q of lines) {
+        const d = Math.max(dist(me.x, me.y, q.x, q.y), 1);
+        const reach = d + P.friendBehind * UNIT;
+        const s = segDist(m.x, m.y, me.x, me.y, me.x + ((q.x - me.x) * reach) / d, me.y + ((q.y - me.y) * reach) / d);
+        if (s.t <= 0 || s.t >= 1) continue;
+        const along = s.t * reach;
+        if (along <= d ? s.d < this.friendClear + drift + along * P.friendSpread : s.d < P.friendBehindClear * UNIT && this.g.los(me.x, me.y, m.x, m.y)) return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -515,6 +529,32 @@ export class Combat {
     return out;
   }
 
+  /** 聲音過了反應時間了沒 @param {import('./memory.js').Sector} snd */
+  heard(snd) {
+    if (this.soundSeen !== snd.tick) {
+      this.soundSeen = snd.tick;
+      this.soundWait = this.soundReact;
+    }
+    if (this.soundWait <= 0) return true;
+    this.soundWait--;
+    return false;
+  }
+
+  /**
+   * 挨打、或近處有聲音而來源在視野外：先轉過去（比行進預瞄優先，否則背身中彈也不回頭）
+   * 守位中只看挨打：近處腳步常在牆後，轉過去就沒人看入口了
+   * @param {import('./base.js').Observation} obs @param {boolean} holding @returns {import('./base.js').Pt | null}
+   */
+  alert(obs, holding) {
+    const me = obs.me;
+    const t = obs.tick;
+    const hurt = this.perc.lastHurt;
+    if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
+    const snd = this.perc.lastSound;
+    if (holding || snd === null || t - snd.tick >= this.tps || snd.r0 > 0 || Math.abs(adiff(snd.dir, me.facing)) <= this.rules.fovDeg / 2 || !this.heard(snd)) return null;
+    return { x: me.x + cosd(snd.dir) * 6 * UNIT, y: me.y + sind(snd.dir) * 6 * UNIT };
+  }
+
   /**
    * 沒看到敵人時看哪裡
    * @param {import('./base.js').Observation} obs
@@ -541,16 +581,9 @@ export class Combat {
     if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
     // 3. 敵方聲音（反應延遲後）
     const snd = this.perc.lastSound;
-    if (snd !== null && t - snd.tick < this.tps) {
-      if (this.soundSeen !== snd.tick) {
-        this.soundSeen = snd.tick;
-        this.soundWait = this.soundReact;
-      }
-      if (this.soundWait > 0) this.soundWait--;
-      else {
-        const r = clamp((snd.r0 + snd.r1) / 2, 4, 12);
-        return { x: me.x + cosd(snd.dir) * r * UNIT, y: me.y + sind(snd.dir) * r * UNIT };
-      }
+    if (snd !== null && t - snd.tick < this.tps && this.heard(snd)) {
+      const r = clamp((snd.r0 + snd.r1) / 2, 4, 12);
+      return { x: me.x + cosd(snd.dir) * r * UNIT, y: me.y + sind(snd.dir) * r * UNIT };
     }
     // 4. 記得的敵人（3 秒內、25 格內、信心 ≥ 50）
     for (const th of this.perc.threats(me.x, me.y, 50)) {
