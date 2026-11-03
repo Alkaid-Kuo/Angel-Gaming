@@ -1,5 +1,5 @@
-// CS 射擊試玩 Bot 等級階梯（Bot 2.2 任務書）：走試玩頁同一條路（trialRunOptions：MR6、觀戰 3 秒、陪練混打 8 tick），陪練對基準 v1～v5，種子互換側。
-// 用法：node scripts/shooter-trial-ladder.ts [--games 12] [--seed 1] [--jobs 10] [--bot bots/shooter-baseline.js]
+// CS 射擊試玩 Bot 等級階梯：走試玩頁同一條路（trialRunOptions：MR6、觀戰 3 秒），基準 v1～v5 對固定版本的基準（預設 v3，試玩的預設對手），種子互換側。
+// 用法：node scripts/shooter-trial-ladder.ts [--games 12] [--seed 1] [--jobs 10] [--foe 3] [--bot bots/shooter-baseline.js]
 import { readFileSync } from 'node:fs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { compileBot } from '../src/sandbox/compile.ts';
@@ -10,19 +10,18 @@ import { arg } from './shooter-lab.ts';
 
 interface Job {
   readonly version: number;
+  readonly foe: number;
   readonly seed: number;
   /** 基準 Bot 在 0～4 號 */
   readonly baseFirst: boolean;
   readonly bot: string;
 }
 
-const PRACTICE: BotLevel = { kind: 'practice' };
-
 function play(j: Job): { version: number; won: number; rounds: number; baseRounds: number; exceptions: number } {
-  const practice = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'shooter-practice.js');
   const baseline = compileBot(readFileSync(j.bot, 'utf8'), 'shooter-baseline.js');
   const base: BotLevel = { kind: 'baseline', version: j.version as 1 | 2 | 3 | 4 | 5 };
-  const o = trialRunOptions({ team: 'T', seed: j.seed, spectate: true, lineup: j.baseFirst ? { team: base, enemy: PRACTICE } : { team: PRACTICE, enemy: base } }, { practice, baseline: () => baseline }, null);
+  const foe: BotLevel = { kind: 'baseline', version: j.foe as 1 | 2 | 3 | 4 | 5 };
+  const o = trialRunOptions({ team: 'T', seed: j.seed, spectate: true, lineup: j.baseFirst ? { team: base, enemy: foe } : { team: foe, enemy: base } }, { baseline: () => baseline }, null);
   const run = runShooterMatch({ ...o, record: false });
   const g = j.baseFirst ? 0 : 1;
   const r = run.result;
@@ -36,8 +35,9 @@ if (!isMainThread && (workerData as { ladder?: boolean } | null)?.ladder === tru
   const seed = Number(arg('seed', '1'));
   const jobsN = Number(arg('jobs', '10'));
   const bot = arg('bot', 'bots/shooter-baseline.js');
+  const foe = Number(arg('foe', '3'));
   const list: Job[] = [];
-  for (let v = 1; v <= 5; v++) for (let i = 0; i < games; i++) list.push({ version: v, seed: seed + Math.floor(i / 2), baseFirst: i % 2 === 0, bot });
+  for (let v = 1; v <= 5; v++) for (let i = 0; i < games; i++) list.push({ version: v, foe, seed: seed + Math.floor(i / 2), baseFirst: i % 2 === 0, bot });
   const buckets: Job[][] = Array.from({ length: Math.min(jobsN, list.length) }, () => []);
   list.forEach((x, k) => buckets[k % buckets.length].push(x));
   const out: ReturnType<typeof play>[] = [];
@@ -52,6 +52,6 @@ if (!isMainThread && (workerData as { ladder?: boolean } | null)?.ladder === tru
     const w = gs.reduce((s, x) => s + x.won, 0);
     const br = gs.reduce((s, x) => s + x.baseRounds, 0);
     const rr = gs.reduce((s, x) => s + x.rounds, 0);
-    console.log(`基準 v${v} 對陪練：${w} 勝 ${gs.length - w} 敗（${((100 * w) / gs.length).toFixed(1)}%）；回合 ${((100 * br) / rr).toFixed(1)}%；例外 ${gs.reduce((s, x) => s + x.exceptions, 0)}`);
+    console.log(`基準 v${v} 對基準 v${foe}：${w} 勝 ${gs.length - w} 敗（${((100 * w) / gs.length).toFixed(1)}%）；回合 ${((100 * br) / rr).toFixed(1)}%；例外 ${gs.reduce((s, x) => s + x.exceptions, 0)}`);
   }
 }

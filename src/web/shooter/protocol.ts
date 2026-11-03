@@ -6,8 +6,8 @@ import type { MatchOutcome, MatchRequest } from '../../manage/gateway.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
 import type { GrenadeInfo, MapInfo, RoundEndReason, RulesInfo, ShooterCommand, ShooterObservation, SoundEvent, Team, WeaponInfo, WeaponId, GrenadeId } from '../../shooter/api.ts';
 
-/** 一隊 Bot 的等級：陪練 v5（對照組），或基準 Bot 的版本 1～5 */
-export type BotLevel = { readonly kind: 'practice' } | { readonly kind: 'baseline'; readonly version: 1 | 2 | 3 | 4 | 5 };
+/** 一隊 Bot 的等級：基準 Bot 的版本 1～5（陪練 Bot 已從試玩拿掉，只留給測試與情境當對手） */
+export type BotLevel = { readonly kind: 'baseline'; readonly version: 1 | 2 | 3 | 4 | 5 };
 
 /** 試玩的兩隊等級。team：人類那一隊的隊友、enemy：對手；觀戰模式 team 是 T 側（0～4）、enemy 是 CT 側（5～9） */
 export interface Lineup {
@@ -21,7 +21,7 @@ export interface ShooterSetup {
   readonly seed: number;
   /** 觀戰模式：不參賽，10 隻 Bot 互打，畫面讀引擎全狀態 */
   readonly spectate: boolean;
-  /** 沒帶＝兩邊陪練 */
+  /** 沒帶＝兩邊基準 v3 */
   readonly lineup?: Lineup;
   /** 地圖（試玩頁選；沒給用預設地圖） */
   readonly mapId?: string;
@@ -188,7 +188,7 @@ export interface ShooterSummary {
   readonly outcome?: MatchOutcome;
 }
 
-/** 下載的回放：試玩有基準 Bot 座位時，頂層多一欄依 playerId 的等級（「你」「陪練 v5」「基準 v3」）；重播用不到 */
+/** 下載的回放：頂層多一欄依 playerId 的等級（「你」「基準 v3」）；重播用不到 */
 export type TrialReplay = ShooterReplay & { readonly lineup?: readonly string[] };
 
 export type FromShooterWorker =
