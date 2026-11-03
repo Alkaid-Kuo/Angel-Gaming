@@ -239,40 +239,20 @@ describe('Bot 2.5 第二批：道具與 eco', () => {
     expect([...kinds].sort()).toEqual(['rush', 'split']);
   });
 
-  it('CT：沒有壓力不丟；敵人接近入口就閃，兩人以上且手上有燃燒就燒', () => {
-    const f = live(5);
-    const t = f.bot.tactics;
-    const site = f.bot.intel.sites.A;
-    const hold = site.holds.find((h) => h.entrance >= 0) ?? site.holds[0];
-    const ent = site.entrances[hold.entrance];
-    const plan = t.chooseCT();
-    t.plan = plan;
-    f.match.players[5].grenades = ['flash', 'incendiary'];
-    f.match.teleport(5, hold.x, hold.y);
-    const obs = f.match.observe(5);
-    expect(t.ctUtility(obs, plan, 'A')).toBeNull();
-    const known = (id: number, dy: number): Parameters<typeof f.bot.perc.known.set>[1] => ({ id, x: ent.ox + (ent.ox - ent.ix), y: ent.oy + (ent.oy - ent.iy) + dy, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: obs.tick, seenTick: obs.tick, conf: 100, src: 'see' as const });
-    f.bot.perc.known.set(0, known(0, 0));
-    expect(t.ctUtility(obs, plan, 'A')?.kind).toBe('flash');
-    f.bot.perc.known.set(1, known(1, 500));
-    expect(t.ctUtility(obs, plan, 'A')?.kind).toBe('incendiary');
-  });
 });
 
 describe('Bot 2.5 第二批：站位', () => {
-  it('CT 守位依回合變化，全隊算出來一樣；變化後仍看得到原本的目標', () => {
+  it('中路守位依回合小幅變化，變化後仍看得到原本的目標', () => {
     const { bot } = make(5);
     const seen = new Set<number>();
     for (let round = 1; round <= 24; round++) {
-      const a = bot.tactics.pickHolds('A', 2, round);
-      expect(a).toEqual(make(6).bot.tactics.pickHolds('A', 2, round).map((s) => expect.objectContaining({ cell: s.cell })));
-      for (const s of a) {
+      for (const s of bot.tactics.midSpots()) {
         const v = bot.tactics.varySpot(s, round);
         seen.add(v.cell);
         expect(bot.g.los(v.x, v.y, v.fx, v.fy)).toBe(true);
       }
     }
-    expect(seen.size).toBeGreaterThanOrEqual(6);
+    expect(seen.size).toBeGreaterThanOrEqual(4);
   });
 
   it('T 待命位看的是看得到的走道，不是牆後的入口', () => {
@@ -284,6 +264,161 @@ describe('Bot 2.5 第二批：站位', () => {
           if (p.fx !== ent.x || p.fy !== ent.y) expect(bot.g.los(p.x, p.y, p.fx, p.fy)).toBe(true);
         }
       });
+    }
+  });
+});
+
+describe('Bot 2.5 第三批：經濟', () => {
+  /** CT（5～9 號）每人同樣的錢、上回合買法、輸過一場（下回合補償 1900） */
+  const call = (money: number, prev: 'eco' | 'force' | null): string => {
+    const f = live(5);
+    for (let k = 5; k < 10; k++) f.match.players[k].money = money;
+    const e = f.bot.tactics.econ;
+    e.roundInHalf = 5;
+    e.lastWon = false;
+    e.lossLevel = 1;
+    e.prevCall = prev;
+    return e.teamCall(f.match.observe(5));
+  };
+
+  it('CT 全買門檻：拆彈器算兩人份、閃光算一半人，每人 4100 就全買（舊算法要 4350）', () => {
+    expect(call(4100, null)).toBe('full');
+  });
+
+  it('連續 eco 最多一回合：上回合 eco，平均還有 1500 就 force；不到 1500 才再 eco', () => {
+    expect(call(2200, null)).toBe('eco');
+    expect(call(2200, 'eco')).toBe('force');
+    expect(call(1600, 'eco')).toBe('force');
+    expect(call(1200, 'eco')).toBe('eco');
+  });
+
+  it('平均 3500 以上（差一點全買）直接 force，不存錢', () => {
+    expect(call(3600, null)).toBe('force');
+  });
+});
+
+describe('Bot 2.5 第三批：CT 守法', () => {
+  it.each(['redrock', 'dust'])('%s：深位看得到 T 主要兩個入口、都在閃光半徑外，兩個入口同時在視野內', (mapId) => {
+    const { bot } = make(5, mapId);
+    const R = bot.tactics.util.flashRadius;
+    for (const s of ['A', 'B'] as const) {
+      const deep = bot.tactics.deepSpots(s);
+      expect(deep.length).toBeGreaterThanOrEqual(2);
+      const top = bot.intel.sites[s].entrances.slice(0, 2);
+      for (const d of deep) {
+        for (const e of top) {
+          expect(bot.g.los(d.x, d.y, e.x, e.y)).toBe(true);
+          expect(dist(d.x, d.y, e.x, e.y)).toBeGreaterThan(R);
+        }
+      }
+    }
+  });
+
+  it('兩人守點都在深位、依回合換組合，全隊算出來一樣', () => {
+    const { bot } = make(5);
+    const seen = new Set<number>();
+    for (let round = 1; round <= 24; round++) {
+      const a = bot.tactics.pickHolds('A', 2, round);
+      expect(a.map((s) => s.cell)).toEqual(make(6).bot.tactics.pickHolds('A', 2, round).map((s) => s.cell));
+      for (const s of a) {
+        expect(bot.tactics.deepSpots('A')).toContain(s);
+        seen.add(s.cell);
+      }
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('道具先拖時間：入口外有人先燒，火快熄或兩人以上再封煙；閃光要有隊友看著入口才丟', () => {
+    const f = live(5);
+    const t = f.bot.tactics;
+    const site = f.bot.intel.sites.A;
+    const ent = site.entrances[0];
+    const hold = site.holds.find((h) => h.entrance === 0) ?? site.holds[0];
+    const plan = t.chooseCT();
+    t.plan = plan;
+    f.match.teleport(5, hold.x, hold.y);
+    const obs = f.match.observe(5);
+    const known = (id: number, dy: number): Parameters<typeof f.bot.perc.known.set>[1] => ({ id, x: ent.ox + (ent.ox - ent.ix), y: ent.oy + (ent.oy - ent.iy) + dy, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: obs.tick, seenTick: obs.tick, conf: 100, src: 'see' as const });
+    f.match.players[5].grenades = ['incendiary', 'smoke'];
+    const o1 = f.match.observe(5);
+    expect(t.ctUtility(o1, plan, 'A')).toBeNull();
+    f.bot.perc.known.set(0, known(0, 0));
+    const burn = t.ctUtility(o1, plan, 'A');
+    expect(burn?.kind).toBe('incendiary');
+    t.burns.push({ x: burn?.x ?? 0, y: burn?.y ?? 0, until: obs.tick + 6 * 30 });
+    expect(t.ctUtility(o1, plan, 'A')).toBeNull();
+    f.bot.perc.known.set(1, known(1, 500));
+    expect(t.ctUtility(o1, plan, 'A')?.kind).toBe('smoke');
+    // 閃光：只有一個人在入口外、沒有隊友看著入口 → 不丟；隊友站到深位看著入口 → 配對閃
+    f.bot.perc.known.delete(1);
+    t.burns = [];
+    f.match.players[5].grenades = ['flash'];
+    const lay = t.ctLayout(obs, plan);
+    const mate = [...lay].find(([id, q]) => id !== 5 && q.site === 'A')?.[0];
+    if (mate === undefined) throw new Error('A 沒有其他守點的人');
+    f.match.teleport(mate, 0, 0);
+    expect(t.ctUtility(f.match.observe(5), plan, 'A')).toBeNull();
+    const deep = t.deepSpots('A')[0];
+    f.match.teleport(mate, deep.x, deep.y);
+    expect(t.ctUtility(f.match.observe(5), plan, 'A')?.why).toBe('配對閃');
+  });
+
+  it('放棄點：三人以上已經進點、點上不超過兩人就退到回防位；下包後交給回防', () => {
+    const f = live(5);
+    const t = f.bot.tactics;
+    const plan = t.chooseCT();
+    t.plan = plan;
+    const site = f.bot.intel.sites.A;
+    const obs = f.match.observe(5);
+    expect(t.giveUp(obs, plan, 'A')).toBeNull();
+    for (let id = 0; id < 3; id++) f.bot.perc.known.set(id, { id, x: site.cx + id * 600, y: site.cy, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: obs.tick, seenTick: obs.tick, conf: 100, src: 'see' as const });
+    expect(t.giveUp(obs, plan, 'A')).toBe('A');
+    const out: Parameters<typeof t.ctGoal>[1] = { goal: null, route: null, hold: null, objective: false, allowPeek: true, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
+    t.ctGoal(obs, out);
+    expect(out.role).toBe('退守 A');
+    expect(t.fallSpots('A').some((s) => s.x === out.goal?.x && s.y === out.goal?.y)).toBe(true);
+    f.match.bomb.state = 'planted';
+    expect(t.giveUp(f.match.observe(5), plan, 'A')).toBeNull();
+  });
+
+  it('退守位在包點裡看不到（入口內側、包點中心都沒有視線），不和看得到入口的回防集結位共用', () => {
+    const { bot } = make(5);
+    for (const s of ['A', 'B'] as const) {
+      const site = bot.intel.sites[s];
+      for (const p of bot.tactics.fallSpots(s)) {
+        expect(site.regions.has(bot.intel.region[p.cell])).toBe(false);
+        expect(bot.g.los(p.x, p.y, site.cx, site.cy)).toBe(false);
+      }
+    }
+  });
+
+  it.each(['redrock', 'dust'])('%s：探點位置 CT 來得及到、T 晚到，看得到 T 來的方向', (mapId) => {
+    const { bot } = make(5, mapId);
+    const list = bot.tactics.probeSpots();
+    expect(list.length).toBeGreaterThan(0);
+    for (const p of list) {
+      expect(bot.intel.distSpawn.CT[p.cell] / 10 / P.routeSpeed).toBeLessThanOrEqual(P.probeTime - 3);
+      expect(bot.g.los(p.x, p.y, p.fx, p.fy)).toBe(true);
+    }
+  });
+
+  it('看到對面在包點附近封煙只提高警覺：當成 1 人，單獨不夠輪轉', () => {
+    expect(P.smokeAlarmN).toBeLessThan(P.rotateHeat);
+  });
+});
+
+describe('Bot 2.5 第三批：T 閃光照得到深位', () => {
+  it('主要入口的爆點候選裡，有在深位閃光半徑內、看得到的點', () => {
+    const f = live(0);
+    const t = f.bot.tactics;
+    const obs = f.match.observe(0);
+    const R = t.util.flashRadius;
+    for (const s of ['A', 'B'] as const) {
+      const e = f.bot.intel.sites[s].entrances[0];
+      t.flashKey = '';
+      t.flashPoint(obs, s, e, 2);
+      const deep = t.deepSpots(s);
+      expect(t.flashList.some((c) => deep.some((d) => dist(c.x, c.y, d.x, d.y) < R && f.bot.g.los(c.x, c.y, d.x, d.y)))).toBe(true);
     }
   });
 });

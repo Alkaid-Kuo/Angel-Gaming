@@ -57,6 +57,10 @@ export class Economy {
     this.prevMine = 0;
     this.prevTheirs = 0;
     this.lastRound = -1;
+    /** 本回合與上回合全隊的買法（連續 eco 最多一回合） @type {BuyCall | null} */
+    this.call = null;
+    /** @type {BuyCall | null} */
+    this.prevCall = null;
   }
 
   /** @param {string} id */
@@ -69,6 +73,8 @@ export class Economy {
     const r = obs.round;
     if (r.number === this.lastRound) return;
     this.lastRound = r.number;
+    this.prevCall = this.call;
+    this.call = null;
     const mine = obs.me.team === 'T' ? r.scoreT : r.scoreCT;
     const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
     if (r.half !== this.half) {
@@ -77,6 +83,7 @@ export class Economy {
       this.lossLevel = 0;
       this.enemyLevel = 0;
       this.lastWon = null;
+      this.prevCall = null;
     } else {
       this.roundInHalf++;
       const ladder = this.data.rules.economy.lossBonus.length;
@@ -106,6 +113,17 @@ export class Economy {
     return need - money;
   }
 
+  /**
+   * 全隊買法用的門檻：CT 的拆彈器只算兩人份、閃光算一半人（平攤到每人），不要求每個人都帶齊
+   * @param {number} money @param {import('./base.js').WeaponId | null} primary @param {import('./base.js').Team} team @param {number} n
+   */
+  teamShort(money, primary, team, n) {
+    if (team === 'T') return this.shortOf(money, primary, team);
+    const r = this.data.rules;
+    const extra = (Math.min(2, n) * r.kitPrice + Math.ceil(n / 2) * this.cost('flash')) / n;
+    return (this.hasGood(primary) ? 0 : this.cost('m4')) + r.armorPrice + extra - money;
+  }
+
   /** @param {import('./base.js').WeaponId | string | null} primary */
   hasGood(primary) {
     return primary !== null && this.cost(primary) >= this.cost('smg') + 1000;
@@ -117,8 +135,9 @@ export class Economy {
   }
 
   /**
-   * 指揮決定全隊買法：全隊有 4 人買得起全買 → full；這回合 eco 下回合就能全買 → eco；
-   * 手槍局、對方賽點、半場最後一回合、輸手槍局後的第二回合 → force；手槍局贏了的第二回合、或買不起全買但夠衝鋒槍 → half
+   * 指揮決定全隊買法：全隊有 4 人買得起全買 → full；手槍局、對方賽點、半場最後一回合、輸手槍局後的第二回合 → force；
+   * 手槍局贏了的第二回合 → half；平均夠甲＋衝鋒槍 → force（不為了下回合全買連續 eco）；
+   * 其他 eco，但上回合已經 eco 而平均還有 P.ecoFloor 就 force（連續 eco 最多一回合）
    * @param {import('./base.js').Observation} obs @returns {BuyCall}
    */
   teamCall(obs) {
@@ -127,12 +146,12 @@ export class Economy {
     if (this.pistolRound(obs)) return 'force';
     // 隊友的主武器看不到（只看得到手上的武器）：手上拿步槍或狙擊槍的算有好槍
     const people = [{ money: me.money, primary: me.loadout.primary }, ...obs.teammates.map((m) => ({ money: m.money, primary: this.hasGood(m.weapon) ? m.weapon : null }))];
-    const can = people.filter((p) => this.shortOf(p.money, p.primary, team) <= 0).length;
     const n = people.length;
+    const can = people.filter((p) => this.teamShort(p.money, p.primary, team, n) <= 0).length;
     if (can >= n - 1 || (this.lastWon === true && this.enemyLevel >= 2 && can >= n - 2)) return 'full';
     const ladder = this.data.rules.economy.lossBonus;
     const nextPay = ladder[Math.min(ladder.length, this.lossLevel + 1) - 1];
-    const canNext = people.filter((p) => this.shortOf(p.money + nextPay, p.primary, team) <= 0).length;
+    const canNext = people.filter((p) => this.teamShort(p.money + nextPay, p.primary, team, n) <= 0).length;
     const r = obs.round;
     const theirs = team === 'T' ? r.scoreCT : r.scoreT;
     const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
@@ -142,9 +161,12 @@ export class Economy {
     if (critical && avg >= half * 0.8) return 'force';
     if (this.roundInHalf === 2 && this.lastWon === true && avg >= half) return 'half';
     if (this.roundInHalf === 2 && this.lastWon === false) return /** @type {BuyCall} */ (P.afterPistol);
-    if (canNext >= n - 1) return 'eco';
-    if (this.opts.economy === 2 && avg >= half) return 'force';
-    if (this.opts.economy !== 1 && avg >= half + 600) return 'half';
+    // 經濟風格只移動 force 的門檻：保守多存一點、積極差一點也 force
+    const forceAt = this.opts.economy === 1 ? half + 600 : this.opts.economy === 2 ? half * 0.8 : half;
+    // P.ecoSave：這回合 eco 下回合就能全買、上回合也不是 eco → 存一回合（只存一次）
+    const save = P.ecoSave && avg < P.ecoSaveMax && canNext >= n - 1 && this.prevCall !== 'eco';
+    if (avg >= forceAt && !save) return 'force';
+    if (this.prevCall === 'eco' && avg >= P.ecoFloor) return 'force';
     return 'eco';
   }
 
