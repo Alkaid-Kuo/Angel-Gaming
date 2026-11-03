@@ -19,10 +19,12 @@ const SPEC = new Map<string, PortraitSpec>(PORTRAITS.map((p) => [p.id, p]));
 
 let clipSeq = 0;
 
-/** 圓形頭像：頭像圖放大 1.3 倍讓臉佔滿圓，墨色漸層底（不比介面亮）；ring 有給就畫外框（攻防戰的隊色） */
-export function portraitSvg(portraitId: string, size = 96, ring?: string): string {
+/** 頭像：頭像圖放大 1.3 倍讓臉佔滿，墨色漸層底（不比介面亮）；ring 有給就畫外框（攻防戰的隊色）；square＝方形（攻防戰頂部計分板） */
+export function portraitSvg(portraitId: string, size = 96, ring?: string, square = false): string {
   const clip = `pfc${++clipSeq}`;
-  return `<svg class="avatar pf" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="${clip}"><circle cx="50" cy="50" r="50"/></clipPath><radialGradient id="${clip}g" cx="50%" cy="35%" r="75%"><stop offset="0" stop-color="#3a4458"/><stop offset="1" stop-color="#151a24"/></radialGradient></defs><g clip-path="url(#${clip})"><rect width="100" height="100" fill="url(#${clip}g)"/><image href="${avatarUrl(portraitId)}" x="-15" y="-11" width="130" height="130" preserveAspectRatio="xMidYMid slice"/></g>${ring ? `<circle cx="50" cy="50" r="47" fill="none" stroke="${ring}" stroke-width="6"/>` : ''}</svg>`;
+  const shape = square ? '<rect width="100" height="100"/>' : '<circle cx="50" cy="50" r="50"/>';
+  const frame = square ? `<rect x="3" y="3" width="94" height="94" fill="none" stroke="${ring}" stroke-width="6"/>` : `<circle cx="50" cy="50" r="47" fill="none" stroke="${ring}" stroke-width="6"/>`;
+  return `<svg class="avatar pf" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="${clip}">${shape}</clipPath><radialGradient id="${clip}g" cx="50%" cy="35%" r="75%"><stop offset="0" stop-color="#3a4458"/><stop offset="1" stop-color="#151a24"/></radialGradient></defs><g clip-path="url(#${clip})"><rect width="100" height="100" fill="url(#${clip}g)"/><image href="${avatarUrl(portraitId)}" x="-15" y="-11" width="130" height="130" preserveAspectRatio="xMidYMid slice"/></g>${ring ? frame : ''}</svg>`;
 }
 
 /** 全身立繪（透明底）；cls 給邊光（rim-me／rim-foe／rim-other） */

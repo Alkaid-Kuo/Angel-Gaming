@@ -112,7 +112,7 @@ export class ShooterHud {
     this.mine = mineGroup(meta);
     this.ticket = meta.watch ? ticket : null;
     this.score = new ScoreBar(root, meta, this.mine ?? 0);
-    this.score.paint((g) => this.groupColor(g), (id) => this.face(id));
+    this.score.paint((g) => this.groupColor(g), (id) => this.face(id, true));
     this.feed = el('div', 'sg-feed', root);
     this.banner = el('div', 'sg-banner hidden', root);
     this.hint = el('div', 'sg-hint', root);
@@ -223,14 +223,14 @@ export class ShooterHud {
     return this.tGroup;
   }
 
-  /** 選手頭像，外框是隊色（同一個人同一邊只產生一次） */
-  face(id: number): string {
+  /** 選手頭像，外框是隊色（同一個人同一邊、同一形狀只產生一次）；square＝頂部計分板的方形 */
+  face(id: number, square = false): string {
     const team = this.teamNow(this.meta.groups[id]);
-    const key = `${id}${team}`;
+    const key = `${id}${team}${square ? 's' : ''}`;
     let html = this.faces.get(key);
     if (html === undefined) {
       // 經營層觀戰用選手的立繪；試玩的 Bot 與舊觀戰票沒有立繪代號，依種子與座位挑
-      html = avatarHtml(this.meta.watch?.portraits?.[id] || portraitOfSeat(this.meta.seed, id), TEAM_COLOR[team]);
+      html = avatarHtml(this.meta.watch?.portraits?.[id] || portraitOfSeat(this.meta.seed, id), TEAM_COLOR[team], square);
       this.faces.set(key, html);
     }
     return html;
@@ -336,7 +336,7 @@ export class ShooterHud {
     const tGroup = this.groupOfTeam('T', f.board);
     if (tGroup !== this.tGroup) {
       this.tGroup = tGroup;
-      this.score.paint((g) => this.groupColor(g), (id) => this.face(id));
+      this.score.paint((g) => this.groupColor(g), (id) => this.face(id, true));
     }
     const leftTeam: Team = tGroup === leftGroup ? 'T' : 'CT';
     const rightTeam: Team = leftTeam === 'T' ? 'CT' : 'T';
