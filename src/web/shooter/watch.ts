@@ -18,6 +18,8 @@ export interface WatchTicket {
   readonly names: readonly string[];
   /** 依 playerId：角色與版本（打那場時的版本） */
   readonly tags: readonly string[];
+  /** 依 playerId：立繪代號（舊票沒有這欄） */
+  readonly portraits?: readonly string[];
   /** 0＝主隊（A）、1＝客隊（B） */
   readonly teams: readonly [string, string];
   /** 我方是哪一組（別隊的比賽＝null） */

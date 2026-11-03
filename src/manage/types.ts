@@ -48,6 +48,8 @@ export interface Player {
   lineageId: string;
   /** 公開：品階，開局決定、之後不變 */
   rarity: Rarity;
+  /** 公開：立繪代號（例 SR_007，清單在 portraits.ts），開局從同品階的池不重複發 */
+  portraitId: string;
   version: number;
   /** 隱藏：個人習慣，對真實強度的小偏移 */
   habit: number;

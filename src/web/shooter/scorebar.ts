@@ -1,7 +1,7 @@
 // 頂部計分：兩隊頭像夾著時間與比分。隊別只看顏色，不寫字；陣亡變灰。
 // 頭像是靜態 DOM，每幀只改 class 和血條寬度，SVG 不重建。敵人的血量觀察資料沒有，對局中只有一條隊色線；觀戰有全狀態，全員都有血條。
 import type { WeaponId } from '../../shooter/api.ts';
-import { avatarSvg } from '../club/art.ts';
+import { portraitSvg } from '../portrait.ts';
 import type { BoardRow, ShooterMeta } from './protocol.ts';
 import { paintGunIcon } from './soldier.ts';
 
@@ -23,8 +23,8 @@ export function gunIconUrl(id: WeaponId): string {
   return url;
 }
 
-/** 選手頭像：先用經營層的生成頭像，種子是名字 */
-export const avatarHtml = (name: string, jersey: string): string => avatarSvg(name, jersey, 96);
+/** 選手頭像：立繪裁圓，外框是隊色 */
+export const avatarHtml = (portraitId: string, ring: string): string => portraitSvg(portraitId, 96, ring);
 
 interface Cell {
   readonly id: number;

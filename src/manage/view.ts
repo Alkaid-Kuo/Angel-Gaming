@@ -15,6 +15,8 @@ export interface KnownPlayer {
   name: string;
   lineageId: string;
   rarity: Rarity;
+  /** 立繪代號（圖檔在 public/portraits/） */
+  portraitId: string;
   version: number;
   /** 個人版本上限（品階與流派取小） */
   maxVersion: number;
@@ -118,6 +120,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       name: p.name,
       lineageId: p.lineageId,
       rarity: p.rarity,
+      portraitId: p.portraitId,
       version: p.version,
       maxVersion: playerMaxVersion(content, p),
       elo: p.elo,
