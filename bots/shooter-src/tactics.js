@@ -243,6 +243,11 @@ export class Tactics {
     /** @type {import('./base.js').Pt[]} */
     this.awpHist = [];
     this.awpTeam = '';
+    /** CT：最近看到（或被閃推估）的敵方閃光；放棄的點；探點結束了 @type {{ x: number, y: number, tick: number } | null} */
+    this.enemyFlash = null;
+    /** @type {SiteId | null} */
+    this.fallback = null;
+    this.probed = false;
     /** 本回合換過路了（躲槍線）；等槍線已經停了幾 tick、對應哪一次隊友陣亡 */
     this.dodged = false;
     this.lineHeld = 0;
@@ -295,6 +300,9 @@ export class Tactics {
     }
     this.awp = null;
     this.awpSaid = -1000000;
+    this.enemyFlash = null;
+    this.fallback = null;
+    this.probed = false;
     this.dodged = false;
     this.lineHeld = 0;
     this.lineDeath = -1;
@@ -430,6 +438,7 @@ export class Tactics {
     }
     this.trackTeam(obs, out);
     this.trackAwp(obs, out);
+    if (me.team === 'CT') this.trackEnemyFlash(obs);
     this.coop.observe(obs);
     this.readChat(obs);
     this.adapt.observe(obs, this.perc, (c) => this.siteNear(c));
@@ -536,6 +545,42 @@ export class Tactics {
     const r = (s.range === 'near' ? 6 : s.range === 'mid' ? 20 : 40) * UNIT;
     const c = this.intel.nearestOpen(Math.floor((me.x + cosd(s.dirDeg) * r) / UNIT), Math.floor((me.y + sind(s.dirDeg) * r) / UNIT));
     if (c >= 0) this.awp = { ...this.g.center(c), tick: t };
+  }
+
+  /**
+   * CT 記敵方閃光：看到飛行中的閃光而不是我方丟的（自己的、隊友喊過的）；沒看到但自己或隊友被閃、我方最近沒丟閃時，
+   * 算在被閃的人最近的包點入口
+   * @param {import('./base.js').Observation} obs
+   */
+  trackEnemyFlash(obs) {
+    const me = obs.me;
+    const t = obs.tick;
+    const away = this.util.away;
+    /** @param {number} x @param {number} y */
+    const ours = (x, y) => this.mateFlash.some((f) => dist(f.x, f.y, x, y) < 8 * UNIT) || (away !== null && dist(away.tx, away.ty, x, y) < 8 * UNIT);
+    for (const q of obs.projectiles) if (q.kind === 'flash' && !ours(q.x, q.y)) this.enemyFlash = { x: q.x, y: q.y, tick: t };
+    if (this.enemyFlash !== null && t - this.enemyFlash.tick <= this.tps) return;
+    if (t - this.flashPop <= 2 * this.tps || t - this.flashHeard <= 3 * this.tps) return;
+    const blind = me.blindTicks > 0 ? me : obs.teammates.find((m) => m.alive && m.blind);
+    if (blind === undefined) return;
+    let best = null;
+    let bestD = 25 * UNIT;
+    for (const s of SITES) {
+      for (const e of this.intel.sites[s].entrances) {
+        const d = dist(blind.x, blind.y, e.x, e.y);
+        if (d < bestD) {
+          bestD = d;
+          best = e;
+        }
+      }
+    }
+    if (best !== null) this.enemyFlash = { x: best.x, y: best.y, tick: t };
+  }
+
+  /** 敵方閃光最近炸在（飛向）這個入口 @param {import('./base.js').Observation} obs @param {import('./analysis.js').Entrance} e */
+  flashAt(obs, e) {
+    const f = this.enemyFlash;
+    return f !== null && obs.tick - f.tick <= P.enemyFlashMemo * this.tps && Math.min(dist(f.x, f.y, e.x, e.y), dist(f.x, f.y, e.ox, e.oy)) < P.enemyFlashNear * UNIT;
   }
 
   /** @param {string} key @param {number} n @param {number} t @param {SiteId | null} site */
@@ -916,6 +961,7 @@ export class Tactics {
     const waited = obs.round.phase !== 'freeze' || this.data.rules.freezeTicks - obs.round.phaseTicksLeft >= this.tps;
     if (this.buyCall === null && !waited) return;
     const call = this.buyCall ?? this.econ.teamCall(obs);
+    this.econ.call = call;
     const items = this.econ.items(obs, call, this.roles.of(me.id), this.roles.awper() === me.id);
     if (items.length > 0) out.cmds.push({ type: 'buy', items });
     this.bought = true;
@@ -949,7 +995,7 @@ export class Tactics {
   }
 
   /**
-   * CT 看到對面丟在包點附近的煙：要打這點了，喊接觸（2 人）讓指揮提早輪轉
+   * CT 看到對面丟在包點附近的煙：只提高警覺，喊 1 人的接觸（單獨不夠輪轉，煙可能是佯攻），要再有別的接觸才輪轉
    * @param {import('./base.js').Observation} obs @param {TacOut} out @returns {boolean}
    */
   smokeAlarm(obs, out) {
@@ -959,8 +1005,8 @@ export class Tactics {
       const s = this.siteNear(this.g.cellOf(q.x, q.y));
       if (s === null) continue;
       const id = this.intel.map.regions[/** @type {number} */ ([...this.intel.sites[s].regions][0])].id;
-      this.noteContact(id, 2, obs.tick, s);
-      out.cmds.push({ type: 'say', text: `E:contact ${id} 2` });
+      this.noteContact(id, P.smokeAlarmN, obs.tick, s);
+      out.cmds.push({ type: 'say', text: `E:contact ${id} ${P.smokeAlarmN}` });
       return true;
     }
     return false;
@@ -1532,12 +1578,12 @@ export class Tactics {
     });
     if (heard) return true;
     if (site === null) return false;
-    // 還有下落不明的敵人，而且包點有守點位看得到爆點、最近沒被我方看過（敵人可能守在那）
+    // 還有下落不明的敵人，而且包點有守點位（或深位）看得到爆點、最近沒被我方看過（敵人可能守在那）
     let far = 0;
     for (const k of this.perc.known.values()) if (k.conf >= 30 && dist(k.x, k.y, p.x, p.y) > R * 1.5) far++;
     if (far >= this.enemiesAlive) return false;
     const t = this.perc.lastTick;
-    return this.intel.sites[site].holds.some((h) => dist(h.x, h.y, p.x, p.y) < R && !this.perc.cleared(h.cell, t) && this.g.los(h.x, h.y, p.x, p.y));
+    return [...this.intel.sites[site].holds, ...this.deepSpots(site)].some((h) => dist(h.x, h.y, p.x, p.y) < R && !this.perc.cleared(h.cell, t) && this.g.los(h.x, h.y, p.x, p.y));
   }
 
   /**
@@ -1553,7 +1599,9 @@ export class Tactics {
     if (this.flashKey !== key) {
       this.flashKey = key;
       const t = this.perc.lastTick;
-      const seers = [...site.holds.filter((h) => !this.perc.cleared(h.cell, t)).map((h) => ({ x: h.x, y: h.y, w: 1 })), ...this.perc.threats(e.ix, e.iy, 30).map((k) => ({ x: k.x, y: k.y, w: 2 }))];
+      // 守點位與深位（2.5 第三批 CT 預設退到深位）都是地圖推導的可能位置
+      const seers = [...site.holds, ...this.deepSpots(s)].filter((h) => !this.perc.cleared(h.cell, t)).map((h) => ({ x: h.x, y: h.y, w: 1 }));
+      seers.push( ...this.perc.threats(e.ix, e.iy, 30).map((k) => ({ x: k.x, y: k.y, w: 2 })));
       // 聽到的敵方聲音：扇形上離入口一樣遠的那一點
       for (const sc of this.perc.sectors) {
         if (sc.conf < 25 || sc.kind === 'hurt') continue;
@@ -1566,14 +1614,16 @@ export class Tactics {
       const list = [];
       const cx = Math.floor(e.ix / UNIT);
       const cy = Math.floor(e.iy / UNIT);
-      for (let y = cy - 8; y <= cy + 8; y++) {
-        for (let x = cx - 8; x <= cx + 8; x++) {
+      // 深位離入口 16 格以上：爆點候選要放到入口內 P.flashDeep 格才閃得到
+      const reach = P.flashDeep;
+      for (let y = cy - reach; y <= cy + reach; y++) {
+        for (let x = cx - reach; x <= cx + reach; x++) {
           if (g.isWall(x, y)) continue;
           const i = y * g.W + x;
           if (!site.regions.has(this.intel.region[i])) continue;
           const c = g.center(i);
           const de = dist(c.x, c.y, e.ix, e.iy);
-          if (de > 8 * UNIT || de < 1.5 * UNIT) continue;
+          if (de > reach * UNIT || de < 1.5 * UNIT) continue;
           let sc = 0;
           for (const v of seers) {
             if (dist(v.x, v.y, c.x, c.y) > R || !g.los(v.x, v.y, c.x, c.y)) continue;
@@ -1805,9 +1855,12 @@ export class Tactics {
     const a = p.a + (mids.length === 0 ? Math.ceil(p.m / 2) : 0);
     const b = 5 - a - m;
     const round = obs.round.number;
-    this.pickHolds('A', a, round).forEach((spot, k) => pos.push({ spot: this.varySpot(spot, round), site: 'A', k }));
+    // 深位本身已依回合換位置，不再小幅變化（變化後未必同時看得到兩個入口）
+    /** @param {import('./analysis.js').Spot} spot @param {SiteId} s */
+    const vary = (spot, s) => (this.deepSpots(s).includes(spot) ? spot : this.varySpot(spot, round));
+    this.pickHolds('A', a, round).forEach((spot, k) => pos.push({ spot: vary(spot, 'A'), site: 'A', k }));
     for (let i = 0; i < m; i++) pos.push({ spot: this.varySpot(mids[i % mids.length], round), site: null, k: -1 });
-    this.pickHolds('B', b, round).forEach((spot, k) => pos.push({ spot: this.varySpot(spot, round), site: 'B', k }));
+    this.pickHolds('B', b, round).forEach((spot, k) => pos.push({ spot: vary(spot, 'B'), site: 'B', k }));
     /** @type {Map<number, { spot: import('./analysis.js').Spot, site: SiteId | null }>} */
     const out = new Map();
     let ids = [...this.ids];
@@ -1913,6 +1966,39 @@ export class Tactics {
           out.role = `輪轉疊點 ${p.rot}`;
         }
       }
+      // 點還沒失守：直接進點補沒人用的深位（在點外等會讓 T 白下包）；失守了由放棄點退到集結位
+      if (P.rotDeep) {
+        const held = this.ids.filter((id) => this.isAlive(obs, id) && this.ctLayout(obs, p).get(id)?.site === p.rot).map((id) => /** @type {import('./analysis.js').Spot} */ (this.ctLayout(obs, p).get(id)?.spot));
+        const free = this.deepSpots(p.rot).filter((d) => held.every((h) => dist(h.x, h.y, d.x, d.y) >= 3 * UNIT));
+        const deep = free[Math.max(0, rotators.indexOf(me.id))];
+        if (deep !== undefined) {
+          spot = deep;
+          out.role = `輪轉進點 ${p.rot}`;
+          out.task = 'hold';
+        }
+      }
+    }
+    // 放棄點：已經 3 人以上進點（或敵方閃光炸在入口而估計 3 人以上）、點上不超過 2 人：退到回防位等人齊，不打 2 對 5
+    const fall = this.giveUp(obs, p, lay.site ?? p.rot);
+    if (fall !== null) {
+      const stage = P.fallHide ? this.fallSpots(fall) : this.stageSpots('CT', fall, 0);
+      const others = this.ids.filter((id) => this.isAlive(obs, id));
+      const sp = stage.length > 0 ? stage[Math.max(0, others.indexOf(me.id)) % stage.length] : null;
+      if (sp !== null) {
+        spot = sp;
+        out.role = `退守 ${fall}`;
+        out.task = 'retake';
+        out.allowPeek = false;
+        // 不用撤離模式：轉身跑會被背後打死；看得到人照常交火，看不到才往後退
+        out.escape = P.giveUpRun && dist(me.x, me.y, sp.x, sp.y) > 3 * UNIT;
+      }
+    }
+    // 開局探點：游擊（或突破手）去看一眼 T 的待命方向，看到或聽到人、時間到就回來
+    const probe = fall === null ? this.probeSpot(obs, p) : null;
+    if (probe !== null) {
+      spot = probe;
+      out.role = '探點';
+      out.allowPeek = false;
     }
     out.goal = { x: spot.x, y: spot.y };
     out.hold = spot;
@@ -1927,6 +2013,135 @@ export class Tactics {
     }
     const s = lay.site ?? p.rot;
     return s === null ? null : this.ctUtility(obs, p, s);
+  }
+
+  /**
+   * 要放棄的點（下包前、守這點或往這點輪轉的人）：看到 P.giveUpIn 人以上在點裡，或敵方閃光炸在這點入口而估計人數達標；
+   * 點上的人不超過 P.giveUpMine。決定後本回合不再回頭（下包後交給回防）
+   * @param {import('./base.js').Observation} obs @param {CTPlan} p @param {SiteId | null} s @returns {SiteId | null}
+   */
+  giveUp(obs, p, s) {
+    const b = obs.bomb.state;
+    if (b === 'planted' || b === 'defusing' || obs.round.phase !== 'live') return null;
+    if (this.fallback !== null) return this.fallback;
+    if (s === null) return null;
+    const t = obs.tick;
+    const site = this.intel.sites[s];
+    let inside = 0;
+    for (const k of this.perc.known.values()) if (k.conf >= 50 && t - k.tick <= 2 * this.tps && site.regions.has(this.intel.region[this.g.cellOf(k.x, k.y)])) inside++;
+    const flashed = site.entrances.some((e) => this.flashAt(obs, e));
+    const est = Math.min(obs.enemiesAlive, flashed ? Math.max(inside, this.heat(obs)[s]) : inside);
+    if (est < P.giveUpIn) return null;
+    const lay = this.ctLayout(obs, p);
+    const mine = this.alive(obs).filter((m) => lay.get(m.id)?.site === s && dist(m.x, m.y, site.cx, site.cy) < 20 * UNIT).length;
+    if (mine > P.giveUpMine) return null;
+    this.fallback = s;
+    return s;
+  }
+
+  /**
+   * 退守位（地圖算，快取）：CT 離這點最近的入口外、沿 CT 這側 6～14 格、包點裡看不到（入口內側與包點中心都沒有視線）、暴露少；
+   * 每人一格。回防集結位看得到入口（要準備衝），退守時站那裡會被已經進點的 T 打
+   * @param {SiteId} s @returns {import('./analysis.js').Spot[]}
+   */
+  fallSpots(s) {
+    const key = `fall${s}`;
+    const hit = this.spotCache.get(key);
+    if (hit !== undefined) return hit;
+    const g = this.g;
+    const intel = this.intel;
+    const site = intel.sites[s];
+    const ent = [...site.entrances].sort((a, b) => a.ctDist - b.ctDist)[0];
+    /** @type {import('./analysis.js').Spot[]} */
+    const ranked = [];
+    if (ent !== undefined) {
+      const field = intel.distSite[s];
+      const d0 = field[g.cellOf(ent.ox, ent.oy)];
+      const ctAt = intel.distSpawn.CT[g.cellOf(ent.ox, ent.oy)];
+      for (let i = 0; i < g.N; i++) {
+        if (g.block[i] === 1 || site.regions.has(intel.region[i]) || field[i] < d0 + 60 || field[i] > d0 + 140 || intel.distSpawn.CT[i] >= ctAt) continue;
+        const c = g.center(i);
+        if (g.los(c.x, c.y, ent.ix, ent.iy) || g.los(c.x, c.y, site.cx, site.cy) || g.los(c.x, c.y, ent.x, ent.y)) continue;
+        ranked.push({ x: c.x, y: c.y, cell: i, fx: ent.ox, fy: ent.oy, score: -3 * intel.exposure[i] - Math.abs(field[i] - d0 - 90) / 10 + (intel.cover[i] !== 0 ? 2 : 0), entrance: site.entrances.indexOf(ent) });
+      }
+    }
+    ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
+    /** @type {import('./analysis.js').Spot[]} */
+    const out = [];
+    for (const q of ranked) {
+      if (out.length >= 5) break;
+      if (out.every((o) => dist(o.x, o.y, q.x, q.y) >= P.stageGap * UNIT)) out.push(q);
+    }
+    const res = out.length > 0 ? out : this.stageSpots('CT', s, 0);
+    this.spotCache.set(key, res);
+    return res;
+  }
+
+  /**
+   * 開局探點：中路的游擊（沒有就突破手）在開打 P.probeTime 秒內去看一眼；看到人、聽到近處腳步、或時間到就結束
+   * @param {import('./base.js').Observation} obs @param {CTPlan} p @returns {import('./analysis.js').Spot | null}
+   */
+  probeSpot(obs, p) {
+    const me = obs.me;
+    const t = obs.tick;
+    // 人手不夠（不到 4 人）不派人出去
+    if (this.probed || obs.round.phase !== 'live' || p.rot !== null || this.alive(obs).length < 4) return null;
+    if (t - this.liveStart > P.probeTime * this.tps || this.perc.known.size > 0 || obs.sounds.some((q) => q.kind === 'footstep' && !q.friendly && q.range === 'near')) {
+      this.probed = true;
+      return null;
+    }
+    const lay = this.ctLayout(obs, p);
+    const lurk = this.roles.who(LURK);
+    const who = lurk >= 0 && this.isAlive(obs, lurk) && lay.get(lurk)?.site === null ? lurk : this.roles.who(ENTRY);
+    if (who !== me.id) return null;
+    const list = this.probeSpots();
+    return list.length === 0 ? null : list[rollOf(obs.round.number, 7) % list.length];
+  }
+
+  /**
+   * 探點位置（地圖算，快取）：T 路線上的交界（不是包點入口），CT 在 P.probeTime 秒前 3 秒到得了、T 最快也晚 P.probeMargin 秒；
+   * 站在交界的 CT 側，看往路線上 T 來的方向。經過的路線多、離 T 近（情報多）的在前，取 2 個
+   * @returns {import('./analysis.js').Spot[]}
+   */
+  probeSpots() {
+    const hit = this.spotCache.get('probe');
+    if (hit !== undefined) return hit;
+    const g = this.g;
+    const intel = this.intel;
+    const v = P.routeSpeed;
+    const entrancePortals = new Set([...intel.sites.A.entrances, ...intel.sites.B.entrances].map((e) => e.portal));
+    /** @type {Map<number, { n: number, from: import('./base.js').Pt }>} */
+    const uses = new Map();
+    for (const s of SITES) {
+      for (const r of intel.routes.T[s]) {
+        r.portals.forEach((pid, k) => {
+          const u = uses.get(pid);
+          if (u !== undefined) u.n++;
+          else uses.set(pid, { n: 1, from: k > 0 ? r.points[k - 1] : this.spawnCenter('T') });
+        });
+      }
+    }
+    /** @type {import('./analysis.js').Spot[]} */
+    const ranked = [];
+    for (const [pid, u] of uses) {
+      if (entrancePortals.has(pid)) continue;
+      const q = intel.portals[pid];
+      const ca = g.cellOf(q.ax, q.ay);
+      const cb = g.cellOf(q.bx, q.by);
+      if (ca < 0 || cb < 0) continue;
+      // CT 側＝離 CT 出生較近的那一端
+      const c = intel.distSpawn.CT[ca] <= intel.distSpawn.CT[cb] ? ca : cb;
+      const ct = intel.distSpawn.CT[c] / 10 / v;
+      const tt = Math.min(intel.distSpawn.T[ca], intel.distSpawn.T[cb]) / 10 / v;
+      if (ct > P.probeTime - 3 || tt < P.probeTime + P.probeMargin) continue;
+      const at = g.center(c);
+      if (!g.los(at.x, at.y, u.from.x, u.from.y)) continue;
+      ranked.push({ x: at.x, y: at.y, cell: c, fx: u.from.x, fy: u.from.y, score: 10 * u.n - tt, entrance: -1 });
+    }
+    ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
+    const out = ranked.slice(0, 2);
+    this.spotCache.set('probe', out);
+    return out;
   }
 
   /** 有隊友在閃光半徑內看得到這個爆點（CT 不躲閃光，丟之前要先確認） @param {import('./base.js').Observation} obs @param {import('./base.js').Pt} c */
@@ -1956,37 +2171,44 @@ export class Tactics {
   }
 
   /**
-   * CT 道具看防守意圖：對面壓到入口才用（不開局亂丟）。兩人以上接近就燒入口外側拖時間；
-   * 有人快到入口就閃入口外（他們正看著這邊）；這點人手不夠頂不住就封煙等輪轉
+   * CT 道具先拖時間再對槍：入口有腳步聲、看到人、或敵方閃光炸在入口，就先燒入口外側；
+   * 兩人以上、敵方閃光、或火快熄了再封煙，目標撐到輪轉到場。
+   * 閃光只配對使用：知道入口外有人、而且有隊友正看著那個入口（炸開後由他接著打）才丟；看得到敵人時手放在槍上
    * @param {import('./base.js').Observation} obs @param {CTPlan} p @param {SiteId} s @returns {import('./utility.js').ThrowWish | null}
    */
   ctUtility(obs, p, s) {
     const me = obs.me;
-    if (obs.round.phase !== 'live' || me.blindTicks > 0) return null;
+    const t = obs.tick;
+    if (obs.round.phase !== 'live' || me.blindTicks > 0 || obs.enemies.length > 0) return null;
     let best = null;
-    let top = { n: 0, sign: 0 };
+    let top = { n: 0, sign: 0, fl: false };
+    // 單一個聲音不算（可能只是路過）：要看到人、兩個以上聲音、或敵方閃光
     let bestS = 1;
     for (const e of this.intel.sites[s].entrances) {
       const q = this.pressure(obs, s, e);
-      const sc = 2 * q.n + Math.min(2, q.sign);
+      const fl = this.flashAt(obs, e);
+      const sc = 2 * q.n + Math.min(2, q.sign) + (fl ? 3 : 0);
       if (sc > bestS) {
         bestS = sc;
         best = e;
-        top = q;
+        top = { ...q, fl };
       }
     }
     if (best === null) return null;
     const e = best;
-    const out = { x: e.ox + (e.ox - e.ix) * 0.3, y: e.oy + (e.oy - e.iy) * 0.3 };
+    const outer = { x: e.ox + (e.ox - e.ix) * 0.3, y: e.oy + (e.oy - e.iy) * 0.3 };
+    const fire = this.burns.find((b) => t <= b.until && dist(b.x, b.y, outer.x, outer.y) < 4 * UNIT);
+    const smoked = this.smokes.some((m) => dist(m.x, m.y, e.ox, e.oy) < P.smokeGap * UNIT);
     const burn = this.util.pick(me, ['incendiary', 'molotov']);
-    if (burn !== null && top.n >= 2) return { kind: burn, ...out, why: '燒入口' };
-    if (obs.enemies.length > 0) return null;
-    if (this.util.has(me, 'flash') && !this.flashDone(e)) {
+    if (burn !== null && fire === undefined && !smoked && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return { kind: burn, ...outer, why: '燒入口' };
+    const fading = fire !== undefined && fire.until - t < 3 * this.tps;
+    if (this.util.has(me, 'smoke') && !smoked && (top.n >= 2 || top.fl || fading) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' };
+    if (top.n >= 1 && this.util.has(me, 'flash') && !this.flashDone(e)) {
       const th = this.perc.threats(e.ox, e.oy, 50).find((k) => dist(k.x, k.y, e.ox, e.oy) < 10 * UNIT);
-      for (const c of [...(th !== undefined ? [th] : []), { x: e.ox, y: e.oy }, { x: e.x, y: e.y }]) if (this.util.solve(me.x, me.y, c.x, c.y) !== null && !this.mateSees(obs, c)) return { kind: 'flash', x: c.x, y: c.y, why: '守點閃' };
+      const lay = this.ctLayout(obs, p);
+      const partner = obs.teammates.some((m) => m.alive && !m.blind && lay.get(m.id)?.site === s && dist(m.x, m.y, e.x, e.y) < P.deepMax * UNIT && this.g.los(m.x, m.y, e.x, e.y));
+      if (th !== undefined && partner && this.util.solve(me.x, me.y, th.x, th.y) !== null && !this.mateSees(obs, th)) return { kind: 'flash', x: th.x, y: th.y, why: '配對閃' };
     }
-    const mine = this.alive(obs).filter((m) => this.ctLayout(obs, p).get(m.id)?.site === s).length;
-    if (this.util.has(me, 'smoke') && top.n >= Math.max(2, mine) && this.smokes.every((m) => dist(m.x, m.y, e.ox, e.oy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' };
     return null;
   }
 
@@ -2219,11 +2441,9 @@ export class Tactics {
    */
   lineCheck(obs, out) {
     const me = obs.me;
-    if (out.goal === null || out.stop || out.urgent || out.commit || out.objective || out.escape || obs.enemies.length > 0 || obs.round.phase !== 'live' || obs.enemiesAlive === 0) return null;
-    const bomb = obs.bomb.state === 'planted' || obs.bomb.state === 'defusing';
-    // CT 下包前的輪轉不能停，停了就趕不上
-    if (me.team === 'CT' && !bomb) return null;
-    if (bomb ? (obs.bomb.ticksLeft ?? 0) < 20 * this.tps : obs.round.phaseTicksLeft < 15 * this.tps) return null;
+    // CT 不用：下包前的輪轉停了就趕不上；下包後階段不是 live（第二批的回防分支實際上從沒觸發，第三批拿掉）
+    if (me.team === 'CT' || out.goal === null || out.stop || out.urgent || out.commit || out.objective || out.escape || obs.enemies.length > 0 || obs.round.phase !== 'live' || obs.enemiesAlive === 0) return null;
+    if (obs.round.phaseTicksLeft < 15 * this.tps) return null;
     const w = this.nav?.wps[this.nav.wpIdx];
     if (w === undefined || dist(me.x, me.y, out.goal.x, out.goal.y) < 2 * UNIT) return null;
     const k = Math.min(1, (3 * UNIT) / Math.max(dist(me.x, me.y, w.x, w.y), 1));
@@ -2508,14 +2728,65 @@ export class Tactics {
    * @param {SiteId} s @param {number} n @param {number} round @returns {import('./analysis.js').Spot[]}
    */
   pickHolds(s, n, round) {
-    const top = this.intel.sites[s].holds.slice(0, 4);
-    if (n < 1 || n > 2 || top.length <= n) return this.siteSpots(s, n);
+    const deep = this.deepSpots(s);
+    if (n < 1 || deep.length === 0) return this.siteSpots(s, n);
     const roll = rollOf(round, s === 'A' ? 1 : 2);
-    if (n === 1) return [top[roll % Math.min(3, top.length)]];
+    if (n === 1 || deep.length === 1) return [deep[roll % Math.min(3, deep.length)], ...this.siteSpots(s, n).slice(0, n - 1)];
+    // 兩人都在深位、各自看得到兩個入口（交叉火力），第三人以上補前面的守點位（層次）
     /** @type {import('./analysis.js').Spot[][]} */
     const pairs = [];
-    for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) if (top[i].entrance !== top[j].entrance || dist(top[i].x, top[i].y, top[j].x, top[j].y) >= 5 * UNIT) pairs.push([top[i], top[j]]);
-    return pairs.length === 0 ? this.siteSpots(s, n) : pairs[roll % pairs.length];
+    for (let i = 0; i < deep.length; i++) for (let j = i + 1; j < deep.length; j++) pairs.push([deep[i], deep[j]]);
+    return [...pairs[roll % pairs.length], ...this.siteSpots(s, n).slice(0, n - 2)];
+  }
+
+  /**
+   * 深位：包點附近、看得到 T 最可能來的兩個入口（同時在視野內）、離它們都在閃光半徑外（入口的閃光照不到）、暴露少。
+   * 取彼此隔 4 格以上的前 4 個；沒有兩個都看得到的格就只看第一個入口
+   * @param {SiteId} s @returns {import('./analysis.js').Spot[]}
+   */
+  deepSpots(s) {
+    const key = `deep${s}`;
+    const hit = this.spotCache.get(key);
+    if (hit !== undefined) return hit;
+    const g = this.g;
+    const intel = this.intel;
+    const site = intel.sites[s];
+    const field = intel.distSite[s];
+    const R = this.util.flashRadius / UNIT;
+    const top = site.entrances.filter((e) => Number.isFinite(e.tDist)).slice(0, 2);
+    const fov = this.data.rules.fovDeg;
+    /** @type {import('./analysis.js').Spot[]} */
+    const ranked = [];
+    for (const need of [top.length, 1]) {
+      const es = top.slice(0, need);
+      for (let i = 0; i < g.N && es.length > 0; i++) {
+        if (g.block[i] === 1 || field[i] > P.holdSiteRadius * 10) continue;
+        const c = g.center(i);
+        let near = Infinity;
+        let ok = true;
+        for (const e of es) {
+          const d = dist(c.x, c.y, e.x, e.y) / UNIT;
+          if (d < R + 1 || d > P.deepMax || !g.los(c.x, c.y, e.x, e.y)) ok = false;
+          near = Math.min(near, d);
+        }
+        if (!ok) continue;
+        const fx = es.reduce((v, e) => v + e.x, 0) / es.length;
+        const fy = es.reduce((v, e) => v + e.y, 0) / es.length;
+        if (es.some((e) => Math.abs(adiff(angleTo(c.x, c.y, e.x, e.y), angleTo(c.x, c.y, fx, fy))) > fov * 0.4)) continue;
+        const sc = 100 - 6 * intel.exposure[i] + ((intel.cover[i] & 1) !== 0 ? 8 : 0) + ((intel.cover[i] & 2) !== 0 ? 6 : 0) - Math.abs(near - (R + 6)) + (site.regions.has(intel.region[i]) ? 4 : 0);
+        ranked.push({ x: c.x, y: c.y, cell: i, fx, fy, score: sc, entrance: site.entrances.indexOf(es[0]) });
+      }
+      if (ranked.length > 0) break;
+    }
+    ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
+    /** @type {import('./analysis.js').Spot[]} */
+    const out = [];
+    for (const q of ranked) {
+      if (out.length >= 4) break;
+      if (out.every((o) => dist(o.x, o.y, q.x, q.y) >= 4 * UNIT)) out.push(q);
+    }
+    this.spotCache.set(key, out);
+    return out;
   }
 
   /**

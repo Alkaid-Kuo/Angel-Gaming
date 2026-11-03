@@ -1415,7 +1415,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'T9',
     name: '閃光不閃到隊友',
-    expect: '兩張圖各跑短賽（每半場 6 回合）：基準對基準一場（兩邊都算），有給對手時再加對手雙邊各一場（只算基準）；自己隊的閃光讓隊友「沒背對」的致盲總 tick（超過背對上限 0.3 秒的部分）< 讓敵方致盲的 20%；背身掩護進點的短暫致盲不算（40 場的統計見報告）',
+    expect: '兩張圖各跑短賽（每半場 6 回合）：基準對基準一場（兩邊都算），有給對手時再加對手雙邊各一場（只算基準）；自己隊的閃光讓隊友「沒背對」的致盲總 tick（超過背對上限 0.3 秒的部分）< 讓敵方致盲的 20%；背身掩護進點的短暫致盲不算；含背對的總量也要 < 20%（原本的量法，退步看得到；40 場的統計見報告）',
     run: (bot, seed, opponent) => {
       let team = 0;
       let all = 0;
@@ -1452,7 +1452,8 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
           }
         }
       }
-      return { pass: team < enemy * 0.2 || (team === 0 && enemy === 0), detail: `隊友沒背對的致盲 ${(team / TPS).toFixed(1)} 秒（含背對 ${(all / TPS).toFixed(1)} 秒）、敵方 ${(enemy / TPS).toFixed(1)} 秒（${enemy === 0 ? '-' : ((team / enemy) * 100).toFixed(1)}%）` };
+      // 舊量法（含背對）保留原本的 20% 上限，背身掩護變多也看得到退步
+      return { pass: (team < enemy * 0.2 && all < enemy * 0.2) || (all === 0 && enemy === 0), detail: `隊友沒背對的致盲 ${(team / TPS).toFixed(1)} 秒（含背對 ${(all / TPS).toFixed(1)} 秒）、敵方 ${(enemy / TPS).toFixed(1)} 秒（${enemy === 0 ? '-' : ((team / enemy) * 100).toFixed(1)}%）` };
     },
   },
   {

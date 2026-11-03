@@ -120,6 +120,7 @@ entryGap: 2.6,
 entryWaitMax: 2.5,
 routeSpeed: 3.9,
 flashLead: 10,
+flashDeep: 12,
 flashEdge: 1.5,
 flashTurn: 0.8,
 postMin: 5,
@@ -158,9 +159,23 @@ lineHold: 2,
 awpMemo: 20,
 awpAvoid: 0.7,
 pressNear: 16,
+deepMax: 32,
+enemyFlashNear: 10,
+enemyFlashMemo: 4,
+giveUpIn: 3,
+giveUpMine: 2,
+giveUpRun: false,
+fallHide: true,
+smokeAlarmN: 1,
+rotDeep: false,
+probeTime: 12,
+probeMargin: 4,
 nadeCluster: 3.5,
 molotovNear: 16,
 afterPistol: 'force',
+ecoFloor: 1500,
+ecoSave: true,
+ecoSaveMax: 3500,
 yieldNear: 6,
 yieldMax: 3,
 yieldMaxSplit: 7,
@@ -2520,6 +2535,10 @@ this.half = -1;
 this.prevMine = 0;
 this.prevTheirs = 0;
 this.lastRound = -1;
+/** @type {BuyCall | null} */
+this.call = null;
+/** @type {BuyCall | null} */
+this.prevCall = null;
 }
 /** @param {string} id */
 cost(id) {
@@ -2530,6 +2549,8 @@ roundStart(obs) {
 const r = obs.round;
 if (r.number === this.lastRound) return;
 this.lastRound = r.number;
+this.prevCall = this.call;
+this.call = null;
 const mine = obs.me.team === 'T' ? r.scoreT : r.scoreCT;
 const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
 if (r.half !== this.half) {
@@ -2538,6 +2559,7 @@ this.roundInHalf = 1;
 this.lossLevel = 0;
 this.enemyLevel = 0;
 this.lastWon = null;
+this.prevCall = null;
 } else {
 this.roundInHalf++;
 const ladder = this.data.rules.economy.lossBonus.length;
@@ -2564,6 +2586,15 @@ shortOf(money, primary, team) {
 const need = this.hasGood(primary) ? this.data.rules.armorPrice + this.cost('flash') : this.fullCost(team);
 return need - money;
 }
+/**
+* @param {number} money @param {WeaponId | null} primary @param {Team} team @param {number} n
+*/
+teamShort(money, primary, team, n) {
+if (team === 'T') return this.shortOf(money, primary, team);
+const r = this.data.rules;
+const extra = (Math.min(2, n) * r.kitPrice + Math.ceil(n / 2) * this.cost('flash')) / n;
+return (this.hasGood(primary) ? 0 : this.cost('m4')) + r.armorPrice + extra - money;
+}
 /** @param {WeaponId | string | null} primary */
 hasGood(primary) {
 return primary !== null && this.cost(primary) >= this.cost('smg') + 1000;
@@ -2580,12 +2611,12 @@ const me = obs.me;
 const team = me.team;
 if (this.pistolRound(obs)) return 'force';
 const people = [{ money: me.money, primary: me.loadout.primary }, ...obs.teammates.map((m) => ({ money: m.money, primary: this.hasGood(m.weapon) ? m.weapon : null }))];
-const can = people.filter((p) => this.shortOf(p.money, p.primary, team) <= 0).length;
 const n = people.length;
+const can = people.filter((p) => this.teamShort(p.money, p.primary, team, n) <= 0).length;
 if (can >= n - 1 || (this.lastWon === true && this.enemyLevel >= 2 && can >= n - 2)) return 'full';
 const ladder = this.data.rules.economy.lossBonus;
 const nextPay = ladder[Math.min(ladder.length, this.lossLevel + 1) - 1];
-const canNext = people.filter((p) => this.shortOf(p.money + nextPay, p.primary, team) <= 0).length;
+const canNext = people.filter((p) => this.teamShort(p.money + nextPay, p.primary, team, n) <= 0).length;
 const r = obs.round;
 const theirs = team === 'T' ? r.scoreCT : r.scoreT;
 const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
@@ -2595,9 +2626,10 @@ const half = this.cost('smg') + this.data.rules.armorPrice;
 if (critical && avg >= half * 0.8) return 'force';
 if (this.roundInHalf === 2 && this.lastWon === true && avg >= half) return 'half';
 if (this.roundInHalf === 2 && this.lastWon === false) return /** @type {BuyCall} */ (P.afterPistol);
-if (canNext >= n - 1) return 'eco';
-if (this.opts.economy === 2 && avg >= half) return 'force';
-if (this.opts.economy !== 1 && avg >= half + 600) return 'half';
+const forceAt = this.opts.economy === 1 ? half + 600 : this.opts.economy === 2 ? half * 0.8 : half;
+const save = P.ecoSave && avg < P.ecoSaveMax && canNext >= n - 1 && this.prevCall !== 'eco';
+if (avg >= forceAt && !save) return 'force';
+if (this.prevCall === 'eco' && avg >= P.ecoFloor) return 'force';
 return 'eco';
 }
 /**
@@ -3315,6 +3347,11 @@ this.awpSaid = -1000000;
 /** @type {Pt[]} */
 this.awpHist = [];
 this.awpTeam = '';
+/** @type {{ x: number, y: number, tick: number } | null} */
+this.enemyFlash = null;
+/** @type {SiteId | null} */
+this.fallback = null;
+this.probed = false;
 this.dodged = false;
 this.lineHeld = 0;
 this.lineDeath = -1;
@@ -3363,6 +3400,9 @@ if (this.awpHist.length > 3) this.awpHist.shift();
 }
 this.awp = null;
 this.awpSaid = -1000000;
+this.enemyFlash = null;
+this.fallback = null;
+this.probed = false;
 this.dodged = false;
 this.lineHeld = 0;
 this.lineDeath = -1;
@@ -3489,6 +3529,7 @@ out.cmds.push({ type: 'say', text: `R:${this.opts.role}` });
 }
 this.trackTeam(obs, out);
 this.trackAwp(obs, out);
+if (me.team === 'CT') this.trackEnemyFlash(obs);
 this.coop.observe(obs);
 this.readChat(obs);
 this.adapt.observe(obs, this.perc, (c) => this.siteNear(c));
@@ -3589,6 +3630,38 @@ if (s === undefined) return;
 const r = (s.range === 'near' ? 6 : s.range === 'mid' ? 20 : 40) * UNIT;
 const c = this.intel.nearestOpen(Math.floor((me.x + cosd(s.dirDeg) * r) / UNIT), Math.floor((me.y + sind(s.dirDeg) * r) / UNIT));
 if (c >= 0) this.awp = { ...this.g.center(c), tick: t };
+}
+/**
+* @param {Observation} obs
+*/
+trackEnemyFlash(obs) {
+const me = obs.me;
+const t = obs.tick;
+const away = this.util.away;
+/** @param {number} x @param {number} y */
+const ours = (x, y) => this.mateFlash.some((f) => dist(f.x, f.y, x, y) < 8 * UNIT) || (away !== null && dist(away.tx, away.ty, x, y) < 8 * UNIT);
+for (const q of obs.projectiles) if (q.kind === 'flash' && !ours(q.x, q.y)) this.enemyFlash = { x: q.x, y: q.y, tick: t };
+if (this.enemyFlash !== null && t - this.enemyFlash.tick <= this.tps) return;
+if (t - this.flashPop <= 2 * this.tps || t - this.flashHeard <= 3 * this.tps) return;
+const blind = me.blindTicks > 0 ? me : obs.teammates.find((m) => m.alive && m.blind);
+if (blind === undefined) return;
+let best = null;
+let bestD = 25 * UNIT;
+for (const s of SITES) {
+for (const e of this.intel.sites[s].entrances) {
+const d = dist(blind.x, blind.y, e.x, e.y);
+if (d < bestD) {
+bestD = d;
+best = e;
+}
+}
+}
+if (best !== null) this.enemyFlash = { x: best.x, y: best.y, tick: t };
+}
+/** @param {Observation} obs @param {Entrance} e */
+flashAt(obs, e) {
+const f = this.enemyFlash;
+return f !== null && obs.tick - f.tick <= P.enemyFlashMemo * this.tps && Math.min(dist(f.x, f.y, e.x, e.y), dist(f.x, f.y, e.ox, e.oy)) < P.enemyFlashNear * UNIT;
 }
 /** @param {string} key @param {number} n @param {number} t @param {SiteId | null} site */
 noteContact(key, n, t, site) {
@@ -3929,6 +4002,7 @@ out.cmds.push({ type: 'say', text: `B:${this.buyCall}` });
 const waited = obs.round.phase !== 'freeze' || this.data.rules.freezeTicks - obs.round.phaseTicksLeft >= this.tps;
 if (this.buyCall === null && !waited) return;
 const call = this.buyCall ?? this.econ.teamCall(obs);
+this.econ.call = call;
 const items = this.econ.items(obs, call, this.roles.of(me.id), this.roles.awper() === me.id);
 if (items.length > 0) out.cmds.push({ type: 'buy', items });
 this.bought = true;
@@ -3968,8 +4042,8 @@ this.smokeSeen.push({ x: q.x, y: q.y });
 const s = this.siteNear(this.g.cellOf(q.x, q.y));
 if (s === null) continue;
 const id = this.intel.map.regions[/** @type {number} */ ([...this.intel.sites[s].regions][0])].id;
-this.noteContact(id, 2, obs.tick, s);
-out.cmds.push({ type: 'say', text: `E:contact ${id} 2` });
+this.noteContact(id, P.smokeAlarmN, obs.tick, s);
+out.cmds.push({ type: 'say', text: `E:contact ${id} ${P.smokeAlarmN}` });
 return true;
 }
 return false;
@@ -4479,7 +4553,7 @@ let far = 0;
 for (const k of this.perc.known.values()) if (k.conf >= 30 && dist(k.x, k.y, p.x, p.y) > R * 1.5) far++;
 if (far >= this.enemiesAlive) return false;
 const t = this.perc.lastTick;
-return this.intel.sites[site].holds.some((h) => dist(h.x, h.y, p.x, p.y) < R && !this.perc.cleared(h.cell, t) && this.g.los(h.x, h.y, p.x, p.y));
+return [...this.intel.sites[site].holds, ...this.deepSpots(site)].some((h) => dist(h.x, h.y, p.x, p.y) < R && !this.perc.cleared(h.cell, t) && this.g.los(h.x, h.y, p.x, p.y));
 }
 /**
 * @param {Observation} obs @param {SiteId} s @param {Entrance} e @param {number} ratio
@@ -4492,7 +4566,8 @@ const key = `${s}${e.portal}:${this.smokes.length}`;
 if (this.flashKey !== key) {
 this.flashKey = key;
 const t = this.perc.lastTick;
-const seers = [...site.holds.filter((h) => !this.perc.cleared(h.cell, t)).map((h) => ({ x: h.x, y: h.y, w: 1 })), ...this.perc.threats(e.ix, e.iy, 30).map((k) => ({ x: k.x, y: k.y, w: 2 }))];
+const seers = [...site.holds, ...this.deepSpots(s)].filter((h) => !this.perc.cleared(h.cell, t)).map((h) => ({ x: h.x, y: h.y, w: 1 }));
+seers.push( ...this.perc.threats(e.ix, e.iy, 30).map((k) => ({ x: k.x, y: k.y, w: 2 })));
 for (const sc of this.perc.sectors) {
 if (sc.conf < 25 || sc.kind === 'hurt') continue;
 const r = clamp(dist(sc.ox, sc.oy, e.ix, e.iy) / UNIT, sc.r0, sc.r1) * UNIT;
@@ -4504,14 +4579,15 @@ if (qc >= 0 && !g.isWall(qc % g.W, Math.floor(qc / g.W)) && site.regions.has(thi
 const list = [];
 const cx = Math.floor(e.ix / UNIT);
 const cy = Math.floor(e.iy / UNIT);
-for (let y = cy - 8; y <= cy + 8; y++) {
-for (let x = cx - 8; x <= cx + 8; x++) {
+const reach = P.flashDeep;
+for (let y = cy - reach; y <= cy + reach; y++) {
+for (let x = cx - reach; x <= cx + reach; x++) {
 if (g.isWall(x, y)) continue;
 const i = y * g.W + x;
 if (!site.regions.has(this.intel.region[i])) continue;
 const c = g.center(i);
 const de = dist(c.x, c.y, e.ix, e.iy);
-if (de > 8 * UNIT || de < 1.5 * UNIT) continue;
+if (de > reach * UNIT || de < 1.5 * UNIT) continue;
 let sc = 0;
 for (const v of seers) {
 if (dist(v.x, v.y, c.x, c.y) > R || !g.los(v.x, v.y, c.x, c.y)) continue;
@@ -4714,9 +4790,11 @@ if (mids.length === 0) m = 0;
 const a = p.a + (mids.length === 0 ? Math.ceil(p.m / 2) : 0);
 const b = 5 - a - m;
 const round = obs.round.number;
-this.pickHolds('A', a, round).forEach((spot, k) => pos.push({ spot: this.varySpot(spot, round), site: 'A', k }));
+/** @param {Spot} spot @param {SiteId} s */
+const vary = (spot, s) => (this.deepSpots(s).includes(spot) ? spot : this.varySpot(spot, round));
+this.pickHolds('A', a, round).forEach((spot, k) => pos.push({ spot: vary(spot, 'A'), site: 'A', k }));
 for (let i = 0; i < m; i++) pos.push({ spot: this.varySpot(mids[i % mids.length], round), site: null, k: -1 });
-this.pickHolds('B', b, round).forEach((spot, k) => pos.push({ spot: this.varySpot(spot, round), site: 'B', k }));
+this.pickHolds('B', b, round).forEach((spot, k) => pos.push({ spot: vary(spot, 'B'), site: 'B', k }));
 /** @type {Map<number, { spot: Spot, site: SiteId | null }>} */
 const out = new Map();
 let ids = [...this.ids];
@@ -4813,6 +4891,35 @@ spot = stack;
 out.role = `輪轉疊點 ${p.rot}`;
 }
 }
+if (P.rotDeep) {
+const held = this.ids.filter((id) => this.isAlive(obs, id) && this.ctLayout(obs, p).get(id)?.site === p.rot).map((id) => /** @type {Spot} */ (this.ctLayout(obs, p).get(id)?.spot));
+const free = this.deepSpots(p.rot).filter((d) => held.every((h) => dist(h.x, h.y, d.x, d.y) >= 3 * UNIT));
+const deep = free[Math.max(0, rotators.indexOf(me.id))];
+if (deep !== undefined) {
+spot = deep;
+out.role = `輪轉進點 ${p.rot}`;
+out.task = 'hold';
+}
+}
+}
+const fall = this.giveUp(obs, p, lay.site ?? p.rot);
+if (fall !== null) {
+const stage = P.fallHide ? this.fallSpots(fall) : this.stageSpots('CT', fall, 0);
+const others = this.ids.filter((id) => this.isAlive(obs, id));
+const sp = stage.length > 0 ? stage[Math.max(0, others.indexOf(me.id)) % stage.length] : null;
+if (sp !== null) {
+spot = sp;
+out.role = `退守 ${fall}`;
+out.task = 'retake';
+out.allowPeek = false;
+out.escape = P.giveUpRun && dist(me.x, me.y, sp.x, sp.y) > 3 * UNIT;
+}
+}
+const probe = fall === null ? this.probeSpot(obs, p) : null;
+if (probe !== null) {
+spot = probe;
+out.role = '探點';
+out.allowPeek = false;
 }
 out.goal = { x: spot.x, y: spot.y };
 out.hold = spot;
@@ -4826,6 +4933,122 @@ out.role = '殘局找人';
 }
 const s = lay.site ?? p.rot;
 return s === null ? null : this.ctUtility(obs, p, s);
+}
+/**
+* @param {Observation} obs @param {CTPlan} p @param {SiteId | null} s @returns {SiteId | null}
+*/
+giveUp(obs, p, s) {
+const b = obs.bomb.state;
+if (b === 'planted' || b === 'defusing' || obs.round.phase !== 'live') return null;
+if (this.fallback !== null) return this.fallback;
+if (s === null) return null;
+const t = obs.tick;
+const site = this.intel.sites[s];
+let inside = 0;
+for (const k of this.perc.known.values()) if (k.conf >= 50 && t - k.tick <= 2 * this.tps && site.regions.has(this.intel.region[this.g.cellOf(k.x, k.y)])) inside++;
+const flashed = site.entrances.some((e) => this.flashAt(obs, e));
+const est = Math.min(obs.enemiesAlive, flashed ? Math.max(inside, this.heat(obs)[s]) : inside);
+if (est < P.giveUpIn) return null;
+const lay = this.ctLayout(obs, p);
+const mine = this.alive(obs).filter((m) => lay.get(m.id)?.site === s && dist(m.x, m.y, site.cx, site.cy) < 20 * UNIT).length;
+if (mine > P.giveUpMine) return null;
+this.fallback = s;
+return s;
+}
+/**
+* @param {SiteId} s @returns {Spot[]}
+*/
+fallSpots(s) {
+const key = `fall${s}`;
+const hit = this.spotCache.get(key);
+if (hit !== undefined) return hit;
+const g = this.g;
+const intel = this.intel;
+const site = intel.sites[s];
+const ent = [...site.entrances].sort((a, b) => a.ctDist - b.ctDist)[0];
+/** @type {Spot[]} */
+const ranked = [];
+if (ent !== undefined) {
+const field = intel.distSite[s];
+const d0 = field[g.cellOf(ent.ox, ent.oy)];
+const ctAt = intel.distSpawn.CT[g.cellOf(ent.ox, ent.oy)];
+for (let i = 0; i < g.N; i++) {
+if (g.block[i] === 1 || site.regions.has(intel.region[i]) || field[i] < d0 + 60 || field[i] > d0 + 140 || intel.distSpawn.CT[i] >= ctAt) continue;
+const c = g.center(i);
+if (g.los(c.x, c.y, ent.ix, ent.iy) || g.los(c.x, c.y, site.cx, site.cy) || g.los(c.x, c.y, ent.x, ent.y)) continue;
+ranked.push({ x: c.x, y: c.y, cell: i, fx: ent.ox, fy: ent.oy, score: -3 * intel.exposure[i] - Math.abs(field[i] - d0 - 90) / 10 + (intel.cover[i] !== 0 ? 2 : 0), entrance: site.entrances.indexOf(ent) });
+}
+}
+ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
+/** @type {Spot[]} */
+const out = [];
+for (const q of ranked) {
+if (out.length >= 5) break;
+if (out.every((o) => dist(o.x, o.y, q.x, q.y) >= P.stageGap * UNIT)) out.push(q);
+}
+const res = out.length > 0 ? out : this.stageSpots('CT', s, 0);
+this.spotCache.set(key, res);
+return res;
+}
+/**
+* @param {Observation} obs @param {CTPlan} p @returns {Spot | null}
+*/
+probeSpot(obs, p) {
+const me = obs.me;
+const t = obs.tick;
+if (this.probed || obs.round.phase !== 'live' || p.rot !== null || this.alive(obs).length < 4) return null;
+if (t - this.liveStart > P.probeTime * this.tps || this.perc.known.size > 0 || obs.sounds.some((q) => q.kind === 'footstep' && !q.friendly && q.range === 'near')) {
+this.probed = true;
+return null;
+}
+const lay = this.ctLayout(obs, p);
+const lurk = this.roles.who(LURK);
+const who = lurk >= 0 && this.isAlive(obs, lurk) && lay.get(lurk)?.site === null ? lurk : this.roles.who(ENTRY);
+if (who !== me.id) return null;
+const list = this.probeSpots();
+return list.length === 0 ? null : list[rollOf(obs.round.number, 7) % list.length];
+}
+/**
+* @returns {Spot[]}
+*/
+probeSpots() {
+const hit = this.spotCache.get('probe');
+if (hit !== undefined) return hit;
+const g = this.g;
+const intel = this.intel;
+const v = P.routeSpeed;
+const entrancePortals = new Set([...intel.sites.A.entrances, ...intel.sites.B.entrances].map((e) => e.portal));
+/** @type {Map<number, { n: number, from: Pt }>} */
+const uses = new Map();
+for (const s of SITES) {
+for (const r of intel.routes.T[s]) {
+r.portals.forEach((pid, k) => {
+const u = uses.get(pid);
+if (u !== undefined) u.n++;
+else uses.set(pid, { n: 1, from: k > 0 ? r.points[k - 1] : this.spawnCenter('T') });
+});
+}
+}
+/** @type {Spot[]} */
+const ranked = [];
+for (const [pid, u] of uses) {
+if (entrancePortals.has(pid)) continue;
+const q = intel.portals[pid];
+const ca = g.cellOf(q.ax, q.ay);
+const cb = g.cellOf(q.bx, q.by);
+if (ca < 0 || cb < 0) continue;
+const c = intel.distSpawn.CT[ca] <= intel.distSpawn.CT[cb] ? ca : cb;
+const ct = intel.distSpawn.CT[c] / 10 / v;
+const tt = Math.min(intel.distSpawn.T[ca], intel.distSpawn.T[cb]) / 10 / v;
+if (ct > P.probeTime - 3 || tt < P.probeTime + P.probeMargin) continue;
+const at = g.center(c);
+if (!g.los(at.x, at.y, u.from.x, u.from.y)) continue;
+ranked.push({ x: at.x, y: at.y, cell: c, fx: u.from.x, fy: u.from.y, score: 10 * u.n - tt, entrance: -1 });
+}
+ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
+const out = ranked.slice(0, 2);
+this.spotCache.set('probe', out);
+return out;
 }
 /** @param {Observation} obs @param {Pt} c */
 mateSees(obs, c) {
@@ -4855,31 +5078,36 @@ return { n, sign };
 */
 ctUtility(obs, p, s) {
 const me = obs.me;
-if (obs.round.phase !== 'live' || me.blindTicks > 0) return null;
+const t = obs.tick;
+if (obs.round.phase !== 'live' || me.blindTicks > 0 || obs.enemies.length > 0) return null;
 let best = null;
-let top = { n: 0, sign: 0 };
+let top = { n: 0, sign: 0, fl: false };
 let bestS = 1;
 for (const e of this.intel.sites[s].entrances) {
 const q = this.pressure(obs, s, e);
-const sc = 2 * q.n + Math.min(2, q.sign);
+const fl = this.flashAt(obs, e);
+const sc = 2 * q.n + Math.min(2, q.sign) + (fl ? 3 : 0);
 if (sc > bestS) {
 bestS = sc;
 best = e;
-top = q;
+top = { ...q, fl };
 }
 }
 if (best === null) return null;
 const e = best;
-const out = { x: e.ox + (e.ox - e.ix) * 0.3, y: e.oy + (e.oy - e.iy) * 0.3 };
+const outer = { x: e.ox + (e.ox - e.ix) * 0.3, y: e.oy + (e.oy - e.iy) * 0.3 };
+const fire = this.burns.find((b) => t <= b.until && dist(b.x, b.y, outer.x, outer.y) < 4 * UNIT);
+const smoked = this.smokes.some((m) => dist(m.x, m.y, e.ox, e.oy) < P.smokeGap * UNIT);
 const burn = this.util.pick(me, ['incendiary', 'molotov']);
-if (burn !== null && top.n >= 2) return { kind: burn, ...out, why: '燒入口' };
-if (obs.enemies.length > 0) return null;
-if (this.util.has(me, 'flash') && !this.flashDone(e)) {
+if (burn !== null && fire === undefined && !smoked && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return { kind: burn, ...outer, why: '燒入口' };
+const fading = fire !== undefined && fire.until - t < 3 * this.tps;
+if (this.util.has(me, 'smoke') && !smoked && (top.n >= 2 || top.fl || fading) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' };
+if (top.n >= 1 && this.util.has(me, 'flash') && !this.flashDone(e)) {
 const th = this.perc.threats(e.ox, e.oy, 50).find((k) => dist(k.x, k.y, e.ox, e.oy) < 10 * UNIT);
-for (const c of [...(th !== undefined ? [th] : []), { x: e.ox, y: e.oy }, { x: e.x, y: e.y }]) if (this.util.solve(me.x, me.y, c.x, c.y) !== null && !this.mateSees(obs, c)) return { kind: 'flash', x: c.x, y: c.y, why: '守點閃' };
+const lay = this.ctLayout(obs, p);
+const partner = obs.teammates.some((m) => m.alive && !m.blind && lay.get(m.id)?.site === s && dist(m.x, m.y, e.x, e.y) < P.deepMax * UNIT && this.g.los(m.x, m.y, e.x, e.y));
+if (th !== undefined && partner && this.util.solve(me.x, me.y, th.x, th.y) !== null && !this.mateSees(obs, th)) return { kind: 'flash', x: th.x, y: th.y, why: '配對閃' };
 }
-const mine = this.alive(obs).filter((m) => this.ctLayout(obs, p).get(m.id)?.site === s).length;
-if (this.util.has(me, 'smoke') && top.n >= Math.max(2, mine) && this.smokes.every((m) => dist(m.x, m.y, e.ox, e.oy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' };
 return null;
 }
 /**
@@ -5085,10 +5313,8 @@ return q !== null && t - q.tick < P.awpMemo * this.tps && dist(me.x, me.y, q.x, 
 */
 lineCheck(obs, out) {
 const me = obs.me;
-if (out.goal === null || out.stop || out.urgent || out.commit || out.objective || out.escape || obs.enemies.length > 0 || obs.round.phase !== 'live' || obs.enemiesAlive === 0) return null;
-const bomb = obs.bomb.state === 'planted' || obs.bomb.state === 'defusing';
-if (me.team === 'CT' && !bomb) return null;
-if (bomb ? (obs.bomb.ticksLeft ?? 0) < 20 * this.tps : obs.round.phaseTicksLeft < 15 * this.tps) return null;
+if (me.team === 'CT' || out.goal === null || out.stop || out.urgent || out.commit || out.objective || out.escape || obs.enemies.length > 0 || obs.round.phase !== 'live' || obs.enemiesAlive === 0) return null;
+if (obs.round.phaseTicksLeft < 15 * this.tps) return null;
 const w = this.nav?.wps[this.nav.wpIdx];
 if (w === undefined || dist(me.x, me.y, out.goal.x, out.goal.y) < 2 * UNIT) return null;
 const k = Math.min(1, (3 * UNIT) / Math.max(dist(me.x, me.y, w.x, w.y), 1));
@@ -5347,14 +5573,61 @@ return out;
 * @param {SiteId} s @param {number} n @param {number} round @returns {Spot[]}
 */
 pickHolds(s, n, round) {
-const top = this.intel.sites[s].holds.slice(0, 4);
-if (n < 1 || n > 2 || top.length <= n) return this.siteSpots(s, n);
+const deep = this.deepSpots(s);
+if (n < 1 || deep.length === 0) return this.siteSpots(s, n);
 const roll = rollOf(round, s === 'A' ? 1 : 2);
-if (n === 1) return [top[roll % Math.min(3, top.length)]];
+if (n === 1 || deep.length === 1) return [deep[roll % Math.min(3, deep.length)], ...this.siteSpots(s, n).slice(0, n - 1)];
 /** @type {Spot[][]} */
 const pairs = [];
-for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) if (top[i].entrance !== top[j].entrance || dist(top[i].x, top[i].y, top[j].x, top[j].y) >= 5 * UNIT) pairs.push([top[i], top[j]]);
-return pairs.length === 0 ? this.siteSpots(s, n) : pairs[roll % pairs.length];
+for (let i = 0; i < deep.length; i++) for (let j = i + 1; j < deep.length; j++) pairs.push([deep[i], deep[j]]);
+return [...pairs[roll % pairs.length], ...this.siteSpots(s, n).slice(0, n - 2)];
+}
+/**
+* @param {SiteId} s @returns {Spot[]}
+*/
+deepSpots(s) {
+const key = `deep${s}`;
+const hit = this.spotCache.get(key);
+if (hit !== undefined) return hit;
+const g = this.g;
+const intel = this.intel;
+const site = intel.sites[s];
+const field = intel.distSite[s];
+const R = this.util.flashRadius / UNIT;
+const top = site.entrances.filter((e) => Number.isFinite(e.tDist)).slice(0, 2);
+const fov = this.data.rules.fovDeg;
+/** @type {Spot[]} */
+const ranked = [];
+for (const need of [top.length, 1]) {
+const es = top.slice(0, need);
+for (let i = 0; i < g.N && es.length > 0; i++) {
+if (g.block[i] === 1 || field[i] > P.holdSiteRadius * 10) continue;
+const c = g.center(i);
+let near = Infinity;
+let ok = true;
+for (const e of es) {
+const d = dist(c.x, c.y, e.x, e.y) / UNIT;
+if (d < R + 1 || d > P.deepMax || !g.los(c.x, c.y, e.x, e.y)) ok = false;
+near = Math.min(near, d);
+}
+if (!ok) continue;
+const fx = es.reduce((v, e) => v + e.x, 0) / es.length;
+const fy = es.reduce((v, e) => v + e.y, 0) / es.length;
+if (es.some((e) => Math.abs(adiff(angleTo(c.x, c.y, e.x, e.y), angleTo(c.x, c.y, fx, fy))) > fov * 0.4)) continue;
+const sc = 100 - 6 * intel.exposure[i] + ((intel.cover[i] & 1) !== 0 ? 8 : 0) + ((intel.cover[i] & 2) !== 0 ? 6 : 0) - Math.abs(near - (R + 6)) + (site.regions.has(intel.region[i]) ? 4 : 0);
+ranked.push({ x: c.x, y: c.y, cell: i, fx, fy, score: sc, entrance: site.entrances.indexOf(es[0]) });
+}
+if (ranked.length > 0) break;
+}
+ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
+/** @type {Spot[]} */
+const out = [];
+for (const q of ranked) {
+if (out.length >= 4) break;
+if (out.every((o) => dist(o.x, o.y, q.x, q.y) >= 4 * UNIT)) out.push(q);
+}
+this.spotCache.set(key, out);
+return out;
 }
 /**
 * @param {Spot} spot @param {number} round @returns {Spot}
@@ -5657,7 +5930,7 @@ version: '2.5',
 style: '基準',
 knobs: [
 { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
-{ key: 'economy', name: '經濟風格', description: '0 標準、1 保守（不半買）、2 積極（差一點也全買、半買門檻低）', min: 0, max: 2, default: 0, integer: true },
+{ key: 'economy', name: '經濟風格', description: '0 標準、1 保守（force 門檻高）、2 積極（force 門檻低）', min: 0, max: 2, default: 0, integer: true },
 { key: 'awpSlot', name: '狙擊手', description: '隊內序號幾號在錢夠時買狙擊槍（5 = 沒有狙擊手）', min: 0, max: 5, default: 4, integer: true },
 { key: 'ctSplitA', name: 'CT 守 A 人數', description: 'CT 開局守 A 點的人數（B 固定 2 人，其餘守中路）', min: 0, max: 5, default: P.ctSplitA, integer: true },
 { key: 'plan', name: 'T 計畫', description: '0 自動（依經濟與侵略抽）；1 default、2 rush、3 split、4 fake（指揮才有作用）', min: 0, max: 4, default: 0, integer: true },
