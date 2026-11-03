@@ -268,6 +268,7 @@ function openWatch(fixtureId: string): void {
     request: t.request,
     outcome: t.outcome,
     names: [...f.match.home, ...f.match.away].map((id) => ctx.pm.get(id)?.name ?? id),
+    portraits: [...f.match.home, ...f.match.away].map((id) => ctx.pm.get(id)?.portraitId ?? ''),
     // 打那場時的版本（之後升版不影響）
     tags: specs.map((s) => `${lineageName(ctx.c, s.lineageId)} v${s.version}`),
     teams: [teamName(ctx.v, f.home), teamName(ctx.v, f.away)],

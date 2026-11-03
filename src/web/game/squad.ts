@@ -2,10 +2,11 @@
 // 名單人數與出賽位名稱來自內容包（軍團戰暫代包 3 人：先鋒、中堅、大將；攻防戰 5 人：1～5 號位）。
 import type { KnownPlayer } from '../../manage/index.ts';
 import { lineageName } from '../manage/format.ts';
-import { lineupOf, maxVersionOf, myFixture, playerRecords, publicRating, rankOf, rosterOf, teamForm } from '../club/model.ts';
+import { lineupOf, myFixture, playerRecords, publicRating, rankOf, rosterOf, teamForm } from '../club/model.ts';
 import { avatarSvg } from '../club/art.ts';
+import { portraitFull } from '../portrait.ts';
 import type { Ctx } from './kit.ts';
-import { avatar, btn, canAct, crest, crestRing, esc, foeOf, head, icon, intelNote, lineage, pcard, pt, slotEn, slotName, teamName, tierName, wan } from './kit.ts';
+import { avatar, btn, canAct, crest, crestRing, esc, foeOf, head, icon, intelNote, lineage, pcard, pt, rarityBadge, slotEn, slotName, teamName, tierName, verCap, wan } from './kit.ts';
 
 // ───── 戰隊 ─────
 export function squadScreen(ctx: Ctx): string {
@@ -45,8 +46,8 @@ export function squadScreen(ctx: Ctx): string {
       const t = tierName(p.version);
       const status = p.upgrading ? '<span class="st-tag bn">升版中</span>' : slot >= 0 ? `<span class="st-tag on">${esc(slotName(ctx, slot))}</span>` : '<span class="st-tag bn">替補</span>';
       return `<div class="row ${slot === 0 || (slot >= 0 && !lu.auto) ? 'me' : ''} ${ui.pickSlot !== null ? 'pickable' : ''}" data-act="${ui.pickSlot !== null && active ? 'assign' : 'player'}" data-pid="${p.id}" ${active ? 'draggable="true"' : ''}>
-        ${avatar(ctx, p, 46)}<span class="who"><b>${esc(p.name)}</b>${lineage(ctx, p.lineageId, 13)}</span>
-        <span class="ver"><span class="num ${p.version >= 3 ? 'gd' : ''}">v${p.version}</span><small class="dim">${t.zh}</small></span>
+        ${avatar(ctx, p, 46)}<span class="who"><b>${esc(p.name)}${rarityBadge(p)}</b>${lineage(ctx, p.lineageId, 13)}</span>
+        <span class="ver"><span class="num ${p.version >= 3 ? 'gd' : ''}">${verCap(p)}</span><small class="dim">${t.zh}</small></span>
         <span class="num">${p.elo}</span><span class="num dim">${r.w}-${r.l}</span><span><span class="num">${wan(p.weeklySalary)}</span> <small class="dim">萬</small></span><span class="act">${status}</span></div>`;
     })
     .join('');
@@ -108,7 +109,8 @@ export function playerScreen(ctx: Ctx): string {
   const lu = lineupOf(ctx);
   const slot = mine ? lu.ids.indexOf(p.id) : -1;
   const ln = c.lineages.find((l) => l.id === p.lineageId);
-  const maxV = maxVersionOf(c, p.lineageId);
+  // 個人上限（品階與流派取小）：版本線與升版鈕都照它
+  const maxV = p.maxVersion;
   const upCost = p.weeklySalary * e.upgradeCostWeeks;
   const nextSalary = Math.round((p.weeklySalary * e.salaryGrowthPct) / 100);
   const ladder = Array.from({ length: maxV }, (_, i) => {
@@ -153,10 +155,10 @@ export function playerScreen(ctx: Ctx): string {
         <circle cx="320" cy="320" r="262" fill="none" stroke="${mine ? 'url(#gold)' : 'rgba(238,242,246,.6)'}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${Math.round(Math.max(0.05, Math.min(1, (p.elo - 1350) / 350)) * 1646)} 1646" transform="rotate(-90 320 320)"/>
         <g class="rf"><circle cx="320" cy="320" r="238" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2" stroke-dasharray="50 100 12 70 160 330 24 760"/></g>
         <path d="M 320 30 L 320 52 M 320 588 L 320 610 M 30 320 L 52 320 M 588 320 L 610 320" stroke="#f0b54a" stroke-width="3"/></svg>
-      <div class="lens tinted ${mine ? '' : 'grey'} in">${avatarSvg(p.id + p.name, '#3a4458', 370)}<i class="scan"></i></div>
+      ${p.portraitId ? `<div class="pbody in">${portraitFull(p.portraitId)}</div>` : `<div class="lens tinted ${mine ? '' : 'grey'} in">${avatarSvg(p.id + p.name, '#3a4458', 370)}<i class="scan"></i></div>`}
       <div class="orb in" style="left:440px;top:66px"><b>${p.elo}</b><span>RATING</span></div>
       <div class="orb w in" style="left:96px;top:66px"><b>v${p.version}</b><span>${t.en}</span></div></section>
-    <section class="plate in"><div class="tags">${tags}</div><h1>${esc(p.name)}</h1><div class="roman">${esc(lineageName(c, p.lineageId))} · ${t.zh}</div>
+    <section class="plate in"><div class="tags">${rarityBadge(p, 'lg')}${tags}</div><h1>${esc(p.name)}</h1><div class="roman">${esc(lineageName(c, p.lineageId))} · ${t.zh} · ${verCap(p)}</div>
       <div class="stats"><div><b>${p.elo}</b><span>RATING</span></div><i></i><div><b>${rec.w}-${rec.l}</b><span>RECORD</span></div><i></i><div><b>${wan(p.weeklySalary)}</b><span>萬／週</span></div></div></section>
     <section class="body s-player">${verPanel}
       <div class="pn p-hist in">${pt('02', '出賽紀錄', `${rec.w} 勝 ${rec.l} 敗`)}${history(ctx, p)}</div>
@@ -171,8 +173,8 @@ function faRow(ctx: Ctx, p: KnownPlayer, sel: boolean): string {
   const intel = ctx.v.intel.find((i) => i.playerId === p.id);
   const pending = ctx.v.jobs.some((j) => j.kind === 'scout' && j.playerId === p.id);
   const d = intel ? intel.estPower - p.elo : 0;
-  return `<div class="row ${sel ? 'me' : ''}" data-act="pick-fa" data-pid="${p.id}">${avatar(ctx, p, 44)}<span class="who"><b>${esc(p.name)}</b>${lineage(ctx, p.lineageId, 13)}</span>
-    <span class="num ${p.version >= 3 ? 'gd' : ''}">v${p.version}</span><span class="num">${p.elo}</span>
+  return `<div class="row ${sel ? 'me' : ''}" data-act="pick-fa" data-pid="${p.id}">${avatar(ctx, p, 44)}<span class="who"><b>${esc(p.name)}${rarityBadge(p)}</b>${lineage(ctx, p.lineageId, 13)}</span>
+    <span class="num ${p.version >= 3 ? 'gd' : ''}">${verCap(p)}</span><span class="num">${p.elo}</span>
     <span class="intel">${intel ? `<b class="${d >= 0 ? 'gd2' : 'rd'}">${d >= 0 ? '+' : ''}${d}</b><small>真實 ${intel.estPower}</small>` : pending ? '<small>球探中</small>' : '<small class="dim2">—</small>'}</span>
     <span><span class="num">${wan(p.weeklySalary)}</span> <small class="dim">萬</small></span></div>`;
 }
@@ -196,7 +198,7 @@ export function marketScreen(ctx: Ctx): string {
       .join('')}</div>`;
   } else {
     const rep = [...v.intel].reverse();
-    list = `<div class="rows scroll">${rep.length ? rep.map((i) => { const p = ctx.pm.get(i.playerId); if (!p) return ''; const d = i.estPower - p.elo; return `<div class="row" data-act="pick-fa" data-pid="${p.id}">${avatar(ctx, p, 44)}<span class="who"><b>${esc(p.name)}</b><small class="dim">${esc(teamName(v, p.teamId))}</small></span><span class="num">${p.elo}</span><span class="num gd2">${i.estPower}</span><span class="intel"><b class="${d >= 0 ? 'gd2' : 'rd'}">${d >= 0 ? '比評分高' : '比評分低'} ${Math.abs(d)}</b><small>±${i.sd} · W${String(i.week).padStart(2, '0')}</small></span></div>`; }).join('') : '<p class="dim">還沒有球探報告。選一位選手派球探，推進一週後回報。</p>'}</div>`;
+    list = `<div class="rows scroll">${rep.length ? rep.map((i) => { const p = ctx.pm.get(i.playerId); if (!p) return ''; const d = i.estPower - p.elo; return `<div class="row" data-act="pick-fa" data-pid="${p.id}">${avatar(ctx, p, 44)}<span class="who"><b>${esc(p.name)}${rarityBadge(p)}</b><small class="dim">${esc(teamName(v, p.teamId))}</small></span><span class="num">${p.elo}</span><span class="num gd2">${i.estPower}</span><span class="intel"><b class="${d >= 0 ? 'gd2' : 'rd'}">${d >= 0 ? '比評分高' : '比評分低'} ${Math.abs(d)}</b><small>±${i.sd} · W${String(i.week).padStart(2, '0')}</small></span></div>`; }).join('') : '<p class="dim">還沒有球探報告。選一位選手派球探，推進一週後回報。</p>'}</div>`;
   }
   const picked = ui.marketPick ? ctx.pm.get(ui.marketPick) : undefined;
   const pick = picked && picked.teamId !== v.me.teamId ? picked : free[0];
@@ -220,7 +222,7 @@ export function marketScreen(ctx: Ctx): string {
     side = `<div class="sel in"><div class="card">${pcard(ctx, pick, { act: 'player', sel: true, note: intelNote(ctx, pick) })}</div>
       <div class="pn g cmp">${pt('COMPARE', cmp ? '跟替補比' : '選手資料', esc(teamName(v, pick.teamId)))}
         ${cmp ? `<div class="hdr"><div class="who">${avatar(ctx, pick, 54)}<div><b>${esc(pick.name)}</b><small>${esc(lineageName(c, pick.lineageId))} · v${pick.version}</small></div></div><div class="mid">VS</div><div class="who r">${avatar(ctx, cmp, 54)}<div><b>${esc(cmp.name)}</b><small>${esc(lineageName(c, cmp.lineageId))} · v${cmp.version} · 我方</small></div></div></div>
-          ${line('公開評分', pick.elo, cmp.elo, ea, eb, pick.elo > cmp.elo)}${line('版本', `v${pick.version}`, `v${cmp.version}`, pick.version * 18, cmp.version * 18, false)}${line('週薪（萬）', wan(pick.weeklySalary), wan(cmp.weeklySalary), pick.weeklySalary, cmp.weeklySalary, false)}${line('流派上限', `v${maxVersionOf(c, pick.lineageId)}`, `v${maxVersionOf(c, cmp.lineageId)}`, maxVersionOf(c, pick.lineageId) * 16, maxVersionOf(c, cmp.lineageId) * 16, false)}` : ''}</div>
+          ${line('公開評分', pick.elo, cmp.elo, ea, eb, pick.elo > cmp.elo)}${line('版本', `v${pick.version}`, `v${cmp.version}`, pick.version * 18, cmp.version * 18, false)}${line('週薪（萬）', wan(pick.weeklySalary), wan(cmp.weeklySalary), pick.weeklySalary, cmp.weeklySalary, false)}${line('版本上限', `v${pick.maxVersion}`, `v${cmp.maxVersion}`, pick.maxVersion * 16, cmp.maxVersion * 16, false)}` : ''}</div>
       ${isFree ? `<div class="pn sim">${pt('SIMULATE', '簽下之後', `簽約金 <b class="num">${wan(fee)}</b> 萬 · 週薪 <b class="num">${wan(pick.weeklySalary)}</b> 萬`)}
         <div class="grid"><div class="k"><small>現金</small><div class="ch"><span class="num">${wan(v.me.cash)}</span><i>→</i><span class="num to ${cashAfter < 0 ? 'bad' : ''}">${wan(cashAfter)}</span></div></div>
           <div class="k"><small>每週固定淨額</small><div class="ch"><span class="num">${net >= 0 ? '+' : '−'}${wan(Math.abs(net))}</span><i>→</i><span class="num to ${netAfter < 0 ? 'bad' : ''}">${netAfter >= 0 ? '+' : '−'}${wan(Math.abs(netAfter))}</span></div></div>

@@ -1,7 +1,7 @@
 // 狀態查詢小工具與記帳。這裡的函式都不亂數、不呼叫對戰閘道。
-import type { ContentPack, Lineage } from './content.ts';
+import type { ContentPack, Lineage, RaritySpec } from './content.ts';
 import type { SideSpec } from './gateway.ts';
-import type { GameState, LedgerCategory, Message, Player, PlayerId, Team, TeamId } from './types.ts';
+import type { GameState, LedgerCategory, Message, Player, PlayerId, Rarity, Team, TeamId } from './types.ts';
 
 export function findPlayer(state: GameState, id: PlayerId): Player | undefined {
   return state.players.find((p) => p.id === id);
@@ -39,6 +39,17 @@ export function lineageOf(content: ContentPack, id: string): Lineage {
 
 export function maxVersion(content: ContentPack, lineageId: string): number {
   return lineageOf(content, lineageId).power.length;
+}
+
+export function raritySpec(content: ContentPack, id: Rarity): RaritySpec {
+  const r = content.rarities.find((x) => x.id === id);
+  if (!r) throw new Error(`未知品階 ${id}`);
+  return r;
+}
+
+/** 選手個人版本上限：品階上限與流派上限取小 */
+export function playerMaxVersion(content: ContentPack, p: Player): number {
+  return Math.min(raritySpec(content, p.rarity).maxVersion, maxVersion(content, p.lineageId));
 }
 
 /** 公開先驗：只看版本號給的初始 Elo（所有流派相同），真實強度要靠戰績或情報才看得出差別 */

@@ -63,7 +63,7 @@ function begin(s: ShooterSetup): void {
 /** 經營層觀戰：與閘道同一條建驅動的路徑，所以播出來的就是存檔裡那一場 */
 function beginWatch(w: WatchSetup): void {
   human = null;
-  const info: WatchInfo = { teams: w.teams, tags: w.tags, mine: w.mine };
+  const info: WatchInfo = { teams: w.teams, tags: w.tags, mine: w.mine, portraits: w.portraits };
   const build = (): ShooterDriver => new ShooterDriver(gatewayDriverOptions(w.request, baselineBot(), { record: true }));
   rebuild = build;
   launch({ team: 'T', seed: w.request.seed, spectate: true }, build(), 0, [...w.names], info);

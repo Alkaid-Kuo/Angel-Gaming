@@ -16,8 +16,9 @@ import { knownView } from '../src/manage/view.ts';
 const content = STUB_CONTENT;
 const gateway = new FakeGateway(content);
 
+/** 內容包定的起始資金：NPC 開局就簽約，所以不能拿開局後的現金當起點 */
 function startCashes(state: GameState): Map<string, number> {
-  return new Map(state.teams.map((t) => [t.id, t.cash]));
+  return new Map(state.teams.map((t) => [t.id, t.persona === null ? content.economy.humanStartCash : content.personas[t.persona].startCash]));
 }
 
 describe('評分', () => {
@@ -92,12 +93,13 @@ describe('賽程', () => {
 });
 
 describe('開新局', () => {
-  it('8 隊、1 位玩家、各隊 lineupSize 人、10 名自由選手、28 場例行賽，同種子結果相同', () => {
+  it('8 隊、1 位玩家、各隊至少 lineupSize 人、共發 10 名自由選手、28 場例行賽，同種子結果相同', () => {
     const s = newGame(7, content);
     expect(s.teams).toHaveLength(8);
     expect(s.teams.filter((t) => t.human)).toHaveLength(1);
-    for (const t of s.teams) expect(rosterOf(s, t.id)).toHaveLength(content.lineupSize);
-    expect(s.players.filter((p) => p.teamId === null)).toHaveLength(content.economy.freeAgentCount);
+    expect(rosterOf(s, s.humanTeamId)).toHaveLength(content.lineupSize);
+    for (const t of s.teams) expect(rosterOf(s, t.id).length).toBeGreaterThanOrEqual(content.lineupSize);
+    expect(s.players).toHaveLength(8 * content.lineupSize + content.economy.freeAgentCount);
     expect(s.fixtures).toHaveLength(28);
     expect(serialize(newGame(7, content))).toBe(serialize(s));
     expect(serialize(newGame(8, content))).not.toBe(serialize(s));
@@ -223,7 +225,7 @@ describe('完整賽段', () => {
 
   it('現金為負的玩家在週結算後破產，賽段結束後不能再推進', async () => {
     const s = newGame(31, content);
-    humanTeam(s).cash = -1;
+    humanTeam(s).cash = -1000; // 單週贏球的淨收入補不回來，不依賴當週勝負
     await advance(s, content, gateway); // 休賽期 → 第 1 週，不結算
     expect(s.phase).toBe('season');
     await advance(s, content, gateway);
@@ -253,7 +255,7 @@ describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
     expect(played).toHaveLength(4);
     expect(played.map((f) => f.result?.request)).toEqual(spy.sent);
     expect(s.version).toBe(SAVE_VERSION);
-    expect(SAVE_VERSION).toBe(4);
+    expect(SAVE_VERSION).toBe(5);
     for (const f of played) {
       const r = f.result as NonNullable<typeof f.result>;
       expect(r.request.formatId).toBe(s.formatId);
@@ -270,7 +272,7 @@ describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
   it('第 2 版存檔被拒，訊息說明版本', () => {
     const s = newGame(62, content);
     const old = JSON.stringify({ ...s, version: 2 });
-    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 4 不符/);
+    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 5 不符/);
   });
 
   it('watchable 由賽制自報、透傳到視圖；視圖不帶請求單（含隱藏的習慣）', async () => {
