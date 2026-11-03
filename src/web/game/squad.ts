@@ -6,7 +6,7 @@ import { lineupOf, myFixture, playerRecords, publicRating, rankOf, rosterOf, tea
 import { avatarSvg } from '../club/art.ts';
 import { portraitFull } from '../portrait.ts';
 import type { Ctx } from './kit.ts';
-import { avatar, btn, canAct, crest, crestRing, esc, foeOf, head, icon, intelNote, lineage, pcard, pt, rarityBadge, slotEn, slotName, teamName, tierName, verCap, wan } from './kit.ts';
+import { avatar, btn, canAct, crest, crestRing, esc, foeOf, head, icon, intelNote, lineage, pcard, pt, rarityBadge, rimOf, slotEn, slotName, teamName, tierName, verCap, wan } from './kit.ts';
 
 // ───── 戰隊 ─────
 export function squadScreen(ctx: Ctx): string {
@@ -155,7 +155,7 @@ export function playerScreen(ctx: Ctx): string {
         <circle cx="320" cy="320" r="262" fill="none" stroke="${mine ? 'url(#gold)' : 'rgba(238,242,246,.6)'}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${Math.round(Math.max(0.05, Math.min(1, (p.elo - 1350) / 350)) * 1646)} 1646" transform="rotate(-90 320 320)"/>
         <g class="rf"><circle cx="320" cy="320" r="238" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2" stroke-dasharray="50 100 12 70 160 330 24 760"/></g>
         <path d="M 320 30 L 320 52 M 320 588 L 320 610 M 30 320 L 52 320 M 588 320 L 610 320" stroke="#f0b54a" stroke-width="3"/></svg>
-      ${p.portraitId ? `<div class="pbody in">${portraitFull(p.portraitId)}</div>` : `<div class="lens tinted ${mine ? '' : 'grey'} in">${avatarSvg(p.id + p.name, '#3a4458', 370)}<i class="scan"></i></div>`}
+      ${p.portraitId ? `<div class="pbody in">${portraitFull(p.portraitId, rimOf(ctx, p))}</div>` : `<div class="lens tinted ${mine ? '' : 'grey'} in">${avatarSvg(p.id + p.name, '#3a4458', 370)}<i class="scan"></i></div>`}
       <div class="orb in" style="left:440px;top:66px"><b>${p.elo}</b><span>RATING</span></div>
       <div class="orb w in" style="left:96px;top:66px"><b>v${p.version}</b><span>${t.en}</span></div></section>
     <section class="plate in"><div class="tags">${rarityBadge(p, 'lg')}${tags}</div><h1>${esc(p.name)}</h1><div class="roman">${esc(lineageName(c, p.lineageId))} · ${t.zh} · ${verCap(p)}</div>

@@ -6,7 +6,7 @@ import type { ClubUi } from '../club/model.ts';
 import { myFixture, opponentOf } from '../club/model.ts';
 import { LINEAGE_LOOK, avatarSvg, crestSvg, npcCrest, tierOf, type CrestSpec, type IconName } from '../club/art.ts';
 import { icon } from '../club/art.ts';
-import { portraitFull, portraitSvg } from '../portrait.ts';
+import { portraitBust, portraitSvg } from '../portrait.ts';
 import type { Prefs } from '../club/prefs.ts';
 
 export type Screen = 'title' | 'create' | 'hub' | 'squad' | 'player' | 'market' | 'training' | 'league' | 'betting' | 'finance' | 'inbox';
@@ -105,6 +105,11 @@ export function avatar(ctx: Ctx, p: KnownPlayer | undefined, size: number, cls =
   return `<span class="av tinted ${side} ${cls}" style="width:${size}px;height:${size}px">${avatarSvg(p.id + p.name, '#3a4458', size)}</span>`;
 }
 
+/** 立繪邊光的隊色：我方金、本週對手紅、其他人淡白 */
+export function rimOf(ctx: Ctx, p: KnownPlayer): string {
+  return p.teamId === ctx.v.me.teamId ? 'rim-me' : p.teamId !== null && p.teamId === foeOf(ctx.v) ? 'rim-foe' : 'rim-other';
+}
+
 /** 品階徽章：N 灰、R 白、SR 金框、SSR 金底（只在金、白、墨之間分級） */
 export function rarityBadge(p: KnownPlayer, cls = ''): string {
   return `<span class="rb rb-${p.rarity.toLowerCase()} ${cls}">${p.rarity}</span>`;
@@ -143,13 +148,14 @@ export interface CardOpts {
   note?: string;
 }
 
-/** 選手收藏卡：版本只用框的明暗與金的多寡區分 */
+/** 選手收藏卡：版本只用框的明暗與金的多寡區分；有立繪時滿版（art），文字疊在下方漸層上，SR／SSR 多一層金光 */
 export function pcard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
   const t = tierName(p.version);
   const foe = p.teamId !== null && p.teamId === foeOf(ctx.v);
-  return `<div class="pc t${t.idx + 1} ${o.sel ? 'sel' : ''} ${foe ? 'foe' : ''}" data-act="${o.act ?? 'player'}" data-pid="${p.id}" ${o.drag ? 'draggable="true"' : ''}>
+  const art = p.portraitId ? `art r-${p.rarity.toLowerCase()}` : '';
+  return `<div class="pc t${t.idx + 1} ${art} ${o.sel ? 'sel' : ''} ${foe ? 'foe' : ''}" data-act="${o.act ?? 'player'}" data-pid="${p.id}" ${o.drag ? 'draggable="true"' : ''}>
     <div class="top2"><span class="ver">${verCap(p)}</span>${rarityBadge(p)}<span>${t.zh} · ${t.en}</span></div>
-    ${p.portraitId ? `<div class="por pic">${portraitFull(p.portraitId)}</div>` : `<div class="por tinted ${p.teamId === ctx.v.me.teamId ? '' : 'grey'}">${avatarSvg(p.id + p.name, '#3a4458', 176)}</div>`}
+    ${p.portraitId ? `<div class="por pic r-${p.rarity.toLowerCase()}" data-r="${p.rarity}">${portraitBust(p.portraitId, 338, rimOf(ctx, p), 0.42, 0.27)}</div>` : `<div class="por tinted ${p.teamId === ctx.v.me.teamId ? '' : 'grey'}">${avatarSvg(p.id + p.name, '#3a4458', 176)}</div>`}
     ${o.slot !== undefined && o.slot >= 0 ? `<span class="slot"><i>${esc(slotName(ctx, o.slot))}</i></span>` : ''}
     ${p.upgrading ? '<span class="flag">升版中</span>' : ''}
     ${o.note ? `<div class="note">${o.note}</div>` : ''}

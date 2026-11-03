@@ -27,6 +27,18 @@ describe('立繪清單', () => {
     }
   });
 
+  it('頭像中心與邊長在立繪範圍內（介面裁半身用）', () => {
+    for (const p of PORTRAITS) {
+      const [x, y, side] = p.face;
+      expect(x, p.id).toBeGreaterThan(0.2);
+      expect(x, p.id).toBeLessThan(0.8);
+      expect(y, p.id).toBeGreaterThan(0.03);
+      expect(y, p.id).toBeLessThan(0.3);
+      expect(side, p.id).toBeGreaterThan(0.2);
+      expect(side, p.id).toBeLessThan(0.45);
+    }
+  });
+
   it('每張都有網頁用的立繪與頭像', () => {
     for (const p of PORTRAITS) {
       expect(existsSync(`public/portraits/full/${p.id}.webp`), p.id).toBe(true);
