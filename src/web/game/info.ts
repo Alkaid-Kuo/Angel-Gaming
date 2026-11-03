@@ -1,10 +1,10 @@
 // 聯賽（時間軸、積分榜、某週賽程、季後賽樹狀圖）、財務（現金與資金跑道、資金曲線、固定收支、累計、帳本）、信件。
-import type { KnownFixture } from '../../manage/index.ts';
+import type { KnownFixture, KnownPlayer } from '../../manage/index.ts';
 import { CATEGORY_NAME } from '../manage/format.ts';
 import { cashSeries, rosterOf, startCash, teamForm } from '../club/model.ts';
 import type { IconName } from '../club/art.ts';
 import type { Ctx } from './kit.ts';
-import { crest, esc, foeOf, head, icon, pt, teamName, wan } from './kit.ts';
+import { avatar, crest, esc, foeOf, head, icon, pt, rarityBadge, teamName, wan } from './kit.ts';
 
 // ───── 聯賽 ─────
 const NODE = ['休', '1', '2', '3', '4', '5', '6', '7', '準', '決'];
@@ -180,6 +180,11 @@ function mailText(text: string): string {
   return esc(text).replace(/(淨收支 |現金 )([+-]?)(\d+)/g, (_m, k: string, sign: string, n: string) => `${k}${sign}${wan(Number(n))} 萬`);
 }
 
+/** 信裡提到的選手（名字是英文 ID、只有英數字，前後不接英數字才算） */
+function mentions(ctx: Ctx, text: string): KnownPlayer[] {
+  return ctx.v.players.filter((p) => new RegExp(`(^|[^A-Za-z0-9])${p.name}($|[^A-Za-z0-9])`).test(text));
+}
+
 export function inboxScreen(ctx: Ctx, seen: number): string {
   const { v, ui } = ctx;
   const msgs = v.inbox.map((m, i) => ({ ...m, i, unread: i >= seen })).reverse();
@@ -190,9 +195,9 @@ export function inboxScreen(ctx: Ctx, seen: number): string {
   const go = open?.kind === 'report' ? `<button class="btn" data-act="go" data-to="training"><b>去訓練基地</b></button><button class="btn ghost" data-act="go" data-to="market"><b>去轉會市場</b></button>` : open?.kind === 'result' ? `<button class="btn ghost" data-act="go" data-to="league"><b>看聯賽</b></button>` : open?.kind === 'finance' ? `<button class="btn ghost" data-act="go" data-to="finance"><b>看財務</b></button>` : '';
   return `${head('INBOX // 信件', '信件', `${unread ? `未讀 <b>${unread}</b> · ` : ''}共 ${msgs.length} 封 · 球探、練習賽、研發的報告在推進一週後寄到`)}
     <section class="body s-inbox">
-      <div class="pn list in">${pt('01', '收件匣', `${msgs.length} 封`)}<div class="scroll">${msgs.map((m) => { const q = MSG[m.kind] ?? MSG.system; return `<button class="msg ${m.i === sel ? 'on' : ''} ${m.unread ? 'unread' : 'read'}" data-act="mail" data-i="${m.i}"><span class="ic2 ${q.cls}">${icon(q.ic, 24)}</span><b>${q.name}</b><span class="wk">${m.week === 0 ? '休' : `W${String(m.week).padStart(2, '0')}`}</span><p>${mailText(m.text)}</p></button>`; }).join('') || '<p class="dim">信箱是空的。</p>'}</div></div>
+      <div class="pn list in">${pt('01', '收件匣', `${msgs.length} 封`)}<div class="scroll">${msgs.map((m) => { const q = MSG[m.kind] ?? MSG.system; const who = mentions(ctx, m.text)[0]; return `<button class="msg ${m.i === sel ? 'on' : ''} ${m.unread ? 'unread' : 'read'}" data-act="mail" data-i="${m.i}">${who ? avatar(ctx, who, 52, 'ic2') : `<span class="ic2 ${q.cls}">${icon(q.ic, 24)}</span>`}<b>${q.name}</b><span class="wk">${m.week === 0 ? '休' : `W${String(m.week).padStart(2, '0')}`}</span><p>${mailText(m.text)}</p></button>`; }).join('') || '<p class="dim">信箱是空的。</p>'}</div></div>
       <div class="pn ${open?.kind === 'report' ? 'g' : ''} open in">${open ? `<div class="meta">${sel !== null && sel >= seen ? '<span class="chip fill">NEW</span>' : ''}<span class="chip ${k.cls}">${k.name}</span><span class="chip">${open.week === 0 ? '休賽期' : `第 ${open.week} 週`}</span></div>
-        <div class="txt">${mailText(open.text)}</div><div class="wm">${icon(k.ic, 260, 0.8)}</div><div class="acts">${go}</div>` : '<p class="dim big">沒有信。</p>'}</div>
+        <div class="txt">${mailText(open.text)}</div>${mentions(ctx, open.text).map((p) => `<button class="who-chip" data-act="player" data-pid="${p.id}">${avatar(ctx, p, 40)}<b>${esc(p.name)}</b>${rarityBadge(p)}<small>v${p.version}／v${p.maxVersion}</small></button>`).join('')}<div class="wm">${icon(k.ic, 260, 0.8)}</div><div class="acts">${go}</div>` : '<p class="dim big">沒有信。</p>'}</div>
     </section>`;
 }
 

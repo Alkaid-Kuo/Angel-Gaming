@@ -585,7 +585,7 @@ function startWatch(t: WatchTicket): void {
     return;
   }
   $('setup').innerHTML = `<section class="card sg-loading"><h2>比賽即將開始</h2><p class="muted">${esc(t.teams[0])} VS ${esc(t.teams[1])}・${esc(t.title)}</p></section>`;
-  ensureWorker().postMessage({ type: 'watch', watch: { request: t.request, names: t.names, tags: t.tags, teams: t.teams, mine: t.mine } } satisfies ToShooterWorker);
+  ensureWorker().postMessage({ type: 'watch', watch: { request: t.request, names: t.names, tags: t.tags, teams: t.teams, mine: t.mine, portraits: t.portraits } } satisfies ToShooterWorker);
 }
 
 /**

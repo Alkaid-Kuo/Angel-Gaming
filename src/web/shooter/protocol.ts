@@ -37,6 +37,8 @@ export interface WatchInfo {
   readonly tags: readonly string[];
   /** 我方是哪一組（別隊的比賽＝null）：天使金外框依此上色 */
   readonly mine: 0 | 1 | null;
+  /** 依 playerId：立繪代號（舊票沒有這欄，頭像改依名字挑） */
+  readonly portraits?: readonly string[];
 }
 
 export interface WatchSetup extends WatchInfo {

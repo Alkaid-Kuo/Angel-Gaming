@@ -1033,6 +1033,33 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .md-result.md-team .ch.foe em.up { color: var(--white); }
 .md-result.md-team .gains { top: 800px; }
 
+/* ───── 選手立繪與品階（src/web/portrait.ts）─────
+   頭像保留原色、不染金，我方框金、本週對手框紅、其他人框灰；亮底圓（SVG 內）讓深色服裝不融進暗底。
+   全身立繪加淡色描邊。品階徽章只在金、白、墨之間分四級：N 灰、R 白、SR 金框、SSR 金底。 */
+.av.pic { box-shadow: 0 0 0 2px var(--gold), 0 0 0 5px rgba(var(--gold-rgb), 0.22); }
+.av.pic.foe { box-shadow: 0 0 0 2px var(--red), 0 0 0 5px rgba(var(--red-rgb), 0.22); }
+.av.pic.other { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5), 0 0 0 5px rgba(255, 255, 255, 0.06); }
+.pfull { display: block; filter: drop-shadow(0 0 1px rgba(var(--white-rgb), 0.9)) drop-shadow(0 0 8px rgba(var(--white-rgb), 0.16)); user-select: none; }
+.pc .por.pic { position: relative; overflow: hidden; align-items: flex-start; background: radial-gradient(120% 90% at 50% 30%, #4a5468, #1a2130 75%); }
+.pc .por.pic .pfull { width: 100%; height: auto; margin-top: -4px; }
+.v-player .pbody { position: absolute; left: 87px; top: -40px; width: 467px; height: 700px; -webkit-mask-image: linear-gradient(#000 80%, transparent 99%); mask-image: linear-gradient(#000 80%, transparent 99%); }
+.v-player .pbody .pfull { width: 100%; height: 100%; object-fit: contain; object-position: 50% 0; }
+.v-player .hero2 .orb { z-index: 2; }
+.rb { display: inline-block; flex: none; margin-left: 8px; padding: 1px 6px; font-family: var(--en); font-style: italic; font-weight: 800; font-size: max(13px, var(--fmin, 0px)); line-height: 1.25; letter-spacing: 0.04em; vertical-align: 2px; transform: skewX(-8deg); }
+.rb-n { color: var(--grey); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22); }
+.rb-r { color: var(--white); box-shadow: inset 0 0 0 1px rgba(var(--white-rgb), 0.75); }
+.rb-sr { color: var(--gold2); box-shadow: inset 0 0 0 1px var(--gold); background: rgba(var(--gold-rgb), 0.12); }
+.rb-ssr { color: var(--ink); background: linear-gradient(100deg, var(--gold2), var(--gold) 55%, var(--gold3)); box-shadow: 0 0 10px rgba(var(--gold-rgb), 0.45); }
+.pc .top2 .rb { margin-left: 6px; margin-right: auto; }
+.rb.lg { margin: 0 10px 0 0; padding: 4px 14px; font-size: 20px; vertical-align: middle; }
+.cap { font-size: max(0.6em, var(--fmin, 0px)); font-weight: 600; color: var(--grey); letter-spacing: 0; }
+.v-inbox .msg .av.ic2 { width: 52px; height: 52px; }
+.v-inbox .open .who-chip { display: inline-flex; align-items: center; gap: 10px; margin: 22px 12px 0 0; padding: 6px 14px 6px 6px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.v-inbox .open .who-chip:hover { background: rgba(255, 255, 255, 0.08); }
+.v-inbox .open .who-chip b { font-size: 18px; font-weight: 900; letter-spacing: 0.06em; }
+.v-inbox .open .who-chip .rb { margin-left: 0; }
+.v-inbox .open .who-chip small { font-family: var(--en); font-size: max(14px, var(--fmin, 0px)); color: var(--grey); }
+
 @media (prefers-reduced-motion: reduce) {
   #stage *, #stage *::before, #stage *::after { animation: none !important; transition: none !important; }
 }

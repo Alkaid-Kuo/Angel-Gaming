@@ -3,6 +3,7 @@
 // 隊色照 CS：T 黃、CT 藍，敵我都一樣，換邊時跟著換，介面與世界一致（render.ts）。組別固定，隊色看這組現在打哪一邊。
 // 我方永遠在左；經營層觀戰顯示隊名、選手名、角色與版本。
 import type { RoundEndReason, ShooterObservation, Team, WeaponId } from '../../shooter/api.ts';
+import { portraitOfSeat } from '../portrait.ts';
 import { mineGroup } from './render.ts';
 import type { CamMode } from './camera.ts';
 import type { BoardRow, FullState, KillFeedItem, ShooterFrame, ShooterMeta, ShooterSummary } from './protocol.ts';
@@ -14,7 +15,6 @@ import { EMBED, type WatchTicket } from './watch.ts';
 export const ANGEL = { gold: '#f0b54a', blue: '#57aef5', red: '#ff5d5d', white: '#eef2f6', grey: '#8b95a4' } as const;
 /** 隊色 */
 export const TEAM_COLOR: Readonly<Record<Team, string>> = { T: ANGEL.gold, CT: ANGEL.blue };
-const TEAM_JERSEY: Readonly<Record<Team, string>> = { T: '#b9832a', CT: '#2f6db0' };
 /** 觀戰速度（[ ] 或控制列切換） */
 export const SPEEDS = [0.5, 1, 2, 4, 8] as const;
 
@@ -223,13 +223,14 @@ export class ShooterHud {
     return this.tGroup;
   }
 
-  /** 選手頭像，球衣是隊色（同一個人同一邊只產生一次） */
+  /** 選手頭像，外框是隊色（同一個人同一邊只產生一次） */
   face(id: number): string {
     const team = this.teamNow(this.meta.groups[id]);
     const key = `${id}${team}`;
     let html = this.faces.get(key);
     if (html === undefined) {
-      html = avatarHtml(this.meta.names[id] ?? `#${id}`, TEAM_JERSEY[team]);
+      // 經營層觀戰用選手的立繪；試玩的 Bot 與舊觀戰票沒有立繪代號，依種子與座位挑
+      html = avatarHtml(this.meta.watch?.portraits?.[id] || portraitOfSeat(this.meta.seed, id), TEAM_COLOR[team]);
       this.faces.set(key, html);
     }
     return html;
