@@ -23,8 +23,8 @@ export function gunIconUrl(id: WeaponId): string {
   return url;
 }
 
-/** 選手頭像：立繪裁圓，外框是隊色 */
-export const avatarHtml = (portraitId: string, ring: string): string => portraitSvg(portraitId, 96, ring);
+/** 選手頭像：立繪裁圓（頂部計分板用方形），外框是隊色 */
+export const avatarHtml = (portraitId: string, ring: string, square = false): string => portraitSvg(portraitId, 96, ring, square);
 
 interface Cell {
   readonly id: number;
