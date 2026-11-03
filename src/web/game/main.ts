@@ -5,28 +5,36 @@
 import type { Command } from '../../manage/index.ts';
 import { GAME_KINDS, ManageGame } from '../manage/store.ts';
 import { EMBLEM_NAMES, type EmblemName } from '../club/art.ts';
-import { lineupOf, newClubUi } from '../club/model.ts';
+import { lineupOf, myFixture, newClubUi } from '../club/model.ts';
 import { lineageName } from '../manage/format.ts';
-import { WATCH_HASH, writeTicket } from '../shooter/watch.ts';
+import { LIVE_MSG, WATCH_HASH, writeTicket, type LiveMessage } from '../shooter/watch.ts';
 import { loadPrefs, savePrefs } from '../club/prefs.ts';
-import { mountCity, type CityView } from '../sketch/city.ts';
+import { landmarkAt, mountCity, type CityView } from '../sketch/city.ts';
 import { dust, initStage, still } from '../sketch/stage.ts';
-import { hubPanels, hubTags } from './hub.ts';
+import { showCoach } from './coach.ts';
+import { HELP, SCREEN_NAME, autoHelpId, currentStep, lockedUntil, type Step } from './guide.ts';
+import { LAND_SCREEN, hubPanels, hubTags } from './hub.ts';
 import { financeScreen, inboxScreen, leagueScreen } from './info.ts';
 import type { Ctx, GameUi, Screen } from './kit.ts';
 import { STANDALONE, esc, icon, myCrest, newGameUi, runStep, slotName, teamName, wan } from './kit.ts';
 import { bettingScreen, scrimWaitText, trainingScreen } from './ops.ts';
 import { rail, topBar } from './shell.ts';
-import { buildScenes, snapshot, stageName, type Scene } from './show.ts';
+import { buildScenes, preMatchScene, snapshot, stageName, type Scene } from './show.ts';
 import { marketScreen, playerScreen, squadScreen } from './squad.ts';
 import { createScreen, titleScreen, type Draft } from './title.ts';
 
 initStage();
+// 舞台等比縮放後字會跟著變小：小字設下限，實際顯示不低於 11 px（1920 時不影響）
+const fitFont = (): void => document.getElementById('stage')?.style.setProperty('--fmin', `${(11 / Math.min(1, innerWidth / 1920, innerHeight / 1080)).toFixed(2)}px`);
+addEventListener('resize', fitFont);
+fitFont();
 const app = document.getElementById('app') as HTMLElement;
 const cineEl = document.getElementById('cine') as HTMLElement;
 const toastEl = document.getElementById('toasts') as HTMLElement;
 const citySec = document.getElementById('city') as HTMLElement;
 const cityTags = document.getElementById('city-tags') as HTMLElement;
+const coachEl = document.getElementById('coach') as HTMLElement;
+const fxCv = document.getElementById('fx-cv') as HTMLCanvasElement;
 
 const randomSeed = (): number => Math.floor(Math.random() * 2 ** 31);
 const prefs = loadPrefs();
@@ -37,13 +45,17 @@ let lastScreen: Screen | null = null;
 let freshUntil = 0;
 let ui: GameUi = newGameUi(newClubUi());
 let draft: Draft = { name: '天使戰隊', crest: { ...myCrest(prefs) }, seed: randomSeed(), contentId: GAME_KINDS[0].content.id };
-let modal: { kind: 'menu' } | { kind: 'confirm'; title: string; text: string; ok: string; fn: () => void } | null = null;
+let modal: { kind: 'menu' } | { kind: 'help' } | { kind: 'confirm'; title: string; text: string; ok: string; fn: () => void } | null = null;
 let busy = false;
 /** 推進中的模擬進度（null＝沒有在模擬） */
 let progress: { done: number; total: number; estMs: number } | null = null;
 let lastCash: number | null = null;
+/** 賽前畫面等著播的那一場 */
+let liveFixture: string | null = null;
 let cine: { scenes: Scene[]; i: number } | null = null;
 let cineTimer = 0;
+/** 看比賽的全螢幕框（開著時經營畫面停在賽前） */
+let liveFrame: HTMLIFrameElement | null = null;
 const city: CityView = mountCity(document.getElementById('city-cv') as HTMLCanvasElement, document.getElementById('fx-cv') as HTMLCanvasElement, document.getElementById('rain-cv') as HTMLCanvasElement);
 dust(document.getElementById('dust') as HTMLCanvasElement, ['rgba(255,217,138,.5)', 'rgba(220,235,255,.3)'], 60);
 const bgWord = document.querySelector('.bgx .word') as HTMLElement;
@@ -51,10 +63,10 @@ const WORD: Partial<Record<Screen, string>> = { title: 'ANGEL', create: 'NEW TEA
 
 const speed = (): number => (prefs.fast ? 0.5 : 1);
 
-function toast(msg: string, bad = false): void {
+function toast(msg: string, bad = false, ic: 'check' | 'warn' | 'lock' = bad ? 'warn' : 'check'): void {
   const el = document.createElement('div');
   el.className = `toast ${bad ? 'bad' : ''}`;
-  el.innerHTML = `${icon(bad ? 'warn' : 'check', 18)}<span>${esc(msg)}</span>`;
+  el.innerHTML = `${icon(ic, 18)}<span>${esc(msg)}</span>`;
   toastEl.append(el);
   setTimeout(() => el.classList.add('out'), 2300);
   setTimeout(() => el.remove(), 2700);
@@ -97,7 +109,7 @@ function screenHtml(ctx: Ctx, seen: number): string {
     case 'inbox':
       return inboxScreen(ctx, seen);
     default:
-      return hubPanels(ctx, busy);
+      return hubPanels(ctx, busy, unread(ctx));
   }
 }
 
@@ -109,9 +121,13 @@ function modalHtml(): string {
       ${STANDALONE ? '' : `<button data-act="export">${icon('download', 22)}<b>匯出存檔</b><small>下載成 .json 備份</small></button>`}
       <button data-act="speed">${icon('skip', 22)}<b>演出速度：${prefs.fast ? '快速' : '一般'}</b><small>點一下切換</small></button>
       <button data-act="to-title">${icon('exit', 22)}<b>回到標題畫面</b><small>進度已自動存檔</small></button>
+      ${prefs.guide?.on ? `<button data-act="guide-skip">${icon('check', 22)}<b>關閉教學</b><small>全部功能直接開放</small></button>` : ''}
       ${STANDALONE ? '' : `<a href="./club.html">${icon('chart', 22)}<b>舊版介面</b><small>同一份存檔</small></a>`}</div>
       <div class="foot"><button class="btn ghost sm" data-act="close-modal"><b>關閉</b></button></div>`;
-  else
+  else if (modal.kind === 'help') {
+    const h = HELP[screen] ?? HELP.hub;
+    inner = `<div class="pt"><span class="no">HELP</span><b>${h?.title ?? ''}</b></div><ul class="help-list">${(h?.items ?? []).map((x) => `<li>${x}</li>`).join('')}</ul><div class="foot"><button class="btn ghost sm" data-act="close-modal"><b>關閉</b></button></div>`;
+  } else
     inner = `<div class="pt"><span class="no">CONFIRM</span><b>${esc(modal.title)}</b></div><p>${esc(modal.text)}</p><div class="foot"><button class="btn ghost" data-act="close-modal"><b>取消</b></button><button class="btn" data-act="confirm-ok"><b>${esc(modal.ok)}</b></button></div>`;
   return `<div class="modal-bg" data-act="close-modal"><div class="pn g modal ${modal.kind}" data-act="noop">${inner}</div></div>`;
 }
@@ -124,6 +140,7 @@ function render(): void {
     citySec.hidden = true;
     app.innerHTML = `<div class="scr v-${screen} ${changed ? 'fresh' : ''}">${screen === 'create' ? createScreen(draft) : titleScreen(ManageGame.peek(), myCrest(prefs), ManageGame.saveProblem())}</div>${modalHtml()}`;
     lastScreen = screen;
+    showCoach(coachEl, null);
     return;
   }
   const ctx = context();
@@ -134,7 +151,7 @@ function render(): void {
     if (game.persist !== false) savePrefs(prefs);
   }
   const hub = screen === 'hub';
-  citySec.hidden = !hub;
+  citySec.hidden = !hub || liveFrame !== null;
   if (hub) cityTags.innerHTML = hubTags(ctx);
   app.innerHTML = `<div class="scr v-${screen} ${changed ? 'fresh' : ''}">${screenHtml(ctx, seen)}</div>${topBar(ctx, unread(ctx), game.persist === false)}${hub ? '' : rail(ctx, screen, unread(ctx), busy)}${modalHtml()}${progressHtml()}`;
   lastScreen = screen;
@@ -157,23 +174,110 @@ function render(): void {
     }
   }
   lastCash = cash;
+  syncCoach(ctx);
 }
+
+// ───── 新手引導 ─────
+function guideDone(id: string): void {
+  if (prefs.guide && !prefs.guide.done.includes(id)) {
+    prefs.guide.done.push(id);
+    savePrefs(prefs);
+  }
+}
+
+/** 帶路步驟 → 畫面上的說明卡 */
+function coachOf(step: Step, ctx: Ctx): Parameters<typeof showCoach>[1] {
+  const buttons = step.go ? [] : step.open ? [{ label: '知道了', act: 'guide-next', ghost: true }, { label: '去看看', act: 'guide-open' }] : [{ label: step.ok ?? (step.first ? '開始教學' : '下一步'), act: 'guide-next' }];
+  return { target: step.target, clickThrough: step.go !== undefined, tag: step.tag ?? 'GUIDE', title: step.title, html: step.body(ctx.v, ctx.c), buttons, skip: step.first === true };
+}
+
+let activeStep: Step | null = null;
+let activeHelp: string | null = null;
+
+function syncCoach(ctx: Ctx): void {
+  activeStep = null;
+  activeHelp = null;
+  if (!game || cine || busy || modal || !prefs.guide?.on) {
+    showCoach(coachEl, null);
+    return;
+  }
+  let step = currentStep(prefs.guide, ctx.v);
+  // 要玩家自己走到的畫面已經到了
+  while (step?.go && step.go === screen) {
+    guideDone(step.id);
+    step = currentStep(prefs.guide, ctx.v);
+  }
+  if (step) {
+    if (step.screen !== screen) {
+      // 帶路中途換了畫面（重新整理、讀檔）：帶回那一步的畫面
+      screen = step.screen;
+      render();
+      return;
+    }
+    activeStep = step;
+    showCoach(coachEl, coachOf(step, ctx));
+    return;
+  }
+  const id = autoHelpId(prefs.guide, screen);
+  const h = HELP[screen];
+  if (id && h) {
+    activeHelp = id;
+    showCoach(coachEl, { clickThrough: false, tag: 'HELP', title: h.title, html: h.items.join('<br>'), buttons: [{ label: '知道了', act: 'guide-next' }], skip: false });
+    return;
+  }
+  showCoach(coachEl, null);
+}
+
+// ───── 看比賽 ─────
+/** 開全螢幕框播這一場；看完或跳過時框會傳訊息回來 */
+function openLive(fixtureId: string): boolean {
+  if (!writeWatchTicket(fixtureId)) return false;
+  const f = document.createElement('iframe');
+  f.id = 'live';
+  f.src = `./shooter.html?embed=1${WATCH_HASH}`;
+  f.allow = 'fullscreen';
+  f.addEventListener('load', () => f.contentWindow?.focus());
+  document.body.append(f);
+  liveFrame = f;
+  citySec.hidden = true;
+  return true;
+}
+
+function closeLive(): void {
+  liveFrame?.remove();
+  liveFrame = null;
+  window.focus();
+}
+
+function jumpScene(key: 'match' | 'result'): void {
+  if (!cine) return;
+  const j = cine.scenes.findIndex((s) => s.key === key);
+  cine.i = j >= 0 ? j : 1;
+  showScene();
+}
+
+window.addEventListener('message', (e: MessageEvent<LiveMessage>) => {
+  if (e.origin !== location.origin || e.source !== liveFrame?.contentWindow || e.data?.type !== LIVE_MSG) return;
+  closeLive();
+  jumpScene(e.data.event === 'over' ? 'result' : 'match');
+});
 
 // ───── 模擬進度 ─────
 function progressText(): string {
   if (!progress) return '';
   if (progress.total === 0) return '準備中…';
-  return `模擬中 ${progress.done}／${progress.total} 場`;
+  return `各賽場開打 ${progress.done}／${progress.total} 場`;
 }
 
 function progressHtml(): string {
   if (!progress) return '';
   const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
   const est = progress.estMs >= 3000 ? `預估約 ${Math.max(1, Math.round(progress.estMs / 1000))} 秒` : '';
-  return `<div class="sim-prog"><div class="box"><span class="en">SIMULATING // 比賽進行中</span><b id="sim-prog-text">${progressText()}</b><div class="meter g" style="--v:${pct}%"><i id="sim-prog-bar"></i></div><small>${est}</small></div></div>`;
+  return `<div class="sim-prog"><div class="box"><span class="en">MATCH DAY // 比賽進行中</span><b id="sim-prog-text">${progressText()}</b><div class="meter g" style="--v:${pct}%"><i id="sim-prog-bar"></i></div><small>${est}</small></div></div>`;
 }
 
 function onProgress(done: number, total: number): void {
+  document.querySelector<HTMLElement>('[data-live-bar]')?.parentElement?.style.setProperty('--v', `${total ? Math.round((done / total) * 100) : 0}%`);
   if (!progress) return;
   progress.done = done;
   progress.total = total;
@@ -194,7 +298,7 @@ function showScene(): void {
   cineEl.hidden = false;
   const sc = cine.scenes[cine.i];
   const hasStop = !sc.stop && cine.scenes.slice(cine.i + 1).some((s) => s.stop);
-  cineEl.innerHTML = `<div class="cine" style="--sp:${speed()}">${sc.html}<div class="cine-bar">${hasStop ? `<button class="btn ghost sm" data-act="cine-skip"><b>跳過演出</b><span>SKIP</span></button>` : ''}<button class="btn ghost sm" data-act="speed"><b>${prefs.fast ? '一般速度' : '加速 ×2'}</b></button></div></div>`;
+  cineEl.innerHTML = `<div class="cine" style="--sp:${speed()}">${sc.html}${sc.bare ? '' : `<div class="cine-bar">${hasStop ? `<button class="btn ghost sm" data-act="cine-skip"><b>跳過演出</b><span>SKIP</span></button>` : ''}<button class="btn ghost sm" data-act="speed"><b>${prefs.fast ? '一般速度' : '加速 ×2'}</b></button></div>`}</div>`;
   sc.enter?.(cineEl, speed());
   if (sc.auto) cineTimer = window.setTimeout(nextScene, sc.auto * speed());
 }
@@ -224,11 +328,17 @@ function skipScenes(): void {
 
 async function doAdvance(): Promise<void> {
   if (!game || busy) return;
-  const before = snapshot(context());
+  const ctx0 = context();
+  const before = snapshot(ctx0);
   const wasOff = game.state.phase === 'offseason';
+  // 我方有比賽、賽制能播：先進賽前畫面，背景打比賽；其他週（休賽期、輪空、假比賽）照舊顯示進度
+  const mine = !wasOff && game.format?.watchable === true ? myFixture(ctx0.v) : undefined;
   busy = true;
   modal = null;
-  progress = { done: 0, total: 0, estMs: game.estimateWeekMs() };
+  if (mine) {
+    cine = { scenes: [preMatchScene(ctx0, mine, before)], i: 0 };
+    showScene();
+  } else progress = { done: 0, total: 0, estMs: game.estimateWeekMs() };
   render();
   try {
     const summary = await game.advance(onProgress);
@@ -237,9 +347,16 @@ async function doAdvance(): Promise<void> {
     ui.pickSlot = null;
     const ctx = context();
     lastCash = ctx.v.me.cash;
-    cine = { scenes: buildScenes(ctx, summary, before, wasOff), i: 0 };
+    const scenes = buildScenes(ctx, summary, before, wasOff);
+    const played = mine ? ctx.v.fixtures.find((x) => x.id === mine.id) : undefined;
+    // 開場字卡換成賽前畫面（對手名單此時公開）
+    if (played) scenes[0] = preMatchScene(ctx, played, before);
+    liveFixture = played?.id ?? null;
+    cine = { scenes, i: 0 };
     showScene();
   } catch (e) {
+    cine = null;
+    showScene();
     toast(e instanceof Error ? e.message : '推進失敗', true);
   }
   busy = false;
@@ -253,13 +370,20 @@ async function doAdvance(): Promise<void> {
  * 被瀏覽器擋掉新分頁時改在本分頁開（回經營要按「繼續」讀檔）。
  */
 function openWatch(fixtureId: string): void {
-  if (!game) return;
+  if (!writeWatchTicket(fixtureId)) return;
+  const url = `./shooter.html${WATCH_HASH}`;
+  if (!window.open(url, '_blank')) location.href = url;
+}
+
+/** 把一場打完的比賽寫成觀戰票；寫不了時提示並回傳 false */
+function writeWatchTicket(fixtureId: string): boolean {
+  if (!game) return false;
   const ctx = context();
   const f = ctx.v.fixtures.find((x) => x.id === fixtureId);
   const t = game.watchTicket(fixtureId);
   if (!t || !f?.match) {
     toast('這場比賽不能觀戰', true);
-    return;
+    return false;
   }
   const me = ctx.v.me.teamId;
   const specs = [...t.request.a.players, ...t.request.b.players];
@@ -275,12 +399,8 @@ function openWatch(fixtureId: string): void {
     mine: f.home === me ? 0 : f.away === me ? 1 : null,
     title: stageName(f),
   });
-  if (!ok) {
-    toast('無法寫入觀戰資料（瀏覽器儲存空間不可用）', true);
-    return;
-  }
-  const url = `./shooter.html${WATCH_HASH}`;
-  if (!window.open(url, '_blank')) location.href = url;
+  if (!ok) toast('無法寫入觀戰資料（瀏覽器儲存空間不可用）', true);
+  return ok;
 }
 
 // ───── 指令 ─────
@@ -340,6 +460,13 @@ function maxStake(): number {
 
 const id = (el: HTMLElement): string => el.dataset.id as string;
 const go = (s: Screen): void => {
+  if (game) {
+    const w = lockedUntil(s, game.view(), prefs.guide);
+    if (w !== null) {
+      toast(`${SCREEN_NAME[s] ?? ''}第 ${w} 週開放`, false, 'lock');
+      return;
+    }
+  }
   screen = s;
   ui.pickSlot = null;
   modal = null;
@@ -349,6 +476,32 @@ const go = (s: Screen): void => {
 const actions: Record<string, (el: HTMLElement) => unknown> = {
   noop: () => undefined,
   go: (el) => go(el.dataset.to as Screen),
+  locked: (el) => go(el.dataset.to as Screen),
+  help: () => {
+    modal = { kind: 'help' };
+    render();
+  },
+  'guide-next': () => {
+    if (activeStep) guideDone(activeStep.id);
+    else if (activeHelp) guideDone(activeHelp);
+    render();
+  },
+  'guide-open': () => {
+    const to = activeStep?.open;
+    if (activeStep) guideDone(activeStep.id);
+    if (to) go(to);
+  },
+  'guide-skip': () => {
+    if (prefs.guide) prefs.guide.on = false;
+    savePrefs(prefs);
+    modal = null;
+    toast('教學已關閉，全部功能開放');
+    render();
+  },
+  'live-watch': () => {
+    if (liveFixture === null || !openLive(liveFixture)) jumpScene('match');
+  },
+  'live-skip': () => jumpScene('match'),
   advance: () => doAdvance(),
   player: (el) => {
     ui.player = el.dataset.pid as string;
@@ -511,6 +664,7 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
   create: () => {
     const make = (): void => {
       prefs.crest = { ...draft.crest };
+      prefs.guide = { on: true, done: [] };
       savePrefs(prefs);
       startGame(ManageGame.create(draft.seed, draft.name.trim() || '天使戰隊', draft.contentId));
       toast(`${draft.name.trim() || '天使戰隊'} 成立了！`);
@@ -544,9 +698,32 @@ function dispatch(e: Event): void {
 }
 
 app.addEventListener('click', dispatch);
+coachEl.addEventListener('click', dispatch);
 cityTags.addEventListener('click', dispatch);
 cityTags.addEventListener('mouseover', (e) => city.setHot((e.target as Element).closest<HTMLElement>('.tag')?.dataset.at ?? ''));
 cityTags.addEventListener('mouseleave', () => city.setHot(''));
+
+// 城市裡的地標建築與競技場：跟標籤一樣可以點（背景的其他大樓是景）
+function buildingAt(e: MouseEvent): string | null {
+  if ((e.target as Element).closest('.tag')) return null;
+  const r = fxCv.getBoundingClientRect();
+  return landmarkAt(((e.clientX - r.left) / r.width) * fxCv.width, ((e.clientY - r.top) / r.height) * fxCv.height);
+}
+let hotBuilding: string | null = null;
+citySec.addEventListener('mousemove', (e) => {
+  if ((e.target as Element).closest('.tag')) return;
+  const id = buildingAt(e);
+  if (id === hotBuilding) return;
+  hotBuilding = id;
+  city.setHot(id ?? '');
+  citySec.style.cursor = id ? 'pointer' : '';
+  cityTags.querySelectorAll('.tag.hot').forEach((x) => x.classList.remove('hot'));
+  if (id) cityTags.querySelector(`.tag[data-at="${id}"]`)?.classList.add('hot');
+});
+citySec.addEventListener('click', (e) => {
+  const id = buildingAt(e);
+  if (id) go(LAND_SCREEN[id]);
+});
 cineEl.addEventListener('click', (e) => {
   const el = (e.target as Element).closest<HTMLElement>('[data-act]');
   if (el) dispatch(e);
@@ -601,6 +778,7 @@ app.addEventListener('change', (e) => {
     void t.files[0].text().then((text) => {
       const load = (): void => {
         try {
+          prefs.guide = undefined;
           startGame(ManageGame.fromJson(text));
           toast('存檔匯入完成');
         } catch (err) {
@@ -652,7 +830,7 @@ document.addEventListener('keydown', (e) => {
   } else if (cine && (e.key === ' ' || e.key === 'Enter')) {
     e.preventDefault();
     if (cine.scenes[cine.i].auto) nextScene();
-    else (cineEl.querySelector('[data-act="cine-next"]') as HTMLElement | null)?.click();
+    else (cineEl.querySelector('[data-act="live-watch"], [data-act="cine-next"]') as HTMLElement | null)?.click();
   } else if (!typing && screen === 'title' && e.key === 'Enter' && ManageGame.peek()) {
     actions.continue(document.body);
   }
@@ -668,6 +846,8 @@ async function boot(): Promise<void> {
     render();
     return;
   }
+  // 展示模式不帶教學（不存回偏好）
+  prefs.guide = undefined;
   const g = ManageGame.demo(Number(q.get('demo')) || 1, '天使戰隊', q.get('content') ?? undefined);
   const v0 = g.view();
   const fa = v0.players.filter((p) => p.teamId === null).sort((a, b) => b.elo - a.elo)[0];

@@ -8,8 +8,9 @@ import { LINEAGE_LOOK, avatarSvg, crestSvg, npcCrest, tierOf, type CrestSpec, ty
 import { icon } from '../club/art.ts';
 import { portraitBust, portraitSvg } from '../portrait.ts';
 import type { Prefs } from '../club/prefs.ts';
+import type { Screen } from './guide.ts';
 
-export type Screen = 'title' | 'create' | 'hub' | 'squad' | 'player' | 'market' | 'training' | 'league' | 'betting' | 'finance' | 'inbox';
+export type { Screen };
 
 export interface GameUi extends ClubUi {
   /** 市場裡選中的自由球員 */

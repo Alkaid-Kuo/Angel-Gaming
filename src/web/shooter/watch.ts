@@ -7,6 +7,38 @@ import { SHOOTER_ENGINE_VERSION } from '../../shooter/config.ts';
 export const WATCH_KEY = 'angel-gaming-watch';
 export const WATCH_HASH = '#watch';
 
+/** 經營頁把觀戰嵌在全螢幕框裡（賽前按「看比賽」）：沒有賽後卡，看完或跳過就傳訊息回經營頁 */
+export const EMBED = new URLSearchParams(location.search).has('embed');
+export const LIVE_MSG = 'angel-live';
+export interface LiveMessage {
+  type: typeof LIVE_MSG;
+  event: 'over' | 'skip';
+}
+
+export function tellManage(event: LiveMessage['event']): void {
+  parent.postMessage({ type: LIVE_MSG, event } satisfies LiveMessage, location.origin);
+}
+
+const SPEED_KEY = 'angel-gaming-live-speed';
+
+/** 看比賽的速度：下一場沿用（SPEEDS 的索引；沒存過＝null） */
+export function loadLiveSpeed(): number | null {
+  try {
+    const raw = localStorage.getItem(SPEED_KEY);
+    return raw === null ? null : Number(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function saveLiveSpeed(i: number): void {
+  try {
+    localStorage.setItem(SPEED_KEY, String(i));
+  } catch {
+    // 寫不進去就下次用預設速度
+  }
+}
+
 export interface WatchTicket {
   readonly v: 1;
   /** 開票時的引擎版本；舊票沒有這欄。不符就不重播：同一張請求單在新引擎是另一場比賽 */

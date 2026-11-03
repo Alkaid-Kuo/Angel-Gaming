@@ -2,6 +2,9 @@
 // 網址帶 ?still 時是截圖模式：略過進場動畫、每個畫格回呼只跑一次。
 export const still = location.search.includes('still');
 
+/** 視差強度：所有跟著滑鼠飄的東西（背景、面板、城市、雨、浮塵）都乘這個比例 */
+const PARALLAX = 0.2;
+
 type FrameHook = (t: number, mx: number, my: number) => void;
 const hooks: FrameHook[] = [];
 
@@ -30,9 +33,11 @@ export function initStage(): HTMLElement {
   const tick = (now: number): void => {
     cx += (tx - cx) * 0.06;
     cy += (ty - cy) * 0.06;
-    stage.style.setProperty('--mx', cx.toFixed(4));
-    stage.style.setProperty('--my', cy.toFixed(4));
-    for (const h of hooks) h((now - t0) / 1000, cx, cy);
+    const px = cx * PARALLAX;
+    const py = cy * PARALLAX;
+    stage.style.setProperty('--mx', px.toFixed(4));
+    stage.style.setProperty('--my', py.toFixed(4));
+    for (const h of hooks) h((now - t0) / 1000, px, py);
     if (!still) requestAnimationFrame(tick);
   };
   // 等各頁註冊好畫格回呼再開始
