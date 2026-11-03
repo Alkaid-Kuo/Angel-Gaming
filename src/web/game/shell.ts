@@ -2,6 +2,7 @@
 import type { Ctx, Screen } from './kit.ts';
 import { crestSpec, esc, icon, wan, weekLabel } from './kit.ts';
 import { crestSvg, type IconName } from '../club/art.ts';
+import { lockedUntil } from './guide.ts';
 
 const NAV: { id: Screen; label: string; ic: IconName }[] = [
   { id: 'hub', label: '基地', ic: 'home' },
@@ -15,10 +16,10 @@ const NAV: { id: Screen; label: string; ic: IconName }[] = [
 ];
 
 /** 圓環錶：0～1 的比例 */
-function gauge(frac: number, color: string, val: string): string {
+function gauge(frac: number, color: string, val: string, id = ''): string {
   const L = 182;
   const d = Math.max(0, Math.min(1, frac)) * L;
-  return `<div class="gauge"><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${d.toFixed(1)} ${L}"/></svg><b>${val}</b></div>`;
+  return `<div class="gauge" ${id ? `data-guide="${id}"` : ''}><svg viewBox="0 0 70 70"><circle cx="35" cy="35" r="29" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="6"/><circle cx="35" cy="35" r="29" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${d.toFixed(1)} ${L}"/></svg><b>${val}</b></div>`;
 }
 
 export function topBar(ctx: Ctx, unread: number, demo: boolean): string {
@@ -32,9 +33,10 @@ export function topBar(ctx: Ctx, unread: number, demo: boolean): string {
     <div class="slash"></div>
     <div class="wk"><b>${wl.short}</b><span>${v.phase === 'season' || v.phase === 'offseason' ? `/ 09 · ${wl.en}` : wl.en}</span></div>
     <div class="res">
-      <div class="funds"><div class="lb">FUNDS</div><b class="${v.me.cash < 0 ? 'neg' : ''}"><span id="hud-cash">${wan(v.me.cash)}</span><small>萬</small></b><div class="dl ${net >= 0 ? 'up' : ''}">${net >= 0 ? '▲' : '▼'} ${wan(Math.abs(net))} / WEEK</div></div>
+      <div class="funds" data-guide="funds"><div class="lb">FUNDS</div><b class="${v.me.cash < 0 ? 'neg' : ''}"><span id="hud-cash">${wan(v.me.cash)}</span><small>萬</small></b><div class="dl ${net >= 0 ? 'up' : ''}">${net >= 0 ? '▲' : '▼'} ${wan(Math.abs(net))} / WEEK</div></div>
       ${gauge(v.me.fame / 30, '#eef2f6', String(v.me.fame))}<div class="gl"><b>名氣</b>REP</div>
-      ${gauge(runway === null ? 1 : runway / 12, low ? '#ff5d5d' : '#f0b54a', runway === null ? '∞' : String(runway))}<div class="gl ${low ? 'warn' : ''}"><b>資金跑道</b>WEEKS</div>
+      ${gauge(runway === null ? 1 : runway / 12, low ? '#ff5d5d' : '#f0b54a', runway === null ? '∞' : String(runway), 'runway')}<div class="gl ${low ? 'warn' : ''}"><b>資金跑道</b>WEEKS</div>
+      <button class="icon-btn" data-act="help" aria-label="這一頁怎麼用" title="這一頁怎麼用">${icon('info', 24)}</button>
       <button class="icon-btn" data-act="go" data-to="inbox" aria-label="信件">${icon('mail', 24)}${unread ? `<em>${unread}</em>` : ''}</button>
       <button class="icon-btn" data-act="menu" aria-label="選單">${icon('menu', 24)}</button>
     </div>
@@ -48,10 +50,15 @@ export function rail(ctx: Ctx, screen: Screen, unread: number, busy: boolean): s
   const badge = (id: Screen): string => {
     if (id === 'inbox' && unread) return `<em>${unread}</em>`;
     if (id === 'market' && v.jobs.some((j) => j.kind === 'scout')) return '<em class="dot"></em>';
-    if (id === 'squad' && v.me.lineup.length !== 3 && !over) return '<em class="dot"></em>';
+    if (id === 'squad' && v.me.lineup.length !== ctx.c.lineupSize && !over) return '<em class="dot"></em>';
     return '';
   };
   const md = busy ? ['進行中', 'WAIT'] : over ? ['已結束', 'OVER'] : v.phase === 'offseason' ? ['開幕', 'START'] : ['比賽日', 'MATCH'];
-  return `<nav class="rail">${NAV.map((n) => `<button class="${n.id === lit ? 'on' : ''}" data-act="go" data-to="${n.id}">${icon(n.ic, 26)}${n.label}${badge(n.id)}</button>`).join('')}
+  const item = (n: (typeof NAV)[number]): string => {
+    const w = lockedUntil(n.id, v, ctx.prefs.guide);
+    if (w !== null) return `<button class="locked" data-act="locked" data-to="${n.id}" title="第 ${w} 週開放">${icon('lock', 26)}${n.label}<small>第 ${w} 週</small></button>`;
+    return `<button class="${n.id === lit ? 'on' : ''}" data-act="go" data-to="${n.id}">${icon(n.ic, 26)}${n.label}${badge(n.id)}</button>`;
+  };
+  return `<nav class="rail">${NAV.map(item).join('')}
     <button class="md" data-act="advance" ${busy || over ? 'disabled' : ''}><b>${md[0]}</b><span>${md[1]}</span></button></nav>`;
 }

@@ -129,9 +129,17 @@ export class BuyMenu {
   private cmpKey = '';
   private note = '';
   private noteEl!: HTMLElement;
+  private roundEl!: HTMLElement;
+  /** 回合橫幅的內容：商店開著時橫幅收起來，改放在標題列 */
+  private round = '';
   private timer!: HTMLElement;
   private timerBar!: HTMLElement;
   private info!: HTMLElement;
+
+  setRound(html: string): void {
+    this.round = html;
+    if (this.roundEl) this.roundEl.innerHTML = html;
+  }
 
   constructor(el: HTMLElement, meta: ShooterMeta, send: (items: BuyItem[]) => void) {
     this.el = el;
@@ -166,10 +174,12 @@ export class BuyMenu {
     this.states.clear();
     this.cmpKey = '';
     this.el.innerHTML =
-      `<div class="sb-head"><b>購買</b><span class="nt"></span><span class="tm"><i class="tb"><u></u></i><span class="tt"></span></span><span class="cl"><kbd>B</kbd> 關閉・<kbd>1</kbd>～<kbd>=</kbd> 快速購買</span></div>` +
+      `<div class="sb-head"><b>購買</b><span class="rd"></span><span class="nt"></span><span class="tm"><i class="tb"><u></u></i><span class="tt"></span></span><span class="cl"><kbd>B</kbd> 關閉・<kbd>1</kbd>～<kbd>=</kbd> 快速購買</span></div>` +
       `<div class="sb-body"><nav class="sb-cats"></nav><div class="sb-grid"></div><aside class="sb-info"></aside></div>`;
     const q = <T extends HTMLElement>(s: string): T => this.el.querySelector(s) as T;
     this.noteEl = q('.nt');
+    this.roundEl = q('.rd');
+    this.roundEl.innerHTML = this.round;
     this.timer = q('.tt');
     this.timerBar = q('.tb u');
     this.info = q('.sb-info');

@@ -2,7 +2,7 @@
 // → 其他賽場 → 週結算 →（賽段結束時）頒獎典禮或破產。結果在推進時就算好了（確定性），這裡只負責怎麼揭曉。
 import type { AdvanceSummary, KnownFixture } from '../../manage/index.ts';
 import { CATEGORY_NAME, lineageName } from '../manage/format.ts';
-import { rankOf, weekBreakdown } from '../club/model.ts';
+import { lineupOf, rankOf, weekBreakdown } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
 import { avatar, crest, crestRing, esc, glyph, icon, slotName, teamName, wan } from './kit.ts';
 
@@ -25,6 +25,10 @@ export interface Scene {
   enter?: (root: HTMLElement, speed: number) => void;
   /** 「跳過演出」時停在這一幕 */
   stop?: boolean;
+  /** 不放演出控制列（賽前畫面） */
+  bare?: boolean;
+  /** 幕的代號：看完比賽或跳過時用來找要接哪一幕 */
+  key?: 'match' | 'result';
 }
 
 /** 數字滾動：data-from、data-to（千元，顯示為萬；data-fmt="int" 顯示整數） */
@@ -110,6 +114,31 @@ function roundStrip(m: MatchView, live: boolean): string {
     .join('');
 }
 
+/**
+ * 賽前畫面：按下開戰立刻出現，比賽在背景準備時顯示進場中；準備好後公開對手名單，讓玩家選看比賽或跳過。
+ * f 是推進前的賽程（未打完）或推進後的同一場；打完才有對手名單。
+ */
+export function preMatchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scene {
+  const { v } = ctx;
+  const me = v.me.teamId;
+  const opp = f.home === me ? f.away : f.home;
+  const x = f.match;
+  const mine = x ? (f.home === me ? x.home : x.away) : lineupOf(ctx).ids;
+  const theirs = x ? (f.home === me ? x.away : x.home) : [];
+  const hidden = Array.from({ length: ctx.c.lineupSize }, (_, i) => `<div class="mp foe" style="--d:${0.3 + i * 0.12}s">${avatar(ctx, undefined, 64)}<span class="c"><small>${esc(slotName(ctx, i))}</small><b>？？？</b></span></div>`).join('');
+  const ready = x !== null;
+  return {
+    bare: true,
+    auto: 0,
+    html: `<div class="md md-match md-team md-pre"><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span>PRE-MATCH</span></div>
+      <div class="score">${crestRing(ctx, me, 84)}<b class="tn">${esc(teamName(v, me))}</b><div class="sc"><span class="vs2">VS</span></div><b class="tn rd">${esc(teamName(v, opp))}</b>${crestRing(ctx, opp, 84, opp)}</div>
+      <section class="col l">${rosterCol(ctx, mine, before, false)}</section>
+      <section class="col r">${ready ? rosterCol(ctx, theirs, before, true) : hidden}</section>
+      <section class="mid2"><div class="st"><i></i><span>${ready ? '選手就位，比賽即將開始' : '選手進場中'}</span></div>${ready ? '' : '<div class="meter g" style="--v:0%"><i data-live-bar></i></div>'}</section>
+      ${ready ? `<div class="ctl"><button class="btn ghost" data-act="live-skip"><b>跳過比賽</b><span>SKIP</span></button><button class="btn" data-act="live-watch"><b>看比賽</b><span>WATCH</span></button></div>` : ''}</div>`,
+  };
+}
+
 function matchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scene {
   const { v } = ctx;
   const me = v.me.teamId;
@@ -120,7 +149,8 @@ function matchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scene {
   const T0 = 1.6;
   const tEnd = T0 + n * STEP;
   return {
-    html: `<div class="md md-match md-team"><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span class="live"><i></i>LIVE · ${m.mine.length} 對 ${m.theirs.length}，一場定勝負</span></div>
+    key: 'match',
+    html: `<div class="md md-match md-team"><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span class="live"><i></i>${m.mine.length} 對 ${m.theirs.length}，一場定勝負</span></div>
       <div class="score">${crestRing(ctx, me, 84)}<b class="tn">${esc(teamName(v, me))}</b><div class="sc"><span class="num me" data-sc="me">0</span><i>:</i><span class="num" data-sc="opp">0</span></div><b class="tn rd">${esc(teamName(v, m.opp))}</b>${crestRing(ctx, m.opp, 84, m.opp)}</div>
       <section class="col l">${rosterCol(ctx, m.mine, before, false)}</section>
       <section class="col r">${rosterCol(ctx, m.theirs, before, true)}</section>
@@ -165,6 +195,7 @@ function resultScene(ctx: Ctx, f: KnownFixture, before: Snapshot, summaryWeek: n
   };
   const fameD = v.me.fame - before.fame;
   return {
+    key: 'result',
     html: `<div class="md md-result md-team ${m.res}"><div class="flare"></div><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span>FINAL</span></div>
       <section class="big"><span class="huge">${m.res === 'win' ? 'WIN' : m.res === 'lose' ? 'LOSE' : 'DRAW'}</span><span class="zh">${m.res === 'win' ? '勝利' : m.res === 'lose' ? '落敗' : '平手'}</span></section>
       <section class="vsrow"><div class="t">${crestRing(ctx, me, 80)}${esc(teamName(v, me))}</div><div class="sc"><b>${m.my}</b><i>:</i>${m.their}</div><div class="t r">${crestRing(ctx, m.opp, 80, m.opp)}<span class="rd">${esc(teamName(v, m.opp))}</span></div></section>

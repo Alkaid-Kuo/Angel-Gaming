@@ -146,6 +146,50 @@ export function anchorOf(id: string): { x: number; y: number; k: number } {
   return { x: p.x, y: p.y, k: l ? Math.min(1, Math.max(0.66, 0.5 + 340 / p.d)) : 1 };
 }
 
+/** 凸多邊形外框（單調鏈）：地標方塊的 8 個角投影後的輪廓 */
+function hull(pts: { x: number; y: number }[]): { x: number; y: number }[] {
+  const p = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (list: { x: number; y: number }[]): { x: number; y: number }[] => {
+    const h: { x: number; y: number }[] = [];
+    for (const q of list) {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop();
+      h.push(q);
+    }
+    h.pop();
+    return h;
+  };
+  return [...half(p), ...half([...p].reverse())];
+}
+
+function inPoly(poly: { x: number; y: number }[], x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/** 六個地標建築在畫布上的輪廓（近的在前，重疊時先命中）與競技場的橢圓 */
+const LAND_HIT = Object.entries(LAND)
+  .sort((a, b) => a[1].z - b[1].z)
+  .map(([id, l]) => {
+    const corners: { x: number; y: number }[] = [];
+    for (const x of [l.x - l.w / 2, l.x + l.w / 2]) for (const z of [l.z - l.d / 2, l.z + l.d / 2]) for (const y of [0, l.h]) corners.push(proj(x, y, z));
+    return { id, poly: hull(corners) };
+  });
+const ARENA_C = proj(ARENA.x, ARENA.h / 2, ARENA.z);
+const ARENA_RX = proj(ARENA.x + ARENA.r, ARENA.h / 2, ARENA.z).x - ARENA_C.x;
+const ARENA_RY = (proj(ARENA.x, ARENA.h / 2, ARENA.z - ARENA.r).y - proj(ARENA.x, ARENA.h / 2, ARENA.z + ARENA.r).y) / 2 + 30;
+
+/** 畫布座標（2048×1152）上是哪棟可以點的建築：地標 id、'arena'，其餘（背景的城市）是 null */
+export function landmarkAt(x: number, y: number): string | null {
+  for (const l of LAND_HIT) if (inPoly(l.poly, x, y)) return l.id;
+  return ((x - ARENA_C.x) / ARENA_RX) ** 2 + ((y - ARENA_C.y) / ARENA_RY) ** 2 <= 1 ? 'arena' : null;
+}
+
 /** 在給定的畫布上畫出城市並開始動畫。city、fx 是 2048×1152（放在舞台左上 −64、−36）；rain 是 1920×1080 */
 export function mountCity(city: HTMLCanvasElement, fx: HTMLCanvasElement, rain: HTMLCanvasElement | null): CityView {
   let hot = '';

@@ -2,7 +2,7 @@
 // 射擊名單 5 人（lineupSize 5，座位順序＝隊內序號）；選手規格 → 屬性與旋鈕由 src/shooter/players.ts 的 derivePlayer 算，
 // 內容包只放資料（流派的名稱與說明取角色表）。power 以「整場勝率」的 Elo 尺度（給 expectedPermille），隊伍強度＝五人平均。
 // 經濟（步驟 8）：從暫代包放大到 5 人名單跑得起來（陣容上限 8、起始資金與自由選手數約 ×5/3、每回合獎金依 13 回合一場換算、
-// 訓練中心每週場數 ÷20，因為真引擎一場要數秒）；平衡留給 M5。名字庫沿用暫代包。
+// 訓練中心每週場數 ÷20，因為真引擎一場要數秒）；平衡留給 M5。品階表與名字庫沿用暫代包。
 import { ROLE_TABLE, SHOOTER_ROLES, type ShooterRole } from '../shooter/players.ts';
 import { STUB_CONTENT, type ContentPack, type Economy, type PersonaSpec } from './content.ts';
 import type { Persona } from './types.ts';
@@ -30,6 +30,7 @@ export const SHOOTER_PERSONAS: Readonly<Record<Persona, PersonaSpec>> = {
 export const SHOOTER_ECONOMY: Economy = {
   ...STUB_CONTENT.economy,
   humanStartCash: 2500,
+  humanStartRarities: ['SR', 'R', 'R', 'N', 'N'],
   rosterMax: 8,
   freeAgentCount: 18,
   // 聯賽 MR6 一場平均 12 回合（規則 1.2）：贏方約 7 回合 × 3 ≈ 21，比 MR12 時期（約 39）少；數值未動，平衡留給 M5
@@ -45,10 +46,10 @@ export const SHOOTER_CONTENT: ContentPack = {
   lineupSize: 5,
   slotNames: ['1 號位', '2 號位', '3 號位', '4 號位', '5 號位'],
   lineages: SHOOTER_ROLES.map((r) => ({ id: r, name: ROLE_TABLE[r].name, style: ROLE_TABLE[r].style, power: SHOOTER_POWER[r] })),
+  rarities: STUB_CONTENT.rarities,
   personas: SHOOTER_PERSONAS,
   economy: SHOOTER_ECONOMY,
   teamNames: ['烈焰突擊', '暗鴉小隊', '鋼鐵防線', '獵鷹戰隊', '雷鳴特攻', '赤狐電競', '零度部隊'],
   humanTeamName: STUB_CONTENT.humanTeamName,
-  surnames: STUB_CONTENT.surnames,
-  givenNames: STUB_CONTENT.givenNames,
+  handles: STUB_CONTENT.handles,
 };

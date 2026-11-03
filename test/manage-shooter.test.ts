@@ -214,11 +214,12 @@ describe('請求單的地圖', () => {
 describe('攻防戰內容包＋真閘道（短賽制）', () => {
   const content: ContentPack = { ...SHOOTER_CONTENT, formatId: 'shooter-short' };
 
-  it('開局 5 人；passive 打完整季：32 場都有結果、帳本恆等、Elo 守恆；第 3 週存檔讀檔續打與不中斷相同', async () => {
+  it('開局至少 5 人；passive 打完整季：32 場都有結果、帳本恆等、Elo 守恆；第 3 週存檔讀檔續打與不中斷相同', async () => {
     const memo = new MemoGateway();
     const whole = newGame(8, content, { gateway: memo });
-    for (const t of whole.teams) expect(whole.players.filter((p) => p.teamId === t.id)).toHaveLength(5);
-    const start = new Map(whole.teams.map((t) => [t.id, t.cash]));
+    expect(whole.players.filter((p) => p.teamId === whole.humanTeamId)).toHaveLength(5);
+    for (const t of whole.teams) expect(whole.players.filter((p) => p.teamId === t.id).length).toBeGreaterThanOrEqual(5);
+    const start = new Map(whole.teams.map((t) => [t.id, t.persona === null ? content.economy.humanStartCash : content.personas[t.persona].startCash]));
     const eloSum = whole.players.reduce((s, p) => s + p.elo, 0);
     await runSeason(whole, content, memo, null);
     expect(['ended', 'bankrupt']).toContain(whole.phase);

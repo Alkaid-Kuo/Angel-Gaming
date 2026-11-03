@@ -6,9 +6,11 @@ import type { ClubUi } from '../club/model.ts';
 import { myFixture, opponentOf } from '../club/model.ts';
 import { LINEAGE_LOOK, avatarSvg, crestSvg, npcCrest, tierOf, type CrestSpec, type IconName } from '../club/art.ts';
 import { icon } from '../club/art.ts';
+import { portraitBust, portraitSvg } from '../portrait.ts';
 import type { Prefs } from '../club/prefs.ts';
+import type { Screen } from './guide.ts';
 
-export type Screen = 'title' | 'create' | 'hub' | 'squad' | 'player' | 'market' | 'training' | 'league' | 'betting' | 'finance' | 'inbox';
+export type { Screen };
 
 export interface GameUi extends ClubUi {
   /** 市場裡選中的自由球員 */
@@ -96,11 +98,27 @@ export function crestRing(ctx: Ctx, teamId: string | null, box: number, foeId: s
   return `<span class="cr ${foe ? 'foe' : ''}" style="width:${box}px;height:${box}px">${crest(ctx, teamId, Math.round(box * 0.64), foeId)}</span>`;
 }
 
-/** 頭像：我方染金框白；本週對手框紅；其他人（他隊、自由球員）一律灰（CSS 處理） */
+/** 頭像：選手立繪裁圓、保留原色；我方框金、本週對手框紅、其他人（他隊、自由球員）框灰（CSS 處理）。舊存檔沒有立繪代號就退回生成頭像 */
 export function avatar(ctx: Ctx, p: KnownPlayer | undefined, size: number, cls = ''): string {
   if (!p) return `<span class="av empty ${cls}" style="width:${size}px;height:${size}px"></span>`;
   const side = p.teamId === ctx.v.me.teamId ? '' : p.teamId !== null && p.teamId === foeOf(ctx.v) ? 'foe' : 'other';
+  if (p.portraitId) return `<span class="av pic ${side} ${cls}" style="width:${size}px;height:${size}px">${portraitSvg(p.portraitId, size)}</span>`;
   return `<span class="av tinted ${side} ${cls}" style="width:${size}px;height:${size}px">${avatarSvg(p.id + p.name, '#3a4458', size)}</span>`;
+}
+
+/** 立繪邊光的隊色：我方金、本週對手紅、其他人淡白 */
+export function rimOf(ctx: Ctx, p: KnownPlayer): string {
+  return p.teamId === ctx.v.me.teamId ? 'rim-me' : p.teamId !== null && p.teamId === foeOf(ctx.v) ? 'rim-foe' : 'rim-other';
+}
+
+/** 品階徽章：N 灰、R 白、SR 金框、SSR 金底（只在金、白、墨之間分級） */
+export function rarityBadge(p: KnownPlayer, cls = ''): string {
+  return `<span class="rb rb-${p.rarity.toLowerCase()} ${cls}">${p.rarity}</span>`;
+}
+
+/** 「v目前／v上限」；上限是品階與流派取小 */
+export function verCap(p: KnownPlayer): string {
+  return `v${p.version}<small class="cap">／v${p.maxVersion}</small>`;
 }
 
 /** 流派徽記：原本的圖形，單色（跟著文字顏色） */
@@ -131,13 +149,14 @@ export interface CardOpts {
   note?: string;
 }
 
-/** 選手收藏卡：版本只用框的明暗與金的多寡區分 */
+/** 選手收藏卡：版本只用框的明暗與金的多寡區分；有立繪時滿版（art），文字疊在下方漸層上，SR／SSR 多一層金光 */
 export function pcard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
   const t = tierName(p.version);
   const foe = p.teamId !== null && p.teamId === foeOf(ctx.v);
-  return `<div class="pc t${t.idx + 1} ${o.sel ? 'sel' : ''} ${foe ? 'foe' : ''}" data-act="${o.act ?? 'player'}" data-pid="${p.id}" ${o.drag ? 'draggable="true"' : ''}>
-    <div class="top2"><span class="ver">v${p.version}</span><span>${t.zh} · ${t.en}</span></div>
-    <div class="por tinted ${p.teamId === ctx.v.me.teamId ? '' : 'grey'}">${avatarSvg(p.id + p.name, '#3a4458', 176)}</div>
+  const art = p.portraitId ? `art r-${p.rarity.toLowerCase()}` : '';
+  return `<div class="pc t${t.idx + 1} ${art} ${o.sel ? 'sel' : ''} ${foe ? 'foe' : ''}" data-act="${o.act ?? 'player'}" data-pid="${p.id}" ${o.drag ? 'draggable="true"' : ''}>
+    <div class="top2"><span class="ver">${verCap(p)}</span>${rarityBadge(p)}<span>${t.zh} · ${t.en}</span></div>
+    ${p.portraitId ? `<div class="por pic r-${p.rarity.toLowerCase()}" data-r="${p.rarity}">${portraitBust(p.portraitId, 338, rimOf(ctx, p), 0.42, 0.27)}</div>` : `<div class="por tinted ${p.teamId === ctx.v.me.teamId ? '' : 'grey'}">${avatarSvg(p.id + p.name, '#3a4458', 176)}</div>`}
     ${o.slot !== undefined && o.slot >= 0 ? `<span class="slot"><i>${esc(slotName(ctx, o.slot))}</i></span>` : ''}
     ${p.upgrading ? '<span class="flag">升版中</span>' : ''}
     ${o.note ? `<div class="note">${o.note}</div>` : ''}

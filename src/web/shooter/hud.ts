@@ -3,18 +3,18 @@
 // 隊色照 CS：T 黃、CT 藍，敵我都一樣，換邊時跟著換，介面與世界一致（render.ts）。組別固定，隊色看這組現在打哪一邊。
 // 我方永遠在左；經營層觀戰顯示隊名、選手名、角色與版本。
 import type { RoundEndReason, ShooterObservation, Team, WeaponId } from '../../shooter/api.ts';
+import { portraitOfSeat } from '../portrait.ts';
 import { mineGroup } from './render.ts';
 import type { CamMode } from './camera.ts';
 import type { BoardRow, FullState, KillFeedItem, ShooterFrame, ShooterMeta, ShooterSummary } from './protocol.ts';
 import { clockText, clockTicks, visibleHp } from './hudinfo.ts';
 import { ScoreBar, avatarHtml, gunIconUrl } from './scorebar.ts';
-import type { WatchTicket } from './watch.ts';
+import { EMBED, type WatchTicket } from './watch.ts';
 
 /** 天使金色票（web/sketch/angel.css） */
 export const ANGEL = { gold: '#f0b54a', blue: '#57aef5', red: '#ff5d5d', white: '#eef2f6', grey: '#8b95a4' } as const;
 /** 隊色 */
 export const TEAM_COLOR: Readonly<Record<Team, string>> = { T: ANGEL.gold, CT: ANGEL.blue };
-const TEAM_JERSEY: Readonly<Record<Team, string>> = { T: '#b9832a', CT: '#2f6db0' };
 /** 觀戰速度（[ ] 或控制列切換） */
 export const SPEEDS = [0.5, 1, 2, 4, 8] as const;
 
@@ -112,7 +112,7 @@ export class ShooterHud {
     this.mine = mineGroup(meta);
     this.ticket = meta.watch ? ticket : null;
     this.score = new ScoreBar(root, meta, this.mine ?? 0);
-    this.score.paint((g) => this.groupColor(g), (id) => this.face(id));
+    this.score.paint((g) => this.groupColor(g), (id) => this.face(id, true));
     this.feed = el('div', 'sg-feed', root);
     this.banner = el('div', 'sg-banner hidden', root);
     this.hint = el('div', 'sg-hint', root);
@@ -131,7 +131,7 @@ export class ShooterHud {
     this.pause = el('div', 'sg-pause hidden', root);
     this.ctl = meta.spectate ? el('div', 'sg-ctl', root) : null;
     const resume = meta.spectate ? '繼續（空白鍵）' : '繼續（Esc）';
-    const quit = meta.watch ? '回經營' : meta.spectate ? '離開觀戰' : '離開比賽';
+    const quit = EMBED ? '跳過比賽' : meta.watch ? '回經營' : meta.spectate ? '離開觀戰' : '離開比賽';
     this.pause.innerHTML =
       `<div class="box"><small class="en">PAUSED</small><b>暫停</b>` +
       `<div class="col"><button type="button" class="primary" data-act="resume">${resume}</button>` +
@@ -223,13 +223,14 @@ export class ShooterHud {
     return this.tGroup;
   }
 
-  /** 選手頭像，球衣是隊色（同一個人同一邊只產生一次） */
-  face(id: number): string {
+  /** 選手頭像，外框是隊色（同一個人同一邊、同一形狀只產生一次）；square＝頂部計分板的方形 */
+  face(id: number, square = false): string {
     const team = this.teamNow(this.meta.groups[id]);
-    const key = `${id}${team}`;
+    const key = `${id}${team}${square ? 's' : ''}`;
     let html = this.faces.get(key);
     if (html === undefined) {
-      html = avatarHtml(this.meta.names[id] ?? `#${id}`, TEAM_JERSEY[team]);
+      // 經營層觀戰用選手的立繪；試玩的 Bot 與舊觀戰票沒有立繪代號，依種子與座位挑
+      html = avatarHtml(this.meta.watch?.portraits?.[id] || portraitOfSeat(this.meta.seed, id), TEAM_COLOR[team], square);
       this.faces.set(key, html);
     }
     return html;
@@ -297,7 +298,7 @@ export class ShooterHud {
         `<i></i>` +
         item('fullscreen', document.fullscreenElement !== null, '⛶', 'title="全螢幕（F11）"') +
         `<button type="button" data-act="help" title="? 或 H">?</button>` +
-        `<button type="button" data-act="quit">${this.meta.watch ? '回經營' : '離開'}</button>`,
+        `<button type="button" class="${EMBED ? 'skipm' : ''}" data-act="quit">${EMBED ? '跳過比賽' : this.meta.watch ? '回經營' : '離開'}</button>`,
     );
   }
 
@@ -335,7 +336,7 @@ export class ShooterHud {
     const tGroup = this.groupOfTeam('T', f.board);
     if (tGroup !== this.tGroup) {
       this.tGroup = tGroup;
-      this.score.paint((g) => this.groupColor(g), (id) => this.face(id));
+      this.score.paint((g) => this.groupColor(g), (id) => this.face(id, true));
     }
     const leftTeam: Team = tGroup === leftGroup ? 'T' : 'CT';
     const rightTeam: Team = leftTeam === 'T' ? 'CT' : 'T';
