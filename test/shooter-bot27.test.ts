@@ -72,3 +72,29 @@ describe('Bot 2.7 批 1-1：撿槍不蓋掉趕期限的任務（grabAfterTask）
     expect(a.goal).toEqual(gun);
   });
 });
+
+describe('Bot 2.7 批 1-2：進過包點按點記（wentInSite）', () => {
+  /** 狙擊手（座位 4）等 A：兩名隊友走進 site 矩形 */
+  function walkIn(site: 'A' | 'B'): { before: boolean; after: boolean } {
+    const { match, bot } = live(4);
+    const t = bot.tactics;
+    const obs = match.observe(4);
+    const q = t.intel.sites[site].plants[0];
+    const before = t.waitEntry(obs, 'A');
+    t.trackTeam({ ...obs, teammates: obs.teammates.map((m, i) => (i < 2 ? { ...m, x: q.x, y: q.y } : m)) }, out());
+    return { before, after: t.waitEntry(obs, 'A') };
+  }
+
+  it('隊友進過 B 不算突破 A：狙擊手繼續等', () => {
+    expect(walkIn('B')).toEqual({ before: true, after: true });
+  });
+
+  it('隊友進過 A（之後退出矩形也算）：狙擊手不再等', () => {
+    expect(walkIn('A')).toEqual({ before: true, after: false });
+  });
+
+  it('開關關掉重現 2.6.3：進過 B 也被當成進過 A', () => {
+    setP('wentInSite', false);
+    expect(walkIn('B')).toEqual({ before: true, after: false });
+  });
+});

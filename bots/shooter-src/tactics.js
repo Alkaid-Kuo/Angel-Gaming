@@ -242,7 +242,7 @@ export class Tactics {
     this.giftMiss = false;
     this.reBought = false;
     this.pickAt = -1000000;
-    /** 本回合進過包點的隊友（等突破手、狙擊手等人用） @type {Set<number>} */
+    /** 本回合進過包點的隊友（等突破手、狙擊手等人用）：`${點}${id}` @type {Set<string>} */
     this.wentIn = new Set();
     /** 本回合我方煙霧的位置（自己丟的與隊友喊的） @type {import('./base.js').Pt[]} */
     this.smokes = [];
@@ -359,7 +359,7 @@ export class Tactics {
     this.giftMiss = false;
     this.reBought = false;
     this.pickAt = -1000000;
-    /** 本回合進過包點的隊友（等突破手、狙擊手等人用） @type {Set<number>} */
+    /** 本回合進過包點的隊友（等突破手、狙擊手等人用）：`${點}${id}` @type {Set<string>} */
     this.wentIn = new Set();
     /** 本回合我方煙霧的位置（自己丟的與隊友喊的） @type {import('./base.js').Pt[]} */
     this.smokes = [];
@@ -534,7 +534,7 @@ export class Tactics {
     const tid = this.combat?.targetId ?? -1;
     for (const s of me.shots) if (s.hit === 'enemy' && tid >= 0) this.dealt.set(tid, (this.dealt.get(tid) ?? 0) + s.damage);
     for (const m of obs.teammates) {
-      if (m.alive && (this.inRectSite(m.x, m.y, 'A') || this.inRectSite(m.x, m.y, 'B'))) this.wentIn.add(m.id);
+      if (m.alive) for (const s of SITES) if (this.inRectSite(m.x, m.y, s)) this.wentIn.add(`${s}${m.id}`);
       if (!m.alive) this.kits.delete(m.id);
       if (m.alive && m.defusing) { if (!this.defuseStarted.has(m.id)) this.defuseStarted.set(m.id, t); }
       else this.defuseStarted.delete(m.id);
@@ -1688,10 +1688,12 @@ export class Tactics {
     if (role === ENTRY || c < 0 || this.inRectSite(me.x, me.y, s)) return false;
     const mates = obs.teammates.filter((m) => m.alive);
     // 進過包點就算（2.6.3：守位可能在矩形外，進去再退出來的人不能讓大家一直等；每個決策在 trackTeam 記）
-    if (role === AWP) return mates.filter((m) => this.wentIn.has(m.id)).length < Math.min(2, mates.length);
+    /** @param {number} id */
+    const went = (id) => this.wentIn.has(`${s}${id}`) || (!P.wentInSite && this.wentIn.has(`${other(s)}${id}`));
+    if (role === AWP) return mates.filter((m) => went(m.id)).length < Math.min(2, mates.length);
     const e = mates.find((m) => m.id === this.roles.who(ENTRY));
     const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
-    return e !== undefined && ce >= 0 && !this.wentIn.has(e.id) && dS[ce] >= dS[c] - 10;
+    return e !== undefined && ce >= 0 && !went(e.id) && dS[ce] >= dS[c] - 10;
   }
 
   /** 路線的包點入口 @param {SiteId} site @param {number} routeIdx */

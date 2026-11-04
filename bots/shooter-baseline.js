@@ -181,6 +181,7 @@ probeCover: true,
 probeStay: 4.5,
 nadeCluster: 3.5,
 grabAfterTask: true,
+wentInSite: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3325,7 +3326,7 @@ const t = obs.tick;
 const tid = this.combat?.targetId ?? -1;
 for (const s of me.shots) if (s.hit === 'enemy' && tid >= 0) this.dealt.set(tid, (this.dealt.get(tid) ?? 0) + s.damage);
 for (const m of obs.teammates) {
-if (m.alive && (this.inRectSite(m.x, m.y, 'A') || this.inRectSite(m.x, m.y, 'B'))) this.wentIn.add(m.id);
+if (m.alive) for (const s of SITES) if (this.inRectSite(m.x, m.y, s)) this.wentIn.add(`${s}${m.id}`);
 if (!m.alive) this.kits.delete(m.id);
 if (m.alive && m.defusing) { if (!this.defuseStarted.has(m.id)) this.defuseStarted.set(m.id, t); }
 else this.defuseStarted.delete(m.id);
@@ -4238,10 +4239,11 @@ const dS = this.intel.distSite[s];
 const c = this.g.cellOf(me.x, me.y);
 if (role === ENTRY || c < 0 || this.inRectSite(me.x, me.y, s)) return false;
 const mates = obs.teammates.filter((m) => m.alive);
-if (role === AWP) return mates.filter((m) => this.wentIn.has(m.id)).length < Math.min(2, mates.length);
+const went = (id) => this.wentIn.has(`${s}${id}`) || (!P.wentInSite && this.wentIn.has(`${other(s)}${id}`));
+if (role === AWP) return mates.filter((m) => went(m.id)).length < Math.min(2, mates.length);
 const e = mates.find((m) => m.id === this.roles.who(ENTRY));
 const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
-return e !== undefined && ce >= 0 && !this.wentIn.has(e.id) && dS[ce] >= dS[c] - 10;
+return e !== undefined && ce >= 0 && !went(e.id) && dS[ce] >= dS[c] - 10;
 }
 entranceOf(site, routeIdx) {
 const r = this.tRoute(site, routeIdx);
