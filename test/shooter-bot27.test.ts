@@ -194,3 +194,37 @@ describe('Bot 2.7 批 1-4：同點掉落物照引擎規則撿（grabSim）', () 
     expect(pick(grabWith(5, (q) => [gun(q), kit(q)]))).toBe(false);
   });
 });
+
+describe('Bot 2.7 批 1-5：加時的賽點門檻（otMatchPoint）', () => {
+  function chance(overtime: number, theirs: number, roundInHalf: number): boolean {
+    const { match, bot } = live(5);
+    const o = match.observe(5);
+    const e = bot.tactics.econ;
+    e.roundInHalf = roundInHalf;
+    return e.lastChance({ ...o, round: { ...o.round, overtime, scoreT: theirs, scoreCT: theirs } });
+  }
+  const rules = (): { rph: number; win: number; ot: { roundsPerHalf: number; winRounds: number } } => {
+    const r = live(5).bot.data.rules;
+    if (r.overtime === false) throw new Error('測試要有加時規則');
+    return { rph: r.roundsPerHalf, win: r.winRounds, ot: r.overtime };
+  };
+
+  it('加時第一局（正規打平）不是對方賽點，可以保槍', () => {
+    const r = rules();
+    expect(chance(1, r.rph, 1)).toBe(false);
+  });
+
+  it('正規的對方賽點、加時真正的賽點、加時半場最後一局：都是最後機會', () => {
+    const r = rules();
+    expect(chance(0, r.win - 1, 2)).toBe(true);
+    expect(chance(1, r.rph + r.ot.winRounds - 1, 2)).toBe(true);
+    expect(chance(2, r.rph + r.ot.roundsPerHalf + r.ot.winRounds - 1, 2)).toBe(true);
+    expect(chance(2, r.rph + r.ot.roundsPerHalf, 2)).toBe(false);
+    expect(chance(1, r.rph, r.ot.roundsPerHalf)).toBe(true);
+  });
+
+  it('開關關掉重現 2.6.3：加時第一局被當成賽點', () => {
+    setP('otMatchPoint', false);
+    expect(chance(1, rules().rph, 1)).toBe(true);
+  });
+});

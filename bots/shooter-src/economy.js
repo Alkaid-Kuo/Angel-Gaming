@@ -138,9 +138,22 @@ export class Economy {
   /** 沒有下一回合可存（2.6.2 保槍用）：對方賽點、或半場最後一回合（換邊後武器與金錢重置） @param {import('./base.js').Observation} obs */
   lastChance(obs) {
     const r = obs.round;
-    const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
     const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
-    return theirs >= this.data.rules.winRounds - 1 || lastOfHalf;
+    return this.enemyMatchPoint(obs) || lastOfHalf;
+  }
+
+  /**
+   * 對方再贏一回合就贏：正規是 winRounds − 1；2.7（P.otMatchPoint）起加時第 k 段每段開打時兩邊同分，
+   * 門檻是 正規半場回合數 ＋ (k − 1) × 加時半場回合數 ＋ 加時 winRounds − 1（公開賽制推得出來）
+   * @param {import('./base.js').Observation} obs
+   */
+  enemyMatchPoint(obs) {
+    const r = obs.round;
+    const rules = this.data.rules;
+    const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
+    if (!P.otMatchPoint || r.overtime <= 0 || rules.overtime === false) return theirs >= rules.winRounds - 1;
+    const ot = rules.overtime;
+    return theirs >= rules.roundsPerHalf + (r.overtime - 1) * ot.roundsPerHalf + ot.winRounds - 1;
   }
 
   /** 手槍局：錢都很少、沒有主武器 @param {import('./base.js').Observation} obs */
@@ -166,10 +179,7 @@ export class Economy {
     const ladder = this.data.rules.economy.lossBonus;
     const nextPay = ladder[Math.min(ladder.length, this.lossLevel + 1) - 1];
     const canNext = people.filter((p) => this.teamShort(p.money + nextPay, p.primary, team, n) <= 0).length;
-    const r = obs.round;
-    const theirs = team === 'T' ? r.scoreCT : r.scoreT;
-    const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
-    const critical = theirs >= this.data.rules.winRounds - 1 || lastOfHalf;
+    const critical = this.lastChance(obs);
     const avg = people.reduce((s, p) => s + p.money, 0) / n;
     const half = this.cost('smg') + this.data.rules.armorPrice;
     if (critical && avg >= half * 0.8) return 'force';

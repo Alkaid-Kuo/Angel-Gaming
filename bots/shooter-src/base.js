@@ -318,6 +318,8 @@ export const P = {
   grabSim: true,
   /** 引擎撿取範圍（格） */
   pickReach: 1.2,
+  /** 1-5：加時的對方賽點用加時段的門檻（false ＝ 2.6.3 固定用正規的 winRounds − 1，加時第一局就當成賽點） */
+  otMatchPoint: true,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */

@@ -186,6 +186,7 @@ heardOnce: true,
 heardKeep: true,
 grabSim: true,
 pickReach: 1.2,
+otMatchPoint: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -2437,9 +2438,16 @@ return primary !== null && this.cost(primary) >= this.cost('smg') + 1000;
 }
 lastChance(obs) {
 const r = obs.round;
-const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
 const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
-return theirs >= this.data.rules.winRounds - 1 || lastOfHalf;
+return this.enemyMatchPoint(obs) || lastOfHalf;
+}
+enemyMatchPoint(obs) {
+const r = obs.round;
+const rules = this.data.rules;
+const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
+if (!P.otMatchPoint || r.overtime <= 0 || rules.overtime === false) return theirs >= rules.winRounds - 1;
+const ot = rules.overtime;
+return theirs >= rules.roundsPerHalf + (r.overtime - 1) * ot.roundsPerHalf + ot.winRounds - 1;
 }
 pistolRound(obs) {
 return obs.me.money <= this.data.rules.economy.startMoney + 100 && obs.me.loadout.primary === null && this.roundInHalf <= 1;
@@ -2455,10 +2463,7 @@ if (can >= n - 1 || (this.lastWon === true && this.enemyLevel >= 2 && can >= n -
 const ladder = this.data.rules.economy.lossBonus;
 const nextPay = ladder[Math.min(ladder.length, this.lossLevel + 1) - 1];
 const canNext = people.filter((p) => this.teamShort(p.money + nextPay, p.primary, team, n) <= 0).length;
-const r = obs.round;
-const theirs = team === 'T' ? r.scoreCT : r.scoreT;
-const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
-const critical = theirs >= this.data.rules.winRounds - 1 || lastOfHalf;
+const critical = this.lastChance(obs);
 const avg = people.reduce((s, p) => s + p.money, 0) / n;
 const half = this.cost('smg') + this.data.rules.armorPrice;
 if (critical && avg >= half * 0.8) return 'force';
