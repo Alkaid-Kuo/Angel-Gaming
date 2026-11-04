@@ -226,7 +226,7 @@ export class Tactics {
     this.execTick = -1;
     this.stageArrive = -1;
     this.noiseLeft = 0;
-    /** 隊友的閃光：躲或轉身到爆完（claim：只收到宣告、爆炸時間是估的） @type {{ x: number, y: number, pop: number, claim?: boolean }[]} */
+    /** 隊友的閃光：躲或轉身到爆完（claim：只收到宣告、爆炸時間是估的；by：宣告的人） @type {{ x: number, y: number, pop: number, claim?: boolean, by?: number }[]} */
     this.mateFlash = [];
     this.flashHeard = -1;
     this.smokeHeard = -1;
@@ -673,14 +673,14 @@ export class Tactics {
         this.noteContact(e.region, e.n, t, this.siteNear(c));
       } else if (e.kind === 'flash') {
         // 宣告時估的、自己看到推算的爆炸時間換成準確的
-        this.mateFlash = this.mateFlash.filter((f) => !f.claim || dist(f.x, f.y, e.x, e.y) > 6 * UNIT);
+        this.mateFlash = this.mateFlash.filter((f) => !f.claim || (P.claimById ? f.by !== msg.from : dist(f.x, f.y, e.x, e.y) > P.claimClear * UNIT));
         this.mateFlash.push({ x: e.x, y: e.y, pop: e.pop });
       }
       else if (e.kind === 'claim') {
         this.flashClaims.push({ x: e.x, y: e.y, until: t + P.flashClaimSec * this.tps, by: msg.from, at: t });
         // 2.6.1：宣告比 E:flash 早一個決策以上，先當成要炸了來躲（估計爆炸時間；E:flash 到了會補上準確的）
         // 估計值偏晚（對方還要轉向、停步才丟）：太早結束躲避會回頭吃到真的那顆
-        if (P.flashClaimDodge) this.mateFlash.push({ x: e.x, y: e.y, pop: t + (this.util.fuse.get('flash') ?? 45) + 2 * this.data.rules.reactionTicks + this.tps, claim: true });
+        if (P.flashClaimDodge) this.mateFlash.push({ x: e.x, y: e.y, pop: t + (this.util.fuse.get('flash') ?? 45) + 2 * this.data.rules.reactionTicks + this.tps, claim: true, by: msg.from });
       }
       else if (e.kind === 'smoke') {
         this.smokeHeard = t;

@@ -200,6 +200,8 @@ burnMateCheck: true,
 critForce: true,
 emptySwitch: true,
 scanLow: true,
+claimClear: 6,
+claimById: false,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3486,12 +3488,12 @@ if (e.kind === 'contact') {
 const c = this.regionCell(e.region);
 this.noteContact(e.region, e.n, t, this.siteNear(c));
 } else if (e.kind === 'flash') {
-this.mateFlash = this.mateFlash.filter((f) => !f.claim || dist(f.x, f.y, e.x, e.y) > 6 * UNIT);
+this.mateFlash = this.mateFlash.filter((f) => !f.claim || (P.claimById ? f.by !== msg.from : dist(f.x, f.y, e.x, e.y) > P.claimClear * UNIT));
 this.mateFlash.push({ x: e.x, y: e.y, pop: e.pop });
 }
 else if (e.kind === 'claim') {
 this.flashClaims.push({ x: e.x, y: e.y, until: t + P.flashClaimSec * this.tps, by: msg.from, at: t });
-if (P.flashClaimDodge) this.mateFlash.push({ x: e.x, y: e.y, pop: t + (this.util.fuse.get('flash') ?? 45) + 2 * this.data.rules.reactionTicks + this.tps, claim: true });
+if (P.flashClaimDodge) this.mateFlash.push({ x: e.x, y: e.y, pop: t + (this.util.fuse.get('flash') ?? 45) + 2 * this.data.rules.reactionTicks + this.tps, claim: true, by: msg.from });
 }
 else if (e.kind === 'smoke') {
 this.smokeHeard = t;
