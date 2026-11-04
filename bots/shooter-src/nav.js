@@ -116,6 +116,11 @@ export class Navigator {
     this.peek = null;
   }
 
+  /** 這次決策沒有送出 step() 排的移動（入口改成 stop 或交戰移動）：不累計「動不了」（2.7，P.navIdle） */
+  idle() {
+    if (P.navIdle) this.moveStreak = 0;
+  }
+
   clearGoal() {
     this.goal = null;
     this.path = [];

@@ -506,3 +506,31 @@ describe('Bot 2.7 批 1-10 A13：拆包、下包途中不換血架槍、不追�
     expect(run('defuse').trade.stop).toBe(true);
   });
 });
+
+describe('Bot 2.7 批 1-10 A21：沒送出導航移動時不算被擋（navIdle）', () => {
+  /** 目標在 20 格外、人站著不動（站著開槍或丟道具）：每次決策導航都排了移動，但入口用了 stop */
+  function stuck(idle: boolean): number {
+    const { match, bot } = live(5);
+    const o = match.observe(5);
+    const g = bot.intel.sites.A;
+    bot.nav.setGoal(g.cx, g.cy, null);
+    for (let k = 0; k < 10; k++) {
+      bot.nav.step({ ...o, tick: o.tick + 3 * k, me: { ...o.me, vx: 0, vy: 0 } }, { allowPeek: false, speed: 130, evading: false, priority: false });
+      if (idle) bot.nav.idle();
+    }
+    return bot.nav.stuck;
+  }
+
+  it('站著不動但沒有送出導航的移動：不累計被擋', () => {
+    expect(stuck(true)).toBe(0);
+  });
+
+  it('真的送出移動卻動不了：照常算被擋（原本的行為保留）', () => {
+    expect(stuck(false)).toBeGreaterThan(0);
+  });
+
+  it('開關關掉重現 2.6.3：刻意停步也算被擋', () => {
+    setP('navIdle', false);
+    expect(stuck(true)).toBeGreaterThan(0);
+  });
+});

@@ -195,6 +195,7 @@ lookHoldQuiet: true,
 defuseAlarmKill: true,
 lineNewest: true,
 tradeSkipTask: true,
+navIdle: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -1328,6 +1329,9 @@ this.route = route;
 this.path = [];
 this.wps = [];
 this.peek = null;
+}
+idle() {
+if (P.navIdle) this.moveStreak = 0;
 }
 clearGoal() {
 this.goal = null;
@@ -5837,6 +5841,7 @@ const nav = this.nav.step(obs, { allowPeek: tac.allowPeek && !tac.commit && !fig
 const ahead = this.nav.wps[this.nav.wpIdx] ?? tac.goal;
 const check = ahead !== null && !fight.engaged && ev === null && !tac.objective && !tac.urgent && !tac.stop && !tac.escape && !tac.commit && dist(me.x, me.y, ahead.x, ahead.y) > 900 ? this.judge?.approach(obs, ahead) : null;
 let moving = false;
+let navUsed = false;
 if (!tac.objective) {
 if (ev !== null && ev.move !== null) {
 out.push({ type: 'move', x: Math.round(ev.move.x), y: Math.round(ev.move.y) });
@@ -5845,9 +5850,11 @@ moving = true;
 else if (tac.escape) {
 out.push(...nav.cmds);
 moving = nav.moving;
+navUsed = true;
 } else if (tac.commit && !fight.engaged) {
 out.push(...nav.cmds);
 moving = nav.moving;
+navUsed = true;
 } else if (fight.move === 'stop') out.push({ type: 'stop' });
 else if (fight.move !== null) {
 out.push({ type: 'move', x: Math.round(fight.move.x), y: Math.round(fight.move.y) });
@@ -5856,8 +5863,10 @@ moving = true;
 else {
 out.push(...nav.cmds);
 moving = nav.moving;
+navUsed = true;
 }
 }
+if (!navUsed) this.nav.idle();
 const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
 const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : this.combat.alert(obs, holding) ?? check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
 if (aim !== null && (Math.abs(aim.x - me.x) > 50 || Math.abs(aim.y - me.y) > 50)) out.push({ type: 'aim', x: Math.round(aim.x), y: Math.round(aim.y) });
