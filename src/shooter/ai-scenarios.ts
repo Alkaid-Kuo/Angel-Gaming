@@ -1875,6 +1875,55 @@ const SITUATION_SCENARIOS: readonly AiScenario[] = [
       return { pass: moved >= 2 && cover && far >= 22, detail: `走了 ${moved.toFixed(1)} 格、停在掩體格 ${cover}、離炸彈 ${far.toFixed(1)} 格` };
     }),
   },
+  {
+    id: 'T28',
+    name: '煙滅火',
+    expect: 'T 全買 rush（CT 放進牆角）：第一個 T 走到離包點 14～22 步（還沒到入口）時，在那個包點每個入口外側各點一團 CT 的燃燒（燒 7 秒）；5 秒內 T 丟的煙至少撲滅一團（火提早消失、旁邊有 T 的煙）；兩張圖',
+    run: (bot, seed) => onBoth((mapId) => {
+      const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], knobs: { plan: 2 }, opts: { roundMoney: [16000, null] } });
+      toLive(d);
+      const m = d.match;
+      park(m, CT0);
+      const data = shooterInitData(m.map, T0, {});
+      const g = new Grid(data.map);
+      const intel = new MapIntel(data.map, g);
+      let fire: Pt | null = null;
+      let fires: Pt[] = [];
+      let lit = -1;
+      let out = -1;
+      run(d, 60 * TPS, (mm) => {
+        if (fire === null) {
+          for (const pid of TS) {
+            const p = mm.players[pid];
+            if (!p.alive) continue;
+            for (const s of ['A', 'B'] as const) {
+              // 還沒走到入口（入口外側離包點約 3～8 步）：14～22 步時點火
+              if (stepsAt(mm.map, s, p.x, p.y) > 22 || stepsAt(mm.map, s, p.x, p.y) < 14) continue;
+              // 那個包點的每個入口外側都點火（不知道 T 走哪個入口）
+              fires = intel.sites[s].entrances.map((e) => [e.ox, e.oy] as Pt);
+              if (fires.length === 0) continue;
+              fire = fires[0];
+              lit = mm.tick;
+              for (const q of fires) mm.fires.push({ x: q[0], y: q[1], owner: CT0, kind: 'incendiary', startTick: mm.tick, endTick: mm.tick + GRENADES.incendiary.durationTicks, cells: burnCells(mm.map, q[0], q[1], GRENADES.incendiary.radius) });
+              return false;
+            }
+          }
+          return false;
+        }
+        const gone = fires.find((q) => !mm.fires.some((f) => f.x === q[0] && f.y === q[1]));
+        if (out < 0 && gone !== undefined) {
+          out = mm.tick;
+          fire = gone;
+        }
+        return out >= 0 || mm.tick - lit > 6 * TPS;
+      });
+      if (fire === null) return { pass: false, detail: '沒有 T 走到入口附近' };
+      const f: Pt = fire;
+      const smoked = m.smokes.some((q) => q.owner < TEAM_SIZE && d2([q.x, q.y], f) < 7 * UNIT);
+      const early = out >= 0 && out - lit < 5 * TPS;
+      return { pass: early && smoked, detail: `火 ${out < 0 ? '沒滅' : `${((out - lit) / TPS).toFixed(1)} 秒後消失`}、T 的煙在旁邊 ${smoked}` };
+    }),
+  },
 ];
 
 const batchMemos = new WeakMap<CompiledBot, Map<string, AiScenarioResult>>();
