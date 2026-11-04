@@ -1,4 +1,3 @@
-// @ts-check
 // CS 射擊基準 Bot（步驟 6）：四層架構。
 //   感知 memory.js（每次決策）：敵情記憶、已清空格、危險格成本（每秒）
 //   導航 analysis.js（init 一次：可走格、距離場、區域交界與窄口、掩體點、守點位、下包位、路線集）＋ nav.js（A*、路徑點、被擋重算、探頭）
@@ -13,21 +12,6 @@
 // movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步、佈置時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、T 計畫、角色）。
 // 本檔由 scripts/build-shooter-bots.ts 從 bots/shooter-src/ 產生：請修改原始碼後重新產生，不要直接改這個檔案。
 
-/** @typedef {import('../src/shooter/api.ts').ShooterInitData} InitData */
-/** @typedef {import('../src/shooter/api.ts').ShooterHelpers} Helpers */
-/** @typedef {import('../src/shooter/api.ts').ShooterObservation} Observation */
-/** @typedef {import('../src/shooter/api.ts').ShooterCommand} Command */
-/** @typedef {import('../src/shooter/api.ts').ShooterDeclaration} Declaration */
-/** @typedef {import('../src/shooter/api.ts').EnemyInfo} Enemy */
-/** @typedef {import('../src/shooter/api.ts').WeaponInfo} WeaponInfo */
-/** @typedef {import('../src/shooter/api.ts').MapInfo} MapInfo */
-/** @typedef {import('../src/shooter/api.ts').Team} Team */
-/** @typedef {import('../src/shooter/api.ts').BuyItem} BuyItem */
-/** @typedef {import('../src/shooter/api.ts').WeaponId} WeaponId */
-/** @typedef {import('../src/shooter/api.ts').AttributeKey} AttributeKey */
-/** @typedef {import('../src/shooter/api.ts').GrenadeId} GrenadeId */
-/** @typedef {{ x: number, y: number }} Pt */
-/** @typedef {{ x0: number, y0: number, x1: number, y1: number }} Rect */
 const UNIT = 1000;
 const P = {
 chokeWidth: 6,
@@ -58,7 +42,6 @@ bandFar: [30, 60],
 trust0: 0.7,
 trust100: 1,
 scanEvery: 9,
-mateScanEvery: 2,
 dangerCoef: 0.6,
 sectorCoef: 0.3,
 dangerRange: 30,
@@ -109,7 +92,6 @@ coverRadius: 8,
 holdAngle0: 2.6,
 holdAngle100: 0.4,
 blindFire: true,
-blindT: false,
 blindMemo: 2,
 blindGroups: 2,
 blindPush: 0.7,
@@ -135,19 +117,14 @@ flashTurn: 0.8,
 flashClaim: true,
 flashClaimSec: 2,
 flashStagger: 0.5,
-flashHolders: false,
 flashSecond: true,
 flashSecondAfter: 0.8,
 flashSecondWin: 3,
 flashSecondGap: 6,
 flashClaimDodge: true,
-flashStill: false,
-flashSeeDodge: false,
 flashRelease: true,
 flashReleaseMargin: 2,
 smokeFire: true,
-flankCover: false,
-flankCoverSec: 5,
 postMin: 5,
 postGap: 6,
 friendSpread: 0.05,
@@ -196,17 +173,13 @@ enemyFlashNear: 10,
 enemyFlashMemo: 4,
 giveUpIn: 3,
 giveUpMine: 2,
-giveUpRun: false,
 fallHide: true,
 smokeAlarmN: 1,
-rotDeep: false,
 probeTime: 12,
 probeMargin: 4,
 probeCover: true,
 probeStay: 4.5,
-probeRun: false,
 nadeCluster: 3.5,
-molotovNear: 16,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -223,9 +196,7 @@ retakeLead: 1.2,
 };
 const COS = new Float64Array(360);
 const SIN = new Float64Array(360);
-/** @type {Helpers | null} */
 let HELP = null;
-/** @param {Helpers} h */
 function initTrig(h) {
 HELP = h;
 for (let d = 0; d < 360; d++) {
@@ -234,44 +205,35 @@ COS[d] = x / 1000000;
 SIN[d] = y / 1000000;
 }
 }
-/** @param {number} d */
 function normDeg(d) {
 const r = Math.round(d) % 360;
 return r < 0 ? r + 360 : r;
 }
-/** @param {number} d */
 function cosd(d) {
 return COS[normDeg(d)];
 }
-/** @param {number} d */
 function sind(d) {
 return SIN[normDeg(d)];
 }
-/** @param {number} ax @param {number} ay @param {number} bx @param {number} by */
 function angleTo(ax, ay, bx, by) {
 if (HELP === null || (ax === bx && ay === by)) return 0;
 return normDeg(HELP.angleTo(ax, ay, bx, by));
 }
-/** @param {number} a @param {number} b */
 function adiff(a, b) {
 let d = (a - b) % 360;
 if (d > 180) d -= 360;
 if (d <= -180) d += 360;
 return d;
 }
-/** @param {number} ax @param {number} ay @param {number} bx @param {number} by */
 function dist(ax, ay, bx, by) {
 return Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
 }
-/** @param {number} v @param {number} lo @param {number} hi */
 function clamp(v, lo, hi) {
 return v < lo ? lo : v > hi ? hi : v;
 }
-/** @param {number} a @param {number} b @param {number} t */
 function lerp(a, b, t) {
 return a + (b - a) * t;
 }
-/** @param {number} px @param {number} py @param {number} ax @param {number} ay @param {number} bx @param {number} by */
 function segDist(px, py, ax, ay, bx, by) {
 const dx = bx - ax;
 const dy = by - ay;
@@ -280,7 +242,6 @@ const t = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2;
 const c = clamp(t, 0, 1);
 return { d: dist(px, py, ax + dx * c, ay + dy * c), t };
 }
-/** @param {Rect} r @param {number} cx @param {number} cy */
 function inRect(r, cx, cy) {
 return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1;
 }
@@ -295,7 +256,6 @@ const DIR8 = [
 [-1, -1, 14],
 ];
 class Grid {
-/** @param {MapInfo} map */
 constructor(map) {
 this.W = map.width;
 this.H = map.height;
@@ -312,24 +272,20 @@ this.low[i] = v === 2 || v >= 7 ? 1 : 0;
 this.slope[i] = v >= 3 ? (v - 3) % 4 : -1;
 }
 }
-/** @param {number} i @param {number} x @param {number} y @returns {[number, number]} */
 slopeLocal(i, x, y) {
 const c = this.slope[i];
 const cx = (i % this.W) * UNIT;
 const cy = Math.floor(i / this.W) * UNIT;
 return [c === 0 || c === 3 ? x - cx : cx + UNIT - x, c === 0 || c === 1 ? y - cy : cy + UNIT - y];
 }
-/** @param {number} i 格索引 @param {number} x @param {number} y */
 filled(i, x, y) {
 if (this.slope[i] < 0) return true;
 const [u, v] = this.slopeLocal(i, x, y);
 return u + v <= UNIT;
 }
-/** @param {number} i 格索引 @param {number} x @param {number} y */
 wallAt(i, x, y) {
 return this.wall[i] === 1 && this.filled(i, x, y);
 }
-/** @param {number} i @param {number} x @param {number} y */
 slopeDistSq(i, x, y) {
 const [u, v] = this.slopeLocal(i, x, y);
 if (u >= 0 && v >= 0 && u + v <= UNIT) return 0;
@@ -340,7 +296,6 @@ const du = u - (UNIT + s) / 2;
 const dv = v - (UNIT - s) / 2;
 return Math.min((u - cu) * (u - cu) + v * v, u * u + (v - cv) * (v - cv), du * du + dv * dv);
 }
-/** @param {number} i @param {number} ax @param {number} ay @param {number} bx @param {number} by */
 cutsSlope(i, ax, ay, bx, by) {
 const [ua, va] = this.slopeLocal(i, ax, ay);
 const [ub, vb] = this.slopeLocal(i, bx, by);
@@ -354,41 +309,32 @@ else t1 = Math.min(t1, -g / d);
 }
 return t0 <= t1;
 }
-/** @param {number} cx @param {number} cy @param {number} ax @param {number} ay @param {number} bx @param {number} by */
 sideWall(cx, cy, ax, ay, bx, by) {
 if (!this.isWall(cx, cy)) return false;
 if (cx < 0 || cy < 0 || cx >= this.W || cy >= this.H) return true;
 const i = cy * this.W + cx;
 return this.slope[i] < 0 || this.cutsSlope(i, ax, ay, bx, by);
 }
-/** @param {number} x @param {number} y */
 cellOf(x, y) {
 const cx = Math.floor(x / UNIT);
 const cy = Math.floor(y / UNIT);
 if (cx < 0 || cy < 0 || cx >= this.W || cy >= this.H) return -1;
 return cy * this.W + cx;
 }
-/** @param {number} i @returns {Pt} */
 center(i) {
 return { x: (i % this.W) * UNIT + UNIT / 2, y: Math.floor(i / this.W) * UNIT + UNIT / 2 };
 }
-/** @param {number} cx @param {number} cy */
 isWall(cx, cy) {
 if (cx < 0 || cy < 0 || cx >= this.W || cy >= this.H) return true;
 return this.wall[cy * this.W + cx] === 1;
 }
-/** @param {number} cx @param {number} cy */
 isBlock(cx, cy) {
 if (cx < 0 || cy < 0 || cx >= this.W || cy >= this.H) return true;
 return this.block[cy * this.W + cx] === 1;
 }
-/** @param {number} i */
 walkable(i) {
 return i >= 0 && i < this.N && this.block[i] === 0;
 }
-/**
-* @param {number} ax @param {number} ay @param {number} bx @param {number} by
-*/
 los(ax, ay, bx, by) {
 const start = this.cellOf(ax, ay);
 if (start >= 0 && this.slope[start] >= 0 && this.wall[start] === 1 && this.cutsSlope(start, ax, ay, bx, by)) return false;
@@ -437,10 +383,6 @@ if (this.isWall(cx, cy)) return false;
 }
 return true;
 }
-/**
-* @param {number} x @param {number} y @param {number} deg @param {number} maxCells
-* @param {(i: number, d: number) => boolean | void} visit
-*/
 ray(x, y, deg, maxCells, visit) {
 const c = cosd(deg) * (UNIT / 2);
 const s = sind(deg) * (UNIT / 2);
@@ -453,9 +395,6 @@ last = i;
 if (visit(i, k / 2) === false) return;
 }
 }
-/**
-* @param {number} ax @param {number} ay @param {number} bx @param {number} by
-*/
 walkLine(ax, ay, bx, by) {
 const len = dist(ax, ay, bx, by);
 if (len < 1) return true;
@@ -485,7 +424,6 @@ this.lastKey = 0;
 clear() {
 this.size = 0;
 }
-/** @param {number} n @param {number} k */
 push(n, k) {
 if (this.size === this.node.length) {
 const node = new Int32Array(this.size * 2);
@@ -534,9 +472,6 @@ key[i] = k;
 return top;
 }
 }
-/**
-* @param {Grid} g @param {readonly number[]} sources @param {number} [limit]
-*/
 function dijkstra(g, sources, limit = Infinity) {
 const d = new Float64Array(g.N).fill(Infinity);
 const heap = new Heap();
@@ -567,9 +502,7 @@ heap.push(j, nd);
 }
 return d;
 }
-/** @param {Grid} g @param {Rect} r */
 function rectCells(g, r) {
-/** @type {number[]} */
 const out = [];
 for (let y = Math.max(0, r.y0); y < Math.min(g.H, r.y1); y++) {
 for (let x = Math.max(0, r.x0); x < Math.min(g.W, r.x1); x++) {
@@ -579,29 +512,15 @@ if (g.block[i] === 0) out.push(i);
 }
 return out;
 }
-/**
-* @typedef {{ id: number, a: number, b: number, cells: number[], width: number, x: number, y: number, ax: number, ay: number, bx: number, by: number, choke: boolean, covers: Spot[] }} Portal
-*/
-/** @typedef {{ x: number, y: number, cell: number, fx: number, fy: number, score: number, entrance: number }} Spot */
-/** @typedef {{ portal: number, x: number, y: number, ix: number, iy: number, ox: number, oy: number, tDist: number, ctDist: number }} Entrance */
-/** @typedef {{ id: 'A' | 'B', rect: Rect, cx: number, cy: number, regions: Set<number>, entrances: Entrance[], holds: Spot[], plants: Spot[] }} SiteIntel */
-/** @typedef {{ site: 'A' | 'B', team: 'T' | 'CT', regions: number[], regionSet: Set<number>, portals: number[], points: Pt[], length: number }} Route */
 class MapIntel {
-/**
-* @param {MapInfo} map
-* @param {Grid} g
-*/
 constructor(map, g) {
 this.g = g;
 this.map = map;
 const N = g.N;
 const W = g.W;
 this.regionCount = map.regions.length;
-/** @type {string[]} */
-this.regionNames = map.regions.map((r) => r.name);
 this.region = new Int16Array(N).fill(-1);
 const order = map.regions.map((r, i) => ({ i, area: (r.x1 - r.x0) * (r.y1 - r.y0) })).sort((a, b) => a.area - b.area || a.i - b.i);
-/** @type {number[]} */
 const queue = [];
 for (let i = 0; i < N; i++) {
 if (g.block[i] === 1) continue;
@@ -648,29 +567,23 @@ if (k > P.exposeRay) open++;
 this.exposure[i] = open;
 this.cover[i] = cov;
 }
-/** @type {Portal[]} */
 this.portals = [];
 this.portalAt = new Int16Array(N).fill(-1);
 this.findPortals();
 this.chokes = this.portals.filter((p) => p.choke);
 for (const c of this.chokes) c.covers = this.chokeCovers(c);
-/** @type {Record<'A' | 'B', SiteIntel>} */
 this.sites = { A: this.siteIntel('A'), B: this.siteIntel('B') };
-/** @type {Record<'T' | 'CT', Record<'A' | 'B', Route[]>>} */
 this.routes = {
 T: { A: this.routeSet('T', 'A'), B: this.routeSet('T', 'B') },
 CT: { A: this.routeSet('CT', 'A'), B: this.routeSet('CT', 'B') },
 };
-/** @type {Record<'A' | 'B', Route | null>} */
 this.lurk = { A: this.lurkRoute('A'), B: this.lurkRoute('B') };
 }
-/** @param {'A' | 'B'} id */
 siteRect(id) {
 const s = this.map.sites.find((x) => x.id === id);
 if (s === undefined) throw new Error(`地圖沒有 ${id} 點`);
 return s;
 }
-/** @param {number} cx @param {number} cy */
 nearestOpen(cx, cy) {
 const g = this.g;
 for (let r = 0; r < 20; r++) {
@@ -685,14 +598,9 @@ if (!g.isBlock(x, y)) return y * g.W + x;
 }
 return -1;
 }
-/** @param {number} r */
-regionName(r) {
-return r >= 0 && r < this.regionNames.length ? this.regionNames[r] : '?';
-}
 findPortals() {
 const g = this.g;
 const W = g.W;
-/** @type {Map<number, number[]>} */
 const byPair = new Map();
 const mark = new Int32Array(g.N).fill(-1);
 for (let i = 0; i < g.N; i++) {
@@ -719,11 +627,10 @@ const comp = new Int32Array(g.N).fill(-1);
 for (const key of keys) {
 const a = Math.floor(key / 4096);
 const b = key % 4096;
-const cells = /** @type {number[]} */ (byPair.get(key));
+const cells = (byPair.get(key));
 const inSet = new Set(cells);
 for (const start of cells) {
 if (comp[start] === key) continue;
-/** @type {number[]} */
 const part = [start];
 comp[start] = key;
 for (let h = 0; h < part.length; h++) {
@@ -742,7 +649,6 @@ let say = 0;
 let sbx = 0;
 let sby = 0;
 let nb = 0;
-/** @type {Set<number>} */
 const bSide = new Set();
 for (const i of part) {
 const cx = i % W;
@@ -772,15 +678,10 @@ for (const j of bSide) if (this.portalAt[j] < 0) this.portalAt[j] = id;
 }
 }
 }
-/**
-* @param {Portal} c
-* @returns {Spot[]}
-*/
 chokeCovers(c) {
 const g = this.g;
 const cx = Math.floor(c.x / UNIT);
 const cy = Math.floor(c.y / UNIT);
-/** @type {(Spot | null)[]} */
 const best = [null, null];
 for (let y = cy - 16; y <= cy + 16; y++) {
 for (let x = cx - 16; x <= cx + 16; x++) {
@@ -796,15 +697,13 @@ const cur = best[side];
 if (cur === null || score > cur.score) best[side] = { x: p.x, y: p.y, cell: i, fx: c.x, fy: c.y, score, entrance: -1 };
 }
 }
-return /** @type {Spot[]} */ (best.filter((s) => s !== null));
+return (best.filter((s) => s !== null));
 }
-/** @param {'A' | 'B'} id @returns {SiteIntel} */
 siteIntel(id) {
 const g = this.g;
 const rect = this.siteRect(id);
 const center = this.nearestOpen(Math.floor((rect.x0 + rect.x1) / 2), Math.floor((rect.y0 + rect.y1) / 2));
 const cp = g.center(center);
-/** @type {Set<number>} */
 const regions = new Set([this.region[center]]);
 const total = new Int32Array(this.regionCount);
 const inside = new Int32Array(this.regionCount);
@@ -815,7 +714,6 @@ total[r]++;
 if (inRect(rect, i % g.W, Math.floor(i / g.W))) inside[r]++;
 }
 for (let r = 0; r < this.regionCount; r++) if (total[r] > 0 && inside[r] * 2 >= total[r]) regions.add(r);
-/** @type {Entrance[]} */
 const entrances = [];
 for (const p of this.portals) {
 const ia = regions.has(p.a);
@@ -831,29 +729,22 @@ const ctDist = oc < 0 ? Infinity : this.distSpawn.CT[oc] / 10;
 entrances.push({ portal: p.id, x: p.x, y: p.y, ix, iy, ox, oy, tDist, ctDist });
 }
 entrances.sort((a, b) => a.tDist - b.tDist);
-const site = { id, rect, cx: cp.x, cy: cp.y, regions, entrances, holds: /** @type {Spot[]} */ ([]), plants: /** @type {Spot[]} */ ([]) };
+const site = { id, rect, cx: cp.x, cy: cp.y, regions, entrances, holds: ([]), plants: ([]) };
 site.holds = this.holdSpots(site);
 site.plants = this.plantSpots(site);
 return site;
 }
-/**
-* @param {SiteIntel} site
-* @returns {Spot[]}
-*/
 holdSpots(site) {
 const g = this.g;
 const field = this.distSite[site.id];
-/** @type {number[]} */
 const cand = [];
 for (let i = 0; i < g.N; i++) if (field[i] <= P.holdSiteRadius * 10 && g.block[i] === 0) cand.push(i);
 const sees = cand.map((i) => {
 const p = g.center(i);
 return site.entrances.map((e) => dist(p.x, p.y, e.x, e.y) <= 30 * UNIT && g.los(p.x, p.y, e.x, e.y));
 });
-/** @type {Spot[]} */
 const out = [];
 site.entrances.forEach((e, ei) => {
-/** @type {Spot[]} */
 const ranked = [];
 cand.forEach((i, k) => {
 if (!sees[k][ei]) return;
@@ -873,18 +764,12 @@ out.push(first);
 const second = ranked.find((s) => s.score >= first.score - 15 && dist(s.x, s.y, first.x, first.y) >= 5 * UNIT);
 if (second !== undefined) out.push(second);
 });
-/** @type {Spot[]} */
 const uniq = [];
 for (const s of out) if (!uniq.some((u) => u.cell === s.cell)) uniq.push(s);
 return uniq;
 }
-/**
-* @param {SiteIntel} site
-* @returns {Spot[]}
-*/
 plantSpots(site) {
 const g = this.g;
-/** @type {Spot[]} */
 const ranked = [];
 const r = site.rect;
 for (let y = r.y0 + 1; y < r.y1 - 1; y++) {
@@ -899,7 +784,6 @@ ranked.push({ x: p.x, y: p.y, cell: i, fx: site.cx, fy: site.cy, score, entrance
 }
 }
 ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
-/** @type {Spot[]} */
 const out = [];
 for (const s of ranked) {
 if (out.length >= 3) break;
@@ -908,15 +792,10 @@ if (out.every((o) => dist(o.x, o.y, s.x, s.y) >= 4 * UNIT)) out.push(s);
 if (out.length === 0) out.push({ x: site.cx, y: site.cy, cell: g.cellOf(site.cx, site.cy), fx: site.cx, fy: site.cy, score: 0, entrance: -1 });
 return out;
 }
-/**
-* @param {'T' | 'CT'} team @param {'A' | 'B'} id
-* @returns {Route[]}
-*/
 routeSet(team, id) {
 const e = this.enumRoutes(team, id, P.routeSlack);
 if (e === null) return [];
 const { found, overlap } = e;
-/** @type {Route[]} */
 const out = [];
 for (const f of found) {
 if (out.length >= P.routeMax) break;
@@ -939,9 +818,6 @@ out.push({ site: id, team, regions: f.regions, regionSet: new Set(f.regions), po
 }
 return out;
 }
-/**
-* @param {'A' | 'B'} id @returns {Route | null}
-*/
 lurkRoute(id) {
 const e = P.lurkSlack > 0 ? this.enumRoutes('T', id, P.lurkSlack) : null;
 const base = this.routes.T[id];
@@ -957,10 +833,6 @@ best = f;
 }
 return best === null ? null : { site: id, team: 'T', regions: best.regions, regionSet: new Set(best.regions), portals: best.portals, points: best.points, length: Math.round(best.length) };
 }
-/**
-* @param {'T' | 'CT'} team @param {'A' | 'B'} id @param {number} slack
-* @returns {{ found: { portals: number[], regions: number[], points: Pt[], length: number }[], overlap: (a: number[], b: number[]) => number } | null}
-*/
 enumRoutes(team, id, slack) {
 const g = this.g;
 const zone = this.map.spawnZones[team];
@@ -971,23 +843,17 @@ const startRegion = this.region[startCell];
 const shortest = this.distSite[id][startCell] / 10;
 if (!Number.isFinite(shortest)) return null;
 const bound = shortest * slack * UNIT;
-/** @type {{ portals: number[], regions: number[], points: Pt[], length: number }[]} */
 const found = [];
-/** @type {Portal[][]} */
 const adj = Array.from({ length: this.regionCount }, () => []);
 for (const p of this.portals) {
 adj[p.a].push(p);
 adj[p.b].push(p);
 }
 const visited = new Uint8Array(this.regionCount);
-/** @type {number[]} */
 const portals = [];
-/** @type {number[]} */
 const regs = [startRegion];
-/** @type {Pt[]} */
 const pts = [];
 let budget = 20000;
-/** @param {number} r @param {number} x @param {number} y @param {number} len */
 const dfs = (r, x, y, len) => {
 if (--budget < 0) return;
 if (site.regions.has(r)) {
@@ -1013,7 +879,6 @@ visited[r] = 0;
 };
 dfs(startRegion, start.x, start.y, 0);
 found.sort((a, b) => a.length - b.length);
-/** @param {number[]} a @param {number[]} b */
 const overlap = (a, b) => {
 const sa = new Set(a.filter((r) => r !== startRegion && !site.regions.has(r)));
 const sb = new Set(b.filter((r) => r !== startRegion && !site.regions.has(r)));
@@ -1025,16 +890,12 @@ return uni === 0 ? 1 : inter / uni;
 return { found, overlap };
 }
 }
-/** @typedef {{ id: number, x: number, y: number, tick: number, conf: number, field: Float64Array | null, cells: Set<number> }} Hypothesis */
 class Belief {
-/** @param {Grid} g @param {MapIntel} intel @param {InitData} data */
 constructor(g, intel, data) {
 this.g = g;
 this.intel = intel;
 this.tps = data.rules.ticksPerSecond;
-/** @type {Map<number, Hypothesis>} */
 this.tracks = new Map();
-/** @type {{ x: number, y: number, cell: number, id: number, conf: number }[]} */
 this.points = [];
 this.risk = new Float32Array(g.N);
 this.regions = new Float32Array(intel.regionCount);
@@ -1047,7 +908,6 @@ this.risk.fill(0);
 this.regions.fill(0);
 this.next = -1;
 }
-/** @param {Observation} obs @param {Perception} perc */
 update(obs, perc) {
 const t = obs.tick;
 if (obs.enemiesAlive === 0) { this.reset(); return; }
@@ -1060,7 +920,7 @@ this.tracks.set(k.id, { id: k.id, x: k.x, y: k.y, tick: t, conf: k.conf, field: 
 for (const [id, k] of this.tracks) if (t - k.tick > 6 * this.tps) this.tracks.delete(id);
 if (this.tracks.size > obs.enemiesAlive) {
 const stale = [...this.tracks.values()].filter((k) => k.tick !== t).sort((a, b) => a.tick - b.tick || a.id - b.id);
-while (this.tracks.size > obs.enemiesAlive && stale.length > 0) this.tracks.delete(/** @type {Hypothesis} */ (stale.shift()).id);
+while (this.tracks.size > obs.enemiesAlive && stale.length > 0) this.tracks.delete( (stale.shift()).id);
 }
 if (t < this.next) return;
 this.next = t + Math.max(1, Math.round(this.tps / 2));
@@ -1077,7 +937,6 @@ const reach = age * P.enemySpeed * 10 + 7;
 const conf = k.conf * Math.max(0, 1 - age / 6);
 const mass = new Float64Array(this.regions.length);
 let sum = 0;
-/** @type {Map<number, { x: number, y: number, cell: number, score: number }>} */
 const representatives = new Map();
 for (let i = 0; i < g.N; i++) {
 const d = k.field[i];
@@ -1099,19 +958,9 @@ for (const p of representatives.values()) this.points.push({ x: p.x, y: p.y, cel
 this.points.sort((a, b) => b.conf - a.conf || a.id - b.id || a.cell - b.cell);
 }
 }
-/** @typedef {{ id: number, x: number, y: number, vx: number, vy: number, facing: number, weapon: string, tick: number, seenTick: number, conf: number, src: 'see' | 'radar' | 'tracer' }} Known */
-/** @typedef {{ x: number, y: number, tick: number, conf: number, src: 'tracer' | 'death' }} Anon */
-/** @typedef {{ ox: number, oy: number, dir: number, r0: number, r1: number, tick: number, conf: number, kind: string }} Sector */
-/** @typedef {{ x: number, y: number, conf: number, src: string, id: number }} Threat */
 const BANDS = { near: P.bandNear, mid: P.bandMid, far: P.bandFar };
 const ENEMY_SOUNDS = new Set(['footstep', 'shot', 'reload', 'plant', 'defuse']);
 class Perception {
-/**
-* @param {Grid} g
-* @param {MapIntel} intel
-* @param {InitData} data
-* @param {number} awareness 0～1
-*/
 constructor(g, intel, data, awareness) {
 this.g = g;
 this.intel = intel;
@@ -1120,33 +969,24 @@ this.awareness = awareness;
 this.decay = lerp(P.decay0, P.decay100, awareness);
 this.trust = lerp(P.trust0, P.trust100, awareness);
 this.clearTtl = Math.round(lerp(P.clearTtl0, P.clearTtl100, awareness) * data.rules.ticksPerSecond);
-/** @type {Map<number, Known>} */
 this.known = new Map();
-/** @type {Anon[]} */
 this.anon = [];
-/** @type {Sector[]} */
 this.sectors = [];
 this.seenTick = new Int32Array(g.N).fill(-1000000);
 this.danger = new Float32Array(g.N);
 this.stamp = new Int32Array(g.N);
 this.stampId = 0;
 this.portalThreat = new Float32Array(intel.portals.length);
-this.regionSeen = new Float32Array(intel.regionCount);
 this.dangerTick = -1000000;
 this.dangerDirty = true;
 this.lastTick = -1;
 this.updates = 0;
-/** @type {Map<number, boolean>} */
 this.mateAlive = new Map();
 this.liveStart = -1;
-/** @type {{ dir: number, tick: number } | null} */
 this.lastHurt = null;
-/** @type {Sector | null} */
 this.lastSound = null;
-/** @type {number[]} */
 this.newIds = [];
-this.myTeam = /** @type {Team} */ ('T');
-/** @type {Observation['effects']} */
+this.myTeam = ('T');
 this.effects = [];
 this.belief = new Belief(g, intel, data);
 }
@@ -1158,7 +998,6 @@ this.sectors.length = 0;
 this.seenTick.fill(-1000000);
 this.danger.fill(0);
 this.portalThreat.fill(0);
-this.regionSeen.fill(0);
 this.dangerTick = -1000000;
 this.dangerDirty = true;
 this.lastTick = -1;
@@ -1168,7 +1007,6 @@ this.lastHurt = null;
 this.lastSound = null;
 this.effects = [];
 }
-/** @param {Observation} obs */
 update(obs) {
 const me = obs.me;
 const t = obs.tick;
@@ -1240,13 +1078,12 @@ this.mateAlive.set(m.id, m.alive);
 }
 if (this.known.size > obs.enemiesAlive) {
 const list = [...this.known.values()].filter((k) => k.tick !== t).sort((a, b) => a.conf - b.conf || a.id - b.id);
-while (this.known.size > obs.enemiesAlive && list.length > 0) this.known.delete(/** @type {Known} */ (list.shift()).id);
+while (this.known.size > obs.enemiesAlive && list.length > 0) this.known.delete( (list.shift()).id);
 }
 if (me.alive && me.blindTicks === 0) this.scan(me.x, me.y, me.facing, me.scoped ? this.rules.scopedFovDeg : this.rules.fovDeg, me.scoped ? (this.rules.scopedViewRange ?? 60) : this.rules.viewRange, t);
 this.belief.update(obs, this);
 if (this.dangerDirty || t - this.dangerTick >= this.rules.ticksPerSecond) this.computeDanger(t);
 }
-/** @param {number} id */
 forget(id) {
 this.belief.tracks.delete(id);
 this.belief.next = -1;
@@ -1264,7 +1101,6 @@ this.dangerDirty = true;
 this.danger.fill(0);
 this.portalThreat.fill(0);
 }
-/** @param {number} x @param {number} y @param {number} conf @param {number} t */
 notePoint(x, y, conf, t) {
 let best = null;
 let bestD = 2500;
@@ -1295,9 +1131,6 @@ return;
 this.anon.push({ x, y, tick: t, conf, src: 'tracer' });
 this.dangerDirty = true;
 }
-/**
-* @param {number} ox @param {number} oy @param {number} dir @param {number} r0 @param {number} r1 @param {number} conf @param {number} t @param {string} kind
-*/
 addSector(ox, oy, dir, r0, r1, conf, t, kind) {
 for (const s of this.sectors) {
 if (Math.abs(adiff(s.dir, dir)) < 20 && s.r0 === r0 && dist(s.ox, s.oy, ox, oy) < 3 * UNIT) {
@@ -1310,13 +1143,11 @@ s.kind = kind;
 return s;
 }
 }
-/** @type {Sector} */
 const s = { ox, oy, dir, r0, r1, tick: t, conf, kind };
 this.sectors.push(s);
 this.dangerDirty = true;
 return s;
 }
-/** @param {number} x @param {number} y @param {number} facing @param {number} fov @param {number} range @param {number} t */
 scan(x, y, facing, fov, range, t) {
 const half = fov / 2;
 const seen = this.seenTick;
@@ -1334,14 +1165,12 @@ seen[i] = t;
 }
 }
 }
-/** @param {number} i @param {number} t */
 cleared(i, t) {
 if (i < 0 || this.seenTick[i] < t - this.clearTtl) return false;
 const p = this.g.center(i);
 for (const k of this.known.values()) if (k.conf >= P.unconfirmed && dist(k.x, k.y, p.x, p.y) < 3 * UNIT) return false;
 return true;
 }
-/** @param {number} i @param {number} t @param {number} [margin] */
 reachable(i, t, margin = 2) {
 if (i < 0) return false;
 const enemy = this.myTeam === 'T' ? 'CT' : 'T';
@@ -1349,7 +1178,6 @@ const d = this.intel.distSpawn[enemy][i] / 10;
 if (this.liveStart < 0) return d <= margin;
 return d <= ((t - this.liveStart) / this.rules.ticksPerSecond) * P.enemySpeed + margin;
 }
-/** @param {number} t */
 computeDanger(t) {
 const g = this.g;
 const danger = this.danger;
@@ -1358,7 +1186,6 @@ this.portalThreat.fill(0);
 this.dangerTick = t;
 this.dangerDirty = false;
 const range = P.dangerRange;
-/** @param {number} x @param {number} y @param {number} value */
 const fromPoint = (x, y, value) => {
 const id = ++this.stampId;
 const stamp = this.stamp;
@@ -1403,55 +1230,20 @@ if (a.src === 'tracer' && d < 10) v = Math.max(v, a.conf * (1 - d / 10));
 }
 this.portalThreat[p.id] = Math.max(v, this.belief.risk[g.cellOf(p.x, p.y)] ?? 0);
 }
-const n = this.intel.regionCount;
-const tot = new Int32Array(n);
-const seen = new Int32Array(n);
-const lim = t - this.clearTtl;
-for (let i = 0; i < g.N; i++) {
-const r = this.intel.region[i];
-if (r < 0) continue;
-tot[r]++;
-if (this.seenTick[i] >= lim) seen[r]++;
 }
-for (let r = 0; r < n; r++) this.regionSeen[r] = tot[r] === 0 ? 1 : seen[r] / tot[r];
-}
-/** @param {number} t */
-unconfirmedRegions(t) {
-/** @type {number[]} */
-const out = [];
-for (let r = 0; r < this.intel.regionCount; r++) {
-if (this.regionSeen[r] >= 0.5) continue;
-const reg = this.intel.map.regions[r];
-const c = this.intel.nearestOpen(Math.floor((reg.x0 + reg.x1) / 2), Math.floor((reg.y0 + reg.y1) / 2));
-if (this.reachable(c, t, 6)) out.push(r);
-}
-return out;
-}
-/** @param {number} x @param {number} y @param {number} [minConf] @returns {Threat[]} */
 threats(x, y, minConf = P.unconfirmed) {
-/** @type {Threat[]} */
 const out = [];
 for (const k of this.known.values()) if (k.conf >= minConf) out.push({ x: k.x, y: k.y, conf: k.conf, src: k.src, id: k.id });
 for (const a of this.anon) if (a.src === 'tracer' && a.conf >= minConf) out.push({ x: a.x, y: a.y, conf: a.conf, src: a.src, id: -1 });
 out.sort((a, b) => dist(x, y, a.x, a.y) - dist(x, y, b.x, b.y));
 return out;
 }
-/** @param {number} x @param {number} y */
 nearestThreat(x, y) {
 const t = this.threats(x, y)[0];
 return t === undefined ? null : { ...t, dir: angleTo(x, y, t.x, t.y) };
 }
 }
-/** @typedef {{ portal: number, hold: Pt, far: Pt, cross: Pt, phase: 'approach' | 'hold' | 'shoulder' | 'back', left: number, since: number, reach: number }} Peek */
-/** @typedef {{ cmds: Command[], look: Pt | null, moving: boolean, peeking: boolean, arrived: boolean, walk: boolean }} NavOut */
 class Navigator {
-/**
-* @param {Grid} g
-* @param {MapIntel} intel
-* @param {Perception} perc
-* @param {{ aggression: number, movement: number }} attrs 0～1（侵略：探頭等待與方式；走位：肩探與靜步）
-* @param {InitData} data
-*/
 constructor(g, intel, perc, attrs, data) {
 this.g = g;
 this.intel = intel;
@@ -1471,73 +1263,49 @@ const c = intel.cover[i];
 this.base[i] = ((c & 1) !== 0 ? P.wallHug : 0) - ((c & 2) !== 0 ? P.lowBonus : 0);
 }
 this.peekHold = Math.round(lerp(P.peekHold0, P.peekHold100, attrs.aggression));
-/** @type {Set<number>} */
 this.hazard = new Set();
 this.hazardSize = 0;
-/** @type {Pt | null} */
 this.goal = null;
-/** @type {Route | null} */
 this.route = null;
-/** @type {number[]} */
 this.path = [];
-/** @type {Pt[]} */
 this.wps = [];
 this.wpIdx = 0;
 this.planTick = -1000000;
 this.stuck = 0;
 this.moveStreak = 0;
-/** @type {Set<number> | null} */
 this.avoid = null;
 this.avoidUntil = -1;
-/** @type {{ x: number, y: number, until: number } | null} */
 this.side = null;
-/** @type {Pt | null} */
 this.prevPt = null;
-/** @type {Peek | null} */
 this.peek = null;
-/** @type {Map<number, number>} */
 this.peeked = new Map();
 this.replans = 0;
 this.detour = false;
 this.priority = false;
 this.jammed = 0;
-/** @type {{ x: number, y: number, t: number } | null} */
 this.lastPeek = null;
 }
 reset() {
-/** @type {Pt | null} */
 this.goal = null;
-/** @type {Route | null} */
 this.route = null;
-/** @type {number[]} */
 this.path = [];
-/** @type {Pt[]} */
 this.wps = [];
 this.wpIdx = 0;
 this.planTick = -1000000;
 this.stuck = 0;
 this.moveStreak = 0;
-/** @type {Set<number> | null} */
 this.avoid = null;
 this.avoidUntil = -1;
-/** @type {{ x: number, y: number, until: number } | null} */
 this.side = null;
-/** @type {Pt | null} */
 this.prevPt = null;
-/** @type {Peek | null} */
 this.peek = null;
-/** @type {Map<number, number>} */
 this.peeked = new Map();
 this.replans = 0;
 this.detour = false;
 this.priority = false;
 this.jammed = 0;
-/** @type {{ x: number, y: number, t: number } | null} */
 this.lastPeek = null;
 }
-/**
-* @param {number} x @param {number} y @param {Route | null} [route]
-*/
 setGoal(x, y, route = null) {
 if (this.goal !== null && dist(this.goal.x, this.goal.y, x, y) < 500 && this.route === route) return;
 this.goal = { x, y };
@@ -1552,9 +1320,6 @@ this.path = [];
 this.wps = [];
 this.peek = null;
 }
-/**
-* @param {number} start @param {number} goal @param {Set<number> | null} avoid
-*/
 astar(start, goal, avoid) {
 const g = this.g;
 if (start < 0 || goal < 0) return null;
@@ -1578,7 +1343,6 @@ const heap = this.heap;
 heap.clear();
 const gx = goal % W;
 const gy = (goal - gx) / W;
-/** @param {number} i */
 const h = (i) => {
 const dx = Math.abs((i % W) - gx);
 const dy = Math.abs(Math.floor(i / W) - gy);
@@ -1612,13 +1376,11 @@ heap.push(j, ng + h(j));
 }
 }
 if (vis[goal] !== id) return null;
-/** @type {number[]} */
 const out = [];
 for (let i = goal; i >= 0; i = par[i]) out.push(i);
 out.reverse();
 return out;
 }
-/** @param {Pt} a @param {Pt} b @param {Set<number> | null} avoid */
 lineOK(a, b, avoid) {
 const g = this.g;
 if (!g.walkLine(a.x, a.y, b.x, b.y)) return false;
@@ -1635,13 +1397,10 @@ for (const o of [0, 1, -1]) if (avoid.has(g.cellOf(x + px * o, y + py * o))) ret
 }
 return true;
 }
-/** @param {number[]} path @param {Set<number> | null} avoid @param {Pt} from 起點（自己的位置） @returns {Pt[]} */
 smooth(path, avoid, from) {
 const g = this.g;
-/** @type {Set<number> | null} */
 let bad = avoid;
 if (this.hazard.size > 0) bad = new Set([...(avoid ?? []), ...this.hazard]);
-/** @type {Pt[]} */
 const out = [];
 let i = 0;
 const maxJ = Math.round(P.maxSegment * 1.2);
@@ -1657,10 +1416,9 @@ i = j;
 }
 return out;
 }
-/** @param {Observation} obs @param {Set<number> | null} avoid */
 plan(obs, avoid) {
 const me = obs.me;
-const goal = /** @type {Pt} */ (this.goal);
+const goal = (this.goal);
 const g = this.g;
 let start = g.cellOf(me.x, me.y);
 if (!g.walkable(start)) start = this.intel.nearestOpen(Math.floor(me.x / UNIT), Math.floor(me.y / UNIT));
@@ -1683,16 +1441,10 @@ else wps.push({ x: goal.x, y: goal.y });
 this.wps = wps;
 this.wpIdx = 0;
 }
-/**
-* @param {Observation} obs
-* @param {{ allowPeek: boolean, speed: number, evading: boolean, priority?: boolean }} opts
-* @returns {NavOut}
-*/
 step(obs, opts) {
 const me = obs.me;
 const t = obs.tick;
 if (this.priority !== (opts.priority ?? false)) { this.priority = opts.priority ?? false; this.wps = []; this.path = []; }
-/** @type {NavOut} */
 const out = { cmds: [], look: null, moving: false, peeking: false, arrived: false, walk: false };
 if (this.goal === null) {
 this.moveStreak = 0;
@@ -1803,7 +1555,6 @@ if (th !== null && dist(th.x, th.y, me.x, me.y) < 20 * UNIT) out.walk = true;
 }
 return out;
 }
-/** @param {Observation} obs */
 sideStep(obs) {
 const me = obs.me;
 const wp = this.wps[this.wpIdx] ?? this.goal ?? me;
@@ -1817,7 +1568,6 @@ if (this.g.walkLine(me.x, me.y, x, y)) return { x, y, until: obs.tick + 15 };
 }
 return null;
 }
-/** @param {Observation} obs @param {{ x: number, y: number }[]} jam */
 scatter(obs, jam) {
 const me = obs.me;
 const cx = jam.reduce((a, m) => a + m.x, me.x) / (jam.length + 1);
@@ -1828,7 +1578,6 @@ const x = me.x + ((me.x - cx) / len) * 1500;
 const y = me.y + ((me.y - cy) / len) * 1500;
 return this.g.walkLine(me.x, me.y, x, y) ? { x, y, until: obs.tick + 15 } : this.sideStep(obs);
 }
-/** @param {Observation} obs */
 personAhead(obs) {
 const me = obs.me;
 const wp = this.wps[this.wpIdx];
@@ -1837,7 +1586,6 @@ const len = dist(me.x, me.y, wp.x, wp.y);
 if (len < 1) return false;
 const ux = (wp.x - me.x) / len;
 const uy = (wp.y - me.y) / len;
-/** @param {number} x @param {number} y */
 const ahead = (x, y) => {
 const along = (x - me.x) * ux + (y - me.y) * uy;
 const side = Math.abs((x - me.x) * uy - (y - me.y) * ux);
@@ -1845,10 +1593,8 @@ return along > 0 && along < 1100 && side < 700;
 };
 return obs.teammates.some((m) => m.alive && ahead(m.x, m.y)) || obs.enemies.some((e) => ahead(e.x, e.y));
 }
-/** @param {Observation} obs */
 peopleCells(obs) {
 const g = this.g;
-/** @type {Set<number>} */
 const s = new Set();
 const mine = g.cellOf(obs.me.x, obs.me.y);
 const people = [...obs.teammates.filter((m) => m.alive), ...obs.enemies];
@@ -1867,10 +1613,6 @@ if (dist(c.x, c.y, q.x, q.y) < 900 && dist(c.x, c.y, obs.me.x, obs.me.y) > 1000)
 }
 return s;
 }
-/**
-* @param {Observation} obs
-* @returns {Peek | null}
-*/
 findPeek(obs) {
 const g = this.g;
 const me = obs.me;
@@ -1914,26 +1656,20 @@ return { portal: pid, hold, far, cross: g.center(path[i]), phase: 'approach', le
 }
 return null;
 }
-/** @param {number} pid */
 isEntrance(pid) {
 return this.intel.sites.A.entrances.some((e) => e.portal === pid) || this.intel.sites.B.entrances.some((e) => e.portal === pid);
 }
-/**
-* @param {Observation} obs @param {readonly Pt[]} threats @param {(i: number) => boolean} [ok] 只考慮這些格（2.6 探點縮回：不往前）
-* @returns {Pt | null}
-*/
 findCover(obs, threats, ok) {
 if (threats.length === 0) return null;
 const g = this.g;
 const start = g.cellOf(obs.me.x, obs.me.y);
 if (start < 0) return null;
 const W = g.W;
-/** @type {number[]} */
 const queue = [start];
 const depth = new Map([[start, 0]]);
 for (let h = 0; h < queue.length; h++) {
 const i = queue[h];
-const d = /** @type {number} */ (depth.get(i));
+const d = (depth.get(i));
 const p = g.center(i);
 if (i !== start && (ok === undefined || ok(i)) && threats.every((th) => !g.los(th.x, th.y, p.x, p.y))) return p;
 if (d >= P.coverRadius) continue;
@@ -1952,21 +1688,16 @@ queue.push(j);
 }
 return null;
 }
-/**
-* @param {Observation} obs @param {(i: number) => boolean} bad @param {number} maxDepth
-* @returns {Pt | null}
-*/
 escape(obs, bad, maxDepth) {
 const g = this.g;
 const start = g.cellOf(obs.me.x, obs.me.y);
 if (start < 0) return null;
 const W = g.W;
-/** @type {number[]} */
 const queue = [start];
 const depth = new Map([[start, 0]]);
 for (let h = 0; h < queue.length; h++) {
 const i = queue[h];
-const d = /** @type {number} */ (depth.get(i));
+const d = (depth.get(i));
 if (!bad(i)) return g.center(i);
 if (d >= maxDepth) continue;
 const x = i % W;
@@ -1985,16 +1716,8 @@ queue.push(j);
 return null;
 }
 }
-/**
-* @typedef {{ engaged: boolean, aim: Pt | null, fire: boolean, move: 'stop' | Pt | null, crouch: boolean | null, holdNav: boolean, cmds: Command[], why: string }} Fight
-*/
 const HALF_ANGLE_K = 300 * 5730;
 class Combat {
-/**
-* @param {Grid} g @param {MapIntel} intel @param {Perception} perc @param {Navigator} nav
-* @param {Record<AttributeKey, number> & { offAim?: number }} attrs 0～1（offAim：拿狙擊槍以外的槍時的瞄準）
-* @param {InitData} data @param {Helpers} h
-*/
 constructor(g, intel, perc, nav, attrs, data, h) {
 this.g = g;
 this.intel = intel;
@@ -2004,7 +1727,6 @@ this.attrs = attrs;
 this.h = h;
 this.rules = data.rules;
 this.tps = data.rules.ticksPerSecond;
-/** @type {Map<string, WeaponInfo>} */
 this.weapons = new Map(data.weapons.map((w) => [w.id, w]));
 this.err0 = lerp(P.aimErr0, P.aimErr100, attrs.aim) * UNIT;
 this.conv = lerp(P.aimConv0, P.aimConv100, attrs.aim);
@@ -2016,7 +1738,6 @@ this.preAim = 1 - P.preAimErr * attrs.awareness;
 this.awareness = attrs.awareness;
 this.wait = Math.round(this.reactExtra);
 this.notice = lerp(P.notice0, P.notice100, attrs.awareness);
-/** @type {Map<number, number>} */
 this.noticed = new Map();
 this.soundReact = Math.round(lerp(3, 0, attrs.reaction));
 this.lead = data.rules.reactionTicks + P.leadExtra;
@@ -2032,11 +1753,9 @@ this.seen = 0;
 this.errX = 0;
 this.errY = 0;
 this.lostTick = -1000000;
-/** @type {Pt | null} */
 this.lostPos = null;
 this.blocked = 0;
 this.pistolUntil = -1;
-/** @type {Pt | null} */
 this.retreat = null;
 this.retreatUntil = -1;
 this.engagedDecisions = 0;
@@ -2044,16 +1763,11 @@ this.scanIdx = 0;
 this.scanLeft = 0;
 this.soundSeen = -1;
 this.soundWait = 0;
-/** @type {Pt[]} */
 this.trail = [];
 this.trailTick = -1000000;
-/** @type {Pt | null} */
 this.blindBack = null;
-/** @type {Map<string, { x: number, y: number, radius: number, cells: readonly number[], until: number }>} */
 this.fires = new Map();
-/** @type {Map<string, { x: number, y: number, radius: number, tick: number, until: number }>} */
 this.smokes = new Map();
-/** @type {{ x: number, y: number, shots: number, burst: number, groups: number, rest: number, until: number, push: boolean } | null} */
 this.blind = null;
 this.smokeRadius = data.grenades.find((e) => e.id === 'smoke')?.radius ?? 0;
 this.smokeGrowth = this.smokeRadius / Math.max(1, data.rules.grenadeRules.smokeBloomTicks);
@@ -2068,11 +1782,9 @@ this.seen = 0;
 this.errX = 0;
 this.errY = 0;
 this.lostTick = -1000000;
-/** @type {Pt | null} */
 this.lostPos = null;
 this.blocked = 0;
 this.pistolUntil = -1;
-/** @type {Pt | null} */
 this.retreat = null;
 this.retreatUntil = -1;
 this.engagedDecisions = 0;
@@ -2080,10 +1792,8 @@ this.scanIdx = 0;
 this.scanLeft = 0;
 this.soundSeen = -1;
 this.soundWait = 0;
-/** @type {Pt[]} */
 this.trail = [];
 this.trailTick = -1000000;
-/** @type {Pt | null} */
 this.blindBack = null;
 }
 clearTargets() {
@@ -2091,17 +1801,14 @@ this.lostPos = null;
 this.retreat = null;
 this.targetId = -1;
 }
-/** @param {string} id */
 weapon(id) {
 return this.weapons.get(id);
 }
-/** @param {Observation['me']} me @param {WeaponInfo} w @param {boolean} still @param {boolean} crouch */
 baseSpread(me, w, still, crouch) {
 const base = me.scoped && w.scopedSpread !== null ? w.scopedSpread : w.spread;
 const mul = crouch ? 0.7 : still ? 1 : me.walking ? 1.2 : w.movingMul;
 return base * mul;
 }
-/** @param {Observation} obs */
 track(obs) {
 const me = obs.me;
 if (obs.tick - this.trailTick < this.tps / 2) return;
@@ -2111,10 +1818,6 @@ this.trailTick = obs.tick;
 this.trail.push({ x: me.x, y: me.y });
 if (this.trail.length > 8) this.trail.shift();
 }
-/**
-* @param {Observation} obs
-* @returns {{ move: Pt | null, crouch: boolean, why: string } | null}
-*/
 evade(obs) {
 const me = obs.me;
 const g = this.g;
@@ -2123,7 +1826,6 @@ if (e.kind === 'fire' && e.cells !== undefined) this.fires.set(`${e.x},${e.y}`, 
 if (e.kind === 'smoke' && e.radius > 0 && e.ticksLeft > 0) this.smokes.set(`${e.x},${e.y},${obs.tick + e.ticksLeft}`, { x: e.x, y: e.y, radius: e.radius, tick: obs.tick, until: obs.tick + e.ticksLeft });
 }
 for (const [key, s] of this.smokes) if (obs.tick >= s.until) this.smokes.delete(key);
-/** @type {Set<number>} */
 const fire = new Set();
 for (const [key, f] of this.fires) {
 const quenched = [...this.smokes.values()].some((s) => dist(s.x, s.y, f.x, f.y) < f.radius + Math.max(s.radius, Math.min(this.smokeRadius, s.radius + Math.floor((obs.tick - s.tick) * this.smokeGrowth))));
@@ -2175,7 +1877,6 @@ return { move: back, crouch: false, why: '被閃・後退' };
 }
 return null;
 }
-/** @param {Observation} obs @param {Enemy} e */
 spot(obs, e) {
 const me = obs.me;
 const t = obs.tick;
@@ -2184,15 +1885,9 @@ const ok = (last !== undefined && t - last <= this.tps) || e.firing || Math.abs(
 if (ok) this.noticed.set(e.id, t);
 return ok;
 }
-/**
-* @param {Observation} obs
-* @param {{ holding: boolean, objective: boolean }} ctx holding＝守位中；objective＝下包／拆包中（不開槍不移動）
-* @returns {Fight}
-*/
 engage(obs, ctx) {
 const me = obs.me;
 const t = obs.tick;
-/** @type {Fight} */
 const out = { engaged: false, aim: null, fire: false, move: null, crouch: null, holdNav: false, cmds: [], why: '' };
 for (const s of me.shots) if (s.kill && this.targetId >= 0) this.perc.forget(this.targetId);
 const vis = obs.enemies.filter((e) => this.spot(obs, e));
@@ -2333,9 +2028,6 @@ out.fire = ok;
 out.why = ok ? '開火' : '等散佈';
 return this.finishMove(obs, out, e, ok, d, ctx);
 }
-/**
-* @param {Observation} obs @param {Pt[]} pts
-*/
 lineClear(obs, pts) {
 const me = obs.me;
 const drift = (Math.abs(me.vx) + Math.abs(me.vy)) * this.rules.reactionTicks;
@@ -2354,10 +2046,6 @@ if (along <= d ? s.d < this.friendClear + drift + along * P.friendSpread : s.d <
 }
 return true;
 }
-/**
-* @param {Observation} obs @param {Fight} out @param {Enemy} e
-* @param {boolean} firing @param {number} d @param {{ holding: boolean, objective: boolean }} ctx @param {boolean} [weak]
-*/
 finishMove(obs, out, e, firing, d, ctx, weak = false) {
 const me = obs.me;
 const t = obs.tick;
@@ -2383,7 +2071,6 @@ if (lowWall) out.crouch = !firing;
 else out.crouch = firing && d >= P.crouchFireMin * UNIT;
 return out;
 }
-/** @param {number} ax @param {number} ay @param {number} bx @param {number} by */
 lowCoverNear(ax, ay, bx, by) {
 const len = dist(ax, ay, bx, by);
 if (len < 1) return false;
@@ -2396,7 +2083,6 @@ if (i >= 0 && this.g.low[i] === 1 && this.g.filled(i, x, y)) return true;
 }
 return false;
 }
-/** @param {Observation} obs @param {Pt} aim */
 sidestep(obs, aim) {
 const me = obs.me;
 const a = angleTo(me.x, me.y, aim.x, aim.y);
@@ -2407,9 +2093,6 @@ if (this.g.walkable(this.g.cellOf(x, y)) && this.g.walkLine(me.x, me.y, x, y)) r
 }
 return null;
 }
-/**
-* @param {Observation} obs @param {Fight} out @param {{ holding: boolean, objective: boolean }} ctx
-*/
 noEnemy(obs, out, ctx) {
 const me = obs.me;
 const t = obs.tick;
@@ -2443,23 +2126,17 @@ out.why = '受傷・找掩體';
 }
 return out;
 }
-/** @param {{ radius: number, tick: number }} s @param {number} t */
 smokeR(s, t) {
 return Math.max(s.radius, Math.min(this.smokeRadius, s.radius + Math.floor((t - s.tick) * this.smokeGrowth)));
 }
-/** @param {number} ax @param {number} ay @param {number} bx @param {number} by @param {number} t */
 smoked(ax, ay, bx, by, t) {
 for (const s of this.smokes.values()) if (segDist(s.x, s.y, ax, ay, bx, by).d < this.smokeR(s, t)) return true;
 return false;
 }
-/**
-* @param {Observation} obs @returns {Pt | null}
-*/
 blindAim(obs) {
 const me = obs.me;
 const t = obs.tick;
 const g = this.g;
-/** @type {Pt | null} */
 let best = null;
 let bestT = -1;
 for (const k of this.perc.known.values()) {
@@ -2488,9 +2165,6 @@ if (g.los(me.x, me.y, p.x, p.y) && this.h.random() < this.notice) return p;
 }
 return null;
 }
-/**
-* @param {Observation} obs @param {Fight} out @param {{ holding: boolean, objective: boolean }} ctx
-*/
 blindFire(obs, out, ctx) {
 const me = obs.me;
 const t = obs.tick;
@@ -2504,7 +2178,7 @@ b.rest = t + Math.round(0.4 * this.tps);
 }
 }
 if (b !== null && t > b.until) this.blind = null;
-const ok = P.blindFire && (me.team === 'CT' || P.blindT) && !ctx.objective && obs.enemies.length === 0 && me.blindTicks === 0 && me.hp >= this.retreatHp &&
+const ok = P.blindFire && me.team === 'CT' && !ctx.objective && obs.enemies.length === 0 && me.blindTicks === 0 && me.hp >= this.retreatHp &&
 me.weapon === me.loadout.primary && me.weapon !== 'awp' && me.reloadTicksLeft === 0;
 if (!ok) return false;
 if (b !== null && b.groups >= P.blindGroups) {
@@ -2521,7 +2195,6 @@ const w = this.weapon(me.weapon);
 if (aim === null || w === undefined || dist(me.x, me.y, aim.x, aim.y) > w.range * UNIT) return false;
 const smokes = [...this.smokes.values()];
 const len = Math.max(1, dist(me.x, me.y, aim.x, aim.y));
-/** @param {{ x: number, y: number }} m */
 const onLine = (m) => {
 const q = segDist(m.x, m.y, me.x, me.y, aim.x, aim.y);
 return q.d < P.blindMateGap * UNIT && q.t * len > 1.5 * UNIT;
@@ -2549,13 +2222,8 @@ out.fire = turned && t >= s.rest && this.lineClear(obs, [aim]);
 out.why = out.fire ? '盲射' : '盲射・瞄';
 return true;
 }
-/**
-* @param {Observation} obs @param {boolean} holding 站定守位
-* @returns {Command[]}
-*/
 upkeep(obs, holding) {
 const me = obs.me;
-/** @type {Command[]} */
 const out = [];
 const primary = me.loadout.primary;
 if (primary !== null && me.weapon !== primary && obs.tick > this.pistolUntil) {
@@ -2572,7 +2240,6 @@ if (me.ammoMag < w.magazine * P.reloadBelow && me.ammoReserve > 0 && me.reloadTi
 if (w.scopedSpread !== null && me.reloadTicksLeft === 0 && holding !== me.scoped) out.push({ type: 'scope', on: holding });
 return out;
 }
-/** @param {Sector} snd */
 heard(snd) {
 if (this.soundSeen !== snd.tick) {
 this.soundSeen = snd.tick;
@@ -2582,9 +2249,6 @@ if (this.soundWait <= 0) return true;
 this.soundWait--;
 return false;
 }
-/**
-* @param {Observation} obs @param {boolean} holding @returns {Pt | null}
-*/
 alert(obs, holding) {
 const me = obs.me;
 const t = obs.tick;
@@ -2594,11 +2258,6 @@ const snd = this.perc.lastSound;
 if (holding || snd === null || t - snd.tick >= this.tps || snd.r0 > 0 || Math.abs(adiff(snd.dir, me.facing)) <= this.rules.fovDeg / 2 || !this.heard(snd)) return null;
 return { x: me.x + cosd(snd.dir) * 6 * UNIT, y: me.y + sind(snd.dir) * 6 * UNIT };
 }
-/**
-* @param {Observation} obs
-* @param {{ hold: Spot | null, holding: boolean, navLook: Pt | null, ahead: Pt | null }} ctx
-* @returns {Pt | null}
-*/
 look(obs, ctx) {
 const me = obs.me;
 const t = obs.tick;
@@ -2633,7 +2292,6 @@ if (--this.scanLeft <= 0) {
 this.scanLeft = this.scanEvery;
 this.scanIdx++;
 }
-/** @type {Pt[]} */
 const views = [{ x: hold.fx, y: hold.fy }];
 for (const p of this.intel.portals) {
 if (views.length >= 3) break;
@@ -2665,16 +2323,13 @@ if (pick !== null) return { x: pick.x, y: pick.y };
 return ctx.ahead;
 }
 }
-/** @typedef {'full' | 'force' | 'half' | 'eco'} BuyCall */
-/** @param {string} text @returns {BuyCall | null} */
 function parseBuy(text) {
 const m = /^B:(full|force|half|eco)$/.exec(text);
-return m === null ? null : /** @type {BuyCall} */ (m[1]);
+return m === null ? null : (m[1]);
 }
-/** @param {string} text @returns {{ from: number, to: number, w: WeaponId } | null} */
 function parseGift(text) {
 const m = /^B:gift (\d+) (\d+) (awp|ak|m4)$/.exec(text);
-return m === null ? null : { from: Number(m[1]), to: Number(m[2]), w: /** @type {WeaponId} */ (m[3]) };
+return m === null ? null : { from: Number(m[1]), to: Number(m[2]), w: (m[3]) };
 }
 const UTIL = {
 T: [
@@ -2695,36 +2350,26 @@ CT: [
 ],
 };
 class Economy {
-/**
-* @param {InitData} data @param {Helpers} h
-* @param {{ economy: number, discipline: number }} opts
-*/
 constructor(data, h, opts) {
 this.data = data;
 this.h = h;
 this.opts = opts;
-/** @type {Map<string, number>} */
 this.price = new Map(data.weapons.map((w) => [w.id, w.price]));
 for (const n of data.grenades) this.price.set(n.id, n.price);
 this.lossLevel = 0;
 this.enemyLevel = 0;
-/** @type {boolean | null} */
 this.lastWon = null;
 this.roundInHalf = 0;
 this.half = -1;
 this.prevMine = 0;
 this.prevTheirs = 0;
 this.lastRound = -1;
-/** @type {BuyCall | null} */
 this.call = null;
-/** @type {BuyCall | null} */
 this.prevCall = null;
 }
-/** @param {string} id */
 cost(id) {
 return this.price.get(id) ?? Infinity;
 }
-/** @param {Observation} obs */
 roundStart(obs) {
 const r = obs.round;
 if (r.number === this.lastRound) return;
@@ -2756,43 +2401,32 @@ this.enemyLevel = Math.max(0, this.enemyLevel - 1);
 this.prevMine = mine;
 this.prevTheirs = theirs;
 }
-/** @param {Team} team */
 fullCost(team) {
 const r = this.data.rules;
 return this.cost(team === 'T' ? 'ak' : 'm4') + r.armorPrice + (team === 'CT' ? r.kitPrice : 0) + this.cost('flash');
 }
-/** @param {number} money @param {WeaponId | null} primary @param {Team} team */
 shortOf(money, primary, team) {
 const need = this.hasGood(primary) ? this.data.rules.armorPrice + this.cost('flash') : this.fullCost(team);
 return need - money;
 }
-/**
-* @param {number} money @param {WeaponId | null} primary @param {Team} team @param {number} n
-*/
 teamShort(money, primary, team, n) {
 if (team === 'T') return this.shortOf(money, primary, team);
 const r = this.data.rules;
 const extra = (Math.min(2, n) * r.kitPrice + Math.ceil(n / 2) * this.cost('flash')) / n;
 return (this.hasGood(primary) ? 0 : this.cost('m4')) + r.armorPrice + extra - money;
 }
-/** @param {WeaponId | string | null} primary */
 hasGood(primary) {
 return primary !== null && this.cost(primary) >= this.cost('smg') + 1000;
 }
-/** @param {Observation} obs */
 lastChance(obs) {
 const r = obs.round;
 const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
 const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
 return theirs >= this.data.rules.winRounds - 1 || lastOfHalf;
 }
-/** @param {Observation} obs */
 pistolRound(obs) {
 return obs.me.money <= this.data.rules.economy.startMoney + 100 && obs.me.loadout.primary === null && this.roundInHalf <= 1;
 }
-/**
-* @param {Observation} obs @returns {BuyCall}
-*/
 teamCall(obs) {
 const me = obs.me;
 const team = me.team;
@@ -2812,23 +2446,18 @@ const avg = people.reduce((s, p) => s + p.money, 0) / n;
 const half = this.cost('smg') + this.data.rules.armorPrice;
 if (critical && avg >= half * 0.8) return 'force';
 if (this.roundInHalf === 2 && this.lastWon === true && avg >= half) return 'half';
-if (this.roundInHalf === 2 && this.lastWon === false) return /** @type {BuyCall} */ (P.afterPistol);
+if (this.roundInHalf === 2 && this.lastWon === false) return (P.afterPistol);
 const forceAt = this.opts.economy === 1 ? half + 600 : this.opts.economy === 2 ? half * 0.8 : half;
 const save = P.ecoSave && avg < P.ecoSaveMax && canNext >= n - 1 && this.prevCall !== 'eco';
 if (avg >= forceAt && !save) return 'force';
 if (this.prevCall === 'eco' && avg >= P.ecoFloor) return 'force';
 return 'eco';
 }
-/**
-* @param {Observation} obs @param {BuyCall} call @param {number} role @param {boolean} awper
-* @param {WeaponId | null} [gift] @param {boolean} [receive] @returns {BuyItem[]}
-*/
 items(obs, call, role, awper, gift = null, receive = false) {
 const me = obs.me;
 const rules = this.data.rules;
 const team = me.team;
 let money = me.money;
-/** @type {BuyItem[]} */
 const pre = [];
 if (gift !== null && money >= this.cost(gift)) {
 pre.push(gift);
@@ -2836,9 +2465,7 @@ money -= this.cost(gift);
 }
 const primary = me.loadout.primary;
 const rifle = team === 'T' ? 'ak' : 'm4';
-/** @type {BuyItem[]} */
 const items = [];
-/** @param {BuyItem} id @param {number} price */
 const take = (id, price) => {
 if (price > money) return false;
 items.push(id);
@@ -2848,15 +2475,15 @@ return true;
 const armorLeft = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') ? rules.armorPrice : 0;
 const armor = () => armorLeft() > 0 && take('armor', rules.armorPrice);
 const kit = () => team === 'CT' && !me.loadout.kit && !items.includes('kit') && take('kit', rules.kitPrice);
-const util = (/** @type {number} */ max) => {
+const util = ( max) => {
 const owned = [...me.loadout.grenades];
 let n = 0;
 for (const g of UTIL[team][role] ?? UTIL[team][0]) {
 if (n >= max || owned.length >= rules.grenadeSlots) break;
 const def = this.data.grenades.find((x) => x.id === g);
 if (def === undefined || def.maxCarry < 1 || owned.some((x) => x === g)) continue;
-if (take(/** @type {BuyItem} */ (g), def.price)) {
-owned.push(/** @type {GrenadeId} */ (g));
+if (take( (g), def.price)) {
+owned.push( (g));
 n++;
 }
 }
@@ -2894,20 +2521,14 @@ const w = this.data.weapons.find((x) => x.id === (primary ?? me.weapon));
 if (w !== undefined && w.reserve > 0 && me.ammoReserve < w.reserve / 2 && me.weapon === w.id && mode !== 'eco') take('ammo', rules.ammoPrice);
 return [...pre, ...items];
 }
-/**
-* @param {{ id: number, money: number, good: boolean, awp: boolean, awper: boolean }[]} people @param {Team} team @param {BuyCall} call
-* @returns {{ from: number, to: number, w: WeaponId }[]}
-*/
 giftPlan(people, team, call) {
 if (!P.gifts || (call !== 'full' && call !== 'force')) return [];
 const rules = this.data.rules;
 const rifle = team === 'T' ? 'ak' : 'm4';
 const own = this.fullCost(team) + 200;
 const donors = people.filter((p) => !p.good).sort((a, b) => b.money - a.money || a.id - b.id);
-/** @type {{ from: number, to: number, w: WeaponId }[]} */
 const out = [];
 const used = new Set();
-/** @param {number} to @param {WeaponId} w */
 const give = (to, w) => {
 const d = donors.find((p) => p.id !== to && !used.has(p.id) && p.money >= own + this.cost(w));
 if (d === undefined) return;
@@ -2921,32 +2542,22 @@ for (const p of needy) give(p.id, rifle);
 return out;
 }
 }
-/** @typedef {{ kind: GrenadeId, x: number, y: number, why: string }} ThrowWish */
-/** @typedef {{ cmds: Command[], look: Pt | null, stop: boolean, thrown: ThrowWish | null }} UtilOut */
 class Utility {
-/**
-* @param {Grid} g @param {InitData} data
-*/
 constructor(g, data) {
 this.g = g;
 this.rules = data.rules;
 this.tps = data.rules.ticksPerSecond;
 this.range = data.rules.grenadeRules.maxThrowRange * UNIT;
 this.speed = data.rules.grenadeRules.flySpeed;
-/** @type {Map<string, number>} */
 this.fuse = new Map(data.grenades.map((n) => [n.id, n.fuseTicks]));
 this.flashR = (data.grenades.find((n) => n.id === 'flash')?.radius ?? 15 * UNIT);
 this.lastThrow = -1000000;
 this.lastEnemy = -1000000;
 this.aimSince = -1;
 this.lastLook = -1;
-/** @type {Pt | null} */
 this.aimAt = null;
-/** @type {{ x: number, y: number, tx: number, ty: number, from: number, until: number } | null} */
 this.away = null;
-/** @type {Set<string>} */
 this.used = new Set();
-this.throws = 0;
 }
 reset() {
 this.lastThrow = -1000000;
@@ -2956,17 +2567,12 @@ this.aimAt = null;
 this.away = null;
 this.used = new Set();
 }
-/** @param {Observation['me']} me @param {GrenadeId} kind */
 has(me, kind) {
 return me.loadout.grenades.includes(kind) && !this.used.has(kind);
 }
-/** @param {Observation['me']} me @param {GrenadeId[]} kinds */
 pick(me, kinds) {
 return kinds.find((k) => this.has(me, k)) ?? null;
 }
-/**
-* @param {number} ax @param {number} ay @param {number} bx @param {number} by
-*/
 solve(ax, ay, bx, by) {
 const d = dist(ax, ay, bx, by);
 if (d < 2 * UNIT || d > this.range) return null;
@@ -2976,7 +2582,6 @@ const land = this.fly(ax, ay, deg, power);
 if (land === null || dist(land.x, land.y, bx, by) > 1.2 * UNIT) return null;
 return { deg, power, x: land.x, y: land.y };
 }
-/** @param {number} ax @param {number} ay @param {number} deg @param {number} power */
 fly(ax, ay, deg, power) {
 const dx = Math.round(cosd(deg) * 10000);
 const dy = Math.round(sind(deg) * 10000);
@@ -2995,7 +2600,6 @@ left -= step;
 }
 return { x, y };
 }
-/** @param {number} x @param {number} y */
 hits(x, y) {
 const g = this.g;
 const r = 120;
@@ -3014,9 +2618,6 @@ if ((nx - x) * (nx - x) + (ny - y) * (ny - y) <= r * r) return true;
 }
 return false;
 }
-/**
-* @param {Observation} obs @param {number} x @param {number} y @param {Set<number>} busy 最近在交戰的隊友
-*/
 flashSafe(obs, x, y, busy) {
 if (obs.radar.some((r) => dist(r.x, r.y, x, y) < this.flashR)) return false;
 for (const m of obs.teammates) {
@@ -3028,13 +2629,9 @@ if (busy.has(m.id) && d < this.blindRange) return false;
 }
 return true;
 }
-/**
-* @param {Observation} obs @param {ThrowWish | null} wish @param {Set<number>} busy 最近在交戰的隊友 @returns {UtilOut}
-*/
 step(obs, wish, busy) {
 const me = obs.me;
 const t = obs.tick;
-/** @type {UtilOut} */
 const out = { cmds: [], look: null, stop: false, thrown: null };
 if (obs.enemies.length > 0) this.lastEnemy = t;
 if (this.away !== null) {
@@ -3062,7 +2659,6 @@ if ((wish.kind === 'flash' || wish.kind === 'smoke') && t - this.lastEnemy <= 2 
 out.cmds.push({ type: 'throw', grenade: wish.kind, deg: s.deg, power: s.power });
 this.lastThrow = t;
 this.used.add(wish.kind);
-this.throws++;
 out.thrown = { ...wish, x: Math.round(s.x), y: Math.round(s.y) };
 if (wish.kind === 'flash') {
 const pop = t + this.rules.reactionTicks + (this.fuse.get('flash') ?? 45);
@@ -3087,45 +2683,36 @@ const LURK = 5;
 const ROLE_NAME = ['無', '突破', '支援', '錨點', '狙擊', '游擊'];
 const AUTO = [ENTRY, SUPPORT, ANCHOR, LURK, AWP];
 const FILL = [ENTRY, SUPPORT, ANCHOR, LURK];
-/** @param {number} slot @param {number} awpSlot */
 function autoRole(slot, awpSlot) {
 if (slot === awpSlot) return AWP;
 const r = AUTO[slot] ?? ENTRY;
 return r === AWP ? LURK : r;
 }
-/** @param {string} text */
 function parseRole(text) {
 const m = /^R:([1-5])$/.exec(text);
 return m === null ? 0 : Number(m[1]);
 }
 class Roles {
-/** @param {number[]} ids 全隊 id（排序＝隊內序號） @param {number} me @param {number} mine 自己喊的角色 @param {number} awpSlot */
 constructor(ids, me, mine, awpSlot) {
 this.ids = ids;
-/** @type {Map<number, number>} */
 this.said = new Map([[me, mine]]);
 this.awpSlot = awpSlot;
-/** @type {Map<number, number>} */
 this.eff = new Map();
-/** @type {Map<number, number>} */
 this.holder = new Map();
 this.key = '';
 this.solve();
 }
-/** @param {number} id @param {number} r */
 hear(id, r) {
 if (r === 0 || this.said.get(id) === r || !this.ids.includes(id)) return;
 this.said.set(id, r);
 this.solve();
 }
-/** @param {number} id */
 announced(id) {
 return this.said.get(id) ?? autoRole(this.ids.indexOf(id), 4);
 }
 solve() {
 this.eff = new Map();
 this.holder = new Map();
-/** @type {number[]} */
 const extra = [];
 for (const id of this.ids) {
 const r = this.announced(id);
@@ -3147,11 +2734,9 @@ if (r !== 0) this.holder.set(r, id);
 }
 this.key = this.ids.map((id) => this.eff.get(id) ?? 0).join('');
 }
-/** @param {number} id */
 of(id) {
 return this.eff.get(id) ?? 0;
 }
-/** @param {number} r */
 who(r) {
 return this.holder.get(r) ?? -1;
 }
@@ -3161,20 +2746,16 @@ return -1;
 }
 }
 class Cooperation {
-/** @param {Grid} g @param {MapIntel} intel @param {Perception} perc @param {InitData} data */
 constructor(g, intel, perc, data) {
 this.g = g;
 this.intel = intel;
 this.perc = perc;
 this.tps = data.rules.ticksPerSecond;
-/** @type {Map<number, boolean>} */
 this.alive = new Map();
-/** @type {Map<number, { x: number, y: number, facing: number, tick: number, dead: boolean }>} */
 this.cues = new Map();
 this.acted = false;
 }
 reset() { this.alive.clear(); this.cues.clear(); }
-/** @param {Observation} obs */
 observe(obs) {
 for (const m of obs.teammates) {
 if (m.alive && m.firing) this.cues.set(m.id, { x: m.x, y: m.y, facing: m.facing, tick: obs.tick, dead: false });
@@ -3183,7 +2764,6 @@ this.alive.set(m.id, m.alive);
 }
 for (const [id, c] of this.cues) if (obs.tick - c.tick > (c.dead ? 2 : 0.9) * this.tps) this.cues.delete(id);
 }
-/** @param {Observation} obs @param {TacOut} out */
 apply(obs, out) {
 const me = obs.me;
 this.acted = false;
@@ -3199,7 +2779,6 @@ const target = this.perc.threats(cue.x, cue.y, 45).find((p) => dist(p.x, p.y, cu
 const trace = obs.tracers.find((p) => p.friendly && dist(p.x0, p.y0, cue.x, cue.y) < 1500);
 const look = target ?? (trace === undefined ? null : { x: trace.x1, y: trace.y1 });
 if (look === null || !this.g.los(me.x, me.y, cue.x, cue.y)) continue;
-/** @type {Pt | null} */
 let best = null;
 let score = -Infinity;
 const center = this.g.cellOf(cue.x, cue.y);
@@ -3252,26 +2831,19 @@ if (actor.id === me.id) { if (chosen !== null) out.look = { x: chosen.ox, y: cho
 if (out.look !== null) out.role += '・互補守角';
 }
 }
-/** @typedef {'A' | 'B'} LearnedSite */
-/** @typedef {{ team: 'T' | 'CT', site: LearnedSite | null, fast: boolean | null, plan: string, won: boolean, rotated: boolean | null }} RoundSample */
 class Adaptation {
 constructor() {
-/** @type {RoundSample[]} */
 this.history = [];
-/** @type {RoundSample | null} */
 this.sample = null;
 this.round = -1;
 this.start = -1;
-/** @type {Map<number, LearnedSite>} */
 this.locations = new Map();
-/** @type {Map<number, LearnedSite>} */
 this.baitBaseline = new Map();
 this.baitAt = -1;
 this.fakeReason = '';
 this.mine = 0;
 this.theirs = 0;
 }
-/** @param {Observation} obs @param {boolean | null} won */
 begin(obs, won) {
 if (this.round === obs.round.number) return;
 const mine = obs.me.team === 'T' ? obs.round.scoreT : obs.round.scoreCT;
@@ -3290,7 +2862,6 @@ this.baitBaseline.clear();
 this.baitAt = -1;
 this.fakeReason = '';
 }
-/** @param {Observation} obs @param {Perception} perc @param {(cell: number) => LearnedSite | null} siteNear */
 observe(obs, perc, siteNear) {
 if (this.sample === null || obs.round.phase === 'freeze') return;
 if (this.start < 0) this.start = obs.tick;
@@ -3308,13 +2879,11 @@ this.sample.site = site;
 if (this.sample.fast === null) this.sample.fast = obs.tick - this.start < 18 * perc.rules.ticksPerSecond;
 }
 }
-/** @param {'T' | 'CT'} team */
 advice(team) {
 const samples = this.history.filter((s) => s.team === team);
-const out = { A: 0, B: 0, fast: 0.5, rotation: 0.5, evidence: samples.filter((s) => team === 'CT' ? s.site !== null : s.plan !== '').length, plans: /** @type {Record<string, number>} */ ({}) };
+const out = { A: 0, B: 0, fast: 0.5, rotation: 0.5, evidence: samples.filter((s) => team === 'CT' ? s.site !== null : s.plan !== '').length, plans: ({}) };
 if (samples.length < 3) return out;
 let sites = 0, tempo = 0, rotations = 0, fast = 0, rotated = 0;
-/** @type {Record<string, { n: number, wins: number }>} */
 const plans = {};
 for (let i = 0; i < samples.length; i++) {
 const s = samples[i];
@@ -3333,7 +2902,6 @@ out.rotation = (rotated + 1) / (rotations + 2);
 for (const [kind, p] of Object.entries(plans)) out.plans[kind] = clamp(1 + ((p.wins + 1.5) / (p.n + 3) - 0.5), 0.75, 1.25);
 return out;
 }
-/** @param {Observation} obs @param {Perception} perc @param {TPlan} plan @param {boolean} probed */
 fake(obs, perc, plan, probed) {
 if (this.baitAt < 0) { this.baitAt = obs.tick; this.baitBaseline = new Map(this.locations); return null; }
 const tps = perc.rules.ticksPerSecond;
@@ -3365,43 +2933,31 @@ return null;
 }
 const MAIN_PRI = [3, 0, 1, 2, 5, 4];
 const SMOKE_PREF = [SUPPORT, ANCHOR, LURK, 0, ENTRY, AWP];
-/** @typedef {'A' | 'B'} SiteId */
-/** @typedef {{ kind: 'go' | 'default' | 'rush' | 'split' | 'fake', site: SiteId, r1: number, r2: number, exec: SiteId | null }} TPlan */
-/** @typedef {{ kind: 'hold', a: number, m: number, b: number, rot: SiteId | null, go: boolean }} CTPlan */
-/** @typedef {TPlan | CTPlan} Plan */
-/** @typedef {{ kind: 'contact', region: string, n: number } | { kind: 'dead', region: string } | { kind: 'planted', site: SiteId } | { kind: 'flash', x: number, y: number, pop: number } | { kind: 'claim', x: number, y: number } | { kind: 'fl', has: boolean } | { kind: 'smoke', x: number, y: number } | { kind: 'burn', x: number, y: number, until: number } | { kind: 'awp', x: number, y: number } | { kind: 'kit' | 'smoker' }} TeamEvent */
-/**
-* @typedef {{ goal: Pt | null, route: Route | null, hold: Spot | null, objective: boolean, allowPeek: boolean, cmds: Command[], role: string, look: Pt | null, urgent: boolean, hard: boolean, stop: boolean, walk: boolean | null, noise: boolean, escape: boolean, task?: 'hold' | 'execute' | 'retrieve' | 'plant' | 'defuse' | 'retake' | 'cover' | 'save', commit?: boolean }} TacOut
-*/
-const SITES = /** @type {const} */ (['A', 'B']);
-/** @param {SiteId} s @returns {SiteId} */
+const SITES = (['A', 'B']);
 const other = (s) => (s === 'A' ? 'B' : 'A');
-/** @param {number} round @param {number} salt */
 const rollOf = (round, salt) => {
 const a = Math.imul(round + 1, 2654435761) ^ Math.imul(salt + 1, 40503);
 return (a ^ (a >>> 15)) >>> 0;
 };
-/** @param {string} text @returns {Plan | null} */
 function parsePlan(text) {
 let m = /^P:go ([AB]) (\d+)$/.exec(text);
 if (m !== null) {
-const site = /** @type {SiteId} */ (m[1]);
+const site = (m[1]);
 return { kind: 'go', site, r1: Number(m[2]), r2: Number(m[2]), exec: site };
 }
 m = /^P:(rush|split)([AB]) (\d+)(?: (\d+))?( go)?$/.exec(text);
 if (m !== null) {
-const site = /** @type {SiteId} */ (m[2]);
-const kind = /** @type {'rush' | 'split'} */ (m[1]);
+const site = (m[2]);
+const kind = (m[1]);
 const r1 = Number(m[3]);
 return { kind, site, r1, r2: m[4] !== undefined ? Number(m[4]) : r1, exec: kind === 'rush' || m[5] !== undefined ? site : null };
 }
 m = /^P:(default|fake) ([AB]) (\d+) (\d+)(?: >([AB]))?$/.exec(text);
-if (m !== null) return { kind: /** @type {'default' | 'fake'} */ (m[1]), site: /** @type {SiteId} */ (m[2]), r1: Number(m[3]), r2: Number(m[4]), exec: m[5] !== undefined ? /** @type {SiteId} */ (m[5]) : null };
+if (m !== null) return { kind: (m[1]), site: (m[2]), r1: Number(m[3]), r2: Number(m[4]), exec: m[5] !== undefined ? (m[5]) : null };
 m = /^P:hold A=(\d) (?:M=(\d) )?B=(\d)(?: rot=([AB]))?( go)?$/.exec(text);
-if (m !== null) return { kind: 'hold', a: Number(m[1]), m: m[2] !== undefined ? Number(m[2]) : 0, b: Number(m[3]), rot: m[4] !== undefined ? /** @type {SiteId} */ (m[4]) : null, go: m[5] !== undefined };
+if (m !== null) return { kind: 'hold', a: Number(m[1]), m: m[2] !== undefined ? Number(m[2]) : 0, b: Number(m[3]), rot: m[4] !== undefined ? (m[4]) : null, go: m[5] !== undefined };
 return null;
 }
-/** @param {Plan} p */
 function planText(p) {
 switch (p.kind) {
 case 'go':
@@ -3417,18 +2973,15 @@ default:
 return `P:hold A=${p.a}${p.m > 0 ? ` M=${p.m}` : ''} B=${p.b}${p.rot !== null ? ` rot=${p.rot}` : ''}${p.go ? ' go' : ''}`;
 }
 }
-/** @param {string} text @returns {TeamEvent | null} */
 function parseEvent(text) {
 let m = /^E:contact (\S+) (\d+)$/.exec(text);
 if (m !== null) return { kind: 'contact', region: m[1], n: Number(m[2]) };
 m = /^E:dead (\S+)$/.exec(text);
 if (m !== null) return { kind: 'dead', region: m[1] };
 m = /^E:planted ([AB])$/.exec(text);
-if (m !== null) return { kind: 'planted', site: /** @type {SiteId} */ (m[1]) };
+if (m !== null) return { kind: 'planted', site: (m[1]) };
 m = /^E:flash (\d+) (\d+) (\d+)$/.exec(text);
 if (m !== null) return { kind: 'flash', x: Number(m[1]) * 100, y: Number(m[2]) * 100, pop: Number(m[3]) };
-m = /^E:fl ([01])$/.exec(text);
-if (m !== null) return { kind: 'fl', has: m[1] === '1' };
 m = /^E:flashing (\d+) (\d+)$/.exec(text);
 if (m !== null) return { kind: 'claim', x: Number(m[1]) * 100, y: Number(m[2]) * 100 };
 m = /^E:smoke (\d+) (\d+)$/.exec(text);
@@ -3442,12 +2995,6 @@ if (text === 'E:smoker') return { kind: 'smoker' };
 return null;
 }
 class Tactics {
-/**
-* @param {Grid} g @param {MapIntel} intel @param {Perception} perc
-* @param {InitData} data @param {Helpers} h
-* @param {{ awpSlot: number, role: number, economy: number, ctSplitA: number, plan: number }} opts
-* @param {{ aim: number, reaction: number, awareness: number, aggression: number, discipline: number, movement: number }} attrs
-*/
 constructor(g, intel, perc, data, h, opts, attrs) {
 this.g = g;
 this.intel = intel;
@@ -3475,177 +3022,109 @@ this.spawnHeld = 0;
 this.goTick = -1;
 this.readyAt = -1;
 this.eventDelay = Math.round(lerp(P.eventDelay0, P.eventDelay100, attrs.awareness) * data.rules.decisionInterval);
-/** @type {Map<string, Spot[]>} */
 this.spotCache = new Map();
-/** @type {Set<number>} */
 this.probeBare = new Set();
-/** @type {Map<string, Spot | null>} */
-this.flankSpots = new Map();
-/** @type {Combat | null} */
 this.combat = null;
-/** @type {Navigator | null} */
 this.nav = null;
-/** @type {Judgment | null} */
 this.judge = null;
-/** @type {Mission | null} */
 this.mission = null;
 this.coop = new Cooperation(g, intel, perc, data);
 this.adapt = new Adaptation();
 this.rotSince = -1;
-/** @type {Map<number, number>} */
 this.defuseStarted = new Map();
 this.defuseIssued = -1;
 this.fakeProbe = false;
-/** @type {{ x: number, y: number, until: number }[]} */
 this.burns = [];
 this.defuseAlarm = -1;
 this.postSaid = false;
-/** @type {Set<number>} */
 this.postSmokers = new Set();
-/** @type {Pt | null} */
 this.hide = null;
 this.hideFor = -1;
-/** @type {SiteId[]} */
-this.hits = [];
 this.siteScore = { A: 0, B: 0 };
-/** @type {Record<string, [number, number]>} */
-this.planStats = {};
 this.lastKind = '';
-this.lastSite = /** @type {SiteId | null} */ (null);
-this.lastAttack = /** @type {SiteId | null} */ (null);
+this.lastSite = (null);
 this.enemiesAlive = 5;
-/** @type {{ spot: Spot, site: SiteId, len: number } | null | undefined} */
 this.sniper = undefined;
-/** @type {Plan | null} */
 this.plan = null;
 this.commander = -1;
 this.saidAs = -1;
 this.saidText = '';
 this.bought = false;
-/** @type {BuyCall | null} */
 this.buyCall = null;
 this.routeOverride = -1;
-/** @type {Map<string, { near: number, main: Entrance, second: Entrance, wait: number } | null>} */
 this.flankCache = new Map();
-/** @type {Map<SiteId, Route>} */
 this.aroundCache = new Map();
-/** @type {Map<string, Pt[]>} */
 this.smokeCache = new Map();
 this.flankStart = -1;
 this.flankGo = false;
 this.flanked = false;
-this.flankDone = false;
-/** @type {{ route: Route, wait: Route, stage: Spot | null } | null} */
 this.lurkPick = null;
 this.lurkKey = '';
 this.steppedIn = false;
 this.rushReady = false;
 this.queueHeld = 0;
-/** @type {{ ready: number, from: number, text: string }[]} */
 this.inbox = [];
-/** @type {Map<string, { n: number, tick: number }>} */
 this.contacts = new Map();
-/** @type {Map<string, SiteId | null>} */
 this.contactSite = new Map();
-/** @type {Map<string, { n: number, tick: number }>} */
 this.saidContact = new Map();
-/** @type {Pt[]} */
 this.smokeSeen = [];
-/** @type {Map<number, number> | null} */
 this.groups = null;
 this.groupKey = '';
 this.execTick = -1;
 this.stageArrive = -1;
 this.noiseLeft = 0;
-/**
-* lx／ly／lt 是上一次看到的位置與 tick，aim＝已經推出落點） @type {{ x: number, y: number, pop: number, claim?: boolean, seen?: boolean, lx?: number, ly?: number, lt?: number, aim?: boolean }[]} */
 this.mateFlash = [];
 this.flashHeard = -1;
 this.smokeHeard = -1;
 this.flashCue = -1;
 this.flashPop = -1000000;
-/** @type {{ x: number, y: number, tick: number }[]} */
 this.flashSpots = [];
-/** @type {{ x: number, y: number, until: number }[]} */
 this.flashClaims = [];
-/** @type {{ x: number, y: number, until: number } | null} */
 this.myClaim = null;
-/** @type {Set<number>} */
-this.flashHolders = new Set();
-this.flashSaid = -1;
-/** @type {{ from: number, to: number, w: WeaponId }[]} */
 this.gifts = [];
-/** @type {{ w: WeaponId, until: number } | null} */
 this.giftWant = null;
 this.giftMiss = false;
 this.reBought = false;
 this.pickAt = -1000000;
-/** @type {Set<number>} */
 this.wentIn = new Set();
-/** @type {Pt[]} */
 this.smokes = [];
 this.flashKey = '';
-/** @type {{ x: number, y: number, sc: number }[]} */
 this.flashList = [];
-/** @type {Set<number>} */
 this.kits = new Set();
 this.kitSaid = false;
-/** @type {{ x: number, y: number, tick: number } | null} */
 this.awp = null;
 this.awpSaid = -1000000;
-/** @type {Pt[]} */
 this.awpHist = [];
 this.awpTeam = '';
-/** @type {{ x: number, y: number, tick: number } | null} */
 this.enemyFlash = null;
-/** @type {SiteId | null} */
 this.fallback = null;
 this.probed = false;
 this.probeAt = -1;
-/** @type {{ spot: Spot, until: number } | null} */
 this.probeOut = null;
 this.dodged = false;
 this.lineHeld = 0;
 this.lineDeath = -1;
-/** @type {{ x: number, y: number, until: number } | null} */
 this.trade = null;
-/** @type {{ x: number, y: number, until: number } | null} */
 this.chase = null;
-/** @type {Map<number, number>} */
 this.dealt = new Map();
-/** @type {Map<number, boolean>} */
 this.mateAlive = new Map();
-/** @type {Map<number, number>} */
 this.mateFired = new Map();
 this.liveStart = -1;
 this.plantedSaid = false;
 this.saving = false;
 this.awper = -1;
 this.awperFixed = false;
-/** @type {Map<number, { spot: Spot, site: SiteId | null }> | null} */
 this.layout = null;
 this.layoutKey = '';
-/** @type {Pt | null} */
 this.saveCache = null;
 this.saveAt = -1000000;
 }
-/** @param {Observation | null} obs */
 reset(obs) {
 if (obs !== null) {
 this.econ.roundStart(obs);
 this.adapt.begin(obs, this.econ.lastWon);
 const won = this.econ.lastWon;
-if (won !== null && this.lastKind !== '') {
-const st = this.planStats[this.lastKind] ?? [0, 0];
-this.planStats[this.lastKind] = st;
-st[0]++;
-if (won) st[1]++;
-if (this.lastSite !== null) this.siteScore[this.lastSite] = clamp(this.siteScore[this.lastSite] + (won ? 1 : -1), -2, 2);
-}
-if (this.lastAttack !== null) {
-this.hits.push(this.lastAttack);
-if (this.hits.length > 6) this.hits.shift();
-}
+if (won !== null && this.lastKind !== '' && this.lastSite !== null) this.siteScore[this.lastSite] = clamp(this.siteScore[this.lastSite] + (won ? 1 : -1), -2, 2);
 }
 if (this.awp !== null) {
 this.awpHist.push({ x: this.awp.x, y: this.awp.y });
@@ -3663,7 +3142,6 @@ this.lineHeld = 0;
 this.lineDeath = -1;
 this.lastKind = '';
 this.lastSite = null;
-this.lastAttack = null;
 this.plan = null;
 this.commander = -1;
 this.saidAs = -1;
@@ -3674,7 +3152,6 @@ this.routeOverride = -1;
 this.flankStart = -1;
 this.flankGo = false;
 this.flanked = false;
-this.flankDone = false;
 this.lurkPick = null;
 this.lurkKey = '';
 this.steppedIn = false;
@@ -3698,19 +3175,14 @@ this.flashPop = -1000000;
 this.flashSpots = [];
 this.flashClaims = [];
 this.myClaim = null;
-this.flashHolders = new Set();
-this.flashSaid = -1;
 this.gifts = [];
 this.giftWant = null;
 this.giftMiss = false;
 this.reBought = false;
 this.pickAt = -1000000;
-/** @type {Set<number>} */
 this.wentIn = new Set();
-/** @type {Pt[]} */
 this.smokes = [];
 this.flashKey = '';
-/** @type {{ x: number, y: number, sc: number }[]} */
 this.flashList = [];
 this.kits = new Set();
 this.kitSaid = false;
@@ -3745,30 +3217,25 @@ this.defuseStarted.clear();
 this.defuseIssued = -1;
 this.fakeProbe = false;
 }
-/** @param {Observation} obs */
 commanderOf(obs) {
 let c = obs.me.alive ? obs.me.id : Infinity;
 for (const m of obs.teammates) if (m.alive && m.id < c) c = m.id;
 return Number.isFinite(c) ? c : -1;
 }
-/** @param {number} id */
 slotOf(id) {
 return this.ids.indexOf(id);
 }
-/** @param {Observation} obs */
 alive(obs) {
 const me = obs.me;
 const out = obs.teammates.filter((m) => m.alive).map((m) => ({ id: m.id, x: m.x, y: m.y }));
 if (me.alive) out.push({ id: me.id, x: me.x, y: me.y });
 return out.sort((a, b) => a.id - b.id);
 }
-/** @param {string} id */
 regionCell(id) {
 const r = this.intel.map.regions.find((x) => x.id === id);
 if (r === undefined) return -1;
 return this.intel.nearestOpen(Math.floor((r.x0 + r.x1) / 2), Math.floor((r.y0 + r.y1) / 2));
 }
-/** @param {number} c @returns {SiteId | null} */
 siteNear(c) {
 if (c < 0) return null;
 const a = this.intel.distSite.A[c] / 10;
@@ -3777,14 +3244,9 @@ if (a <= 25 && a < b - 5) return 'A';
 if (b <= 25 && b < a - 5) return 'B';
 return null;
 }
-/**
-* @param {Observation} obs
-* @returns {TacOut}
-*/
 update(obs) {
 const me = obs.me;
 const t = obs.tick;
-/** @type {TacOut} */
 const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
 if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
 this.enemiesAlive = obs.enemiesAlive;
@@ -3808,16 +3270,10 @@ this.commander = cmd;
 if (cmd === me.id) this.lead(obs, out);
 else if (this.plan === null && obs.round.phase !== 'freeze' && t - this.liveStart > this.tps) this.plan = this.choosePlan(obs);
 this.buy(obs, out, cmd === me.id);
-const fl = this.util.has(me, 'flash') ? 1 : 0;
-if (P.flashClaim && P.flashHolders && obs.round.phase !== 'freeze' && fl !== this.flashSaid) {
-this.flashSaid = fl;
-out.cmds.push({ type: 'say', text: `E:fl ${fl}` });
-}
 this.report(obs, out);
 const live = obs.round.phase === 'live';
 out.allowPeek = live && obs.round.phaseTicksLeft > 25 * this.tps;
 this.slow = false;
-/** @type {ThrowWish | null} */
 let wish = me.team === 'T' ? this.tGoal(obs, out) : this.ctGoal(obs, out);
 if (this.slow) {
 out.walk = true;
@@ -3832,7 +3288,6 @@ if (wish === null) {
 this.coop.apply(obs, out);
 if (!this.coop.acted) wish = this.lineCheck(obs, out);
 }
-/** @type {Set<number>} */
 const busy = new Set();
 for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
 if (out.commit || out.urgent || this.mateFlash.some((x) => t <= x.pop)) wish = null;
@@ -3865,9 +3320,6 @@ if (out.cmds.some((c) => c.type === 'defuse')) this.defuseIssued = t;
 else if (!out.objective || me.defuseTicks > 0 || t > this.defuseIssued + this.delayMax + this.data.rules.decisionInterval) this.defuseIssued = -1;
 return out;
 }
-/**
-* @param {Observation} obs @param {TacOut} out
-*/
 trackTeam(obs, out) {
 const me = obs.me;
 const t = obs.tick;
@@ -3891,7 +3343,6 @@ if (near !== null) this.noteContact(`#dead${m.id}`, 1, t, near);
 this.mateAlive.set(m.id, m.alive);
 }
 }
-/** @param {Observation} obs @param {TacOut} out */
 trackAwp(obs, out) {
 const me = obs.me;
 const t = obs.tick;
@@ -3915,14 +3366,10 @@ const r = (s.range === 'near' ? 6 : s.range === 'mid' ? 20 : 40) * UNIT;
 const c = this.intel.nearestOpen(Math.floor((me.x + cosd(s.dirDeg) * r) / UNIT), Math.floor((me.y + sind(s.dirDeg) * r) / UNIT));
 if (c >= 0) this.awp = { ...this.g.center(c), tick: t };
 }
-/**
-* @param {Observation} obs
-*/
 trackEnemyFlash(obs) {
 const me = obs.me;
 const t = obs.tick;
 const away = this.util.away;
-/** @param {number} x @param {number} y */
 const ours = (x, y) => this.mateFlash.some((f) => dist(f.x, f.y, x, y) < 8 * UNIT) || (away !== null && dist(away.tx, away.ty, x, y) < 8 * UNIT);
 for (const q of obs.projectiles) if (q.kind === 'flash' && !ours(q.x, q.y)) this.enemyFlash = { x: q.x, y: q.y, tick: t };
 if (this.enemyFlash !== null && t - this.enemyFlash.tick <= this.tps) return;
@@ -3942,17 +3389,14 @@ best = e;
 }
 if (best !== null) this.enemyFlash = { x: best.x, y: best.y, tick: t };
 }
-/** @param {Observation} obs @param {Entrance} e */
 flashAt(obs, e) {
 const f = this.enemyFlash;
 return f !== null && obs.tick - f.tick <= P.enemyFlashMemo * this.tps && Math.min(dist(f.x, f.y, e.x, e.y), dist(f.x, f.y, e.ox, e.oy)) < P.enemyFlashNear * UNIT;
 }
-/** @param {string} key @param {number} n @param {number} t @param {SiteId | null} site */
 noteContact(key, n, t, site) {
 this.contacts.set(key, { n, tick: t });
 this.contactSite.set(key, site);
 }
-/** @param {Observation} obs */
 readChat(obs) {
 const me = obs.me;
 const t = obs.tick;
@@ -3994,16 +3438,12 @@ if (e.kind === 'contact') {
 const c = this.regionCell(e.region);
 this.noteContact(e.region, e.n, t, this.siteNear(c));
 } else if (e.kind === 'flash') {
-this.mateFlash = this.mateFlash.filter((f) => !(f.claim || f.seen) || dist(f.x, f.y, e.x, e.y) > 6 * UNIT);
+this.mateFlash = this.mateFlash.filter((f) => !f.claim || dist(f.x, f.y, e.x, e.y) > 6 * UNIT);
 this.mateFlash.push({ x: e.x, y: e.y, pop: e.pop });
 }
 else if (e.kind === 'claim') {
 this.flashClaims.push({ x: e.x, y: e.y, until: t + P.flashClaimSec * this.tps });
 if (P.flashClaimDodge) this.mateFlash.push({ x: e.x, y: e.y, pop: t + (this.util.fuse.get('flash') ?? 45) + 2 * this.data.rules.reactionTicks + this.tps, claim: true });
-}
-else if (e.kind === 'fl') {
-if (e.has) this.flashHolders.add(msg.from);
-else this.flashHolders.delete(msg.from);
 }
 else if (e.kind === 'smoke') {
 this.smokeHeard = t;
@@ -4021,7 +3461,6 @@ this.flashSpots.push({ x: e.x, y: e.y, tick: t });
 }
 this.inbox = keep;
 }
-/** @param {Plan} p @param {Observation} obs */
 setPlan(p, obs) {
 const prev = this.plan;
 this.plan = p;
@@ -4029,13 +3468,12 @@ if (p.kind === 'hold' && (prev === null || prev.kind !== 'hold' || p.rot !== pre
 if (p.kind !== 'hold' && p.exec !== null && (prev === null || prev.kind === 'hold' || prev.exec === null)) this.execTick = obs.tick;
 if (prev !== null && prev.kind !== 'hold' && p.kind !== 'hold' && prev.r1 !== p.r1) this.routeOverride = -1;
 }
-/** @param {Observation} obs @param {TacOut} out */
 lead(obs, out) {
 if (this.plan === null) this.setPlan(this.choosePlan(obs), obs);
-const p = /** @type {Plan} */ (this.plan);
+const p = (this.plan);
 const next = p.kind === 'hold' ? this.leadCT(obs, p) : this.dodgeLine(obs, this.leadT(obs, p));
 if (next !== p) this.setPlan(next, obs);
-const text = planText(/** @type {Plan} */ (this.plan));
+const text = planText( (this.plan));
 if (this.saidAs !== obs.me.id || this.saidText !== text) {
 out.cmds.push({ type: 'say', text });
 this.saidAs = obs.me.id;
@@ -4047,14 +3485,10 @@ this.plantedSaid = true;
 out.cmds.push({ type: 'say', text: `E:planted ${b.site}` });
 }
 }
-/** @param {Observation} obs @returns {Plan} */
 choosePlan(obs) {
 if (obs.me.team === 'CT') return this.chooseCT();
 return this.chooseT(obs);
 }
-/**
-* @param {Observation} obs @returns {TPlan}
-*/
 chooseT(obs) {
 const h = this.h;
 const ag = this.attrs.aggression;
@@ -4062,17 +3496,16 @@ const call = this.buyCall ?? this.econ.teamCall(obs);
 const learned = this.adapt.advice('T');
 const wA = Math.max(0.2, 1 + 0.35 * this.siteScore.A);
 const wB = Math.max(0.2, 1 + 0.35 * this.siteScore.B);
-/** @type {SiteId} */
 const site = h.random() * (wA + wB) < wA ? 'A' : 'B';
 const forced = ['', 'default', 'rush', 'split', 'fake'][this.opts.plan] ?? '';
 let kind = forced;
 if (kind === '') {
 const w = call === 'eco' ? { default: 0, rush: 0.65, split: 0.35, fake: 0 } : this.enemyEco() ? { default: 0.1, rush: 0.35 + 0.2 * ag, split: 0.4, fake: 0.1 } : { default: 0.22, rush: 0.12 + 0.2 * ag, split: 0.4, fake: 0.18 };
-for (const k of /** @type {const} */ (['default', 'rush', 'split', 'fake'])) w[k] *= learned.plans[k] ?? 1;
+for (const k of (['default', 'rush', 'split', 'fake'])) w[k] *= learned.plans[k] ?? 1;
 w.fake *= 0.75 + learned.rotation * 0.5;
 let r = h.random() * (w.default + w.rush + w.split + w.fake);
 kind = 'fake';
-for (const k of /** @type {const} */ (['default', 'rush', 'split'])) {
+for (const k of (['default', 'rush', 'split'])) {
 if ((r -= w[k]) < 0) {
 kind = k;
 break;
@@ -4093,7 +3526,6 @@ const nOther = Math.max(1, this.intel.routes.T[other(site)].length);
 if (kind === 'fake') return { kind: 'fake', site, r1: 0, r2: Math.floor(h.random() * Math.min(2, nOther)), exec: null };
 return { kind: 'default', site, r1: Math.floor(h.random() * Math.min(2, n)), r2: Math.floor(h.random() * Math.min(2, nOther)), exec: null };
 }
-/** @returns {CTPlan} */
 chooseCT() {
 let a = clamp(this.opts.ctSplitA, 0, 5);
 let b = Math.min(P.ctB, 5 - a);
@@ -4115,9 +3547,6 @@ m--;
 }
 return { kind: 'hold', a, m, b, rot: null, go: false };
 }
-/**
-* @param {Observation} obs @param {TPlan} p @returns {TPlan}
-*/
 leadT(obs, p) {
 if (obs.round.phase !== 'live' || p.exec !== null) return p;
 const t = obs.tick;
@@ -4157,13 +3586,9 @@ if (el >= at || early) return { ...p, exec: heat.A < heat.B ? 'A' : heat.B < hea
 }
 return p;
 }
-/** @param {Pt} q @param {Entrance | null} e */
 covers(q, e) {
 return e !== null && dist(q.x, q.y, e.ox, e.oy) < 45 * UNIT && (this.g.los(q.x, q.y, e.ox, e.oy) || this.g.los(q.x, q.y, e.ix, e.iy));
 }
-/**
-* @param {Observation} obs @param {TPlan} p @returns {TPlan}
-*/
 dodgeLine(obs, p) {
 if (this.dodged || p.kind === 'go' || (p.exec !== null && p.exec !== p.site)) return p;
 const last = this.awpHist[this.awpHist.length - 1];
@@ -4184,16 +3609,12 @@ return p;
 enemyEco() {
 return this.econ.lastWon === true && this.econ.enemyLevel >= 2;
 }
-/** @param {Observation} obs @returns {SiteId} */
 nearestSite(obs) {
 const c = obs.teammates.find((m) => m.alive && m.hasBomb) ?? obs.me;
 const cell = this.g.cellOf(c.x, c.y);
 if (cell < 0) return 'A';
 return this.intel.distSite.A[cell] <= this.intel.distSite.B[cell] ? 'A' : 'B';
 }
-/**
-* @param {Observation} obs
-*/
 heat(obs) {
 const t = obs.tick;
 const out = { A: 0, B: 0 };
@@ -4215,9 +3636,6 @@ if (s !== null) heard[s] += c.n;
 for (const s of SITES) out[s] = Math.max(seen[s], heard[s]);
 return out;
 }
-/**
-* @param {Observation} obs @param {CTPlan} p @returns {CTPlan}
-*/
 leadCT(obs, p) {
 if (obs.round.phase === 'freeze') return p;
 const b = obs.bomb;
@@ -4243,7 +3661,6 @@ if (n > 0 && seen / n >= 0.65) { this.rotSince = obs.tick; return { ...p, rot: n
 }
 return p;
 }
-/** @param {Observation} obs @param {SiteId} s */
 retakeReady(obs, s) {
 const b = obs.bomb;
 const bx = b.x ?? this.intel.sites[s].cx;
@@ -4255,9 +3672,6 @@ const feasible = this.defuseTeam(obs, bx, by).filter((m) => m.eta <= left);
 if (feasible.length === 0 || feasible.some((m) => m.defusing || m.pending || m.cautious > left) || left <= Math.min(...feasible.map((m) => m.cautious)) + P.saveMargin + 2) return true;
 return feasible.every((m) => this.inSite(m.x, m.y, s, bx, by) || stage.some((sp) => dist(m.x, m.y, sp.x, sp.y) < P.retakeGather * UNIT));
 }
-/**
-* @param {Observation} obs @param {number} bx @param {number} by
-*/
 defuseTeam(obs, bx, by) {
 const me = obs.me;
 const r = this.data.rules;
@@ -4267,7 +3681,7 @@ const team = this.alive(obs).map((m) => ({ ...m, weapon: m.id === me.id ? me.wea
 return team.map((m) => {
 const duration = m.kit ? r.defuseKitTicks : r.defuseTicks;
 const walking = dist(m.x, m.y, bx, by) < 1300 ? 0 : this.judge !== null ? Math.max(0, this.judge.travel(m, bx, by) * this.tps - r.reactionTicks) : m.d / 4.6 / UNIT * this.tps;
-const finish = (/** @type {number} */ delay) => {
+const finish = ( delay) => {
 if (m.defusing) {
 const progress = m.id === me.id ? me.defuseTicks : 1 + obs.tick - (this.defuseStarted.get(m.id) ?? obs.tick);
 return Math.max(0, duration - progress) / this.tps;
@@ -4280,12 +3694,10 @@ return (Math.max(ready, handoff) + delay + duration - 1) / this.tps;
 return { ...m, eta: finish(this.delayMin), cautious: finish(this.delayMax) };
 });
 }
-/** @param {number} x @param {number} y @param {SiteId} s @param {number} bx @param {number} by */
 inSite(x, y, s, bx, by) {
 const c = this.g.cellOf(x, y);
 return (c >= 0 && this.intel.sites[s].regions.has(this.intel.region[c])) || dist(x, y, bx, by) < 8 * UNIT;
 }
-/** @param {Observation} obs @param {TacOut} out @param {boolean} isCmd */
 buy(obs, out, isCmd) {
 const me = obs.me;
 if (this.bought && this.giftMiss && !this.reBought && obs.round.canBuy) {
@@ -4320,14 +3732,10 @@ const items = this.econ.items(obs, call, this.roles.of(me.id), this.roles.awper(
 if (items.length > 0) out.cmds.push({ type: 'buy', items });
 this.bought = true;
 }
-/** @param {string | null} w */
 gunValue(w) {
 if (w === 'awp') return this.roles.of(this.data.playerId) === AWP ? 4 : 2.5;
 return w === 'ak' || w === 'm4' ? 3 : w === 'smg' || w === 'shotgun' ? 2 : 0;
 }
-/**
-* @param {Observation} obs @param {TacOut} out
-*/
 grab(obs, out) {
 const me = obs.me;
 const t = obs.tick;
@@ -4365,15 +3773,11 @@ out.cmds.push({ type: 'pickup' });
 }
 else if (near) out.goal = { x: best.x, y: best.y };
 }
-/**
-* @param {Observation} obs @param {TacOut} out
-*/
 report(obs, out) {
 if (obs.round.phase === 'freeze') return;
 const t = obs.tick;
 if (obs.me.team === 'CT' && this.smokeAlarm(obs, out)) return;
 if (obs.enemies.length === 0) return;
-/** @type {Map<number, number>} */
 const byRegion = new Map();
 for (const e of obs.enemies) {
 const r = this.intel.region[this.g.cellOf(e.x, e.y)];
@@ -4390,29 +3794,22 @@ out.cmds.push({ type: 'say', text: `E:contact ${id} ${n}` });
 return;
 }
 }
-/**
-* @param {Observation} obs @param {TacOut} out @returns {boolean}
-*/
 smokeAlarm(obs, out) {
 for (const q of obs.effects) {
 if (q.kind !== 'smoke' || this.smokes.some((m) => dist(m.x, m.y, q.x, q.y) < 2 * UNIT) || this.smokeSeen.some((m) => dist(m.x, m.y, q.x, q.y) < 2 * UNIT)) continue;
 this.smokeSeen.push({ x: q.x, y: q.y });
 const s = this.siteNear(this.g.cellOf(q.x, q.y));
 if (s === null) continue;
-const id = this.intel.map.regions[/** @type {number} */ ([...this.intel.sites[s].regions][0])].id;
+const id = this.intel.map.regions[ ([...this.intel.sites[s].regions][0])].id;
 this.noteContact(id, P.smokeAlarmN, obs.tick, s);
 out.cmds.push({ type: 'say', text: `E:contact ${id} ${P.smokeAlarmN}` });
 return true;
 }
 return false;
 }
-/** @param {number} id */
 mainPri(id) {
 return MAIN_PRI[this.roles.of(id)] * 10 + this.slotOf(id);
 }
-/**
-* @param {Observation} obs @param {number} id @param {TPlan} p
-*/
 groupOf(obs, id, p) {
 if (p.kind === 'rush' || p.kind === 'go') return 0;
 const key = `${p.kind}${p.site}${this.roles.key}`;
@@ -4425,7 +3822,6 @@ this.groupKey = key;
 }
 return this.groups.get(id) ?? 0;
 }
-/** @param {Observation} obs @param {number} id @param {TPlan} p */
 memberIndex(obs, id, p) {
 const gid = this.groupOf(obs, id, p);
 const carrier = obs.me.hasBomb ? obs.me.id : (obs.teammates.find((m) => m.hasBomb)?.id ?? -1);
@@ -4433,14 +3829,12 @@ const last = this.roles.of(carrier) === ENTRY ? -1 : carrier;
 const list = this.ids.filter((x) => this.isAlive(obs, x) && this.groupOf(obs, x, p) === gid).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
 return Math.max(0, list.indexOf(id));
 }
-/** @param {Observation} obs @param {number} id @param {TPlan} p @returns {{ site: SiteId, route: number }} */
 setupOf(obs, id, p) {
 const gid = this.groupOf(obs, id, p);
 if (gid === 0) return { site: p.site, route: p.r1 };
 if (p.kind === 'split') return { site: p.site, route: p.r2 };
 return { site: other(p.site), route: p.r2 };
 }
-/** @param {Observation} obs @param {number} id @param {TPlan} p */
 memberStage(obs, id, p) {
 if (p.kind === 'rush' || p.kind === 'go') return null;
 const s = this.setupOf(obs, id, p);
@@ -4448,15 +3842,10 @@ const spots = this.stageSpots('T', s.site, s.route);
 if (spots.length === 0) return null;
 return spots[this.memberIndex(obs, id, p) % spots.length];
 }
-/** @param {SiteId} site @param {number} idx */
 tRoute(site, idx) {
 const routes = this.intel.routes.T[site];
 return routes.length === 0 ? null : routes[Math.min(idx, routes.length - 1)];
 }
-/**
-* @param {Observation} obs @param {TacOut} out
-* @returns {ThrowWish | null}
-*/
 tGoal(obs, out) {
 const me = obs.me;
 const t = obs.tick;
@@ -4571,7 +3960,6 @@ out.role = `繞第二入口 ${exec}`;
 return null;
 }
 }
-/** @type {ThrowWish | null} */
 let wish = null;
 const sinceExec = this.execTick >= 0 ? (t - this.execTick) / this.tps : 99;
 if (ent !== null && !this.inSite(me.x, me.y, exec, site.cx, site.cy) && dist(me.x, me.y, ent.ox, ent.oy) < 22 * UNIT) {
@@ -4585,25 +3973,16 @@ const size = Math.max(1, this.groupSize(obs, p));
 const first = Math.min(1, size - 1);
 const since = this.flashCue >= 0 ? t - this.flashCue : -1;
 let flashTurn;
-if (P.flashClaim && !P.flashHolders) {
+if (P.flashClaim) {
 const order = (idx - first + size) % size;
 flashTurn = order === 0 || (since >= 0 && since > (P.flashTurn + (order - 1) * P.flashStagger) * this.tps);
-} else if (P.flashClaim) {
-const gid = this.groupOf(obs, me.id, p);
-const pri = (/** @type {number} */ x) => {
-const k = this.memberIndex(obs, x, p);
-return k === first ? -1 : k === 0 ? 99 : k;
-};
-const holders = this.ids.filter((x) => this.isAlive(obs, x) && this.groupOf(obs, x, p) === gid && (x === me.id ? this.util.has(me, 'flash') : this.flashHolders.has(x))).sort((a, b) => pri(a) - pri(b) || a - b);
-const turn = since >= 0 ? Math.floor(since / (P.flashTurn * this.tps)) : 0;
-flashTurn = holders.length > 0 && holders[turn % holders.length] === me.id;
 } else flashTurn = idx === first || (since >= 0 && since > P.flashTurn * this.tps);
 const gs = Math.max(1, this.groupSize(obs, p));
 const next = this.flashNext(obs, ent, p.kind === 'rush', (idx - Math.min(1, gs - 1) + gs) % gs);
 const st = this.memberStage(obs, me.id, p);
 const near = st !== null && dist(me.x, me.y, st.x, st.y) < 6 * UNIT;
 const supportFirst = role !== SUPPORT && this.isAlive(obs, this.roles.who(SUPPORT)) && this.smokeHeard < 0 && sinceExec < 8;
-const onWay = (/** @type {{ x: number, y: number, radius: number }} */ q) => Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT || (dist(me.x, me.y, q.x, q.y) < 20 * UNIT && segDist(q.x, q.y, me.x, me.y, site.cx, site.cy).d < q.radius + 2 * UNIT);
+const onWay = ( q) => Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT || (dist(me.x, me.y, q.x, q.y) < 20 * UNIT && segDist(q.x, q.y, me.x, me.y, site.cx, site.cy).d < q.radius + 2 * UNIT);
 const burning = P.smokeFire ? obs.effects.find((q) => q.kind === 'fire' && q.ticksLeft > 2 * this.tps && onWay(q) && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) > q.radius + 2 * UNIT)) : undefined;
 const reach = this.data.rules.grenadeRules.maxThrowRange * UNIT;
 const gid = this.groupOf(obs, me.id, p);
@@ -4639,20 +4018,6 @@ out.hold = st;
 out.role = wish !== null ? '丟道具' : lead && !waiting ? '等突破手先走' : '等閃光';
 this.awpSettle(obs, out, st);
 return wish;
-}
-}
-if (P.flankCover && p.kind !== 'go' && mine && !this.flankDone && ent !== null) {
-const fw = this.flankWatch(obs, p, exec, setup.route);
-if (fw !== null && fw.spot !== null) {
-out.goal = { x: fw.spot.x, y: fw.spot.y };
-out.hold = fw.spot;
-out.role = '看側翼';
-return wish;
-}
-if (fw !== null && wish === null && sinceExec < 4) {
-const q = fw.side;
-if (this.util.has(me, 'smoke') && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, q.x, q.y) !== null) wish = { kind: 'smoke', x: q.x, y: q.y, why: '封側翼' };
-else if (this.util.has(me, 'flash') && !this.flashTaken(obs, q) && this.util.solve(me.x, me.y, q.x, q.y) !== null) wish = { kind: 'flash', x: q.x, y: q.y, why: '閃側翼' };
 }
 }
 out.role = `執行 ${exec}`;
@@ -4705,9 +4070,6 @@ out.goal = { x: spot.x, y: spot.y };
 out.hold = spot;
 return wish;
 }
-/**
-* @param {Observation} obs @param {SiteId} exec @param {Entrance} ent
-*/
 tooClose(obs, exec, ent) {
 const me = obs.me;
 if (this.roles.of(me.id) === ENTRY || this.queueHeld >= P.entryWaitMax * this.tps || this.inRectSite(me.x, me.y, exec)) return false;
@@ -4719,30 +4081,19 @@ const held = obs.teammates.some((m) => m.alive && !this.inRectSite(m.x, m.y, exe
 if (held) this.queueHeld += this.data.rules.decisionInterval;
 return held;
 }
-/**
-* @param {Observation} obs @param {Entrance} ent
-*/
 flashDone(obs, ent) {
-/** @param {Pt} f */
 const at = (f) => this.flashOf(ent, f);
 return this.flashSpots.some(at) || (P.flashClaim && (this.flashClaims.some((c) => obs.tick <= c.until && at(c)) || obs.projectiles.some((q) => q.kind === 'flash' && at(q))));
 }
-/** @param {Entrance} ent @param {Pt} f */
 flashOf(ent, f) {
 const d = dist(f.x, f.y, ent.ix, ent.iy);
 if (d < 12 * UNIT) return true;
 if (!P.flashClaim || d >= (P.flashDeep + 4) * UNIT) return false;
 return SITES.every((s) => this.intel.sites[s].entrances.every((e) => dist(f.x, f.y, e.ix, e.iy) >= d));
 }
-/**
-* @param {Observation} obs @param {Entrance} ent @param {boolean} rush @param {number} order
-* @returns {{ ok: boolean, avoid: Pt | null, second: boolean }}
-*/
 flashNext(obs, ent, rush, order) {
 const t = obs.tick;
-/** @type {{ x: number, y: number, tick: number }[]} */
 const list = [];
-/** @param {number} x @param {number} y @param {number} tick */
 const add = (x, y, tick) => {
 if (!this.flashOf(ent, { x, y })) return;
 const o = list.find((q) => dist(q.x, q.y, x, y) < 3 * UNIT);
@@ -4760,25 +4111,21 @@ const age = t - first.tick;
 if (age < (P.flashSecondAfter + order * P.flashStagger) * this.tps || age > P.flashSecondWin * this.tps) return { ok: false, avoid: null, second: false };
 return { ok: true, avoid: rush ? null : { x: first.x, y: first.y }, second: true };
 }
-/** @param {Observation} obs @param {Pt} c */
 flashTaken(obs, c) {
 if (!P.flashClaim) return false;
 const r = 8 * UNIT;
 return this.flashSpots.some((f) => obs.tick - f.tick <= 3 * this.tps && dist(f.x, f.y, c.x, c.y) < r) || this.flashClaims.some((f) => obs.tick <= f.until && dist(f.x, f.y, c.x, c.y) < r) || obs.projectiles.some((q) => q.kind === 'flash' && dist(q.x, q.y, c.x, c.y) < r);
 }
-/** @param {Observation} obs @param {TPlan} p */
 groupSize(obs, p) {
 const gid = this.groupOf(obs, obs.me.id, p);
 return this.alive(obs).filter((m) => this.groupOf(obs, m.id, p) === gid).length;
 }
-/** @param {Observation} obs @param {TPlan} p @param {Entrance} ent */
 leadDist(obs, p, ent) {
 const gid = this.groupOf(obs, obs.me.id, p);
 let best = Infinity;
 for (const m of this.alive(obs)) if (this.groupOf(obs, m.id, p) === gid) best = Math.min(best, dist(m.x, m.y, ent.ox, ent.oy));
 return best;
 }
-/** @param {Observation} obs @param {number} id @param {TPlan} p */
 smokerIndex(obs, id, p) {
 const gid = this.groupOf(obs, id, p);
 const members = this.ids.filter((x) => this.groupOf(obs, x, p) === gid && obs.teammates.every((m) => m.id !== x || m.alive));
@@ -4788,9 +4135,6 @@ if (who !== undefined) return this.memberIndex(obs, who, p);
 }
 return -1;
 }
-/**
-* @param {TPlan} p @param {SiteId} exec @returns {{ near: number, main: Entrance, second: Entrance, wait: number } | null}
-*/
 flankOf(p, exec) {
 if (p.kind !== 'default' && p.kind !== 'fake') return null;
 const key = `flank${p.site}${exec}${p.r1}${p.r2}`;
@@ -4817,10 +4161,6 @@ out = { near, main, second: e, wait: Math.min(P.flankWait, d / 10 / 4.5) };
 this.flankCache.set(key, out);
 return out;
 }
-/**
-* @param {Observation} obs @param {TPlan} p
-* @returns {{ route: Route, wait: Route, stage: Spot | null } | null}
-*/
 lurkOf(obs, p) {
 const key = `${p.kind}${p.site}`;
 if (this.lurkKey === key) return this.lurkPick;
@@ -4832,85 +4172,11 @@ if (route === null || (p.kind !== 'default' && p.kind !== 'fake') || this.roles.
 if (rollOf(obs.round.number, 13) % 100 >= 100 * P.lurkProb * (0.6 + 0.8 * this.attrs.aggression)) return null;
 const far = this.intel.sites[other(p.site)];
 const k = route.regions.findIndex((r) => far.regions.has(r));
-/** @type {Route} */
 const wait = k > 0 ? { ...route, site: far.id, regions: route.regions.slice(0, k + 1), regionSet: new Set(route.regions.slice(0, k + 1)), portals: route.portals.slice(0, k), points: [...route.points.slice(0, k), { x: far.cx, y: far.cy }] } : route;
 const stage = this.stageSpots('T', wait.site, -1, wait)[0] ?? null;
 this.lurkPick = { route, wait, stage };
 return this.lurkPick;
 }
-/**
-* @param {Observation} obs @param {TPlan} p @param {SiteId} exec @param {number} routeIdx
-* @returns {{ spot: Spot | null, side: Pt } | null}
-*/
-flankWatch(obs, p, exec, routeIdx) {
-const me = obs.me;
-const w = this.flankSpot(exec, routeIdx);
-if (w === null) return null;
-const gid = this.groupOf(obs, me.id, p);
-const carrier = this.carrierId(obs);
-const mates = this.ids.filter((x) => this.isAlive(obs, x) && x !== carrier && this.roles.of(x) !== ENTRY && this.groupOf(obs, x, p) === gid);
-const pick = mates.find((x) => this.roles.of(x) === LURK) ?? mates.find((x) => this.roles.of(x) === SUPPORT) ?? [...mates].sort((a, b) => this.memberIndex(obs, b, p) - this.memberIndex(obs, a, p))[0];
-if (pick !== me.id) return null;
-const inside = obs.teammates.filter((m) => m.alive && this.inRectSite(m.x, m.y, exec)).length;
-if (inside >= 2 || (this.execTick >= 0 && obs.tick - this.execTick > P.flankCoverSec * this.tps) || this.inRectSite(me.x, me.y, exec)) {
-this.flankDone = true;
-return null;
-}
-return { spot: this.alive(obs).length >= 4 ? w : null, side: { x: w.fx, y: w.fy } };
-}
-/**
-* @param {SiteId} exec @param {number} routeIdx @returns {Spot | null}
-*/
-flankSpot(exec, routeIdx) {
-const key = `flankW${exec}${routeIdx}`;
-if (this.flankSpots.has(key)) return this.flankSpots.get(key) ?? null;
-const g = this.g;
-const intel = this.intel;
-const route = this.tRoute(exec, routeIdx);
-const ent = this.entranceOf(exec, routeIdx);
-const site = intel.sites[exec];
-/** @type {Spot | null} */
-let out = null;
-let side = null;
-let bd = 20 * UNIT;
-if (route !== null && ent !== null) {
-const names = new Set(route.regions.map((i) => intel.map.regions[i].id));
-for (const q of intel.portals) {
-const o = route.regionSet.has(q.a) ? q.b : route.regionSet.has(q.b) ? q.a : -1;
-if (o < 0 || site.regions.has(o) || names.has(intel.map.regions[o].id)) continue;
-const d = dist(q.x, q.y, ent.ox, ent.oy);
-if (d < bd) {
-bd = d;
-side = q;
-}
-}
-}
-if (side !== null && route !== null && ent !== null) {
-const st = this.stageSpots('T', exec, routeIdx)[0] ?? { x: ent.ox, y: ent.oy };
-const cx0 = Math.floor(side.x / UNIT);
-const cy0 = Math.floor(side.y / UNIT);
-let best = -Infinity;
-for (let y = cy0 - 12; y <= cy0 + 12; y++) {
-for (let x = cx0 - 12; x <= cx0 + 12; x++) {
-if (g.isBlock(x, y)) continue;
-const i = y * g.W + x;
-const rg = intel.region[i];
-if (site.regions.has(rg) || !route.regionSet.has(rg)) continue;
-const c = g.center(i);
-const d = dist(c.x, c.y, side.x, side.y) / UNIT;
-if (d < 3 || d > 12 || !g.los(c.x, c.y, side.x, side.y) || segDist(c.x, c.y, st.x, st.y, ent.ox, ent.oy).d < 1.5 * UNIT) continue;
-const sc = (intel.cover[i] !== 0 ? 4 : 0) - intel.exposure[i] - Math.abs(d - 6);
-if (sc > best) {
-best = sc;
-out = { x: c.x, y: c.y, cell: i, fx: side.x, fy: side.y, score: sc, entrance: -1 };
-}
-}
-}
-}
-this.flankSpots.set(key, out);
-return out;
-}
-/** @param {Observation} obs @param {TPlan} p @param {SiteId} exec @param {{ near: number, second: Entrance, wait: number }} f */
 flankHold(obs, p, exec, f) {
 if (this.flankStart < 0) this.flankStart = obs.tick;
 if ((obs.tick - this.flankStart) / this.tps >= f.wait || obs.round.phaseTicksLeft <= P.forceExecLeft * this.tps || this.flankGo) return false;
@@ -4919,24 +4185,19 @@ const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.s
 if (done) this.flankGo = true;
 return !done;
 }
-/** @param {SiteId} s @returns {Route} */
 aroundSite(s) {
 let r = this.aroundCache.get(s);
 if (r === undefined) {
 const site = this.intel.sites[s];
 const regionSet = new Set(this.intel.map.regions.map((_, i) => i).filter((i) => !site.regions.has(i)));
-r = /** @type {Route} */ ({ site: s, team: 'T', regions: [...regionSet], regionSet, portals: [], points: [], length: 0 });
+r = ({ site: s, team: 'T', regions: [...regionSet], regionSet, portals: [], points: [], length: 0 });
 this.aroundCache.set(s, r);
 }
 return r;
 }
-/** @param {number} x @param {number} y @param {SiteId} s */
 inRectSite(x, y, s) {
 return inRect(this.intel.sites[s].rect, Math.floor(x / UNIT), Math.floor(y / UNIT));
 }
-/**
-* @param {Observation} obs @param {SiteId} s
-*/
 yieldTo(obs, s) {
 const me = obs.me;
 const c = this.g.cellOf(me.x, me.y);
@@ -4946,9 +4207,6 @@ const wait = this.waitEntry(obs, s);
 if (wait) this.yielded += this.data.rules.decisionInterval;
 return wait;
 }
-/**
-* @param {Observation} obs @param {TPlan} p @param {SiteId} s
-*/
 spawnWait(obs, p, s) {
 const me = obs.me;
 const e = obs.teammates.find((m) => m.alive && m.id === this.roles.who(ENTRY));
@@ -4961,14 +4219,12 @@ const wait = ce >= 0 && dS[ce] >= dS[c] - 10;
 if (wait) this.spawnHeld += this.data.rules.decisionInterval;
 return wait;
 }
-/** @param {Observation} obs @param {TacOut} out @param {Spot} st */
 awpSettle(obs, out, st) {
 const me = obs.me;
 if (this.roles.of(me.id) !== AWP || me.loadout.primary !== 'awp' || dist(me.x, me.y, st.x, st.y) >= 4 * UNIT) return;
 out.stop = true;
 out.hold = { ...st, x: me.x, y: me.y };
 }
-/** @param {Observation} obs @param {SiteId} s */
 waitEntry(obs, s) {
 const me = obs.me;
 const role = this.roles.of(me.id);
@@ -4981,16 +4237,12 @@ const e = mates.find((m) => m.id === this.roles.who(ENTRY));
 const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
 return e !== undefined && ce >= 0 && !this.wentIn.has(e.id) && dS[ce] >= dS[c] - 10;
 }
-/** @param {SiteId} site @param {number} routeIdx */
 entranceOf(site, routeIdx) {
 const r = this.tRoute(site, routeIdx);
 if (r === null) return null;
 const pid = r.portals[r.portals.length - 1];
 return this.intel.sites[site].entrances.find((e) => e.portal === pid) ?? null;
 }
-/**
-* @param {SiteId} s @param {Entrance} e
-*/
 smokePoint(s, e) {
 const g = this.g;
 let best = null;
@@ -5022,12 +4274,10 @@ const d = dist(best.x, best.y, e.ix, e.iy);
 const f = Math.min(0.6, (P.smokeOff * UNIT) / Math.max(d, 1));
 return { x: e.ix + (best.x - e.ix) * f, y: e.iy + (best.y - e.iy) * f };
 }
-/** @param {SiteId} s @param {Entrance} e @returns {Pt[]} */
 smokeSpots(s, e) {
 const key = `${s}${e.portal}`;
 const hit = this.smokeCache.get(key);
 if (hit !== undefined) return hit;
-/** @type {Pt[]} */
 const out = [];
 const holds = this.intel.sites[s].holds.filter((h) => dist(h.x, h.y, e.ix, e.iy) <= 25 * UNIT && this.g.los(h.x, h.y, e.ix, e.iy)).sort((a, b) => dist(b.x, b.y, e.ix, e.iy) - dist(a.x, a.y, e.ix, e.iy) || a.cell - b.cell);
 for (const h of holds) {
@@ -5038,21 +4288,16 @@ out.push({ x: e.ix, y: e.iy });
 this.smokeCache.set(key, out);
 return out;
 }
-/**
-* @param {Observation} obs @param {TPlan} p @param {SiteId} exec @param {Entrance} ent @returns {Pt | null}
-*/
 smokeTarget(obs, p, exec, ent) {
 const me = obs.me;
 const gap = P.smokeGap * UNIT;
 const rank = this.groupOf(obs, me.id, p) === 0 ? 0 : 1;
 const flank = this.flankOf(p, exec);
 const mine = this.smokeSpots(exec, ent);
-/** @type {Entrance | null} */
 let peer = null;
 if (p.kind === 'split') peer = this.entranceOf(exec, rank === 0 ? p.r2 : p.r1);
 else if (flank !== null) peer = ent.portal === flank.main.portal ? flank.second : flank.main;
 const peerSpots = peer !== null ? this.smokeSpots(exec, peer) : [];
-/** @type {Pt[]} */
 let list;
 if (rank === 0) {
 const second = peerSpots.find((q) => dist(q.x, q.y, mine[0].x, mine[0].y) >= gap);
@@ -5064,7 +4309,6 @@ list = mine.filter((q) => first === undefined || dist(q.x, q.y, first.x, first.y
 }
 return list.find((q) => this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) >= gap) && this.util.solve(me.x, me.y, q.x, q.y) !== null) ?? null;
 }
-/** @param {number} x @param {number} y @param {Pt} c @param {number} depth */
 canHide(x, y, c, depth) {
 const g = this.g;
 const start = g.cellOf(x, y);
@@ -5072,7 +4316,6 @@ if (start < 0) return false;
 let frontier = [start];
 const seen = new Set(frontier);
 for (let d = 0; d <= depth; d++) {
-/** @type {number[]} */
 const next = [];
 for (const i of frontier) {
 const q = g.center(i);
@@ -5090,9 +4333,6 @@ frontier = next;
 }
 return false;
 }
-/**
-* @param {Pt} p @param {SiteId | null} site
-*/
 viewer(p, site) {
 const R = this.util.flashRadius;
 if (this.perc.threats(p.x, p.y, 30).some((k) => dist(k.x, k.y, p.x, p.y) < R && this.g.los(k.x, k.y, p.x, p.y))) return true;
@@ -5109,10 +4349,6 @@ if (far >= this.enemiesAlive) return false;
 const t = this.perc.lastTick;
 return [...this.intel.sites[site].holds, ...this.deepSpots(site)].some((h) => dist(h.x, h.y, p.x, p.y) < R && !this.perc.cleared(h.cell, t) && this.g.los(h.x, h.y, p.x, p.y));
 }
-/**
-* @param {Observation} obs @param {SiteId} s @param {Entrance} e @param {number} ratio
-* @param {Pt | null} [avoid] 第二顆（2.6.1）：離第一顆爆點 P.flashSecondGap 格內的候選不要
-*/
 flashPoint(obs, s, e, ratio, avoid = null) {
 const g = this.g;
 const site = this.intel.sites[s];
@@ -5130,7 +4366,6 @@ const q = { x: sc.ox + cosd(sc.dir) * r, y: sc.oy + sind(sc.dir) * r };
 const qc = g.cellOf(q.x, q.y);
 if (qc >= 0 && !g.isWall(qc % g.W, Math.floor(qc / g.W)) && site.regions.has(this.intel.region[qc])) seers.push({ x: q.x, y: q.y, w: 1 });
 }
-/** @type {{ x: number, y: number, sc: number }[]} */
 const list = [];
 const cx = Math.floor(e.ix / UNIT);
 const cy = Math.floor(e.iy / UNIT);
@@ -5159,7 +4394,6 @@ const d = Math.max(1, dist(e.ix, e.iy, site.cx, site.cy));
 const f = Math.min(1, (4 * UNIT) / d);
 const ax = e.ix + (site.cx - e.ix) * f;
 const ay = e.iy + (site.cy - e.iy) * f;
-/** @type {{ x: number, y: number, sc: number }[]} */
 const def = [];
 for (let y = cy - 8; y <= cy + 8; y++) {
 for (let x = cx - 8; x <= cx + 8; x++) {
@@ -5188,7 +4422,7 @@ if (this.util.solve(me.x, me.y, c.x, c.y) === null) continue;
 let cost = 0;
 for (const m of mates) {
 const d = dist(m.x, m.y, c.x, c.y);
-if (d < B && g.los(m.x, m.y, c.x, c.y) && !(ratio < 5 && !P.flashStill && this.canHide(m.x, m.y, c, 4))) cost += 1 - d / B;
+if (d < B && g.los(m.x, m.y, c.x, c.y) && !(ratio < 5 && this.canHide(m.x, m.y, c, 4))) cost += 1 - d / B;
 }
 const hide = this.nav?.escape(obs, (i) => {
 const q = g.center(i);
@@ -5203,10 +4437,6 @@ best = c;
 }
 return best;
 }
-/**
-* @param {Observation} obs @param {TacOut} out @param {number} bx @param {number} by @param {SiteId} s
-* @returns {ThrowWish | null}
-*/
 postPlant(obs, out, bx, by, s) {
 out.task = 'hold';
 const me = obs.me;
@@ -5258,7 +4488,6 @@ if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, b
 }
 return this.postUtility(obs, bx, by, s);
 }
-/** @param {Observation} obs @param {number} bx @param {number} by @param {SiteId} s @returns {ThrowWish | null} */
 postUtility(obs, bx, by, s) {
 const me = obs.me;
 const left = (obs.bomb.ticksLeft ?? 0) / this.tps;
@@ -5272,7 +4501,6 @@ if (e === undefined) return null;
 const near = enemies.some((p) => dist(p.x, p.y, e.ox, e.oy) < 10 * UNIT);
 const target = { x: e.ox, y: e.oy };
 const smokers = [...new Set([...this.postSmokers, ...(this.util.has(me, 'smoke') ? [me.id] : [])])].filter((id) => this.isAlive(obs, id)).sort((a, b) => a - b);
-/** @type {Entrance[]} */
 const entries = [];
 for (const q of entrances) if (entries.every((p) => dist(p.ox, p.oy, q.ox, q.oy) >= (P.smokeGap + 2) * UNIT)) entries.push(q);
 const smoke = entries[smokers.indexOf(me.id)];
@@ -5282,22 +4510,17 @@ const reserve = burners[0] ?? alive[0];
 if (near && me.id !== reserve && this.util.has(me, 'molotov') && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return { kind: 'molotov', ...target, why: '燒回防入口' };
 return null;
 }
-/** @param {SiteId} s @param {number} bx @param {number} by */
 postSpots(s, bx, by, spread = false) {
 const site = this.intel.sites[s];
 const holds = site.holds.filter((h) => dist(h.x, h.y, bx, by) < 14 * UNIT).sort((a, b) => (site.entrances[a.entrance]?.ctDist ?? 0) - (site.entrances[b.entrance]?.ctDist ?? 0));
 const plants = site.plants.filter((h) => dist(h.x, h.y, bx, by) < 12 * UNIT && dist(h.x, h.y, bx, by) > 1500).map((h) => ({ ...h, fx: bx, fy: by }));
 const all = [...holds, ...plants];
 if (!spread) return all;
-/** @type {typeof all} */
 const out = [];
 for (const h of all) if (dist(h.x, h.y, bx, by) >= P.postMin * UNIT && out.every((o) => dist(o.x, o.y, h.x, h.y) >= P.postGap * UNIT)) out.push(h);
 for (const h of all) if (!out.includes(h)) out.push(h);
 return out;
 }
-/**
-* @param {Observation} obs @param {SiteId} site @param {number} idx0
-*/
 pickRoute(obs, site, idx0) {
 const all = this.intel.routes.T[site];
 if (all.length === 0) return null;
@@ -5307,7 +4530,6 @@ const me = obs.me;
 const c = this.g.cellOf(me.x, me.y);
 if (c >= 0 && !routes[idx].regionSet.has(this.intel.region[c])) return routes.find((r) => r.regionSet.has(this.intel.region[c])) ?? null;
 if (c < 0 || this.intel.distSpawn.T[c] / 10 > P.routeSwitchNear) return routes[idx];
-/** @param {Route} r */
 const risk = (r) => {
 let v = 0;
 for (const p of r.points) v = Math.max(v, this.perc.danger[this.g.cellOf(p.x, p.y)] ?? 0);
@@ -5321,24 +4543,18 @@ if (best !== idx && risk(routes[best]) < cur / 2) this.routeOverride = best;
 const r = routes[this.routeOverride >= 0 ? this.routeOverride : idx];
 return risk(r) >= P.routeSwitchRisk ? null : r;
 }
-/** @param {Observation} obs */
 carrierId(obs) {
 if (obs.me.hasBomb) return obs.me.id;
 const c = obs.teammates.find((m) => m.alive && m.hasBomb);
 return c === undefined ? -1 : c.id;
 }
-/** @param {Observation} obs @param {(id: number) => boolean} [filter] */
 rank(obs, filter = () => true) {
 const ids = [obs.me.id, ...obs.teammates.filter((m) => m.alive).map((m) => m.id)].filter(filter).sort((a, b) => a - b);
 return Math.max(0, ids.indexOf(obs.me.id));
 }
-/**
-* @param {Observation} obs @param {CTPlan} p @returns {Map<number, { spot: Spot, site: SiteId | null }>}
-*/
 ctLayout(obs, p) {
 const key = `${p.a}${p.m}${p.b}${this.awper}${this.roles.key}`;
 if (this.layout !== null && this.layoutKey === key) return this.layout;
-/** @type {{ spot: Spot, site: SiteId | null, k: number }[]} */
 const pos = [];
 const mids = this.midSpots();
 let m = p.m;
@@ -5346,15 +4562,12 @@ if (mids.length === 0) m = 0;
 const a = p.a + (mids.length === 0 ? Math.ceil(p.m / 2) : 0);
 const b = 5 - a - m;
 const round = obs.round.number;
-/** @param {Spot} spot @param {SiteId} s */
 const vary = (spot, s) => (this.deepSpots(s).includes(spot) ? spot : this.varySpot(spot, round));
 this.pickHolds('A', a, round).forEach((spot, k) => pos.push({ spot: vary(spot, 'A'), site: 'A', k }));
 for (let i = 0; i < m; i++) pos.push({ spot: this.varySpot(mids[i % mids.length], round), site: null, k: -1 });
 this.pickHolds('B', b, round).forEach((spot, k) => pos.push({ spot: vary(spot, 'B'), site: 'B', k }));
-/** @type {Map<number, { spot: Spot, site: SiteId | null }>} */
 const out = new Map();
 let ids = [...this.ids];
-/** @type {SiteId | null} */
 let snSite = null;
 if (this.awper >= 0) {
 const sn = this.sniperSpot();
@@ -5368,7 +4581,6 @@ ids = ids.filter((x) => x !== this.awper);
 snSite = sn.site;
 }
 }
-/** @type {Record<number, (q: { site: SiteId | null, k: number }) => number>} */
 const pref = {
 [ANCHOR]: (q) => (q.site === null ? 9 : q.k === 0 ? (q.site !== snSite ? 0 : 1) : 2 + q.k),
 [SUPPORT]: (q) => (q.site === null ? 5 : q.k === 1 ? (q.site !== snSite ? 0 : 1) : q.k >= 2 ? 2 : 4),
@@ -5390,7 +4602,6 @@ this.layout = out;
 this.layoutKey = key;
 return out;
 }
-/** @param {Observation} obs @param {CTPlan} p @param {SiteId} s */
 anchorOf(obs, p, s) {
 const lay = this.ctLayout(obs, p);
 const an = this.roles.who(ANCHOR);
@@ -5398,21 +4609,15 @@ if (an >= 0 && lay.get(an)?.site === s && this.isAlive(obs, an)) return an;
 for (const id of this.ids) if (lay.get(id)?.site === s && this.isAlive(obs, id)) return id;
 return -1;
 }
-/** @param {Observation} obs @param {CTPlan} p @param {number} id */
 stays(obs, p, id) {
 if (p.rot === null) return false;
 const site = this.ctLayout(obs, p).get(id)?.site ?? null;
 return this.anchorOf(obs, p, other(p.rot)) === id || (this.roles.of(id) === ANCHOR && site !== null);
 }
-/** @param {Observation} obs @param {number} id */
 isAlive(obs, id) {
 if (id === obs.me.id) return obs.me.alive;
 return obs.teammates.some((m) => m.id === id && m.alive);
 }
-/**
-* @param {Observation} obs @param {TacOut} out
-* @returns {ThrowWish | null}
-*/
 ctGoal(obs, out) {
 const me = obs.me;
 const b = obs.bomb;
@@ -5423,10 +4628,8 @@ this.awper = me.loadout.primary === 'awp' ? me.id : (obs.teammates.find((m) => m
 this.awperFixed = obs.round.phase === 'live';
 }
 if ((b.state === 'planted' || b.state === 'defusing') && b.x !== null && b.y !== null) {
-this.lastAttack = b.site;
 return this.retake(obs, out, p, b.x, b.y, b.site ?? 'A');
 }
-if (p.rot !== null) this.lastAttack = p.rot;
 const lay = this.ctLayout(obs, p).get(me.id);
 if (lay === undefined) return null;
 let spot = lay.spot;
@@ -5447,16 +4650,6 @@ spot = stack;
 out.role = `輪轉疊點 ${p.rot}`;
 }
 }
-if (P.rotDeep) {
-const held = this.ids.filter((id) => this.isAlive(obs, id) && this.ctLayout(obs, p).get(id)?.site === p.rot).map((id) => /** @type {Spot} */ (this.ctLayout(obs, p).get(id)?.spot));
-const free = this.deepSpots(p.rot).filter((d) => held.every((h) => dist(h.x, h.y, d.x, d.y) >= 3 * UNIT));
-const deep = free[Math.max(0, rotators.indexOf(me.id))];
-if (deep !== undefined) {
-spot = deep;
-out.role = `輪轉進點 ${p.rot}`;
-out.task = 'hold';
-}
-}
 }
 const fall = this.giveUp(obs, p, lay.site ?? p.rot);
 if (fall !== null) {
@@ -5468,7 +4661,7 @@ spot = sp;
 out.role = `退守 ${fall}`;
 out.task = 'retake';
 out.allowPeek = false;
-out.escape = P.giveUpRun && dist(me.x, me.y, sp.x, sp.y) > 3 * UNIT;
+out.escape = false;
 }
 }
 const probe = fall === null ? this.probeSpot(obs, p, out) : null;
@@ -5489,9 +4682,6 @@ out.role = '殘局找人';
 const s = lay.site ?? p.rot;
 return s === null ? null : this.ctUtility(obs, p, s);
 }
-/**
-* @param {Observation} obs @param {CTPlan} p @param {SiteId | null} s @returns {SiteId | null}
-*/
 giveUp(obs, p, s) {
 const b = obs.bomb.state;
 if (b === 'planted' || b === 'defusing' || obs.round.phase !== 'live') return null;
@@ -5510,9 +4700,6 @@ if (mine > P.giveUpMine) return null;
 this.fallback = s;
 return s;
 }
-/**
-* @param {SiteId} s @returns {Spot[]}
-*/
 fallSpots(s) {
 const key = `fall${s}`;
 const hit = this.spotCache.get(key);
@@ -5521,7 +4708,6 @@ const g = this.g;
 const intel = this.intel;
 const site = intel.sites[s];
 const ent = [...site.entrances].sort((a, b) => a.ctDist - b.ctDist)[0];
-/** @type {Spot[]} */
 const ranked = [];
 if (ent !== undefined) {
 const field = intel.distSite[s];
@@ -5535,7 +4721,6 @@ ranked.push({ x: c.x, y: c.y, cell: i, fx: ent.ox, fy: ent.oy, score: -3 * intel
 }
 }
 ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
-/** @type {Spot[]} */
 const out = [];
 for (const q of ranked) {
 if (out.length >= 5) break;
@@ -5545,9 +4730,6 @@ const res = out.length > 0 ? out : this.stageSpots('CT', s, 0);
 this.spotCache.set(key, res);
 return res;
 }
-/**
-* @param {Observation} obs @param {CTPlan} p @param {TacOut} out @returns {Spot | null}
-*/
 probeSpot(obs, p, out) {
 const me = obs.me;
 const t = obs.tick;
@@ -5557,7 +4739,7 @@ if (t > back.until || dist(me.x, me.y, back.spot.x, back.spot.y) < 400) {
 this.probeOut = null;
 return null;
 }
-out.escape = P.probeRun;
+out.escape = false;
 out.role = '探點・縮回';
 return back.spot;
 }
@@ -5585,7 +4767,7 @@ const here = ct[this.g.cellOf(me.x, me.y)];
 const c = this.nav?.findCover(obs, th, (i) => ct[i] <= here) ?? null;
 if (c === null) return null;
 this.probeOut = { spot: { ...sp, x: c.x, y: c.y, cell: this.g.cellOf(c.x, c.y), fx: th[0].x, fy: th[0].y }, until: t + 2 * this.tps };
-out.escape = P.probeRun;
+out.escape = false;
 out.role = '探點・縮回';
 return this.probeOut.spot;
 }
@@ -5593,9 +4775,6 @@ if (P.probeCover && dist(me.x, me.y, sp.x, sp.y) < 6 * UNIT) out.walk = true;
 out.role = '探點';
 return sp;
 }
-/**
-* @returns {Spot[]}
-*/
 probeSpots() {
 const hit = this.spotCache.get('probe');
 if (hit !== undefined) return hit;
@@ -5603,7 +4782,6 @@ const g = this.g;
 const intel = this.intel;
 const v = P.routeSpeed;
 const entrancePortals = new Set([...intel.sites.A.entrances, ...intel.sites.B.entrances].map((e) => e.portal));
-/** @type {Map<number, { n: number, from: Pt }>} */
 const uses = new Map();
 for (const s of SITES) {
 for (const r of intel.routes.T[s]) {
@@ -5614,7 +4792,6 @@ else uses.set(pid, { n: 1, from: k > 0 ? r.points[k - 1] : this.spawnCenter('T')
 });
 }
 }
-/** @type {Spot[]} */
 const ranked = [];
 for (const [pid, u] of uses) {
 if (entrancePortals.has(pid)) continue;
@@ -5657,13 +4834,9 @@ const out = ranked.slice(0, 2);
 this.spotCache.set('probe', out);
 return out;
 }
-/** @param {Observation} obs @param {Pt} c */
 mateSees(obs, c) {
 return obs.teammates.some((m) => m.alive && dist(m.x, m.y, c.x, c.y) < this.util.blindRange && this.g.los(m.x, m.y, c.x, c.y));
 }
-/**
-* @param {Observation} obs @param {SiteId} s @param {Entrance} e
-*/
 pressure(obs, s, e) {
 const site = this.intel.sites[s];
 let n = 0;
@@ -5680,9 +4853,6 @@ if (d >= c.r0 - 2 && d <= c.r1 + 2 && Math.abs(adiff(angleTo(c.ox, c.oy, e.ox, e
 for (const q of obs.effects) if (q.kind === 'smoke' && dist(q.x, q.y, e.ox, e.oy) < 8 * UNIT && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) > 2 * UNIT)) sign++;
 return { n, sign };
 }
-/**
-* @param {Observation} obs @param {CTPlan} p @param {SiteId} s @returns {ThrowWish | null}
-*/
 ctUtility(obs, p, s) {
 const me = obs.me;
 const t = obs.tick;
@@ -5717,13 +4887,8 @@ if (th !== undefined && partner && this.util.solve(me.x, me.y, th.x, th.y) !== n
 }
 return null;
 }
-/**
-* @param {Observation} obs @param {TacOut} out @param {CTPlan} p @param {number} bx @param {number} by @param {SiteId} s
-* @returns {ThrowWish | null}
-*/
 retake(obs, out, p, bx, by, s) {
 const me = obs.me;
-const t = obs.tick;
 const b = obs.bomb;
 out.task = 'retake';
 out.allowPeek = false;
@@ -5753,11 +4918,6 @@ return this.retakeAs(obs, out, p, bx, by, s, g, team);
 }
 return this.retakeAs(obs, out, p, bx, by, s, defuser, feasible);
 }
-/**
-* @param {Observation} obs @param {TacOut} out @param {CTPlan} p @param {number} bx @param {number} by @param {SiteId} s
-* @param {ReturnType<Tactics['defuseTeam']>[number]} defuser @param {ReturnType<Tactics['defuseTeam']>} feasible
-* @returns {ThrowWish | null}
-*/
 retakeAs(obs, out, p, bx, by, s, defuser, feasible) {
 const me = obs.me;
 const t = obs.tick;
@@ -5767,7 +4927,7 @@ const pending = this.defuseTeam(obs, bx, by).some((m) => m.id === me.id && m.pen
 const clear = obs.enemiesAlive === 0;
 if (me.defuseTicks > 0 && defuser.id !== me.id) {
 out.objective = false;
-out.cmds.push({ type: 'move', x: me.x, y: me.y }); // 明確交接；stop 不會取消引擎拆包。
+out.cmds.push({ type: 'move', x: me.x, y: me.y });
 }
 const inside = this.inSite(me.x, me.y, s, bx, by);
 const stage = this.stageSpots('CT', s, 0);
@@ -5784,7 +4944,6 @@ out.role = lead ? '等突破手先進' : '回防集結';
 if (dist(me.x, me.y, sp.x, sp.y) < 10 * UNIT) out.walk = true;
 return null;
 }
-/** @type {ThrowWish | null} */
 let wish = null;
 if (!inside && this.util.has(me, 'flash') && defuser.id !== me.id && t - this.flashHeard > 3 * this.tps) {
 const th = this.perc.threats(bx, by, 30).find((k) => dist(k.x, k.y, bx, by) < 12 * UNIT);
@@ -5821,9 +4980,6 @@ out.role = '回防掩護';
 out.task = 'cover';
 return wish;
 }
-/**
-* @param {Observation} obs @param {number} bx @param {number} by
-*/
 saveSpot(obs, bx, by) {
 const me = obs.me;
 if (P.saveHide) {
@@ -5833,7 +4989,6 @@ const g = this.g;
 const start = g.cellOf(me.x, me.y);
 if (start >= 0) {
 const from = dijkstra(g, [start]);
-/** @type {Pt[]} */
 const th = this.perc.threats(me.x, me.y, 30).map((k) => ({ x: k.x, y: k.y }));
 for (const q of this.perc.sectors) if (q.kind === 'footstep' && t - q.tick < 3 * this.tps) th.push({ x: q.ox + cosd(q.dir) * ((q.r0 + q.r1) / 2) * UNIT, y: q.oy + sind(q.dir) * ((q.r0 + q.r1) / 2) * UNIT });
 const pts = [{ x: bx, y: by }, ...th];
@@ -5867,51 +5022,14 @@ const far = dist(z.x, z.y, bx, by) >= P.saveDist * UNIT ? z : null;
 this.saveCache = far ?? { x: me.x + (me.x - bx), y: me.y + (me.y - by) };
 return this.saveCache;
 }
-/**
-* @param {Observation} obs @param {TacOut} out
-*/
 overlay(obs, out) {
 const me = obs.me;
 const t = obs.tick;
 if (out.escape) return;
 const own = this.util.away !== null && t >= this.util.away.from ? this.util.away : null;
 this.mateFlash = this.mateFlash.filter((x) => t <= x.pop + 2);
-const told = this.mateFlash.some((x) => !x.seen && !x.claim && t <= x.pop + 2);
-if (P.flashSeeDodge && me.team === 'T' && !told) {
-const away = this.util.away;
-for (const q of obs.projectiles) {
-if (q.kind !== 'flash' || (away !== null && dist(away.x, away.y, q.x, q.y) < 6 * UNIT)) continue;
-const e = this.mateFlash.find((x) => x.seen === true && x.lx !== undefined && dist(x.lx, x.ly ?? 0, q.x, q.y) < 4 * UNIT);
-if (e === undefined) {
-if (this.mateFlash.some((x) => dist(x.x, x.y, q.x, q.y) < 6 * UNIT)) continue;
-this.mateFlash.push({ x: q.x, y: q.y, pop: t + (this.util.fuse.get('flash') ?? 45), seen: true, lx: q.x, ly: q.y, lt: t, aim: false });
-continue;
-}
-const dt = Math.max(1, t - (e.lt ?? t));
-const vx = (q.x - (e.lx ?? q.x)) / dt;
-const vy = (q.y - (e.ly ?? q.y)) / dt;
-const left = Math.max(0, e.pop - t);
-let px = q.x;
-let py = q.y;
-const sp = Math.hypot(vx, vy);
-const steps = sp < 1 ? 0 : Math.min(Math.ceil((sp * left) / (UNIT / 2)), 80);
-for (let k = 0; k < steps; k++) {
-const nx = px + (vx / sp) * (UNIT / 2);
-const ny = py + (vy / sp) * (UNIT / 2);
-if (this.g.isWall(Math.floor(nx / UNIT), Math.floor(ny / UNIT))) break;
-px = nx;
-py = ny;
-}
-e.x = px;
-e.y = py;
-e.lx = q.x;
-e.ly = q.y;
-e.lt = t;
-e.aim = true;
-}
-}
 const edge = P.flashEdge * UNIT;
-const mf = this.mateFlash.find((x) => (!x.seen || x.aim === true) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
+const mf = this.mateFlash.find((x) => dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
 const release = P.flashRelease && this.roles.of(me.id) !== AWP ? this.data.rules.reactionTicks - P.flashReleaseMargin : -2;
 const f = own !== null ? own : mf !== undefined && t < mf.pop - release ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
 if (f !== null && t <= f.until && !out.objective) {
@@ -5920,14 +5038,6 @@ const g = this.g;
 const d = dist(me.x, me.y, f.x, f.y);
 if (d >= R && d < R + edge && mf !== undefined && g.los(me.x, me.y, f.x, f.y)) {
 out.stop = true;
-return;
-}
-if (P.flashStill && own === null && d < R && g.los(me.x, me.y, f.x, f.y) && me.team === 'T') {
-if (f.until - 2 - t <= this.data.rules.reactionTicks + Math.ceil(this.tps / 4) + this.data.rules.decisionInterval) {
-out.look = { x: me.x + (me.x - f.x) * 2, y: me.y + (me.y - f.y) * 2 };
-out.urgent = true;
-out.hard = true;
-}
 return;
 }
 if (d < R && g.los(me.x, me.y, f.x, f.y) && me.team === 'T') {
@@ -5982,14 +5092,10 @@ out.role += '・追殘血';
 }
 }
 }
-/**
-* @param {Observation} obs @param {Pt} soon @returns {(Pt & { awp: boolean }) | null}
-*/
 gunLine(obs, soon) {
 const me = obs.me;
 const g = this.g;
 const t = obs.tick;
-/** @param {Pt} q */
 const opens = (q) => !g.los(me.x, me.y, q.x, q.y) && g.los(soon.x, soon.y, q.x, q.y);
 for (let i = this.perc.anon.length - 1; i >= 0; i--) {
 const a = this.perc.anon[i];
@@ -6009,9 +5115,6 @@ if (d > 2 * UNIT && d < P.lineZone * UNIT && dist(soon.x, soon.y, a.x, a.y) < d)
 const q = this.awp;
 return q !== null && t - q.tick < P.awpMemo * this.tps && dist(me.x, me.y, q.x, q.y) < 45 * UNIT && opens(q) ? { x: q.x, y: q.y, awp: true } : null;
 }
-/**
-* @param {Observation} obs @param {TacOut} out @returns {ThrowWish | null}
-*/
 lineCheck(obs, out) {
 const me = obs.me;
 if (me.team === 'CT' || out.goal === null || out.stop || out.urgent || out.commit || out.objective || out.escape || obs.enemies.length > 0 || obs.round.phase !== 'live' || obs.enemiesAlive === 0) return null;
@@ -6035,7 +5138,6 @@ if (this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, sm.x, sm.y) !== nu
 if (this.util.has(me, 'flash') && d < this.util.flashRadius && this.util.solve(me.x, me.y, q.x, q.y) !== null && !this.flashTaken(obs, q)) return { kind: 'flash', x: q.x, y: q.y, why: '閃槍線' };
 return null;
 }
-/** @param {Observation} obs @param {Pt} c */
 entersView(obs, c) {
 const me = obs.me;
 const w = this.nav?.wps[this.nav.wpIdx];
@@ -6043,9 +5145,6 @@ if (w === undefined) return true;
 const k = Math.min(1, (3 * UNIT) / Math.max(dist(me.x, me.y, w.x, w.y), 1));
 return this.g.los(me.x + (w.x - me.x) * k, me.y + (w.y - me.y) * k, c.x, c.y);
 }
-/**
-* @param {Observation} obs @returns {ThrowWish | null}
-*/
 anyNade(obs) {
 const me = obs.me;
 if (!this.util.has(me, 'he') || obs.round.phase === 'freeze') return null;
@@ -6061,10 +5160,6 @@ return { kind: 'he', x, y, why: '手雷' };
 }
 return null;
 }
-/**
-* @param {'T' | 'CT'} team @param {SiteId} s @param {number} routeIdx @param {Route} [over] 指定路線（繞後用，不在路線集裡）
-* @returns {Spot[]}
-*/
 stageSpots(team, s, routeIdx, over) {
 const key = `${team}${s}${routeIdx}${over !== undefined ? `L${over.portals.join(',')}` : ''}`;
 const hit = this.spotCache.get(key);
@@ -6074,7 +5169,6 @@ const intel = this.intel;
 const routes = intel.routes[team][s];
 const route = over ?? (routes.length === 0 ? null : routes[Math.min(routeIdx, routes.length - 1)]);
 const site = intel.sites[s];
-/** @type {Spot[]} */
 const out = [];
 const pid = route?.portals[route.portals.length - 1];
 const ent = site.entrances.find((e) => e.portal === pid) ?? (team === 'T' ? site.entrances[0] : [...site.entrances].sort((a, b) => a.ctDist - b.ctDist)[0]);
@@ -6087,7 +5181,6 @@ const d0 = field[g.cellOf(ent.ox, ent.oy)];
 const want = d0 + P.stageBack * 10;
 const prev = route !== null && route.points.length >= 3 ? route.points[route.points.length - 3] : this.spawnCenter(team);
 const enemyHolds = team === 'T' ? [...site.holds, ...this.midSpots()] : [];
-/** @param {Pt} c */
 const seenBy = (c) => {
 let n = 0;
 for (const hs of enemyHolds) if (dist(hs.x, hs.y, c.x, c.y) < 30 * UNIT && g.los(hs.x, hs.y, c.x, c.y)) n++;
@@ -6096,11 +5189,10 @@ return n;
 let best = -1;
 let bestS = -Infinity;
 const R = team === 'T' ? 18 + P.stageRetreatSteps * P.stageRetreat : 18;
-const onRoute = (/** @type {number} */ i) => team !== 'T' || route === null || route.regionSet.has(intel.region[i]);
+const onRoute = ( i) => team !== 'T' || route === null || route.regionSet.has(intel.region[i]);
 const smokes = team === 'T' ? this.smokeSpots(s, ent) : [];
 const cx0 = Math.floor(ent.ox / UNIT);
 const cy0 = Math.floor(ent.oy / UNIT);
-/** @param {number} target @param {boolean} safe */
 const scan = (target, safe) => {
 for (let y = cy0 - R; y <= cy0 + R; y++) {
 for (let x = cx0 - R; x <= cx0 + R; x++) {
@@ -6127,14 +5219,13 @@ if (best < 0) {
 this.spotCache.set(key, out);
 return out;
 }
-/** @type {number[]} */
 const queue = [best];
 const depth = new Map([[best, 0]]);
 for (let q = 0; q < queue.length && out.length < 5; q++) {
 const i = queue[q];
 const c = g.center(i);
 if (field[i] >= d0 + 40 && !site.regions.has(intel.region[i]) && onRoute(i) && (!safe || seenBy(c) === 0) && out.every((o) => dist(o.x, o.y, c.x, c.y) >= P.stageGap * UNIT)) out.push({ x: c.x, y: c.y, cell: i, fx: ent.x, fy: ent.y, score: 0, entrance: site.entrances.indexOf(ent) });
-const dd = /** @type {number} */ (depth.get(i));
+const dd = (depth.get(i));
 if (dd >= (safe ? 9 : 4)) continue;
 const x = i % g.W;
 const y = (i - x) / g.W;
@@ -6173,21 +5264,16 @@ if (team === 'T') out.sort((a, b) => dist(a.x, a.y, ent.ox, ent.oy) - dist(b.x, 
 this.spotCache.set(key, out);
 return out;
 }
-/** @param {'T' | 'CT'} team */
 spawnCenter(team) {
 const z = this.intel.map.spawnZones[team];
 return this.g.center(this.intel.nearestOpen(Math.floor((z.x0 + z.x1) / 2), Math.floor((z.y0 + z.y1) / 2)));
 }
-/**
-* @returns {Spot[]}
-*/
 midSpots() {
 const hit = this.spotCache.get('mid');
 if (hit !== undefined) return hit;
 const g = this.g;
 const intel = this.intel;
 const entrancePortals = new Set([...intel.sites.A.entrances, ...intel.sites.B.entrances].map((e) => e.portal));
-/** @type {Map<number, number>} */
 const uses = new Map();
 for (const s of SITES) for (const r of intel.routes.T[s]) for (const pid of r.portals) uses.set(pid, (uses.get(pid) ?? 0) + 1);
 let pick = null;
@@ -6208,7 +5294,6 @@ pickS = sc;
 pick = p;
 }
 }
-/** @type {Spot[]} */
 const out = [];
 if (pick !== null) {
 const ctAt = intel.distSpawn.CT[g.cellOf(pick.x, pick.y)];
@@ -6217,14 +5302,9 @@ out.push(...this.watchSpots(pick.x, pick.y, (i) => intel.distSpawn.CT[i] < ctAt,
 this.spotCache.set('mid', out);
 return out;
 }
-/**
-* @param {number} px @param {number} py @param {(i: number) => boolean} ok @param {number} n @param {Spot[]} avoid @param {number} entrance
-* @returns {Spot[]}
-*/
 watchSpots(px, py, ok, n, avoid, entrance) {
 const g = this.g;
 const intel = this.intel;
-/** @type {Spot[]} */
 const ranked = [];
 const R = P.holdMax;
 const cx0 = Math.floor(px / UNIT);
@@ -6242,7 +5322,6 @@ ranked.push({ x: c.x, y: c.y, cell: i, fx: px, fy: py, score: sc, entrance });
 }
 }
 ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
-/** @type {Spot[]} */
 const out = [];
 for (const s of ranked) {
 if (out.length >= n) break;
@@ -6250,16 +5329,12 @@ if ([...out, ...avoid].every((o) => dist(o.x, o.y, s.x, s.y) >= 4 * UNIT)) out.p
 }
 return out;
 }
-/**
-* @param {SiteId} s @param {number} n @returns {Spot[]}
-*/
 siteSpots(s, n) {
 const key = `site${s}${n}`;
 const hit = this.spotCache.get(key);
 if (hit !== undefined) return hit;
 const site = this.intel.sites[s];
 const holds = site.holds;
-/** @type {Spot[]} */
 let out = holds.slice(0, Math.min(2, n));
 if (n > 2 && holds.length > 0) {
 const ei = Math.max(0, holds[0].entrance);
@@ -6271,22 +5346,15 @@ for (let i = 0; out.length < n && holds.length > 0; i++) out.push(holds[i % hold
 this.spotCache.set(key, out);
 return out;
 }
-/**
-* @param {SiteId} s @param {number} n @param {number} round @returns {Spot[]}
-*/
 pickHolds(s, n, round) {
 const deep = this.deepSpots(s);
 if (n < 1 || deep.length === 0) return this.siteSpots(s, n);
 const roll = rollOf(round, s === 'A' ? 1 : 2);
 if (n === 1 || deep.length === 1) return [deep[roll % Math.min(3, deep.length)], ...this.siteSpots(s, n).slice(0, n - 1)];
-/** @type {Spot[][]} */
 const pairs = [];
 for (let i = 0; i < deep.length; i++) for (let j = i + 1; j < deep.length; j++) pairs.push([deep[i], deep[j]]);
 return [...pairs[roll % pairs.length], ...this.siteSpots(s, n).slice(0, n - 2)];
 }
-/**
-* @param {SiteId} s @returns {Spot[]}
-*/
 deepSpots(s) {
 const key = `deep${s}`;
 const hit = this.spotCache.get(key);
@@ -6298,7 +5366,6 @@ const field = intel.distSite[s];
 const R = this.util.flashRadius / UNIT;
 const top = site.entrances.filter((e) => Number.isFinite(e.tDist)).slice(0, 2);
 const fov = this.data.rules.fovDeg;
-/** @type {Spot[]} */
 const ranked = [];
 for (const need of [top.length, 1]) {
 const es = top.slice(0, need);
@@ -6322,7 +5389,6 @@ ranked.push({ x: c.x, y: c.y, cell: i, fx, fy, score: sc, entrance: site.entranc
 if (ranked.length > 0) break;
 }
 ranked.sort((a, b) => b.score - a.score || a.cell - b.cell);
-/** @type {Spot[]} */
 const out = [];
 for (const q of ranked) {
 if (out.length >= 4) break;
@@ -6331,9 +5397,6 @@ if (out.every((o) => dist(o.x, o.y, q.x, q.y) >= 4 * UNIT)) out.push(q);
 this.spotCache.set(key, out);
 return out;
 }
-/**
-* @param {Spot} spot @param {number} round @returns {Spot}
-*/
 varySpot(spot, round) {
 const key = `vary${spot.cell}`;
 let list = this.spotCache.get(key);
@@ -6355,14 +5418,10 @@ this.spotCache.set(key, list);
 }
 return list[rollOf(round, spot.cell) % list.length];
 }
-/**
-* @returns {{ spot: Spot, site: SiteId, len: number } | null}
-*/
 sniperSpot() {
 if (this.sniper !== undefined) return this.sniper;
 const g = this.g;
 const intel = this.intel;
-/** @type {{ spot: Spot, site: SiteId, len: number } | null} */
 let best = null;
 let bestS = -Infinity;
 for (const s of SITES) {
@@ -6397,7 +5456,6 @@ return best;
 }
 }
 class Judgment {
-/** @param {Grid} g @param {MapIntel} intel @param {Perception} perc @param {InitData} data */
 constructor(g, intel, perc, data) {
 this.g = g;
 this.intel = intel;
@@ -6410,7 +5468,6 @@ if (!g.walkable(i) || intel.cover[i] === 0) continue;
 const p = g.center(i);
 if (this.posts.every((q) => dist(q.x, q.y, p.x, p.y) > 2 * UNIT)) this.posts.push({ ...p, cell: i });
 }
-/** @type {Map<number, number>} */
 this.checked = new Map();
 this.focus = -1;
 this.since = -1;
@@ -6418,7 +5475,6 @@ this.bombKey = '';
 this.bombField = new Float64Array(0);
 this.escapeKey = '';
 this.escapeField = new Float64Array(0);
-/** @type {Map<number, Float64Array>} */
 this.fields = new Map();
 }
 reset() {
@@ -6429,24 +5485,21 @@ this.bombKey = '';
 this.escapeKey = '';
 this.fields.clear();
 }
-/** @param {number} x @param {number} y */
 field(x, y) {
 const cell = this.g.cellOf(x, y);
 let f = this.fields.get(cell);
 if (f === undefined) {
 f = dijkstra(this.g, [cell]);
-if (this.fields.size >= 4) this.fields.delete(/** @type {number} */ (this.fields.keys().next().value));
+if (this.fields.size >= 4) this.fields.delete( (this.fields.keys().next().value));
 this.fields.set(cell, f);
 }
 return f;
 }
-/** @param {{ x: number, y: number, weapon?: string }} m @param {number} x @param {number} y */
 travel(m, x, y) {
 const f = this.field(x, y);
 const speed = (this.weapons.find((w) => w.id === m.weapon)?.speed ?? 130) * this.rules.ticksPerSecond;
 return Math.max(0, (f[this.g.cellOf(m.x, m.y)] ?? Infinity) / 10 * UNIT - 800) / speed + this.rules.reactionTicks / this.rules.ticksPerSecond;
 }
-/** @param {Observation} obs @param {number} bx @param {number} by */
 retriever(obs, bx, by) {
 const key = `${bx},${by}`;
 if (key !== this.bombKey) {
@@ -6455,14 +5508,13 @@ this.bombField = dijkstra(this.g, [this.g.cellOf(bx, by)]);
 }
 const me = obs.me;
 const team = [{ id: me.id, x: me.x, y: me.y, hp: me.hp, firing: me.shots.length > 0 }, ...obs.teammates.filter((m) => m.alive)];
-const score = (/** @type {typeof team[number]} */ m) => this.bombField[this.g.cellOf(m.x, m.y)] + (m.firing ? 100 : 0) + (m.hp < 30 ? 30 : 0);
+const score = ( m) => this.bombField[this.g.cellOf(m.x, m.y)] + (m.firing ? 100 : 0) + (m.hp < 30 ? 30 : 0);
 return team.sort((a, b) => score(a) - score(b) || a.id - b.id)[0].id;
 }
-/** @param {Observation} obs @param {Pt} ahead @returns {{ look: Pt | null, stop: boolean, why: string }} */
 approach(obs, ahead) {
 const me = obs.me;
 const g = this.g;
-const out = { look: /** @type {Pt | null} */ (null), stop: false, why: '' };
+const out = { look: (null), stop: false, why: '' };
 if (obs.enemiesAlive === 0 || me.blindTicks > 0 || obs.round.phase === 'freeze') return out;
 const len = Math.max(1, dist(me.x, me.y, ahead.x, ahead.y));
 const k = Math.min(1, 3000 / len);
@@ -6482,7 +5534,7 @@ const recentDeath = deaths.some((q) => dist(q.x, q.y, p.x, p.y) < 16 * UNIT && g
 if (!p.evidence && !opens && !recentDeath) continue;
 if (!p.evidence && !recentDeath && obs.tick - this.perc.seenTick[p.cell] < this.rules.ticksPerSecond) continue;
 if ((this.checked.get(p.cell) ?? -1) > obs.tick && !p.evidence && !recentDeath) continue;
-const route = me.team === 'CT' && ['A', 'B'].some((s) => this.intel.routes.T[/** @type {'A' | 'B'} */ (s)].some((r) => r.points.some((q) => dist(q.x, q.y, p.x, p.y) < 4 * UNIT)));
+const route = me.team === 'CT' && ['A', 'B'].some((s) => this.intel.routes.T[ (s)].some((r) => r.points.some((q) => dist(q.x, q.y, p.x, p.y) < 4 * UNIT)));
 const score = (p.evidence ? 16 : 0) + (recentDeath ? 10 : 0) + (opens ? 8 : 0) + (route ? 3 : 0) - d / UNIT * 0.3;
 if (score <= best) continue;
 best = score;
@@ -6505,7 +5557,6 @@ out.why = out.stop ? '先架危險角度' : '預瞄前進';
 if (ready || !out.stop) this.checked.set(cell, obs.tick + 2 * this.rules.ticksPerSecond);
 return out;
 }
-/** @param {Observation} obs @param {number} bx @param {number} by */
 evacuation(obs, bx, by) {
 const g = this.g;
 const key = `${bx},${by}`;
@@ -6522,7 +5573,6 @@ this.escapeField = dijkstra(g, safe);
 let i = g.cellOf(obs.me.x, obs.me.y);
 const cost = this.escapeField[i];
 if (!Number.isFinite(cost)) return null;
-/** @type {Pt | null} */
 let guard = null;
 for (let n = 0; n < g.N && this.escapeField[i] > 0; n++) {
 const p = g.center(i);
@@ -6543,7 +5593,6 @@ return { ...g.center(i), guard, seconds: cost / 10 * UNIT / speed + this.rules.r
 }
 }
 class Mission {
-/** @param {InitData} data @param {Judgment} judge */
 constructor(data, judge) {
 this.rules = data.rules;
 this.judge = judge;
@@ -6555,10 +5604,6 @@ this.critical = false;
 this.reason = '';
 }
 reset() { this.key = ''; this.since = -1; this.changes = 0; this.critical = false; this.reason = ''; }
-/**
-* @param {Observation} obs @param {TacOut} out
-* @param {Combat['fires'] | undefined} fires @param {Navigator | null} nav
-*/
 avoidFire(obs, out, fires, nav) {
 if (fires === undefined || nav === null || (!out.objective && out.task !== 'plant' && out.task !== 'defuse')) return false;
 const me = obs.me;
@@ -6585,7 +5630,6 @@ out.task = 'hold';
 out.role = plant ? '避火待下包' : '避火待拆包';
 return true;
 }
-/** @param {Observation} obs @param {TacOut} out */
 assess(obs, out) {
 const r = this.rules;
 const me = obs.me;
@@ -6605,26 +5649,17 @@ if (this.critical) { out.allowPeek = false; out.walk = false; out.stop = false; 
 }
 export default class ShooterBaseline {
 constructor() {
-/** @type {InitData} */
-this.data = /** @type {any} */ (null);
-/** @type {Helpers} */
-this.h = /** @type {any} */ (null);
-/** @type {Grid} */
-this.g = /** @type {any} */ (null);
-/** @type {MapIntel} */
-this.intel = /** @type {any} */ (null);
-/** @type {Perception} */
-this.perc = /** @type {any} */ (null);
-/** @type {Navigator} */
-this.nav = /** @type {any} */ (null);
-/** @type {Combat} */
-this.combat = /** @type {any} */ (null);
-/** @type {Tactics} */
-this.tactics = /** @type {any} */ (null);
+this.data = (null);
+this.h = (null);
+this.g = (null);
+this.intel = (null);
+this.perc = (null);
+this.nav = (null);
+this.combat = (null);
+this.tactics = (null);
 this.round = -1;
 this.why = '';
 }
-/** @returns {Declaration} */
 declare() {
 return {
 name: 'shooter-baseline',
@@ -6640,19 +5675,14 @@ knobs: [
 ],
 };
 }
-/**
-* @param {InitData} data
-* @param {Helpers} helpers
-*/
 init(data, helpers) {
 this.data = data;
 this.h = helpers;
 initTrig(helpers);
 const k = data.knobs;
-/** @param {AttributeKey} key */
 const at = (key) => clamp((data.attributes?.[key] ?? 50) / 100, 0, 1);
 const awpSlot = k.awpSlot ?? 4;
-const role = (k.role ?? 0) > 0 ? /** @type {number} */ (k.role) : autoRole(data.slot, awpSlot);
+const role = (k.role ?? 0) > 0 ? (k.role) : autoRole(data.slot, awpSlot);
 const attrs = {
 aim: at('aim'),
 offAim: role === AWP ? clamp(at('aim') - P.awpOffAim, 0, 1) : at('aim'),
@@ -6676,7 +5706,6 @@ this.tactics.nav = this.nav;
 this.tactics.judge = this.judge;
 this.tactics.mission = this.mission;
 }
-/** @param {Observation} obs */
 newRound(obs) {
 this.round = obs.round.number;
 this.perc.reset();
@@ -6686,10 +5715,6 @@ this.mission?.reset();
 this.combat.reset();
 this.tactics.reset(obs);
 }
-/**
-* @param {Observation} obs
-* @returns {Command[]}
-*/
 decide(obs) {
 const me = obs.me;
 if (obs.round.number !== this.round) this.newRound(obs);
@@ -6702,9 +5727,7 @@ this.combat.clearTargets();
 this.combat.track(obs);
 const ev = this.combat.evade(obs);
 const tac = this.tactics.update(obs);
-/** @type {Command[]} */
 const out = [];
-/** @type {Command[]} */
 const late = [];
 for (const c of tac.cmds) (c.type === 'plant' || c.type === 'defuse' ? late : out).push(c);
 if (tac.goal !== null) this.nav.setGoal(tac.goal.x, tac.goal.y, tac.route);

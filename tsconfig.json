@@ -35,6 +35,7 @@
   ],
   "exclude": [
     "src/web",
+    "bots/shooter-baseline.js",
     "bots/legion-marshal.js",
     "bots/legion-general-v2.js",
     "bots/legion-marshal-v2.js",

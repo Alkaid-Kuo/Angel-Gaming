@@ -24,8 +24,6 @@ export class MapIntel {
     const W = g.W;
     // ── 區域歸屬：包含該格的最小區域（同引擎 regionsAt 的排序）；不在任何區域的可走格歸最近的區域 ──
     this.regionCount = map.regions.length;
-    /** @type {string[]} */
-    this.regionNames = map.regions.map((r) => r.name);
     this.region = new Int16Array(N).fill(-1);
     const order = map.regions.map((r, i) => ({ i, area: (r.x1 - r.x0) * (r.y1 - r.y0) })).sort((a, b) => a.area - b.area || a.i - b.i);
     /** @type {number[]} */
@@ -125,11 +123,6 @@ export class MapIntel {
       }
     }
     return -1;
-  }
-
-  /** 區域名稱（只給喊話與報告） @param {number} r */
-  regionName(r) {
-    return r >= 0 && r < this.regionNames.length ? this.regionNames[r] : '?';
   }
 
   findPortals() {

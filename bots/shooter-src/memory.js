@@ -41,8 +41,6 @@ export class Perception {
     this.stampId = 0;
     /** 每個交界的威脅信心 */
     this.portalThreat = new Float32Array(intel.portals.length);
-    /** 每個區域最近被看過的格的比例 */
-    this.regionSeen = new Float32Array(intel.regionCount);
     this.dangerTick = -1000000;
     this.dangerDirty = true;
     this.lastTick = -1;
@@ -73,7 +71,6 @@ export class Perception {
     this.seenTick.fill(-1000000);
     this.danger.fill(0);
     this.portalThreat.fill(0);
-    this.regionSeen.fill(0);
     this.dangerTick = -1000000;
     this.dangerDirty = true;
     this.lastTick = -1;
@@ -341,31 +338,6 @@ export class Perception {
       }
       this.portalThreat[p.id] = Math.max(v, this.belief.risk[g.cellOf(p.x, p.y)] ?? 0);
     }
-    // 區域的已看過比例
-    const n = this.intel.regionCount;
-    const tot = new Int32Array(n);
-    const seen = new Int32Array(n);
-    const lim = t - this.clearTtl;
-    for (let i = 0; i < g.N; i++) {
-      const r = this.intel.region[i];
-      if (r < 0) continue;
-      tot[r]++;
-      if (this.seenTick[i] >= lim) seen[r]++;
-    }
-    for (let r = 0; r < n; r++) this.regionSeen[r] = tot[r] === 0 ? 1 : seen[r] / tot[r];
-  }
-
-  /** 未確認區域：敵人可能到得了、最近被看過的格不到一半 @param {number} t */
-  unconfirmedRegions(t) {
-    /** @type {number[]} */
-    const out = [];
-    for (let r = 0; r < this.intel.regionCount; r++) {
-      if (this.regionSeen[r] >= 0.5) continue;
-      const reg = this.intel.map.regions[r];
-      const c = this.intel.nearestOpen(Math.floor((reg.x0 + reg.x1) / 2), Math.floor((reg.y0 + reg.y1) / 2));
-      if (this.reachable(c, t, 6)) out.push(r);
-    }
-    return out;
   }
 
   /** 記得的敵人（信心 ≥ 門檻），含不知道是誰的彈道點；最近的在前 @param {number} x @param {number} y @param {number} [minConf] @returns {Threat[]} */

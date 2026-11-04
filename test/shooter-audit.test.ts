@@ -237,14 +237,16 @@ describe('Bot 2.4.1：可靠清點與購用一致性', () => {
 });
 
 describe('Bot 建置：刪除註解說明不改語意', () => {
-  it('保留多行 template 中的註解形狀、空行、插值、raw 值、行內轉型與 ASI', () => {
+  it('拿掉全部註解與型別標籤；保留多行 template 中的註解形狀、空行、插值、raw 值、行內轉型與 ASI', () => {
     const text = ['/** 中文說明 @type {string} */', 'const text = `開始', '  // 字串內的文字', '  /** 這也是文字 @type {string} */', '', '', '結束 ${(() => {', '  // 真正的註解', '  return 7;', '})()}`;', 'const raw = String.raw`\\n`;', 'const cast = /** @type {number} */ (3);', 'function asi() { return', '`不能接成回傳值`; }'].join('\n');
     const packed = compactIndent(stripComments(text.split('\n')).join('\n'));
     const ast = (source: string): string => JSON.stringify(parse(source, { ecmaVersion: 2020, sourceType: 'module' }), (k, v: unknown) => k === 'start' || k === 'end' ? undefined : v);
     expect(ast(packed)).toBe(ast(text));
-    expect(packed).toContain('/** @type {string} */');
-    expect(packed).toContain('/** @type {number} */');
-    expect(packed).toContain('文字 @type {string} */\n\n\n結束');
+    // 2.7 起型別標籤也拿掉（型別檢查改對原始碼做），template 內長得像註解的文字原樣保留
+    expect(packed.startsWith('const text')).toBe(true);
+    expect(packed).toContain('const cast = (3);');
+    expect(packed).toContain('  // 字串內的文字\n  /** 這也是文字 @type {string} */\n\n\n結束');
+    expect(packed).not.toContain('真正的註解');
   });
 });
 
