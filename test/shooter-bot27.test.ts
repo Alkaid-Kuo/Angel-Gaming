@@ -309,3 +309,38 @@ describe('Bot 2.7 批 1-6：閃光以投擲者＋爆炸時間識別（flashIdent
     expect(boundary().urgent).toBe(false);
   });
 });
+
+describe('Bot 2.7 批 1-7：閃光候選快取每秒依敵情重算（flashCacheSec）', () => {
+  function reads(advance: number): { first: number; again: number; later: number } {
+    const { match, bot } = live(1);
+    const t = bot.tactics;
+    const obs = match.observe(1);
+    const e = bot.intel.sites.A.entrances[0];
+    let calls = 0;
+    const original = bot.perc.threats.bind(bot.perc);
+    bot.perc.threats = (...args: Parameters<typeof original>) => {
+      calls++;
+      return original(...args);
+    };
+    t.flashPoint(obs, 'A', e, 2);
+    const first = calls;
+    t.flashPoint(obs, 'A', e, 2);
+    const again = calls;
+    bot.perc.lastTick += advance;
+    bot.perc.sectors.push({ conf: 100, kind: 'footstep', ox: e.ix, oy: e.iy, dir: 0, r0: 0, r1: 20, tick: obs.tick + advance });
+    t.flashPoint({ ...obs, tick: obs.tick + advance }, 'A', e, 2);
+    return { first, again, later: calls };
+  }
+
+  it('同一秒內重複呼叫用快取；一秒後有新聲音就重算', () => {
+    const r = reads(30);
+    expect(r.again).toBe(r.first);
+    expect(r.later).toBe(r.first + 1);
+  });
+
+  it('開關關掉重現 2.6.3：新敵情進來也不重算', () => {
+    setP('flashCacheSec', 0);
+    const r = reads(30);
+    expect(r.later).toBe(r.first);
+  });
+});

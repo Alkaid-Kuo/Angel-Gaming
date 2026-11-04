@@ -1889,7 +1889,9 @@ export class Tactics {
     const g = this.g;
     const site = this.intel.sites[s];
     const R = this.util.flashRadius;
-    const key = `${s}${e.portal}:${this.smokes.length}`;
+    // 2.7：敵情（記得的敵人、聲音）每 P.flashCacheSec 秒換一次版本，候選跟著重算
+    const era = P.flashCacheSec > 0 ? Math.floor(this.perc.lastTick / (P.flashCacheSec * this.tps)) : 0;
+    const key = `${s}${e.portal}:${this.smokes.length}:${era}`;
     if (this.flashKey !== key) {
       this.flashKey = key;
       const t = this.perc.lastTick;

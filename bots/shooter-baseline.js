@@ -189,6 +189,7 @@ pickReach: 1.2,
 otMatchPoint: true,
 flashIdent: true,
 flashOffEq: true,
+flashCacheSec: 1,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -4417,7 +4418,8 @@ flashPoint(obs, s, e, ratio, avoid = null) {
 const g = this.g;
 const site = this.intel.sites[s];
 const R = this.util.flashRadius;
-const key = `${s}${e.portal}:${this.smokes.length}`;
+const era = P.flashCacheSec > 0 ? Math.floor(this.perc.lastTick / (P.flashCacheSec * this.tps)) : 0;
+const key = `${s}${e.portal}:${this.smokes.length}:${era}`;
 if (this.flashKey !== key) {
 this.flashKey = key;
 const t = this.perc.lastTick;
