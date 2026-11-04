@@ -1854,9 +1854,9 @@ const SITUATION_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'T27',
     name: '保槍不發呆',
-    expect: '炸彈下在 B、T 五人都活著，最後一個 CT 在 A 點中央、身上沒錢（下回合買不起）：8 秒內走開 2 格以上，停在有掩體（貼牆或矮牆）的格，離炸彈至少 22 格；兩張圖',
+    expect: '炸彈下在 B、T 五人都活著，最後一個 CT 帶 M4 在 A 點中央、身上沒錢（下回合買不起）：8 秒內走開 2 格以上，停在有掩體（貼牆或矮牆）的格，離炸彈至少 22 格；兩張圖',
     run: (bot, seed) => onBoth((mapId) => {
-      const d = driver(bot, { seed, map: mapId, seats: [CT0], alive: [CT0, ...TS] });
+      const d = driver(bot, { seed, map: mapId, seats: [CT0], alive: [CT0, ...TS], opts: { defaultLoadout: { CT: 'm4' } } });
       toLive(d);
       const m = d.match;
       for (const pid of TS) park(m, pid);

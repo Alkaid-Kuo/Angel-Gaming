@@ -13,7 +13,7 @@
 // 角色重複或缺角時退回隊內序號。
 // 經濟「B:full／force／half／eco」見 economy.js；道具的彈道見 utility.js。全部由地圖資料與觀察資料算，不寫死座標或區域代號。
 import { P, UNIT, adiff, angleTo, clamp, cosd, dijkstra, dist, inRect, lerp, segDist, sind } from './base.js';
-import { Economy, parseBuy } from './economy.js';
+import { Economy, parseBuy, parseGift } from './economy.js';
 import { Utility } from './utility.js';
 import { ANCHOR, AWP, ENTRY, LURK, Roles, SUPPORT, parseRole } from './roles.js';
 import { Cooperation } from './cooperation.js';
@@ -247,6 +247,13 @@ export class Tactics {
     /** 喊過身上有閃光的隊友（E:fl）；自己上次喊的（-1 ＝ 還沒喊） @type {Set<number>} */
     this.flashHolders = new Set();
     this.flashSaid = -1;
+    /** 發槍（2.6.2）：本回合的發槍計畫、我要去撿的槍（到期就自己買）、撿不到要補買 @type {{ from: number, to: number, w: import('./base.js').WeaponId }[]} */
+    this.gifts = [];
+    /** @type {{ w: import('./base.js').WeaponId, until: number } | null} */
+    this.giftWant = null;
+    this.giftMiss = false;
+    this.reBought = false;
+    this.pickAt = -1000000;
     /** 本回合我方煙霧的位置（自己丟的與隊友喊的） @type {import('./base.js').Pt[]} */
     this.smokes = [];
     /** 閃光爆點候選（依入口與煙霧數快取） */
@@ -371,6 +378,11 @@ export class Tactics {
     this.myClaim = null;
     this.flashHolders = new Set();
     this.flashSaid = -1;
+    this.gifts = [];
+    this.giftWant = null;
+    this.giftMiss = false;
+    this.reBought = false;
+    this.pickAt = -1000000;
     /** 本回合我方煙霧的位置（自己丟的與隊友喊的） @type {import('./base.js').Pt[]} */
     this.smokes = [];
     /** 閃光爆點候選（依入口與煙霧數快取） */
@@ -497,6 +509,7 @@ export class Tactics {
       out.walk = true;
       out.role += '・讓突破手先走';
     }
+    this.grab(obs, out);
     if (this.mission?.avoidFire(obs, out, this.combat?.fires, this.nav)) wish = null;
     this.mission?.assess(obs, out);
     if (wish === null && !out.commit) wish = this.anyNade(obs);
@@ -663,6 +676,11 @@ export class Tactics {
       if (p !== null) {
         // 只接受 id 比自己小的人（指揮或剛陣亡的指揮）的計畫；陣營要對
         if (msg.from < me.id && (p.kind === 'hold') === (me.team === 'CT')) this.setPlan(p, obs);
+        continue;
+      }
+      const gift = parseGift(text);
+      if (gift !== null) {
+        if (msg.from < me.id && this.gifts.every((q) => q.from !== gift.from)) this.gifts.push(gift);
         continue;
       }
       const b = parseBuy(text);
@@ -1009,6 +1027,13 @@ export class Tactics {
   /** 指揮先決定買法並廣播；其他人等指揮的買法（最多 1 秒）再買 @param {import('./base.js').Observation} obs @param {TacOut} out @param {boolean} isCmd */
   buy(obs, out, isCmd) {
     const me = obs.me;
+    // 等不到隊友送的槍：還能買就自己補買一次
+    if (this.bought && this.giftMiss && !this.reBought && obs.round.canBuy) {
+      this.reBought = true;
+      const items = this.econ.items(obs, this.econ.call ?? 'force', this.roles.of(me.id), this.roles.awper() === me.id);
+      if (items.length > 0) out.cmds.push({ type: 'buy', items });
+      return;
+    }
     if (!obs.round.canBuy || this.bought) {
       if (!this.kitSaid && me.loadout.kit && obs.round.phase !== 'freeze') {
         this.kitSaid = true;
@@ -1019,14 +1044,73 @@ export class Tactics {
     if (isCmd && this.buyCall === null) {
       this.buyCall = this.econ.teamCall(obs);
       out.cmds.push({ type: 'say', text: `B:${this.buyCall}` });
+      // 發槍計畫（2.6.2）：隊友的金錢公開、主武器只看得到手上拿的
+      const awper = this.roles.awper();
+      const people = [{ id: me.id, money: me.money, good: this.econ.hasGood(me.loadout.primary), awp: me.loadout.primary === 'awp', awper: awper === me.id }, ...obs.teammates.filter((m) => m.alive).map((m) => ({ id: m.id, money: m.money, good: this.econ.hasGood(m.weapon), awp: m.weapon === 'awp', awper: awper === m.id }))];
+      this.gifts = this.econ.giftPlan(people, me.team, this.buyCall);
+      for (const g of this.gifts) out.cmds.push({ type: 'say', text: `B:gift ${g.from} ${g.to} ${g.w}` });
     }
     const waited = obs.round.phase !== 'freeze' || this.data.rules.freezeTicks - obs.round.phaseTicksLeft >= this.tps;
     if (this.buyCall === null && !waited) return;
     const call = this.buyCall ?? this.econ.teamCall(obs);
     this.econ.call = call;
-    const items = this.econ.items(obs, call, this.roles.of(me.id), this.roles.awper() === me.id);
+    const give = this.gifts.find((g) => g.from === me.id)?.w ?? null;
+    const get = this.gifts.find((g) => g.to === me.id);
+    if (get !== undefined) this.giftWant = { w: get.w, until: obs.tick + (obs.round.phase === 'freeze' ? obs.round.phaseTicksLeft : 0) + P.giftWait * this.tps };
+    const items = this.econ.items(obs, call, this.roles.of(me.id), this.roles.awper() === me.id, give, get !== undefined);
     if (items.length > 0) out.cmds.push({ type: 'buy', items });
     this.bought = true;
+  }
+
+  /** 槍的價值（撿槍用）：狙擊槍給狙擊手最高，步槍其次 @param {string | null} w */
+  gunValue(w) {
+    if (w === 'awp') return this.roles.of(this.data.playerId) === AWP ? 4 : 2.5;
+    return w === 'ak' || w === 'm4' ? 3 : w === 'smg' || w === 'shotgun' ? 2 : 0;
+  }
+
+  /**
+   * 撿槍（2.6.2）：隊友送的槍（開打後 P.giftWait 秒內去撿，撿不到就自己補買）；或附近 P.grabRange 格內比手上好的槍，
+   * 看不到敵人、15 格內沒有記得的敵人、血 40 以上才撿。下包、拆包、撤離、衝點中不撿
+   * @param {import('./base.js').Observation} obs @param {TacOut} out
+   */
+  grab(obs, out) {
+    const me = obs.me;
+    const t = obs.tick;
+    const gw = this.giftWant;
+    if (gw !== null && (t > gw.until || me.loadout.primary === gw.w)) {
+      this.giftWant = null;
+      if (me.loadout.primary !== gw.w) this.giftMiss = true;
+    }
+    if (!P.grab || obs.round.phase === 'freeze' || out.objective || out.commit || out.escape || me.plantTicks > 0 || me.defuseTicks > 0) return;
+    const want = this.giftWant;
+    const mine = this.gunValue(me.loadout.primary);
+    let best = null;
+    let bv = mine;
+    let bd = Infinity;
+    for (const it of obs.items) {
+      if (it.kind !== 'weapon' || it.weapon === null) continue;
+      const v = want !== null && it.weapon === want.w ? 9 : this.gunValue(it.weapon);
+      const d = dist(me.x, me.y, it.x, it.y);
+      if (d > (want !== null ? 12 : P.grabRange) * UNIT || v <= mine || v < bv || (v === bv && d >= bd)) continue;
+      best = it;
+      bv = v;
+      bd = d;
+    }
+    if (best === null) return;
+    if (want === null && (obs.enemies.length > 0 || me.hp < 40 || this.perc.threats(me.x, me.y, 50).some((k) => dist(k.x, k.y, me.x, me.y) < 15 * UNIT))) return;
+    out.goal = { x: best.x, y: best.y };
+    out.hold = null;
+    out.route = null;
+    out.stop = false;
+    out.role += '・撿槍';
+    // 引擎撿的是 1.2 格內最近的掉落物：目標要是最近的那個才撿，不然再走近一點
+    const near = obs.items.some((it) => it !== best && dist(me.x, me.y, it.x, it.y) <= bd);
+    // 指令要等反應延遲才生效：剛下過就不再下（第二次會把剛掉在腳邊的舊槍撿回來）
+    if (bd < UNIT && !near && t - this.pickAt > this.data.rules.reactionTicks + 2 * this.data.rules.decisionInterval) {
+      this.pickAt = t;
+      out.cmds.push({ type: 'pickup' });
+    }
+    else if (near) out.goal = { x: best.x, y: best.y };
   }
 
   /**
@@ -1948,8 +2032,8 @@ export class Tactics {
       let cost = 0;
       for (const m of mates) {
         const d = dist(m.x, m.y, c.x, c.y);
-        // 照計畫執行時隊友收到 E:flash 會躲：4 步內躲得到的不算
-        if (d < B && g.los(m.x, m.y, c.x, c.y) && !(ratio < 5 && this.canHide(m.x, m.y, c, 4))) cost += 1 - d / B;
+        // 照計畫執行時隊友收到 E:flash 會躲：4 步內躲得到的不算（2.6.2 隊友原地背身不躲：照算）
+        if (d < B && g.los(m.x, m.y, c.x, c.y) && !(ratio < 5 && !P.flashStill && this.canHide(m.x, m.y, c, 4))) cost += 1 - d / B;
       }
       const hide = this.nav?.escape(obs, (i) => {
         const q = g.center(i);
@@ -2557,16 +2641,17 @@ export class Tactics {
     out.task = 'retake';
     out.allowPeek = false;
     const left = (b.ticksLeft ?? 0) / this.tps;
-    const myD = dist(me.x, me.y, bx, by);
     const team = this.defuseTeam(obs, bx, by);
-    const pending = team.some((m) => m.id === me.id && m.pending);
-    const clear = obs.enemiesAlive === 0;
     const feasible = team.filter((m) => m.eta <= left).sort((a, c) => (a.cautious > left ? 1 : 0) - (c.cautious > left ? 1 : 0) || a.eta - c.eta || a.id - c.id);
     const defuser = feasible.find((m) => m.defusing) ?? feasible[0];
     // 保槍：全隊都拆不完；或尚未開始、1 對 3 以上且下回合買不起。
-    const outnumbered = team.length === 1 && obs.enemiesAlive >= 3 && this.attrs.discipline >= 0.5 && this.attrs.aggression < 0.6 && this.econ.shortOf(me.money + 1400, me.loadout.primary, 'CT') > 0;
+    // 2.6.2（P.saveSmart）：沒有下一回合可存（對方賽點、半場最後一回合）就不保；1 對多時手上是狙擊槍或步槍才保
+    const last = P.saveSmart && this.econ.lastChance(obs);
+    const worth = !P.saveSmart || this.econ.hasGood(me.loadout.primary);
+    // 「下回合買不買得起」要用死了沒槍來算（2.5 用手上的槍算：拿著好槍時永遠算得起，反而不保）
+    const outnumbered = !last && worth && team.length === 1 && obs.enemiesAlive >= 3 && this.attrs.discipline >= 0.5 && this.attrs.aggression < 0.6 && this.econ.shortOf(me.money + 1400, P.saveSmart ? null : me.loadout.primary, 'CT') > 0;
     // 隊友已經在拆（而且拆得完）就不保槍，留下來掩護
-    if (defuser === undefined || (!defuser.defusing && outnumbered)) {
+    if ((defuser === undefined && !last) || (defuser !== undefined && !defuser.defusing && outnumbered)) {
       this.saving = true;
       const away = this.saveSpot(obs, bx, by);
       if (away !== null) out.goal = away;
@@ -2578,6 +2663,28 @@ export class Tactics {
       return null;
     }
     this.saving = false;
+    // 沒有下一回合、又沒人拆得完：照樣去拆（賭對方守包的人不在）
+    if (defuser === undefined) {
+      const g = team[0];
+      if (g === undefined) return null;
+      return this.retakeAs(obs, out, p, bx, by, s, g, team);
+    }
+    return this.retakeAs(obs, out, p, bx, by, s, defuser, feasible);
+  }
+
+  /**
+   * 回防（定好拆包的人之後）
+   * @param {import('./base.js').Observation} obs @param {TacOut} out @param {CTPlan} p @param {number} bx @param {number} by @param {SiteId} s
+   * @param {ReturnType<Tactics['defuseTeam']>[number]} defuser @param {ReturnType<Tactics['defuseTeam']>} feasible
+   * @returns {import('./utility.js').ThrowWish | null}
+   */
+  retakeAs(obs, out, p, bx, by, s, defuser, feasible) {
+    const me = obs.me;
+    const t = obs.tick;
+    const b = obs.bomb;
+    const myD = dist(me.x, me.y, bx, by);
+    const pending = this.defuseTeam(obs, bx, by).some((m) => m.id === me.id && m.pending);
+    const clear = obs.enemiesAlive === 0;
     if (me.defuseTicks > 0 && defuser.id !== me.id) {
       out.objective = false;
       out.cmds.push({ type: 'move', x: me.x, y: me.y }); // 明確交接；stop 不會取消引擎拆包。
@@ -2713,6 +2820,15 @@ export class Tactics {
       // 半徑外不會致盲：停在半徑外等炸開，不用躲
       if (d >= R && d < R + edge && mf !== undefined && g.los(me.x, me.y, f.x, f.y)) {
         out.stop = true;
+        return;
+      }
+      // 2.6.2：隊友的閃光不移動去躲（會拖慢進點），快爆時（指令延遲＋轉身 180°＋一個決策）背過身，炸開就轉回來
+      if (P.flashStill && own === null && d < R && g.los(me.x, me.y, f.x, f.y) && me.team === 'T') {
+        if (f.until - 2 - t <= this.data.rules.reactionTicks + Math.ceil(this.tps / 4) + this.data.rules.decisionInterval) {
+          out.look = { x: me.x + (me.x - f.x) * 2, y: me.y + (me.y - f.y) * 2 };
+          out.urgent = true;
+          out.hard = true;
+        }
         return;
       }
       // CT 在守位：閃光是對著外面丟的，離開崗位比被閃一下更虧

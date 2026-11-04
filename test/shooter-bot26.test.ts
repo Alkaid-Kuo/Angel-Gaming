@@ -256,3 +256,55 @@ describe('Bot 2.6.1：有效連閃、盲射友軍、保槍躲遠', () => {
     expect(f.bot.intel.cover[f.bot.g.cellOf(sp!.x, sp!.y)]).not.toBe(0);
   });
 });
+
+describe('Bot 2.6.2：保槍看局勢、發槍、撿槍', () => {
+  it('沒有下一回合可存：對方賽點、半場最後一回合', () => {
+    const f = live(5);
+    const e = f.bot.tactics.econ;
+    const obs = f.match.observe(5);
+    expect(e.lastChance(obs)).toBe(false);
+    const win = f.bot.data.rules.winRounds;
+    expect(e.lastChance({ ...obs, round: { ...obs.round, scoreT: win - 1 } })).toBe(true);
+    e.roundInHalf = f.bot.data.rules.roundsPerHalf;
+    expect(e.lastChance(obs)).toBe(true);
+  });
+
+  it('發槍計畫：狙擊手買不起狙擊槍時由錢最多、沒好槍的人送；買不起步槍的人也有人送；每人最多送一把', () => {
+    const f = live(5);
+    const e = f.bot.tactics.econ;
+    const people = [
+      { id: 5, money: 9800, good: false, awp: false, awper: false },
+      { id: 6, money: 8500, good: false, awp: false, awper: false },
+      { id: 7, money: 4000, good: false, awp: false, awper: true },
+      { id: 8, money: 1500, good: false, awp: false, awper: false },
+      { id: 9, money: 6000, good: true, awp: false, awper: false },
+    ];
+    const plan = e.giftPlan(people, 'CT', 'full');
+    expect(plan).toContainEqual({ from: 5, to: 7, w: 'awp' });
+    expect(plan).toContainEqual({ from: 6, to: 8, w: 'm4' });
+    expect(new Set(plan.map((g) => g.from)).size).toBe(plan.length);
+    expect(e.giftPlan(people, 'CT', 'eco')).toEqual([]);
+  });
+
+  it('送槍的人先買要送的槍；收槍的人不買主武器', () => {
+    const f = live(5);
+    const e = f.bot.tactics.econ;
+    const base = f.match.observe(5);
+    const obs = { ...base, me: { ...base.me, money: 9000, loadout: { ...base.me.loadout, primary: null } } };
+    const give = e.items(obs, 'full', 1, false, 'm4');
+    expect(give[0]).toBe('m4');
+    expect(give.filter((x) => x === 'm4').length).toBe(2);
+    const get = e.items(obs, 'full', 1, false, null, true);
+    expect(get.some((x) => x === 'm4' || x === 'smg' || x === 'awp')).toBe(false);
+  });
+
+  it('槍的價值：狙擊槍給狙擊手最高、步槍其次；E:gift 解析', async () => {
+    const { parseGift } = await import('../bots/shooter-src/economy.js');
+    expect(parseGift('B:gift 5 7 awp')).toEqual({ from: 5, to: 7, w: 'awp' });
+    expect(parseGift('B:full')).toBeNull();
+    const f = live(5);
+    const t = f.bot.tactics;
+    expect(t.gunValue('ak')).toBeGreaterThan(t.gunValue('smg'));
+    expect(t.gunValue('smg')).toBeGreaterThan(t.gunValue(null));
+  });
+});

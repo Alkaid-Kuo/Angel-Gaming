@@ -141,6 +141,7 @@ flashSecondAfter: 0.8,
 flashSecondWin: 3,
 flashSecondGap: 6,
 flashClaimDodge: true,
+flashStill: false,
 flankCover: false,
 flankCoverSec: 5,
 postMin: 5,
@@ -164,6 +165,11 @@ saveMargin: 2,
 saveDist: 22,
 saveHide: true,
 saveEvery: 2,
+saveSmart: true,
+gifts: true,
+giftWait: 5,
+grab: true,
+grabRange: 5,
 huntAggr: 0.65,
 tradeRange: 8,
 tradeHold: 1.5,
@@ -2661,6 +2667,11 @@ function parseBuy(text) {
 const m = /^B:(full|force|half|eco)$/.exec(text);
 return m === null ? null : /** @type {BuyCall} */ (m[1]);
 }
+/** @param {string} text @returns {{ from: number, to: number, w: WeaponId } | null} */
+function parseGift(text) {
+const m = /^B:gift (\d+) (\d+) (awp|ak|m4)$/.exec(text);
+return m === null ? null : { from: Number(m[1]), to: Number(m[2]), w: /** @type {WeaponId} */ (m[3]) };
+}
 const UTIL = {
 T: [
 ['flash', 'smoke', 'he'],
@@ -2765,6 +2776,13 @@ hasGood(primary) {
 return primary !== null && this.cost(primary) >= this.cost('smg') + 1000;
 }
 /** @param {Observation} obs */
+lastChance(obs) {
+const r = obs.round;
+const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
+const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
+return theirs >= this.data.rules.winRounds - 1 || lastOfHalf;
+}
+/** @param {Observation} obs */
 pistolRound(obs) {
 return obs.me.money <= this.data.rules.economy.startMoney + 100 && obs.me.loadout.primary === null && this.roundInHalf <= 1;
 }
@@ -2798,13 +2816,20 @@ if (this.prevCall === 'eco' && avg >= P.ecoFloor) return 'force';
 return 'eco';
 }
 /**
-* @param {Observation} obs @param {BuyCall} call @param {number} role @param {boolean} awper @returns {BuyItem[]}
+* @param {Observation} obs @param {BuyCall} call @param {number} role @param {boolean} awper
+* @param {WeaponId | null} [gift] @param {boolean} [receive] @returns {BuyItem[]}
 */
-items(obs, call, role, awper) {
+items(obs, call, role, awper, gift = null, receive = false) {
 const me = obs.me;
 const rules = this.data.rules;
 const team = me.team;
 let money = me.money;
+/** @type {BuyItem[]} */
+const pre = [];
+if (gift !== null && money >= this.cost(gift)) {
+pre.push(gift);
+money -= this.cost(gift);
+}
 const primary = me.loadout.primary;
 const rifle = team === 'T' ? 'ak' : 'm4';
 /** @type {BuyItem[]} */
@@ -2835,7 +2860,7 @@ n++;
 const rebel = this.opts.discipline < 0.5 && this.h.random() < 1 - 2 * this.opts.discipline;
 let mode = call;
 if (rebel && call === 'half' && this.shortOf(money, primary, team) <= 0) mode = 'full';
-const good = this.hasGood(primary);
+const good = receive || this.hasGood(primary);
 if (this.pistolRound(obs)) {
 armor();
 } else if (mode === 'full' || (good && mode !== 'eco')) {
@@ -2863,7 +2888,33 @@ take('deagle', this.cost('deagle'));
 }
 const w = this.data.weapons.find((x) => x.id === (primary ?? me.weapon));
 if (w !== undefined && w.reserve > 0 && me.ammoReserve < w.reserve / 2 && me.weapon === w.id && mode !== 'eco') take('ammo', rules.ammoPrice);
-return items;
+return [...pre, ...items];
+}
+/**
+* @param {{ id: number, money: number, good: boolean, awp: boolean, awper: boolean }[]} people @param {Team} team @param {BuyCall} call
+* @returns {{ from: number, to: number, w: WeaponId }[]}
+*/
+giftPlan(people, team, call) {
+if (!P.gifts || (call !== 'full' && call !== 'force')) return [];
+const rules = this.data.rules;
+const rifle = team === 'T' ? 'ak' : 'm4';
+const own = this.fullCost(team) + 200;
+const donors = people.filter((p) => !p.good).sort((a, b) => b.money - a.money || a.id - b.id);
+/** @type {{ from: number, to: number, w: WeaponId }[]} */
+const out = [];
+const used = new Set();
+/** @param {number} to @param {WeaponId} w */
+const give = (to, w) => {
+const d = donors.find((p) => p.id !== to && !used.has(p.id) && p.money >= own + this.cost(w));
+if (d === undefined) return;
+used.add(d.id);
+out.push({ from: d.id, to, w });
+};
+const awper = people.find((p) => p.awper && !p.awp && p.money < this.cost('awp') + rules.armorPrice + 200);
+if (awper !== undefined && call === 'full') give(awper.id, 'awp');
+const needy = people.filter((p) => !p.good && !p.awper && p.money < this.cost(rifle) + rules.armorPrice && !out.some((g) => g.to === p.id)).sort((a, b) => a.money - b.money || a.id - b.id);
+for (const p of needy) give(p.id, rifle);
+return out;
 }
 }
 /** @typedef {{ kind: GrenadeId, x: number, y: number, why: string }} ThrowWish */
@@ -3517,6 +3568,13 @@ this.myClaim = null;
 /** @type {Set<number>} */
 this.flashHolders = new Set();
 this.flashSaid = -1;
+/** @type {{ from: number, to: number, w: WeaponId }[]} */
+this.gifts = [];
+/** @type {{ w: WeaponId, until: number } | null} */
+this.giftWant = null;
+this.giftMiss = false;
+this.reBought = false;
+this.pickAt = -1000000;
 /** @type {Pt[]} */
 this.smokes = [];
 this.flashKey = '';
@@ -3635,6 +3693,11 @@ this.flashClaims = [];
 this.myClaim = null;
 this.flashHolders = new Set();
 this.flashSaid = -1;
+this.gifts = [];
+this.giftWant = null;
+this.giftMiss = false;
+this.reBought = false;
+this.pickAt = -1000000;
 /** @type {Pt[]} */
 this.smokes = [];
 this.flashKey = '';
@@ -3751,6 +3814,7 @@ if (this.slow) {
 out.walk = true;
 out.role += '・讓突破手先走';
 }
+this.grab(obs, out);
 if (this.mission?.avoidFire(obs, out, this.combat?.fires, this.nav)) wish = null;
 this.mission?.assess(obs, out);
 if (wish === null && !out.commit) wish = this.anyNade(obs);
@@ -3902,6 +3966,11 @@ const text = msg.text;
 const p = parsePlan(text);
 if (p !== null) {
 if (msg.from < me.id && (p.kind === 'hold') === (me.team === 'CT')) this.setPlan(p, obs);
+continue;
+}
+const gift = parseGift(text);
+if (gift !== null) {
+if (msg.from < me.id && this.gifts.every((q) => q.from !== gift.from)) this.gifts.push(gift);
 continue;
 }
 const b = parseBuy(text);
@@ -4209,6 +4278,12 @@ return (c >= 0 && this.intel.sites[s].regions.has(this.intel.region[c])) || dist
 /** @param {Observation} obs @param {TacOut} out @param {boolean} isCmd */
 buy(obs, out, isCmd) {
 const me = obs.me;
+if (this.bought && this.giftMiss && !this.reBought && obs.round.canBuy) {
+this.reBought = true;
+const items = this.econ.items(obs, this.econ.call ?? 'force', this.roles.of(me.id), this.roles.awper() === me.id);
+if (items.length > 0) out.cmds.push({ type: 'buy', items });
+return;
+}
 if (!obs.round.canBuy || this.bought) {
 if (!this.kitSaid && me.loadout.kit && obs.round.phase !== 'freeze') {
 this.kitSaid = true;
@@ -4219,14 +4294,66 @@ return;
 if (isCmd && this.buyCall === null) {
 this.buyCall = this.econ.teamCall(obs);
 out.cmds.push({ type: 'say', text: `B:${this.buyCall}` });
+const awper = this.roles.awper();
+const people = [{ id: me.id, money: me.money, good: this.econ.hasGood(me.loadout.primary), awp: me.loadout.primary === 'awp', awper: awper === me.id }, ...obs.teammates.filter((m) => m.alive).map((m) => ({ id: m.id, money: m.money, good: this.econ.hasGood(m.weapon), awp: m.weapon === 'awp', awper: awper === m.id }))];
+this.gifts = this.econ.giftPlan(people, me.team, this.buyCall);
+for (const g of this.gifts) out.cmds.push({ type: 'say', text: `B:gift ${g.from} ${g.to} ${g.w}` });
 }
 const waited = obs.round.phase !== 'freeze' || this.data.rules.freezeTicks - obs.round.phaseTicksLeft >= this.tps;
 if (this.buyCall === null && !waited) return;
 const call = this.buyCall ?? this.econ.teamCall(obs);
 this.econ.call = call;
-const items = this.econ.items(obs, call, this.roles.of(me.id), this.roles.awper() === me.id);
+const give = this.gifts.find((g) => g.from === me.id)?.w ?? null;
+const get = this.gifts.find((g) => g.to === me.id);
+if (get !== undefined) this.giftWant = { w: get.w, until: obs.tick + (obs.round.phase === 'freeze' ? obs.round.phaseTicksLeft : 0) + P.giftWait * this.tps };
+const items = this.econ.items(obs, call, this.roles.of(me.id), this.roles.awper() === me.id, give, get !== undefined);
 if (items.length > 0) out.cmds.push({ type: 'buy', items });
 this.bought = true;
+}
+/** @param {string | null} w */
+gunValue(w) {
+if (w === 'awp') return this.roles.of(this.data.playerId) === AWP ? 4 : 2.5;
+return w === 'ak' || w === 'm4' ? 3 : w === 'smg' || w === 'shotgun' ? 2 : 0;
+}
+/**
+* @param {Observation} obs @param {TacOut} out
+*/
+grab(obs, out) {
+const me = obs.me;
+const t = obs.tick;
+const gw = this.giftWant;
+if (gw !== null && (t > gw.until || me.loadout.primary === gw.w)) {
+this.giftWant = null;
+if (me.loadout.primary !== gw.w) this.giftMiss = true;
+}
+if (!P.grab || obs.round.phase === 'freeze' || out.objective || out.commit || out.escape || me.plantTicks > 0 || me.defuseTicks > 0) return;
+const want = this.giftWant;
+const mine = this.gunValue(me.loadout.primary);
+let best = null;
+let bv = mine;
+let bd = Infinity;
+for (const it of obs.items) {
+if (it.kind !== 'weapon' || it.weapon === null) continue;
+const v = want !== null && it.weapon === want.w ? 9 : this.gunValue(it.weapon);
+const d = dist(me.x, me.y, it.x, it.y);
+if (d > (want !== null ? 12 : P.grabRange) * UNIT || v <= mine || v < bv || (v === bv && d >= bd)) continue;
+best = it;
+bv = v;
+bd = d;
+}
+if (best === null) return;
+if (want === null && (obs.enemies.length > 0 || me.hp < 40 || this.perc.threats(me.x, me.y, 50).some((k) => dist(k.x, k.y, me.x, me.y) < 15 * UNIT))) return;
+out.goal = { x: best.x, y: best.y };
+out.hold = null;
+out.route = null;
+out.stop = false;
+out.role += '・撿槍';
+const near = obs.items.some((it) => it !== best && dist(me.x, me.y, it.x, it.y) <= bd);
+if (bd < UNIT && !near && t - this.pickAt > this.data.rules.reactionTicks + 2 * this.data.rules.decisionInterval) {
+this.pickAt = t;
+out.cmds.push({ type: 'pickup' });
+}
+else if (near) out.goal = { x: best.x, y: best.y };
 }
 /**
 * @param {Observation} obs @param {TacOut} out
@@ -5041,7 +5168,7 @@ if (this.util.solve(me.x, me.y, c.x, c.y) === null) continue;
 let cost = 0;
 for (const m of mates) {
 const d = dist(m.x, m.y, c.x, c.y);
-if (d < B && g.los(m.x, m.y, c.x, c.y) && !(ratio < 5 && this.canHide(m.x, m.y, c, 4))) cost += 1 - d / B;
+if (d < B && g.los(m.x, m.y, c.x, c.y) && !(ratio < 5 && !P.flashStill && this.canHide(m.x, m.y, c, 4))) cost += 1 - d / B;
 }
 const hide = this.nav?.escape(obs, (i) => {
 const q = g.center(i);
@@ -5581,14 +5708,13 @@ const b = obs.bomb;
 out.task = 'retake';
 out.allowPeek = false;
 const left = (b.ticksLeft ?? 0) / this.tps;
-const myD = dist(me.x, me.y, bx, by);
 const team = this.defuseTeam(obs, bx, by);
-const pending = team.some((m) => m.id === me.id && m.pending);
-const clear = obs.enemiesAlive === 0;
 const feasible = team.filter((m) => m.eta <= left).sort((a, c) => (a.cautious > left ? 1 : 0) - (c.cautious > left ? 1 : 0) || a.eta - c.eta || a.id - c.id);
 const defuser = feasible.find((m) => m.defusing) ?? feasible[0];
-const outnumbered = team.length === 1 && obs.enemiesAlive >= 3 && this.attrs.discipline >= 0.5 && this.attrs.aggression < 0.6 && this.econ.shortOf(me.money + 1400, me.loadout.primary, 'CT') > 0;
-if (defuser === undefined || (!defuser.defusing && outnumbered)) {
+const last = P.saveSmart && this.econ.lastChance(obs);
+const worth = !P.saveSmart || this.econ.hasGood(me.loadout.primary);
+const outnumbered = !last && worth && team.length === 1 && obs.enemiesAlive >= 3 && this.attrs.discipline >= 0.5 && this.attrs.aggression < 0.6 && this.econ.shortOf(me.money + 1400, P.saveSmart ? null : me.loadout.primary, 'CT') > 0;
+if ((defuser === undefined && !last) || (defuser !== undefined && !defuser.defusing && outnumbered)) {
 this.saving = true;
 const away = this.saveSpot(obs, bx, by);
 if (away !== null) out.goal = away;
@@ -5600,6 +5726,25 @@ if (me.scoped) out.cmds.push({ type: 'scope', on: false });
 return null;
 }
 this.saving = false;
+if (defuser === undefined) {
+const g = team[0];
+if (g === undefined) return null;
+return this.retakeAs(obs, out, p, bx, by, s, g, team);
+}
+return this.retakeAs(obs, out, p, bx, by, s, defuser, feasible);
+}
+/**
+* @param {Observation} obs @param {TacOut} out @param {CTPlan} p @param {number} bx @param {number} by @param {SiteId} s
+* @param {ReturnType<Tactics['defuseTeam']>[number]} defuser @param {ReturnType<Tactics['defuseTeam']>} feasible
+* @returns {ThrowWish | null}
+*/
+retakeAs(obs, out, p, bx, by, s, defuser, feasible) {
+const me = obs.me;
+const t = obs.tick;
+const b = obs.bomb;
+const myD = dist(me.x, me.y, bx, by);
+const pending = this.defuseTeam(obs, bx, by).some((m) => m.id === me.id && m.pending);
+const clear = obs.enemiesAlive === 0;
 if (me.defuseTicks > 0 && defuser.id !== me.id) {
 out.objective = false;
 out.cmds.push({ type: 'move', x: me.x, y: me.y }); // 明確交接；stop 不會取消引擎拆包。
@@ -5720,6 +5865,14 @@ const g = this.g;
 const d = dist(me.x, me.y, f.x, f.y);
 if (d >= R && d < R + edge && mf !== undefined && g.los(me.x, me.y, f.x, f.y)) {
 out.stop = true;
+return;
+}
+if (P.flashStill && own === null && d < R && g.los(me.x, me.y, f.x, f.y) && me.team === 'T') {
+if (f.until - 2 - t <= this.data.rules.reactionTicks + Math.ceil(this.tps / 4) + this.data.rules.decisionInterval) {
+out.look = { x: me.x + (me.x - f.x) * 2, y: me.y + (me.y - f.y) * 2 };
+out.urgent = true;
+out.hard = true;
+}
 return;
 }
 if (d < R && g.los(me.x, me.y, f.x, f.y) && me.team === 'T') {
@@ -6420,7 +6573,7 @@ this.why = '';
 declare() {
 return {
 name: 'shooter-baseline',
-version: '2.6.1',
+version: '2.6.2',
 style: '基準',
 knobs: [
 { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },

@@ -14,6 +14,12 @@ export function parseBuy(text) {
   return m === null ? null : /** @type {BuyCall} */ (m[1]);
 }
 
+/** 發槍（2.6.2）：「B:gift 送的人 收的人 武器」 @param {string} text @returns {{ from: number, to: number, w: import('./base.js').WeaponId } | null} */
+export function parseGift(text) {
+  const m = /^B:gift (\d+) (\d+) (awp|ak|m4)$/.exec(text);
+  return m === null ? null : { from: Number(m[1]), to: Number(m[2]), w: /** @type {import('./base.js').WeaponId} */ (m[3]) };
+}
+
 /** 道具購買順序（角色 0 無、1 突破、2 支援、3 錨點、4 狙擊、5 游擊）。配合 Utility 每種每回合一次，採購不重複買閃。 */
 const UTIL = {
   T: [
@@ -129,6 +135,14 @@ export class Economy {
     return primary !== null && this.cost(primary) >= this.cost('smg') + 1000;
   }
 
+  /** 沒有下一回合可存（2.6.2 保槍用）：對方賽點、或半場最後一回合（換邊後武器與金錢重置） @param {import('./base.js').Observation} obs */
+  lastChance(obs) {
+    const r = obs.round;
+    const theirs = obs.me.team === 'T' ? r.scoreCT : r.scoreT;
+    const lastOfHalf = this.roundInHalf >= (r.overtime > 0 ? (this.data.rules.overtime === false ? 3 : this.data.rules.overtime.roundsPerHalf) : this.data.rules.roundsPerHalf);
+    return theirs >= this.data.rules.winRounds - 1 || lastOfHalf;
+  }
+
   /** 手槍局：錢都很少、沒有主武器 @param {import('./base.js').Observation} obs */
   pistolRound(obs) {
     return obs.me.money <= this.data.rules.economy.startMoney + 100 && obs.me.loadout.primary === null && this.roundInHalf <= 1;
@@ -172,13 +186,22 @@ export class Economy {
 
   /**
    * 照買法買（在規則內）：狙擊手（awper）錢夠買狙擊槍；道具依角色；突破手護甲優先、錨點拆彈器優先；CT 全買帶拆彈器；備彈不到一半補
-   * @param {import('./base.js').Observation} obs @param {BuyCall} call @param {number} role @param {boolean} awper @returns {import('./base.js').BuyItem[]}
+   * 2.6.2：gift＝要送人的槍（先買）；receive＝這回合有人送槍，不買主武器
+   * @param {import('./base.js').Observation} obs @param {BuyCall} call @param {number} role @param {boolean} awper
+   * @param {import('./base.js').WeaponId | null} [gift] @param {boolean} [receive] @returns {import('./base.js').BuyItem[]}
    */
-  items(obs, call, role, awper) {
+  items(obs, call, role, awper, gift = null, receive = false) {
     const me = obs.me;
     const rules = this.data.rules;
     const team = me.team;
     let money = me.money;
+    /** @type {import('./base.js').BuyItem[]} */
+    const pre = [];
+    // 送槍的人先買要送的那把（再買同槽的槍時它會掉在腳邊）
+    if (gift !== null && money >= this.cost(gift)) {
+      pre.push(gift);
+      money -= this.cost(gift);
+    }
     const primary = me.loadout.primary;
     const rifle = team === 'T' ? 'ak' : 'm4';
     /** @type {import('./base.js').BuyItem[]} */
@@ -210,7 +233,8 @@ export class Economy {
     const rebel = this.opts.discipline < 0.5 && this.h.random() < 1 - 2 * this.opts.discipline;
     let mode = call;
     if (rebel && call === 'half' && this.shortOf(money, primary, team) <= 0) mode = 'full';
-    const good = this.hasGood(primary);
+    // 收槍的人不買主武器（開打後去撿）；送槍的人都是手上沒好槍的，照常買自己的
+    const good = receive || this.hasGood(primary);
     if (this.pistolRound(obs)) {
       armor();
     } else if (mode === 'full' || (good && mode !== 'eco')) {
@@ -239,6 +263,35 @@ export class Economy {
     }
     const w = this.data.weapons.find((x) => x.id === (primary ?? me.weapon));
     if (w !== undefined && w.reserve > 0 && me.ammoReserve < w.reserve / 2 && me.weapon === w.id && mode !== 'eco') take('ammo', rules.ammoPrice);
-    return items;
+    return [...pre, ...items];
+  }
+
+  /**
+   * 發槍計畫（2.6.2，指揮在喊買法時算一次）：全買或強起時，狙擊手買不起狙擊槍、或有人買不起步槍，
+   * 由還沒有好槍、錢夠「送一把＋自己全買」的人送（每人最多送一把，狙擊槍優先，錢最多的先送、給錢最少的）
+   * @param {{ id: number, money: number, good: boolean, awp: boolean, awper: boolean }[]} people @param {import('./base.js').Team} team @param {BuyCall} call
+   * @returns {{ from: number, to: number, w: import('./base.js').WeaponId }[]}
+   */
+  giftPlan(people, team, call) {
+    if (!P.gifts || (call !== 'full' && call !== 'force')) return [];
+    const rules = this.data.rules;
+    const rifle = team === 'T' ? 'ak' : 'm4';
+    const own = this.fullCost(team) + 200;
+    const donors = people.filter((p) => !p.good).sort((a, b) => b.money - a.money || a.id - b.id);
+    /** @type {{ from: number, to: number, w: import('./base.js').WeaponId }[]} */
+    const out = [];
+    const used = new Set();
+    /** @param {number} to @param {import('./base.js').WeaponId} w */
+    const give = (to, w) => {
+      const d = donors.find((p) => p.id !== to && !used.has(p.id) && p.money >= own + this.cost(w));
+      if (d === undefined) return;
+      used.add(d.id);
+      out.push({ from: d.id, to, w });
+    };
+    const awper = people.find((p) => p.awper && !p.awp && p.money < this.cost('awp') + rules.armorPrice + 200);
+    if (awper !== undefined && call === 'full') give(awper.id, 'awp');
+    const needy = people.filter((p) => !p.good && !p.awper && p.money < this.cost(rifle) + rules.armorPrice && !out.some((g) => g.to === p.id)).sort((a, b) => a.money - b.money || a.id - b.id);
+    for (const p of needy) give(p.id, rifle);
+    return out;
   }
 }
