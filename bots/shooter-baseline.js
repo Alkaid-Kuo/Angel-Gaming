@@ -192,6 +192,7 @@ flashOffEq: true,
 flashCacheSec: 1,
 lurkOut: true,
 lookHoldQuiet: true,
+defuseAlarmKill: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3064,6 +3065,7 @@ this.defuseIssued = -1;
 this.fakeProbe = false;
 this.burns = [];
 this.defuseAlarm = -1;
+this.alarmAlive = 5;
 this.postSaid = false;
 this.postSmokers = new Set();
 this.hide = null;
@@ -3239,6 +3241,7 @@ this.readyAt = -1;
 this.util.reset();
 this.burns = [];
 this.defuseAlarm = -1;
+this.alarmAlive = 5;
 this.postSaid = false;
 this.postSmokers.clear();
 this.coop.reset();
@@ -4541,8 +4544,7 @@ out.role = '守包';
 out.allowPeek = false;
 const escape = this.judge?.evacuation(obs, bx, by);
 const left = (obs.bomb.ticksLeft ?? this.data.rules.bombTicks) / this.tps;
-if (obs.bomb.state === 'defusing' || (this.perc.lastSound?.kind === 'defuse' && t - this.perc.lastSound.tick < this.tps)) this.defuseAlarm = t + this.data.rules.defuseTicks;
-const defusing = obs.enemiesAlive > 0 && this.defuseAlarm > t;
+const defusing = this.defuseNow(obs);
 const guard = [...this.alive(obs)].sort((a, b) => dist(a.x, a.y, bx, by) - dist(b.x, b.y, bx, by) || a.id - b.id)[0];
 const covered = guard.id !== me.id && dist(guard.x, guard.y, bx, by) < 16 * UNIT && this.g.los(guard.x, guard.y, bx, by);
 const cannotStart = left < this.data.rules.defuseKitTicks / this.tps;
@@ -4592,6 +4594,14 @@ const burners = alive.filter((id) => this.roles.of(id) === ANCHOR || this.roles.
 const reserve = burners[0] ?? alive[0];
 if (near && me.id !== reserve && this.util.has(me, 'molotov') && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return { kind: 'molotov', ...target, why: '燒回防入口' };
 return null;
+}
+defuseNow(obs) {
+const t = obs.tick;
+if (obs.bomb.state === 'defusing' || (this.perc.lastSound?.kind === 'defuse' && t - this.perc.lastSound.tick < this.tps)) {
+this.defuseAlarm = t + this.data.rules.defuseTicks;
+this.alarmAlive = obs.enemiesAlive;
+} else if (P.defuseAlarmKill && obs.enemiesAlive < this.alarmAlive) this.defuseAlarm = -1;
+return obs.enemiesAlive > 0 && this.defuseAlarm > t;
 }
 postSpots(s, bx, by, spread = false) {
 const site = this.intel.sites[s];

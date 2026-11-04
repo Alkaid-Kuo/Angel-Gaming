@@ -420,3 +420,29 @@ describe('Bot 2.7 批 1-10 A5：守位時 look() 不轉去看聲音（lookHoldQu
     expect(aim(true, true)).not.toEqual(aim(true, false));
   });
 });
+
+describe('Bot 2.7 批 1-10 A11：拆包警報在警報後有 CT 陣亡就解除（defuseAlarmKill）', () => {
+  /** T 守包：看到 CT 在拆；一秒後炸彈看不到人在拆（回到 planted），CT 人數 3 → after */
+  function alarm(after: number): [boolean, boolean] {
+    const { match, bot } = live(0);
+    const o = match.observe(0);
+    const t = bot.tactics;
+    const bomb = { ...o.bomb, state: 'defusing' as const, x: o.me.x, y: o.me.y, site: 'A' as const, ticksLeft: 900 };
+    const a = t.defuseNow({ ...o, enemiesAlive: 3, bomb });
+    const b = t.defuseNow({ ...o, tick: o.tick + 30, enemiesAlive: after, bomb: { ...bomb, state: 'planted' as const } });
+    return [a, b];
+  }
+
+  it('拆包的人被殺（警報後 CT 少一人）：警報解除，該撤離就撤離', () => {
+    expect(alarm(2)).toEqual([true, false]);
+  });
+
+  it('沒有人陣亡、只是看不到：照 2.3 的設計當成還在拆（拆包時間內）', () => {
+    expect(alarm(3)).toEqual([true, true]);
+  });
+
+  it('開關關掉重現 2.6.3：拆包的人死了也鎖滿 10 秒', () => {
+    setP('defuseAlarmKill', false);
+    expect(alarm(2)).toEqual([true, true]);
+  });
+});

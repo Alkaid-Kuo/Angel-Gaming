@@ -168,6 +168,7 @@ export class Tactics {
     /** @type {{ x: number, y: number, until: number }[]} */
     this.burns = [];
     this.defuseAlarm = -1;
+    this.alarmAlive = 5;
     this.postSaid = false;
     /** @type {Set<number>} */
     this.postSmokers = new Set();
@@ -397,6 +398,7 @@ export class Tactics {
     this.util.reset();
     this.burns = [];
     this.defuseAlarm = -1;
+    this.alarmAlive = 5;
     this.postSaid = false;
     this.postSmokers.clear();
     this.coop.reset();
@@ -2036,8 +2038,7 @@ export class Tactics {
     out.allowPeek = false;
     const escape = this.judge?.evacuation(obs, bx, by);
     const left = (obs.bomb.ticksLeft ?? this.data.rules.bombTicks) / this.tps;
-    if (obs.bomb.state === 'defusing' || (this.perc.lastSound?.kind === 'defuse' && t - this.perc.lastSound.tick < this.tps)) this.defuseAlarm = t + this.data.rules.defuseTicks;
-    const defusing = obs.enemiesAlive > 0 && this.defuseAlarm > t;
+    const defusing = this.defuseNow(obs);
     const guard = [...this.alive(obs)].sort((a, b) => dist(a.x, a.y, bx, by) - dist(b.x, b.y, bx, by) || a.id - b.id)[0];
     const covered = guard.id !== me.id && dist(guard.x, guard.y, bx, by) < 16 * UNIT && this.g.los(guard.x, guard.y, bx, by);
     const cannotStart = left < this.data.rules.defuseKitTicks / this.tps;
@@ -2095,6 +2096,20 @@ export class Tactics {
     const reserve = burners[0] ?? alive[0];
     if (near && me.id !== reserve && this.util.has(me, 'molotov') && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return { kind: 'molotov', ...target, why: '燒回防入口' };
     return null;
+  }
+
+  /**
+   * 守包：CT 是不是正在拆（看到炸彈在拆、或 1 秒內聽到拆包聲；之後記拆包時間那麼久）。
+   * 2.7（P.defuseAlarmKill）：警報後 CT 人數變少就解除
+   * @param {import('./base.js').Observation} obs
+   */
+  defuseNow(obs) {
+    const t = obs.tick;
+    if (obs.bomb.state === 'defusing' || (this.perc.lastSound?.kind === 'defuse' && t - this.perc.lastSound.tick < this.tps)) {
+      this.defuseAlarm = t + this.data.rules.defuseTicks;
+      this.alarmAlive = obs.enemiesAlive;
+    } else if (P.defuseAlarmKill && obs.enemiesAlive < this.alarmAlive) this.defuseAlarm = -1;
+    return obs.enemiesAlive > 0 && this.defuseAlarm > t;
   }
 
   /** 守包位：包點守點位（看 CT 最近的入口的先）＋下包位，離炸彈 14 格內 @param {SiteId} s @param {number} bx @param {number} by */
