@@ -446,3 +446,28 @@ describe('Bot 2.7 批 1-10 A11：拆包警報在警報後有 CT 陣亡就解除�
     expect(alarm(2)).toEqual([true, true]);
   });
 });
+
+describe('Bot 2.7 批 1-10 A12：等槍線計時只在有更新的陣亡時歸零（lineNewest）', () => {
+  /** 兩個隊友 5 秒內先後陣亡（都在 8 格外，不形成槍線）：已經等了 20 tick，再看一次槍線 */
+  function held(): number {
+    const { match, bot } = live(0);
+    const obs = match.observe(0);
+    const t = bot.tactics;
+    const far = { x: obs.me.x + 30000, y: obs.me.y };
+    bot.perc.anon = [{ ...far, tick: obs.tick - 60, conf: 50, src: 'death' }, { ...far, y: far.y + 3000, tick: obs.tick - 20, conf: 50, src: 'death' }];
+    const soon = { x: obs.me.x + 1000, y: obs.me.y };
+    t.gunLine(obs, soon);
+    t.lineHeld = 20;
+    t.gunLine(obs, soon);
+    return t.lineHeld;
+  }
+
+  it('同一批陣亡：計時不被較舊的那一筆歸零', () => {
+    expect(held()).toBe(20);
+  });
+
+  it('開關關掉重現 2.6.3：兩筆來回切，每次都歸零', () => {
+    setP('lineNewest', false);
+    expect(held()).toBe(0);
+  });
+});

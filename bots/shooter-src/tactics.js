@@ -2858,7 +2858,7 @@ export class Tactics {
     for (let i = this.perc.anon.length - 1; i >= 0; i--) {
       const a = this.perc.anon[i];
       if (a.src !== 'death' || t - a.tick >= P.lineMemo * this.tps) continue;
-      if (this.lineDeath !== a.tick) {
+      if (P.lineNewest ? a.tick > this.lineDeath : this.lineDeath !== a.tick) {
         this.lineDeath = a.tick;
         this.lineHeld = 0;
       }
