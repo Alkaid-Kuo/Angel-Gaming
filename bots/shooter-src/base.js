@@ -337,6 +337,8 @@ export const P = {
   defuseAlarmKill: true,
   /** 1-10 A12：等槍線的計時只在出現更新的隊友陣亡時歸零（false ＝ 兩個隊友 5 秒內陣亡時新舊兩筆來回切，每 tick 歸零，2 秒上限失效） */
   lineNewest: true,
+  /** 1-10 A13：拆包、下包途中不換血架槍、不追殘血（false ＝ 拆包手 8 格內隊友陣亡就原地架 1.5 秒，低紀律還追殘血 3 秒） */
+  tradeSkipTask: true,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */

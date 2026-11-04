@@ -194,6 +194,7 @@ lurkOut: true,
 lookHoldQuiet: true,
 defuseAlarmKill: true,
 lineNewest: true,
+tradeSkipTask: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -5163,16 +5164,17 @@ if (!out.objective && pending !== undefined && this.entersView(obs, pending)) {
 out.stop = true;
 return;
 }
+const busy = P.tradeSkipTask && (out.task === 'defuse' || out.task === 'plant');
 if (this.trade !== null) {
 if (t > this.trade.until) this.trade = null;
-else if (!out.objective && !out.commit && out.task !== 'execute' && out.task !== 'retake') {
+else if (!busy && !out.objective && !out.commit && out.task !== 'execute' && out.task !== 'retake') {
 out.look = { x: this.trade.x, y: this.trade.y };
 out.stop = true;
 return;
 }
 }
 const c = this.combat;
-if (c !== null && this.attrs.discipline < 0.5 && !out.objective && !out.commit && out.task !== 'cover' && obs.enemies.length === 0) {
+if (c !== null && !busy && this.attrs.discipline < 0.5 && !out.objective && !out.commit && out.task !== 'cover' && obs.enemies.length === 0) {
 if (this.chase === null && c.lostPos !== null && t - c.lostTick < this.tps / 2 && c.targetId >= 0) {
 const hp = 100 - (this.dealt.get(c.targetId) ?? 0);
 if (hp <= P.chaseHp && dist(me.x, me.y, c.lostPos.x, c.lostPos.y) < P.chaseRange * UNIT) this.chase = { x: c.lostPos.x, y: c.lostPos.y, until: t + P.chaseTime * this.tps };

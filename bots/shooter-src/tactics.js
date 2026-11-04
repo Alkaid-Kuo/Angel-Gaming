@@ -2818,9 +2818,11 @@ export class Tactics {
       out.stop = true;
       return;
     }
+    // 2.7：拆包、下包途中不停（P.tradeSkipTask；defuseTeam 的 eta 沒算這些停頓）
+    const busy = P.tradeSkipTask && (out.task === 'defuse' || out.task === 'plant');
     if (this.trade !== null) {
       if (t > this.trade.until) this.trade = null;
-      else if (!out.objective && !out.commit && out.task !== 'execute' && out.task !== 'retake') {
+      else if (!busy && !out.objective && !out.commit && out.task !== 'execute' && out.task !== 'retake') {
         out.look = { x: this.trade.x, y: this.trade.y };
         out.stop = true;
         return;
@@ -2828,7 +2830,7 @@ export class Tactics {
     }
     // 不追殘血：紀律低的人，剛丟失的目標估計血量很低而且不遠，就追過去
     const c = this.combat;
-    if (c !== null && this.attrs.discipline < 0.5 && !out.objective && !out.commit && out.task !== 'cover' && obs.enemies.length === 0) {
+    if (c !== null && !busy && this.attrs.discipline < 0.5 && !out.objective && !out.commit && out.task !== 'cover' && obs.enemies.length === 0) {
       if (this.chase === null && c.lostPos !== null && t - c.lostTick < this.tps / 2 && c.targetId >= 0) {
         const hp = 100 - (this.dealt.get(c.targetId) ?? 0);
         if (hp <= P.chaseHp && dist(me.x, me.y, c.lostPos.x, c.lostPos.y) < P.chaseRange * UNIT) this.chase = { x: c.lostPos.x, y: c.lostPos.y, until: t + P.chaseTime * this.tps };

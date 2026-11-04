@@ -471,3 +471,38 @@ describe('Bot 2.7 批 1-10 A12：等槍線計時只在有更新的陣亡時歸�
     expect(held()).toBe(0);
   });
 });
+
+describe('Bot 2.7 批 1-10 A13：拆包、下包途中不換血架槍、不追殘血（tradeSkipTask）', () => {
+  function run(task: TacOut['task']): { trade: TacOut; chase: TacOut } {
+    const { match, bot } = live(5);
+    const obs = match.observe(5);
+    const t = bot.tactics;
+    const goal = { x: obs.me.x + 5000, y: obs.me.y };
+    t.trade = { x: obs.me.x, y: obs.me.y + 9000, until: obs.tick + 30 };
+    const trade = out({ task, goal });
+    t.overlay(obs, trade);
+    t.trade = null;
+    (t.attrs as { discipline: number }).discipline = 0.2;
+    t.chase = { x: obs.me.x - 4000, y: obs.me.y, until: obs.tick + 60 };
+    const chase = out({ task, goal });
+    t.overlay(obs, chase);
+    return { trade, chase };
+  }
+
+  it('拆包途中：不停下架槍、不改去追殘血', () => {
+    const r = run('defuse');
+    expect(r.trade.stop).toBe(false);
+    expect(r.chase.goal).toEqual({ x: r.chase.goal!.x, y: r.chase.goal!.y });
+    expect(r.chase.role).not.toContain('追殘血');
+  });
+
+  it('下包途中也一樣；守位照常換血架槍', () => {
+    expect(run('plant').trade.stop).toBe(false);
+    expect(run('hold').trade.stop).toBe(true);
+  });
+
+  it('開關關掉重現 2.6.3：拆包手停下架槍', () => {
+    setP('tradeSkipTask', false);
+    expect(run('defuse').trade.stop).toBe(true);
+  });
+});
