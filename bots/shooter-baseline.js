@@ -207,6 +207,10 @@ heatDedupe: true,
 tracerSrc: true,
 claimClear: 6,
 claimById: true,
+pairEntry: true,
+pairWait: 1.5,
+pairGap: 2.5,
+tradeAngle: 25,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -2853,6 +2857,7 @@ const p = this.g.center(i);
 const gap = dist(p.x, p.y, cue.x, cue.y);
 if ((!cue.dead && gap < 1600) || gap > 4000 || !this.g.walkLine(me.x, me.y, p.x, p.y) || !this.g.los(p.x, p.y, look.x, look.y)) continue;
 if (!cue.dead && segDist(p.x, p.y, cue.x, cue.y, look.x, look.y).d < 1100) continue;
+if (cue.dead && P.tradeAngle > 0 && (gap < 1500 || Math.abs(adiff(angleTo(p.x, p.y, look.x, look.y), angleTo(cue.x, cue.y, look.x, look.y))) < P.tradeAngle)) continue;
 if (obs.effects.some((e) => e.kind === 'fire' && dist(p.x, p.y, e.x, e.y) < e.radius + 500)) continue;
 const s = (this.intel.cover[i] > 0 ? 2 : 0) - dist(me.x, me.y, p.x, p.y) / UNIT - Math.abs(gap / UNIT - 2.5) - this.perc.danger[i] / 40;
 if (s > score) { score = s; best = p; }
@@ -3130,6 +3135,8 @@ this.lurkers = new Set();
 this.steppedIn = false;
 this.rushReady = false;
 this.queueHeld = 0;
+this.pairHeld = 0;
+this.pairDone = false;
 this.inbox = [];
 this.contacts = new Map();
 this.contactSite = new Map();
@@ -3225,6 +3232,8 @@ this.lurkers = new Set();
 this.steppedIn = false;
 this.rushReady = false;
 this.queueHeld = 0;
+this.pairHeld = 0;
+this.pairDone = false;
 this.inbox = [];
 this.contacts = new Map();
 this.contactSite = new Map();
@@ -3942,6 +3951,27 @@ const last = this.roles.of(carrier) === ENTRY ? -1 : carrier;
 const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
 return Math.max(0, list.indexOf(id));
 }
+pairOf(obs, p) {
+const gid = this.groupOf(obs, obs.me.id, p);
+const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => this.memberIndex(obs, a, p) - this.memberIndex(obs, b, p) || a - b);
+const k = Math.max(0, list.indexOf(obs.me.id));
+return { k, partner: list[k ^ 1] ?? -1, side: k % 2 === 0 ? -1 : 1 };
+}
+pairCorner(ent, side) {
+const g = this.g;
+const len = Math.max(1, dist(ent.ox, ent.oy, ent.ix, ent.iy));
+const ux = (ent.ix - ent.ox) / len;
+const uy = (ent.iy - ent.oy) / len;
+const px = -uy * side;
+const py = ux * side;
+const look = { x: ent.ix + (ux * 3 + px * 8) * UNIT, y: ent.iy + (uy * 3 + py * 8) * UNIT };
+for (const w of [2, 1.5, 1]) for (const a of [2.5, 1.5]) {
+const x = ent.ix + (ux * a + px * w) * UNIT;
+const y = ent.iy + (uy * a + py * w) * UNIT;
+if (g.walkable(g.cellOf(x, y)) && g.walkLine(ent.ix, ent.iy, x, y)) return { x, y, look };
+}
+return { x: ent.ix, y: ent.iy, look };
+}
 inGroup(obs, id, p, gid) {
 return this.groupOf(obs, id, p) === gid && !this.lurking(obs, id);
 }
@@ -4145,7 +4175,10 @@ return wish;
 }
 out.role = `執行 ${exec}`;
 const flashed = t >= this.flashPop && t < this.flashPop + 2 * this.tps;
-if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && this.yieldTo(obs, exec)) {
+const pr = P.pairEntry && p.kind !== 'go' && ent !== null && !this.inRectSite(me.x, me.y, exec) ? this.pairOf(obs, p) : null;
+const mate = pr !== null && pr.k <= 1 ? obs.teammates.find((m) => m.alive && m.id === pr.partner) : undefined;
+const withEntry = mate !== undefined && mate.id === this.roles.who(ENTRY) && this.roles.of(me.id) !== AWP;
+if (p.kind !== 'go' && !withEntry && (!flashed || this.roles.of(me.id) === AWP) && this.yieldTo(obs, exec)) {
 out.stop = true;
 out.look = { x: site.cx, y: site.cy };
 out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
@@ -4153,9 +4186,19 @@ const st = this.memberStage(obs, me.id, p);
 if (this.roles.of(me.id) === AWP && st !== null) out.hold = { ...st, x: me.x, y: me.y };
 return wish;
 }
-if (p.kind !== 'go' && !flashed && ent !== null && obs.enemies.length === 0 && this.tooClose(obs, exec, ent)) {
+if (p.kind !== 'go' && !flashed && ent !== null && obs.enemies.length === 0 && (pr === null || pr.k > 1) && this.tooClose(obs, exec, ent)) {
 out.walk = true;
 out.role = '拉開間距';
+}
+if (mate !== undefined && ent !== null && !flashed && obs.enemies.length === 0 && this.pairHeld < P.pairWait * this.tps && !this.inRectSite(mate.x, mate.y, exec)) {
+const mine = dist(me.x, me.y, ent.ix, ent.iy);
+if (mine < P.entryZone * UNIT && dist(mate.x, mate.y, ent.ix, ent.iy) - mine > P.pairGap * UNIT && dist(me.x, me.y, ent.ox, ent.oy) < 2 * UNIT) {
+this.pairHeld += this.data.rules.decisionInterval;
+out.stop = true;
+out.look = { x: ent.ix, y: ent.iy };
+out.role = '等搭檔';
+return wish;
+}
 }
 if (p.kind === 'rush' && ent !== null && !this.rushReady) {
 if (this.inRectSite(me.x, me.y, exec) || dist(me.x, me.y, ent.ix, ent.iy) < 900) this.rushReady = true;
@@ -4163,6 +4206,16 @@ else {
 out.goal = dist(me.x, me.y, ent.ox, ent.oy) > 2 * UNIT ? { x: ent.ox, y: ent.oy } : { x: ent.ix, y: ent.iy };
 return wish;
 }
+}
+if (pr !== null && pr.k <= 1 && ent !== null && !me.hasBomb && dist(me.x, me.y, ent.ix, ent.iy) < P.entryZone * UNIT && !this.pairDone) {
+const c = this.pairCorner(ent, pr.side);
+if (dist(me.x, me.y, c.x, c.y) > 700) {
+out.goal = { x: c.x, y: c.y };
+out.look = c.look;
+out.role += pr.side < 0 ? '・進門左' : '・進門右';
+return wish;
+}
+this.pairDone = true;
 }
 if (me.hasBomb) {
 const spot = site.plants[0];

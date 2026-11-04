@@ -1,6 +1,6 @@
 // @ts-check
 // 近距離接戰跟進與互補守角。所有協調只用可觀察隊友、雷達與既有戰術目標，沒有共享隱藏狀態。
-import { P, UNIT, dist, segDist } from './base.js';
+import { P, UNIT, adiff, angleTo, dist, segDist } from './base.js';
 
 export class Cooperation {
   /** @param {import('./base.js').Grid} g @param {import('./analysis.js').MapIntel} intel @param {import('./memory.js').Perception} perc @param {import('./base.js').InitData} data */
@@ -58,6 +58,8 @@ export class Cooperation {
           const gap = dist(p.x, p.y, cue.x, cue.y);
           if ((!cue.dead && gap < 1600) || gap > 4000 || !this.g.walkLine(me.x, me.y, p.x, p.y) || !this.g.los(p.x, p.y, look.x, look.y)) continue;
           if (!cue.dead && segDist(p.x, p.y, cue.x, cue.y, look.x, look.y).d < 1100) continue;
+          // 2.7 批 2（P.tradeAngle）：補陣亡的隊友不站到他的角度重探，要換一個角度看殺手
+          if (cue.dead && P.tradeAngle > 0 && (gap < 1500 || Math.abs(adiff(angleTo(p.x, p.y, look.x, look.y), angleTo(cue.x, cue.y, look.x, look.y))) < P.tradeAngle)) continue;
           if (obs.effects.some((e) => e.kind === 'fire' && dist(p.x, p.y, e.x, e.y) < e.radius + 500)) continue;
           const s = (this.intel.cover[i] > 0 ? 2 : 0) - dist(me.x, me.y, p.x, p.y) / UNIT - Math.abs(gap / UNIT - 2.5) - this.perc.danger[i] / 40;
           if (s > score) { score = s; best = p; }

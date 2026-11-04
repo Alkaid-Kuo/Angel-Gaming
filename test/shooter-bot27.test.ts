@@ -862,3 +862,80 @@ describe('Bot 2.7 批 1-15（H04）：曳光推測不冒充目視（tracerSrc）
     expect(track().k).toMatchObject({ src: 'see', conf: 95 });
   });
 });
+
+describe('Bot 2.7 批 2（B1）：成對進門（pairEntry）', () => {
+  const plan = { kind: 'default' as const, site: 'A' as const, r1: 0, r2: 0, exec: 'A' as const };
+
+  it('組內依進點順序兩兩一對：0-1 是搭檔、左右相反；落單的人沒有搭檔', () => {
+    const seen: Record<number, { k: number; partner: number; side: number }> = {};
+    for (let pid = 0; pid < 5; pid++) {
+      const { match, bot } = live(pid);
+      const obs = match.observe(pid);
+      if (bot.tactics.groupOf(obs, pid, plan) !== 0) continue;
+      seen[pid] = bot.tactics.pairOf(obs, plan);
+    }
+    const ids = Object.keys(seen).map(Number);
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    const a = ids.find((i) => seen[i].k === 0)!;
+    const b = ids.find((i) => seen[i].k === 1)!;
+    expect(seen[a].partner).toBe(b);
+    expect(seen[b].partner).toBe(a);
+    expect(seen[a].side).toBe(-seen[b].side);
+    for (const i of ids) if (seen[i].k === 2) expect(seen[i].partner).toBe(-1);
+  });
+
+  it.each(['redrock', 'dust'])('%s：每個入口的左右兩個角在入口兩側、從入口內側走得到、看的方向不同', (mapId) => {
+    const { bot } = live(0, mapId);
+    const t = bot.tactics;
+    for (const s of ['A', 'B'] as const) for (const e of bot.intel.sites[s].entrances) {
+      const l = t.pairCorner(e, -1);
+      const r = t.pairCorner(e, 1);
+      const ux = e.ix - e.ox;
+      const uy = e.iy - e.oy;
+      const cross = (q: { x: number; y: number }): number => ux * (q.y - e.iy) - uy * (q.x - e.ix);
+      expect(bot.g.walkLine(e.ix, e.iy, l.x, l.y)).toBe(true);
+      expect(bot.g.walkLine(e.ix, e.iy, r.x, r.y)).toBe(true);
+      expect(Math.sign(cross(l.look))).toBe(-Math.sign(cross(r.look)));
+    }
+  });
+});
+
+describe('Bot 2.7 批 2（B1）：補槍不重探同一個角（tradeAngle）', () => {
+  /** T 執行中：隊友在 6 格外陣亡，殺手在他前方 12 格；回傳補槍站位看殺手的角度與死者看殺手的角度差 */
+  function trade(): { diff: number | null; role: string } {
+    const { match, bot } = live(2);
+    const raw = match.observe(2);
+    const o = { ...raw, me: { ...raw.me, hasBomb: false } };
+    const g = bot.g;
+    const me = o.me;
+    let pick = null;
+    for (let deg = 0; deg < 360 && pick === null; deg += 15) {
+      const cue = { x: Math.round(me.x + Math.cos((deg * Math.PI) / 180) * 5 * UNIT), y: Math.round(me.y + Math.sin((deg * Math.PI) / 180) * 5 * UNIT) };
+      const killer = { x: Math.round(cue.x + Math.cos((deg * Math.PI) / 180) * 12 * UNIT), y: Math.round(cue.y + Math.sin((deg * Math.PI) / 180) * 12 * UNIT) };
+      if (g.walkable(g.cellOf(cue.x, cue.y)) && g.walkable(g.cellOf(killer.x, killer.y)) && g.los(me.x, me.y, cue.x, cue.y) && g.los(cue.x, cue.y, killer.x, killer.y)) pick = { cue, killer };
+    }
+    if (pick === null) throw new Error('找不到開闊方向');
+    const { cue, killer } = pick;
+    bot.tactics.coop.cues.set(1, { ...cue, facing: 0, tick: o.tick, dead: true });
+    bot.perc.known.set(7, { id: 7, x: killer.x, y: killer.y, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: o.tick, seenTick: o.tick, conf: 90, src: 'see' });
+    const a = out({ task: 'execute', goal: { x: cue.x, y: cue.y } });
+    bot.tactics.coop.apply({ ...o, enemies: [], enemiesAlive: 3, teammates: o.teammates.map((m) => (m.id === 1 ? { ...m, alive: false, ...cue } : { ...m, alive: false })) }, a);
+    if (!a.role.includes('補槍')) return { diff: null, role: a.role };
+    const ang = (p: { x: number; y: number }): number => (Math.atan2(killer.y - p.y, killer.x - p.x) * 180) / Math.PI;
+    let d = Math.abs(ang(a.goal!) - ang(cue));
+    if (d > 180) d = 360 - d;
+    return { diff: d, role: a.role };
+  }
+
+  it('補槍站位換一個角度看殺手（或補不到就不去重探）', () => {
+    const r = trade();
+    if (r.diff !== null) expect(r.diff).toBeGreaterThanOrEqual(25);
+  });
+
+  it('開關關掉重現 2.6.3：走到死者旁邊、幾乎同一個角度', () => {
+    setP('tradeAngle', 0);
+    const r = trade();
+    expect(r.diff).not.toBeNull();
+    expect(r.diff!).toBeLessThan(25);
+  });
+});
