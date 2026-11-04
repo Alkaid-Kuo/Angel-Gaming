@@ -2066,7 +2066,7 @@ export class Tactics {
     if (obs.enemiesAlive === 0) return null;
     if (defusing) {
       const kind = this.util.pick(me, ['molotov', 'he']);
-      if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, by) < 3 * UNIT)) return { kind, x: bx, y: by, why: '燒拆包' };
+      if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, by) < 3 * UNIT) && !this.burnsMate(obs, bx, by)) return { kind, x: bx, y: by, why: '燒拆包' };
     }
     return this.postUtility(obs, bx, by, s);
   }
@@ -2096,6 +2096,11 @@ export class Tactics {
     const reserve = burners[0] ?? alive[0];
     if (near && me.id !== reserve && this.util.has(me, 'molotov') && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return { kind: 'molotov', ...target, why: '燒回防入口' };
     return null;
+  }
+
+  /** 燃燒落點 4 格內有活著的隊友（2.7，P.burnMateCheck；關掉時永遠 false） @param {import('./base.js').Observation} obs @param {number} x @param {number} y */
+  burnsMate(obs, x, y) {
+    return P.burnMateCheck && obs.teammates.some((m) => m.alive && dist(m.x, m.y, x, y) < 4 * UNIT);
   }
 
   /**
@@ -2578,7 +2583,7 @@ export class Tactics {
     const fire = this.burns.find((b) => t <= b.until && dist(b.x, b.y, outer.x, outer.y) < 4 * UNIT);
     const smoked = this.smokes.some((m) => dist(m.x, m.y, e.ox, e.oy) < P.smokeGap * UNIT);
     const burn = this.util.pick(me, ['incendiary', 'molotov']);
-    if (burn !== null && fire === undefined && !smoked && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return { kind: burn, ...outer, why: '燒入口' };
+    if (burn !== null && fire === undefined && !smoked && !this.burnsMate(obs, outer.x, outer.y) && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return { kind: burn, ...outer, why: '燒入口' };
     const fading = fire !== undefined && fire.until - t < 3 * this.tps;
     if (this.util.has(me, 'smoke') && !smoked && (top.n >= 2 || top.fl || fading) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' };
     if (top.n >= 1 && this.util.has(me, 'flash') && !this.flashDone(obs, e)) {

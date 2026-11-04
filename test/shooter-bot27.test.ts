@@ -534,3 +534,29 @@ describe('Bot 2.7 批 1-10 A21：沒送出導航移動時不算被擋（navIdle�
     expect(stuck(true)).toBeGreaterThan(0);
   });
 });
+
+describe('Bot 2.7 批 1-10 A27：燒拆包不燒到正在交火的隊友（burnMateCheck）', () => {
+  /** T 守 B 包、身上有燃燒彈、看到 CT 在拆；mate＝隊友站在炸彈旁 2 格 */
+  function wish(mate: boolean): string | undefined {
+    const { match, bot } = live(0);
+    const raw = match.observe(0);
+    const b = bot.intel.sites.B.plants[0];
+    const p = bot.intel.sites.B.holds[0];
+    const teammates = mate ? [{ ...raw.teammates[0], alive: true, x: b.x + 2000, y: b.y }] : [];
+    const obs: ShooterObservation = { ...raw, enemies: [], radar: [], teammates, enemiesAlive: 3, me: { ...raw.me, x: p.x, y: p.y, loadout: { ...raw.me.loadout, grenades: ['molotov'] } }, bomb: { state: 'defusing', site: 'B', x: b.x, y: b.y, ticksLeft: 900 } };
+    return bot.tactics.postPlant(obs, out(), b.x, b.y, 'B')?.why;
+  }
+
+  it('炸彈旁沒有隊友：照常燒拆包', () => {
+    expect(wish(false)).toBe('燒拆包');
+  });
+
+  it('隊友在炸彈 4 格內：不燒', () => {
+    expect(wish(true)).not.toBe('燒拆包');
+  });
+
+  it('開關關掉重現 2.6.3：隊友在旁邊也燒', () => {
+    setP('burnMateCheck', false);
+    expect(wish(true)).toBe('燒拆包');
+  });
+});
