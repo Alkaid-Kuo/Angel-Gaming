@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import ShooterBaseline from '../bots/shooter-src/baseline.js';
 import { P } from '../bots/shooter-src/base.js';
-import type { TacOut } from '../bots/shooter-src/tactics.js';
+import { parseEvent, type TacOut } from '../bots/shooter-src/tactics.js';
 import { ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
 import { shooterHelpers } from '../src/shooter/runner.ts';
 import type { ShooterObservation, WeaponId } from '../src/shooter/api.ts';
@@ -342,5 +342,55 @@ describe('Bot 2.7 批 1-7：閃光候選快取每秒依敵情重算（flashCache
     setP('flashCacheSec', 0);
     const r = reads(30);
     expect(r.later).toBe(r.first);
+  });
+});
+
+describe('Bot 2.7 批 1-8：繞後者離開原組（lurkOut）', () => {
+  const plan = { kind: 'default' as const, site: 'A' as const, r1: 0, r2: 0, exec: 'A' as const };
+  /** 找一個座位 3（游擊）會繞後的回合 */
+  function lurkRound(): { bot: ShooterBaseline; obs: ShooterObservation; gid: number } {
+    const { match, bot } = live(3);
+    const t = bot.tactics;
+    t.buyCall = 'full';
+    const o = match.observe(3);
+    for (let n = 1; n <= 100; n++) {
+      t.lurkKey = '';
+      const obs = { ...o, round: { ...o.round, number: n } };
+      if (t.lurkOf(obs, plan) !== null) return { bot, obs, gid: t.groupOf(obs, 3, plan) };
+    }
+    throw new Error('找不到繞後回合');
+  }
+
+  it('繞後者的隊友收到 E:lurk：組的人數與順序不算他', () => {
+    const { obs: o3, gid } = lurkRound();
+    const { match, bot } = live(4);
+    const t = bot.tactics;
+    const obs = { ...match.observe(4), round: o3.round };
+    expect(t.groupOf(obs, 3, plan)).toBe(gid);
+    expect(t.groupOf(obs, 4, plan)).toBe(gid);
+    const before = t.groupSize(obs, plan);
+    t.lurkers.add(3);
+    expect(t.groupSize(obs, plan)).toBe(before - 1);
+    expect(t.memberIndex(obs, 4, plan)).toBe(0);
+  });
+
+  it('E:lurk 解析；全隊剩不到 4 人就不再繞後（決定已經快取也一樣）', () => {
+    expect(parseEvent('E:lurk')).toEqual({ kind: 'lurk' });
+    const { bot, obs } = lurkRound();
+    const few = { ...obs, teammates: obs.teammates.map((m, i) => (i < 2 ? { ...m, alive: false } : m)) };
+    expect(bot.tactics.lurkOf(few, plan)).toBeNull();
+    expect(bot.tactics.lurkOf(obs, plan)).not.toBeNull();
+  });
+
+  it('開關關掉重現 2.6.3：繞後者仍算原組成員、人數變少照繞', () => {
+    setP('lurkOut', false);
+    const { bot, obs } = lurkRound();
+    const few = { ...obs, teammates: obs.teammates.map((m, i) => (i < 2 ? { ...m, alive: false } : m)) };
+    expect(bot.tactics.lurkOf(few, plan)).not.toBeNull();
+    const { match, bot: b4 } = live(4);
+    const o4 = { ...match.observe(4), round: obs.round };
+    const before = b4.tactics.groupSize(o4, plan);
+    b4.tactics.lurkers.add(3);
+    expect(b4.tactics.groupSize(o4, plan)).toBe(before);
   });
 });

@@ -28,7 +28,7 @@ const SMOKE_PREF = [SUPPORT, ANCHOR, LURK, 0, ENTRY, AWP];
 /** T 計畫：site 主力的點、r1／r2 兩組的路線序號、exec 執行哪個點（null = 還在佈置） @typedef {{ kind: 'go' | 'default' | 'rush' | 'split' | 'fake', site: SiteId, r1: number, r2: number, exec: SiteId | null }} TPlan */
 /** CT 計畫：A／中路／B 人數、輪轉目標、回防開始 @typedef {{ kind: 'hold', a: number, m: number, b: number, rot: SiteId | null, go: boolean }} CTPlan */
 /** @typedef {TPlan | CTPlan} Plan */
-/** @typedef {{ kind: 'contact', region: string, n: number } | { kind: 'dead', region: string } | { kind: 'planted', site: SiteId } | { kind: 'flash', x: number, y: number, pop: number } | { kind: 'claim', x: number, y: number } | { kind: 'smoke', x: number, y: number } | { kind: 'burn', x: number, y: number, until: number } | { kind: 'awp', x: number, y: number } | { kind: 'kit' | 'smoker' }} TeamEvent */
+/** @typedef {{ kind: 'contact', region: string, n: number } | { kind: 'dead', region: string } | { kind: 'planted', site: SiteId } | { kind: 'flash', x: number, y: number, pop: number } | { kind: 'claim', x: number, y: number } | { kind: 'smoke', x: number, y: number } | { kind: 'burn', x: number, y: number, until: number } | { kind: 'awp', x: number, y: number } | { kind: 'kit' | 'smoker' | 'lurk' }} TeamEvent */
 /**
  * 戰術輸出：goal 目標點、route 偏好路線、hold 守位（到了要看哪裡）、objective 正在下包／拆包、allowPeek 可以探頭、cmds 購買／喊話／丟雷／下包／拆包；
  * look 沒交戰時看哪裡（urgent：躲閃光，連「目標剛消失的架槍」也蓋過；hard：閃光快爆了，交戰中也轉身、停火）、stop 站住、walk 靜步（null = 導航決定）、noise 佯攻開槍
@@ -104,6 +104,7 @@ export function parseEvent(text) {
   if (m !== null) return { kind: 'awp', x: Number(m[1]) * 100, y: Number(m[2]) * 100 };
   if (text === 'E:kit') return { kind: 'kit' };
   if (text === 'E:smoker') return { kind: 'smoker' };
+  if (text === 'E:lurk') return { kind: 'lurk' };
   return null;
 }
 
@@ -203,6 +204,8 @@ export class Tactics {
     /** 本回合的繞後決定（依計畫快取） @type {{ route: import('./analysis.js').Route, wait: import('./analysis.js').Route, stage: import('./analysis.js').Spot | null } | null} */
     this.lurkPick = null;
     this.lurkKey = '';
+    /** 本回合喊過 E:lurk 的隊友（2.7，含自己） @type {Set<number>} */
+    this.lurkers = new Set();
     this.steppedIn = false;
     this.rushReady = false;
     this.queueHeld = 0;
@@ -333,6 +336,8 @@ export class Tactics {
     this.flanked = false;
     this.lurkPick = null;
     this.lurkKey = '';
+    /** 本回合喊過 E:lurk 的隊友（2.7，含自己） @type {Set<number>} */
+    this.lurkers = new Set();
     this.steppedIn = false;
     this.rushReady = false;
     this.queueHeld = 0;
@@ -683,6 +688,7 @@ export class Tactics {
       else if (e.kind === 'burn') this.burns.push(e);
       else if (e.kind === 'awp') this.awp = { x: e.x, y: e.y, tick: t };
       else if (e.kind === 'smoker') this.postSmokers.add(msg.from);
+      else if (e.kind === 'lurk') this.lurkers.add(msg.from);
       if (e.kind === 'flash') {
         this.flashHeard = t;
         this.flashPop = e.pop;
@@ -820,7 +826,7 @@ export class Tactics {
       if ((ready && t - this.readyAt >= 1.5 * this.tps) || el >= Math.max(P.splitWait, far / P.routeSpeed)) return { ...p, exec: p.site };
     }
     if (p.kind === 'fake') {
-      const fakers = this.alive(obs).filter((m) => this.groupOf(obs, m.id, p) === 1);
+      const fakers = this.alive(obs).filter((m) => this.inGroup(obs, m.id, p, 1));
       const there = fakers.some((m) => {
         const s = this.memberStage(obs, m.id, p);
         return s !== null && dist(m.x, m.y, s.x, s.y) < 4 * UNIT;
@@ -1197,8 +1203,18 @@ export class Tactics {
     const carrier = obs.me.hasBomb ? obs.me.id : (obs.teammates.find((m) => m.hasBomb)?.id ?? -1);
     // 突破手帶炸彈時還是排最前（他要先進點）
     const last = this.roles.of(carrier) === ENTRY ? -1 : carrier;
-    const list = this.ids.filter((x) => this.isAlive(obs, x) && this.groupOf(obs, x, p) === gid).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
+    const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
     return Math.max(0, list.indexOf(id));
+  }
+
+  /** 這個隊員現在算在 gid 這組（2.7：繞後中的隊友不算，自己除外） @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p @param {number} gid */
+  inGroup(obs, id, p, gid) {
+    return this.groupOf(obs, id, p) === gid && !this.lurking(obs, id);
+  }
+
+  /** 隊友正在繞後（喊過 E:lurk、全隊還有 4 人以上） @param {import('./base.js').Observation} obs @param {number} id */
+  lurking(obs, id) {
+    return P.lurkOut && id !== obs.me.id && this.lurkers.has(id) && this.alive(obs).length >= 4;
   }
 
   /** 某隊員佈置時要去的點與路線 @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p @returns {{ site: SiteId, route: number }} */
@@ -1263,6 +1279,10 @@ export class Tactics {
     }
     // 繞後（2.6）：游擊這回合走繞後路線，先在另一點外等；主力喊執行後 P.lurkDelay 秒沿對方輪轉路徑從背後進點
     const lk = this.lurkOf(obs, p);
+    if (P.lurkOut && lk !== null && !this.lurkers.has(me.id)) {
+      this.lurkers.add(me.id);
+      out.cmds.push({ type: 'say', text: 'E:lurk' });
+    }
     if (lk !== null && (exec === null || exec === lk.route.site) && !this.inRectSite(me.x, me.y, lk.route.site)) {
       if (exec !== null && this.execTick >= 0 && t - this.execTick >= P.lurkDelay * this.tps) {
         const s = this.intel.sites[lk.route.site];
@@ -1386,9 +1406,9 @@ export class Tactics {
       // 煙霧手丟（或他離火超過投擲距離時，組裡離火最近的人丟；看不到隊友身上有沒有煙，沒有就沒人丟）
       const reach = this.data.rules.grenadeRules.maxThrowRange * UNIT;
       const gid = this.groupOf(obs, me.id, p);
-      const smokerId = this.ids.find((x) => this.isAlive(obs, x) && this.groupOf(obs, x, p) === gid && this.memberIndex(obs, x, p) === this.smokerIndex(obs, me.id, p));
+      const smokerId = this.ids.find((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid) && this.memberIndex(obs, x, p) === this.smokerIndex(obs, me.id, p));
       const sm = smokerId === undefined ? undefined : smokerId === me.id ? me : obs.teammates.find((m) => m.id === smokerId);
-      const closest = burning === undefined ? -1 : [me, ...obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) === gid)].sort((a, b) => dist(a.x, a.y, burning.x, burning.y) - dist(b.x, b.y, burning.x, burning.y) || a.id - b.id)[0].id;
+      const closest = burning === undefined ? -1 : [me, ...obs.teammates.filter((m) => m.alive && this.inGroup(obs, m.id, p, gid))].sort((a, b) => dist(a.x, a.y, burning.x, burning.y) - dist(b.x, b.y, burning.x, burning.y) || a.id - b.id)[0].id;
       const mine = burning !== undefined && (idx === this.smokerIndex(obs, me.id, p) || ((sm === undefined || dist(sm.x, sm.y, burning.x, burning.y) > reach) && closest === me.id));
       if (burning !== undefined && mine && this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
         wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
@@ -1577,21 +1597,21 @@ export class Tactics {
   /** @param {import('./base.js').Observation} obs @param {TPlan} p */
   groupSize(obs, p) {
     const gid = this.groupOf(obs, obs.me.id, p);
-    return this.alive(obs).filter((m) => this.groupOf(obs, m.id, p) === gid).length;
+    return this.alive(obs).filter((m) => this.inGroup(obs, m.id, p, gid)).length;
   }
 
   /** 組裡最前面的人離入口外側多遠 @param {import('./base.js').Observation} obs @param {TPlan} p @param {import('./analysis.js').Entrance} ent */
   leadDist(obs, p, ent) {
     const gid = this.groupOf(obs, obs.me.id, p);
     let best = Infinity;
-    for (const m of this.alive(obs)) if (this.groupOf(obs, m.id, p) === gid) best = Math.min(best, dist(m.x, m.y, ent.ox, ent.oy));
+    for (const m of this.alive(obs)) if (this.inGroup(obs, m.id, p, gid)) best = Math.min(best, dist(m.x, m.y, ent.ox, ent.oy));
     return best;
   }
 
   /** 煙霧手：組內的支援優先，其次錨點、游擊…（同角色看隊內序號） @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p */
   smokerIndex(obs, id, p) {
     const gid = this.groupOf(obs, id, p);
-    const members = this.ids.filter((x) => this.groupOf(obs, x, p) === gid && obs.teammates.every((m) => m.id !== x || m.alive));
+    const members = this.ids.filter((x) => this.inGroup(obs, x, p, gid) && obs.teammates.every((m) => m.id !== x || m.alive));
     for (const r of SMOKE_PREF) {
       const who = members.find((x) => this.roles.of(x) === r);
       if (who !== undefined) return this.memberIndex(obs, who, p);
@@ -1638,6 +1658,8 @@ export class Tactics {
    * @returns {{ route: import('./analysis.js').Route, wait: import('./analysis.js').Route, stage: import('./analysis.js').Spot | null } | null}
    */
   lurkOf(obs, p) {
+    // 2.7：人數每次都查（決定有快取，原本人數變少也照繞）
+    if (P.lurkOut && this.alive(obs).length < 4) return null;
     const key = `${p.kind}${p.site}`;
     if (this.lurkKey === key) return this.lurkPick;
     this.lurkKey = key;
@@ -1659,7 +1681,7 @@ export class Tactics {
   flankHold(obs, p, exec, f) {
     if (this.flankStart < 0) this.flankStart = obs.tick;
     if ((obs.tick - this.flankStart) / this.tps >= f.wait || obs.round.phaseTicksLeft <= P.forceExecLeft * this.tps || this.flankGo) return false;
-    const far = obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) !== f.near);
+    const far = obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) !== f.near && !this.lurking(obs, m.id));
     const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.second.oy) < P.flankNear * UNIT || this.inRectSite(m.x, m.y, exec));
     if (done) this.flankGo = true;
     return !done;

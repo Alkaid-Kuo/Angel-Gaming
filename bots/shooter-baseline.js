@@ -190,6 +190,7 @@ otMatchPoint: true,
 flashIdent: true,
 flashOffEq: true,
 flashCacheSec: 1,
+lurkOut: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3017,6 +3018,7 @@ m = /^E:awp (\d+) (\d+)$/.exec(text);
 if (m !== null) return { kind: 'awp', x: Number(m[1]) * 100, y: Number(m[2]) * 100 };
 if (text === 'E:kit') return { kind: 'kit' };
 if (text === 'E:smoker') return { kind: 'smoker' };
+if (text === 'E:lurk') return { kind: 'lurk' };
 return null;
 }
 class Tactics {
@@ -3085,6 +3087,7 @@ this.flankGo = false;
 this.flanked = false;
 this.lurkPick = null;
 this.lurkKey = '';
+this.lurkers = new Set();
 this.steppedIn = false;
 this.rushReady = false;
 this.queueHeld = 0;
@@ -3179,6 +3182,7 @@ this.flankGo = false;
 this.flanked = false;
 this.lurkPick = null;
 this.lurkKey = '';
+this.lurkers = new Set();
 this.steppedIn = false;
 this.rushReady = false;
 this.queueHeld = 0;
@@ -3476,6 +3480,7 @@ else if (e.kind === 'kit' && this.isAlive(obs, msg.from)) this.kits.add(msg.from
 else if (e.kind === 'burn') this.burns.push(e);
 else if (e.kind === 'awp') this.awp = { x: e.x, y: e.y, tick: t };
 else if (e.kind === 'smoker') this.postSmokers.add(msg.from);
+else if (e.kind === 'lurk') this.lurkers.add(msg.from);
 if (e.kind === 'flash') {
 this.flashHeard = t;
 this.flashPop = e.pop;
@@ -3587,7 +3592,7 @@ const far = Math.max(this.tRoute(p.site, p.r1)?.length ?? 0, this.tRoute(p.site,
 if ((ready && t - this.readyAt >= 1.5 * this.tps) || el >= Math.max(P.splitWait, far / P.routeSpeed)) return { ...p, exec: p.site };
 }
 if (p.kind === 'fake') {
-const fakers = this.alive(obs).filter((m) => this.groupOf(obs, m.id, p) === 1);
+const fakers = this.alive(obs).filter((m) => this.inGroup(obs, m.id, p, 1));
 const there = fakers.some((m) => {
 const s = this.memberStage(obs, m.id, p);
 return s !== null && dist(m.x, m.y, s.x, s.y) < 4 * UNIT;
@@ -3879,8 +3884,14 @@ memberIndex(obs, id, p) {
 const gid = this.groupOf(obs, id, p);
 const carrier = obs.me.hasBomb ? obs.me.id : (obs.teammates.find((m) => m.hasBomb)?.id ?? -1);
 const last = this.roles.of(carrier) === ENTRY ? -1 : carrier;
-const list = this.ids.filter((x) => this.isAlive(obs, x) && this.groupOf(obs, x, p) === gid).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
+const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
 return Math.max(0, list.indexOf(id));
+}
+inGroup(obs, id, p, gid) {
+return this.groupOf(obs, id, p) === gid && !this.lurking(obs, id);
+}
+lurking(obs, id) {
+return P.lurkOut && id !== obs.me.id && this.lurkers.has(id) && this.alive(obs).length >= 4;
 }
 setupOf(obs, id, p) {
 const gid = this.groupOf(obs, id, p);
@@ -3929,6 +3940,10 @@ out.role = '讓突破手先走';
 return null;
 }
 const lk = this.lurkOf(obs, p);
+if (P.lurkOut && lk !== null && !this.lurkers.has(me.id)) {
+this.lurkers.add(me.id);
+out.cmds.push({ type: 'say', text: 'E:lurk' });
+}
 if (lk !== null && (exec === null || exec === lk.route.site) && !this.inRectSite(me.x, me.y, lk.route.site)) {
 if (exec !== null && this.execTick >= 0 && t - this.execTick >= P.lurkDelay * this.tps) {
 const s = this.intel.sites[lk.route.site];
@@ -4039,9 +4054,9 @@ const onWay = ( q) => Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, en
 const burning = P.smokeFire ? obs.effects.find((q) => q.kind === 'fire' && q.ticksLeft > 2 * this.tps && onWay(q) && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) > q.radius + 2 * UNIT)) : undefined;
 const reach = this.data.rules.grenadeRules.maxThrowRange * UNIT;
 const gid = this.groupOf(obs, me.id, p);
-const smokerId = this.ids.find((x) => this.isAlive(obs, x) && this.groupOf(obs, x, p) === gid && this.memberIndex(obs, x, p) === this.smokerIndex(obs, me.id, p));
+const smokerId = this.ids.find((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid) && this.memberIndex(obs, x, p) === this.smokerIndex(obs, me.id, p));
 const sm = smokerId === undefined ? undefined : smokerId === me.id ? me : obs.teammates.find((m) => m.id === smokerId);
-const closest = burning === undefined ? -1 : [me, ...obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) === gid)].sort((a, b) => dist(a.x, a.y, burning.x, burning.y) - dist(b.x, b.y, burning.x, burning.y) || a.id - b.id)[0].id;
+const closest = burning === undefined ? -1 : [me, ...obs.teammates.filter((m) => m.alive && this.inGroup(obs, m.id, p, gid))].sort((a, b) => dist(a.x, a.y, burning.x, burning.y) - dist(b.x, b.y, burning.x, burning.y) || a.id - b.id)[0].id;
 const mine = burning !== undefined && (idx === this.smokerIndex(obs, me.id, p) || ((sm === undefined || dist(sm.x, sm.y, burning.x, burning.y) > reach) && closest === me.id));
 if (burning !== undefined && mine && this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
 wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
@@ -4182,17 +4197,17 @@ return this.flashSpots.some((f) => obs.tick - f.tick <= 3 * this.tps && dist(f.x
 }
 groupSize(obs, p) {
 const gid = this.groupOf(obs, obs.me.id, p);
-return this.alive(obs).filter((m) => this.groupOf(obs, m.id, p) === gid).length;
+return this.alive(obs).filter((m) => this.inGroup(obs, m.id, p, gid)).length;
 }
 leadDist(obs, p, ent) {
 const gid = this.groupOf(obs, obs.me.id, p);
 let best = Infinity;
-for (const m of this.alive(obs)) if (this.groupOf(obs, m.id, p) === gid) best = Math.min(best, dist(m.x, m.y, ent.ox, ent.oy));
+for (const m of this.alive(obs)) if (this.inGroup(obs, m.id, p, gid)) best = Math.min(best, dist(m.x, m.y, ent.ox, ent.oy));
 return best;
 }
 smokerIndex(obs, id, p) {
 const gid = this.groupOf(obs, id, p);
-const members = this.ids.filter((x) => this.groupOf(obs, x, p) === gid && obs.teammates.every((m) => m.id !== x || m.alive));
+const members = this.ids.filter((x) => this.inGroup(obs, x, p, gid) && obs.teammates.every((m) => m.id !== x || m.alive));
 for (const r of SMOKE_PREF) {
 const who = members.find((x) => this.roles.of(x) === r);
 if (who !== undefined) return this.memberIndex(obs, who, p);
@@ -4226,6 +4241,7 @@ this.flankCache.set(key, out);
 return out;
 }
 lurkOf(obs, p) {
+if (P.lurkOut && this.alive(obs).length < 4) return null;
 const key = `${p.kind}${p.site}`;
 if (this.lurkKey === key) return this.lurkPick;
 this.lurkKey = key;
@@ -4244,7 +4260,7 @@ return this.lurkPick;
 flankHold(obs, p, exec, f) {
 if (this.flankStart < 0) this.flankStart = obs.tick;
 if ((obs.tick - this.flankStart) / this.tps >= f.wait || obs.round.phaseTicksLeft <= P.forceExecLeft * this.tps || this.flankGo) return false;
-const far = obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) !== f.near);
+const far = obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) !== f.near && !this.lurking(obs, m.id));
 const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.second.oy) < P.flankNear * UNIT || this.inRectSite(m.x, m.y, exec));
 if (done) this.flankGo = true;
 return !done;
