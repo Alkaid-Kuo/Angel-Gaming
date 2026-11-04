@@ -1065,19 +1065,48 @@ export class Tactics {
     }
     if (best === null) return;
     if (want === null && (obs.enemies.length > 0 || me.hp < 40 || this.perc.threats(me.x, me.y, 50).some((k) => dist(k.x, k.y, me.x, me.y) < 15 * UNIT))) return;
+    /** 撿到它也不虧：目標那把、拆彈器（canPick 已排除撿不到的）、比手上好的槍（之後再換目標那把） @param {import('./base.js').Observation['items'][number]} it */
+    const useful = (it) => it === best || it.kind === 'kit' || (it.kind === 'weapon' && it.weapon !== null && (want !== null && it.weapon === want.w ? 9 : this.gunValue(it.weapon)) > mine);
+    // 同一點排在前面、引擎會先撿到的沒用東西：走過去也只會撿到它，放棄（不把目標鎖在那裡）
+    if (P.grabSim) {
+      const k = obs.items.indexOf(best);
+      if (obs.items.some((it, i) => i < k && this.canPick(me, it) && dist(it.x, it.y, best.x, best.y) < 50 && !useful(it))) return;
+    }
     out.goal = { x: best.x, y: best.y };
     out.hold = null;
     out.route = null;
     out.stop = false;
     out.role += '・撿槍';
-    // 引擎撿的是 1.2 格內最近的掉落物：目標要是最近的那個才撿，不然再走近一點
-    const near = obs.items.some((it) => it !== best && dist(me.x, me.y, it.x, it.y) <= bd);
+    // 引擎撿的是 1.2 格內最近的掉落物（一樣近取排前面的；隊伍撿不到的不算）：下一個會撿到的有用才撿，不然再走近一點
+    const next = P.grabSim ? this.nextPick(obs) : null;
+    const near = P.grabSim ? next === null || !useful(next) : obs.items.some((it) => it !== best && dist(me.x, me.y, it.x, it.y) <= bd);
     // 指令要等反應延遲才生效：剛下過就不再下（第二次會把剛掉在腳邊的舊槍撿回來）
     if (bd < UNIT && !near && t - this.pickAt > this.data.rules.reactionTicks + 2 * this.data.rules.decisionInterval) {
       this.pickAt = t;
       out.cmds.push({ type: 'pickup' });
     }
     else if (near) out.goal = { x: best.x, y: best.y };
+  }
+
+  /** 引擎規則下這個人撿得到的掉落物（炸彈只有 T、拆彈器只有身上沒有的 CT） @param {import('./base.js').Observation['me']} me @param {import('./base.js').Observation['items'][number]} it */
+  canPick(me, it) {
+    return !(it.kind === 'bomb' && me.team !== 'T') && !(it.kind === 'kit' && (me.team !== 'CT' || me.loadout.kit));
+  }
+
+  /** 現在下撿取會撿到哪一個（照引擎：撿取範圍內最近、一樣近取排前面的） @param {import('./base.js').Observation} obs */
+  nextPick(obs) {
+    const me = obs.me;
+    let pick = null;
+    let bd = P.pickReach * UNIT + 1;
+    for (const it of obs.items) {
+      if (!this.canPick(me, it)) continue;
+      const d = dist(me.x, me.y, it.x, it.y);
+      if (d < bd) {
+        bd = d;
+        pick = it;
+      }
+    }
+    return pick;
   }
 
   /**

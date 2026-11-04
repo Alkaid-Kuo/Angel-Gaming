@@ -184,6 +184,8 @@ grabAfterTask: true,
 wentInSite: true,
 heardOnce: true,
 heardKeep: true,
+grabSim: true,
+pickReach: 1.2,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3774,17 +3776,40 @@ bd = d;
 }
 if (best === null) return;
 if (want === null && (obs.enemies.length > 0 || me.hp < 40 || this.perc.threats(me.x, me.y, 50).some((k) => dist(k.x, k.y, me.x, me.y) < 15 * UNIT))) return;
+const useful = (it) => it === best || it.kind === 'kit' || (it.kind === 'weapon' && it.weapon !== null && (want !== null && it.weapon === want.w ? 9 : this.gunValue(it.weapon)) > mine);
+if (P.grabSim) {
+const k = obs.items.indexOf(best);
+if (obs.items.some((it, i) => i < k && this.canPick(me, it) && dist(it.x, it.y, best.x, best.y) < 50 && !useful(it))) return;
+}
 out.goal = { x: best.x, y: best.y };
 out.hold = null;
 out.route = null;
 out.stop = false;
 out.role += '・撿槍';
-const near = obs.items.some((it) => it !== best && dist(me.x, me.y, it.x, it.y) <= bd);
+const next = P.grabSim ? this.nextPick(obs) : null;
+const near = P.grabSim ? next === null || !useful(next) : obs.items.some((it) => it !== best && dist(me.x, me.y, it.x, it.y) <= bd);
 if (bd < UNIT && !near && t - this.pickAt > this.data.rules.reactionTicks + 2 * this.data.rules.decisionInterval) {
 this.pickAt = t;
 out.cmds.push({ type: 'pickup' });
 }
 else if (near) out.goal = { x: best.x, y: best.y };
+}
+canPick(me, it) {
+return !(it.kind === 'bomb' && me.team !== 'T') && !(it.kind === 'kit' && (me.team !== 'CT' || me.loadout.kit));
+}
+nextPick(obs) {
+const me = obs.me;
+let pick = null;
+let bd = P.pickReach * UNIT + 1;
+for (const it of obs.items) {
+if (!this.canPick(me, it)) continue;
+const d = dist(me.x, me.y, it.x, it.y);
+if (d < bd) {
+bd = d;
+pick = it;
+}
+}
+return pick;
 }
 settle(obs, out) {
 if (!P.grabAfterTask) this.grab(obs, out);

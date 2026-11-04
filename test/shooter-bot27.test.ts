@@ -4,7 +4,7 @@ import { P } from '../bots/shooter-src/base.js';
 import type { TacOut } from '../bots/shooter-src/tactics.js';
 import { ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
 import { shooterHelpers } from '../src/shooter/runner.ts';
-import type { ShooterObservation } from '../src/shooter/api.ts';
+import type { ShooterObservation, WeaponId } from '../src/shooter/api.ts';
 import type { Sector } from '../bots/shooter-src/memory.js';
 
 // Bot 2.7 修正批的 regression 測試：每項測反例修好（開關開）與原本的合理行為保留；開關關掉時重現 2.6.3 的錯誤。
@@ -144,5 +144,53 @@ describe('Bot 2.7 批 1-3：聲音反應等待（heardOnce、heardKeep）', () =
     setP('heardKeep', false);
     expect(run(2, 3, false)).toEqual([false, true, true]);
     expect(run(1, 4, true)).toEqual([false, false, false, false]);
+  });
+});
+
+describe('Bot 2.7 批 1-4：同點掉落物照引擎規則撿（grabSim）', () => {
+  /** 沒有主武器、腳邊 0.2 格有槍：items 依引擎順序 */
+  function grabWith(pid: number, items: (pos: { x: number; y: number }) => ShooterObservation['items']): TacOut {
+    const { match, bot } = live(pid);
+    const o = match.observe(pid);
+    const q = { x: o.me.x + 200, y: o.me.y };
+    const obs: ShooterObservation = { ...o, enemies: [], items: items(q), me: { ...o.me, loadout: { ...o.me.loadout, primary: null, kit: false } } };
+    const a = out();
+    bot.tactics.grab(obs, a);
+    return a;
+  }
+  type Item = ShooterObservation['items'][number];
+  const gun = (q: { x: number; y: number }, weapon: WeaponId = 'm4'): Item => ({ kind: 'weapon', weapon, ...q });
+  const kit = (q: { x: number; y: number }): Item => ({ kind: 'kit', weapon: null, ...q });
+  const pick = (a: TacOut): boolean => a.cmds.some((c) => c.type === 'pickup');
+
+  it('CT：槍與拆彈器同一點，引擎先撿排前面的槍 → 下撿取', () => {
+    expect(pick(grabWith(5, (q) => [gun(q), kit(q)]))).toBe(true);
+  });
+
+  it('CT：拆彈器排前面 → 先撿拆彈器也有用，照樣下撿取', () => {
+    expect(pick(grabWith(5, (q) => [kit(q), gun(q)]))).toBe(true);
+  });
+
+  it('T：拆彈器 T 撿不到，不擋撿槍', () => {
+    expect(pick(grabWith(0, (q) => [kit(q), gun(q)]))).toBe(true);
+  });
+
+  it('只有槍：照常撿（原本的行為保留）', () => {
+    expect(pick(grabWith(5, (q) => [gun(q)]))).toBe(true);
+  });
+
+  it('同一點排前面的是更差的槍：不下撿取、也不把目標一直鎖在那裡', () => {
+    const a = grabWith(5, (q) => [gun(q, 'pistol'), gun(q)]);
+    expect(pick(a)).toBe(false);
+    expect(a.goal).toBeNull();
+  });
+
+  it('同一點排前面的是比手上好、但不如目標的槍：先撿它（之後再換）', () => {
+    expect(pick(grabWith(5, (q) => [gun(q, 'smg'), gun(q)]))).toBe(true);
+  });
+
+  it('開關關掉重現 2.6.3：槍與拆彈器同點永遠不撿', () => {
+    setP('grabSim', false);
+    expect(pick(grabWith(5, (q) => [gun(q), kit(q)]))).toBe(false);
   });
 });
