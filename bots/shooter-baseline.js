@@ -198,6 +198,7 @@ tradeSkipTask: true,
 navIdle: true,
 burnMateCheck: true,
 critForce: true,
+emptySwitch: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -1993,7 +1994,7 @@ out.why = '近距離切手槍';
 return this.finishMove(obs, out, e, false, d, ctx);
 }
 if (me.ammoMag === 0 && w.magazine > 0) {
-if (wid === primary && secondary !== null && dc < P.pistolSwitch) {
+if (wid === primary && secondary !== null && (dc < P.pistolSwitch || (P.emptySwitch && me.ammoReserve === 0))) {
 out.cmds.push({ type: 'switch', slot: 'secondary' });
 this.pistolUntil = t + 3 * this.tps;
 out.why = '沒子彈・切手槍';

@@ -345,6 +345,8 @@ export const P = {
   burnMateCheck: true,
   /** 1-10 A23：沒有下一回合（半場最後一回合、對方賽點）就 force，不管平均多少錢（false ＝ 平均不到甲＋衝鋒槍的八成就落到 eco，錢會被重置或比賽結束卻裸奔） */
   critForce: true,
+  /** 1-10 A9：主武器空了也沒有備彈：不管敵人多遠都切手槍（false ＝ 敵人在 pistolSwitch 外時只標「換彈」、沒有任何指令） */
+  emptySwitch: true,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */

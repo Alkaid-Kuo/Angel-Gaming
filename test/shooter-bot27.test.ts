@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import ShooterBaseline from '../bots/shooter-src/baseline.js';
-import { P } from '../bots/shooter-src/base.js';
+import { P, UNIT } from '../bots/shooter-src/base.js';
 import { parseEvent, type TacOut } from '../bots/shooter-src/tactics.js';
 import { ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
 import { shooterHelpers } from '../src/shooter/runner.ts';
@@ -584,5 +584,39 @@ describe('Bot 2.7 批 1-10 A23：沒有下一回合時不存錢（critForce）',
   it('開關關掉重現 2.6.3：最後一回合也存錢', () => {
     setP('critForce', false);
     expect(call(true)).toBe('eco');
+  });
+});
+
+describe('Bot 2.7 批 1-10 A9：主武器空了也沒備彈、敵人在遠處：切手槍（emptySwitch）', () => {
+  /** CT 拿空的 m4（沒有備彈），正前方 20 格有敵人；reserve＝備彈 */
+  function fight(reserve: number): { cmds: string[]; why: string } {
+    const { match, bot } = live(5);
+    const me = match.players[5];
+    let target = null;
+    for (let deg = 0; deg < 360 && target === null; deg += 15) {
+      const q = { x: Math.round(me.x + Math.cos((deg * Math.PI) / 180) * 20 * UNIT), y: Math.round(me.y + Math.sin((deg * Math.PI) / 180) * 20 * UNIT) };
+      if (bot.g.walkable(bot.g.cellOf(q.x, q.y)) && bot.g.los(me.x, me.y, q.x, q.y)) target = { ...q, deg };
+    }
+    if (target === null) throw new Error('找不到開闊方向');
+    match.teleport(5, me.x, me.y, target.deg);
+    const base = match.observe(5);
+    const enemy = { id: 0, x: target.x, y: target.y, facing: 0, weapon: 'ak' as const, crouching: false, planting: false, defusing: false, hasBomb: false, firing: false };
+    const obs: ShooterObservation = { ...base, enemies: [enemy], me: { ...base.me, weapon: 'm4', ammoMag: 0, ammoReserve: reserve, reloadTicksLeft: 0, loadout: { ...base.me.loadout, primary: 'm4', secondary: 'pistol' } } };
+    bot.perc.update(obs);
+    const f = bot.combat.engage(obs, { holding: false, objective: false });
+    return { cmds: f.cmds.map((c) => c.type), why: f.why };
+  }
+
+  it('沒有備彈：切手槍', () => {
+    expect(fight(0).cmds).toContain('switch');
+  });
+
+  it('還有備彈：照常換彈（原本的行為保留）', () => {
+    expect(fight(60).cmds).toContain('reload');
+  });
+
+  it('開關關掉重現 2.6.3：沒有任何指令', () => {
+    setP('emptySwitch', false);
+    expect(fight(0).cmds.filter((c) => c === 'switch' || c === 'reload')).toEqual([]);
   });
 });

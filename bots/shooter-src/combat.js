@@ -324,7 +324,7 @@ export class Combat {
       return this.finishMove(obs, out, e, false, d, ctx);
     }
     if (me.ammoMag === 0 && w.magazine > 0) {
-      if (wid === primary && secondary !== null && dc < P.pistolSwitch) {
+      if (wid === primary && secondary !== null && (dc < P.pistolSwitch || (P.emptySwitch && me.ammoReserve === 0))) {
         out.cmds.push({ type: 'switch', slot: 'secondary' });
         this.pistolUntil = t + 3 * this.tps;
         out.why = '沒子彈・切手槍';
