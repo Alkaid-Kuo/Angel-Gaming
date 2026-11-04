@@ -182,7 +182,7 @@ export class Economy {
     const critical = this.lastChance(obs);
     const avg = people.reduce((s, p) => s + p.money, 0) / n;
     const half = this.cost('smg') + this.data.rules.armorPrice;
-    if (critical && avg >= half * 0.8) return 'force';
+    if (critical && (P.critForce || avg >= half * 0.8)) return 'force';
     if (this.roundInHalf === 2 && this.lastWon === true && avg >= half) return 'half';
     if (this.roundInHalf === 2 && this.lastWon === false) return /** @type {BuyCall} */ (P.afterPistol);
     // 經濟風格只移動 force 的門檻：保守多存一點、積極差一點也 force

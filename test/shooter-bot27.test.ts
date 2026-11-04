@@ -560,3 +560,29 @@ describe('Bot 2.7 批 1-10 A27：燒拆包不燒到正在交火的隊友（burnM
     expect(wish(true)).toBe('燒拆包');
   });
 });
+
+describe('Bot 2.7 批 1-10 A23：沒有下一回合時不存錢（critForce）', () => {
+  function call(lastOfHalf: boolean): string {
+    const { match, bot } = live(5);
+    const o = match.observe(5);
+    const e = bot.tactics.econ;
+    const r = bot.data.rules;
+    e.roundInHalf = lastOfHalf ? r.roundsPerHalf : 4;
+    e.prevCall = null;
+    e.lastWon = false;
+    return e.teamCall({ ...o, round: { ...o.round, overtime: 0, scoreT: 0, scoreCT: 0 }, me: { ...o.me, money: 1000, loadout: { ...o.me.loadout, primary: null } }, teammates: o.teammates.map((m) => ({ ...m, money: 1000, weapon: 'pistol' as const })) });
+  }
+
+  it('半場最後一回合、錢很少：照樣 force（錢會被重置）', () => {
+    expect(call(true)).toBe('force');
+  });
+
+  it('還有下一回合、錢很少：照常 eco', () => {
+    expect(call(false)).toBe('eco');
+  });
+
+  it('開關關掉重現 2.6.3：最後一回合也存錢', () => {
+    setP('critForce', false);
+    expect(call(true)).toBe('eco');
+  });
+});

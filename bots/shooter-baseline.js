@@ -197,6 +197,7 @@ lineNewest: true,
 tradeSkipTask: true,
 navIdle: true,
 burnMateCheck: true,
+critForce: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -2479,7 +2480,7 @@ const canNext = people.filter((p) => this.teamShort(p.money + nextPay, p.primary
 const critical = this.lastChance(obs);
 const avg = people.reduce((s, p) => s + p.money, 0) / n;
 const half = this.cost('smg') + this.data.rules.armorPrice;
-if (critical && avg >= half * 0.8) return 'force';
+if (critical && (P.critForce || avg >= half * 0.8)) return 'force';
 if (this.roundInHalf === 2 && this.lastWon === true && avg >= half) return 'half';
 if (this.roundInHalf === 2 && this.lastWon === false) return (P.afterPistol);
 const forceAt = this.opts.economy === 1 ? half + 600 : this.opts.economy === 2 ? half * 0.8 : half;
