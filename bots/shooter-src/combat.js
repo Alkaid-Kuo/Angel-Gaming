@@ -716,9 +716,9 @@ export class Combat {
     // 2. 受傷方向
     const hurt = this.perc.lastHurt;
     if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
-    // 3. 敵方聲音（反應延遲後）
+    // 3. 敵方聲音（反應延遲後）；守位中不轉（2.7：和 alert 一樣，守位只看挨打，近處腳步常在牆後）
     const snd = this.perc.lastSound;
-    if (snd !== null && t - snd.tick < this.tps && this.heard(snd, t)) {
+    if (snd !== null && !(P.lookHoldQuiet && ctx.holding) && t - snd.tick < this.tps && this.heard(snd, t)) {
       const r = clamp((snd.r0 + snd.r1) / 2, 4, 12);
       return { x: me.x + cosd(snd.dir) * r * UNIT, y: me.y + sind(snd.dir) * r * UNIT };
     }

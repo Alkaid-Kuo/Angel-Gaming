@@ -191,6 +191,7 @@ flashIdent: true,
 flashOffEq: true,
 flashCacheSec: 1,
 lurkOut: true,
+lookHoldQuiet: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -2297,7 +2298,7 @@ if (best !== null) return { x: best.x, y: best.y };
 const hurt = this.perc.lastHurt;
 if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
 const snd = this.perc.lastSound;
-if (snd !== null && t - snd.tick < this.tps && this.heard(snd, t)) {
+if (snd !== null && !(P.lookHoldQuiet && ctx.holding) && t - snd.tick < this.tps && this.heard(snd, t)) {
 const r = clamp((snd.r0 + snd.r1) / 2, 4, 12);
 return { x: me.x + cosd(snd.dir) * r * UNIT, y: me.y + sind(snd.dir) * r * UNIT };
 }

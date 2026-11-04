@@ -394,3 +394,29 @@ describe('Bot 2.7 批 1-8：繞後者離開原組（lurkOut）', () => {
     expect(b4.tactics.groupSize(o4, plan)).toBe(before);
   });
 });
+
+describe('Bot 2.7 批 1-10 A5：守位時 look() 不轉去看聲音（lookHoldQuiet）', () => {
+  /** CT 站在 A 的守點位上守入口，背後 40 格外有槍聲（反應等待 0） */
+  function aim(holding: boolean, sound: boolean): { x: number; y: number } | null {
+    const { match, bot } = live(5);
+    const obs = match.observe(5);
+    const hold = bot.intel.sites.A.holds[0];
+    const o: ShooterObservation = { ...obs, radar: [], me: { ...obs.me, x: hold.x, y: hold.y } };
+    bot.combat.soundReact = 0;
+    bot.perc.lastSound = sound ? { ox: hold.x, oy: hold.y, dir: 180, r0: 30, r1: 70, tick: o.tick, conf: 40, kind: 'shot' } : null;
+    return bot.combat.look(o, { hold, holding, navLook: null, ahead: null });
+  }
+
+  it('守位中：看守的入口，不轉去看遠處的聲音', () => {
+    expect(aim(true, true)).toEqual(aim(true, false));
+  });
+
+  it('不在守位（走動中）：照常轉向聲音', () => {
+    expect(aim(false, true)).not.toEqual(aim(false, false));
+  });
+
+  it('開關關掉重現 2.6.3：守位中也轉去看聲音', () => {
+    setP('lookHoldQuiet', false);
+    expect(aim(true, true)).not.toEqual(aim(true, false));
+  });
+});
