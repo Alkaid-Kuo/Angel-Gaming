@@ -1851,6 +1851,30 @@ const SITUATION_SCENARIOS: readonly AiScenario[] = [
       return { pass: n >= 40 && rate >= 0.7 && ff === 0, detail: `${n} 場：對煙開火 ${(rate * 100).toFixed(1)}%、誤傷隊友 ${ff} 場` };
     }),
   },
+  {
+    id: 'T27',
+    name: '保槍不發呆',
+    expect: '炸彈下在 B、T 五人都活著，最後一個 CT 在 A 點中央、身上沒錢（下回合買不起）：8 秒內走開 2 格以上，停在有掩體（貼牆或矮牆）的格，離炸彈至少 22 格；兩張圖',
+    run: (bot, seed) => onBoth((mapId) => {
+      const d = driver(bot, { seed, map: mapId, seats: [CT0], alive: [CT0, ...TS] });
+      toLive(d);
+      const m = d.match;
+      for (const pid of TS) park(m, pid);
+      const at = openSpot(m.map, siteRect(m.map, 'A'), 1);
+      m.teleport(CT0, at[0], at[1], 0);
+      m.players[CT0].money = 0;
+      const bomb = forcePlant(m, 'B');
+      run(d, 8 * TPS);
+      const p = m.players[CT0];
+      const moved = d2([p.x, p.y], at) / UNIT;
+      const data = shooterInitData(m.map, CT0, {});
+      const g = new Grid(data.map);
+      const intel = new MapIntel(data.map, g);
+      const cover = intel.cover[g.cellOf(p.x, p.y)] !== 0;
+      const far = d2([p.x, p.y], bomb) / UNIT;
+      return { pass: moved >= 2 && cover && far >= 22, detail: `走了 ${moved.toFixed(1)} 格、停在掩體格 ${cover}、離炸彈 ${far.toFixed(1)} 格` };
+    }),
+  },
 ];
 
 const batchMemos = new WeakMap<CompiledBot, Map<string, AiScenarioResult>>();

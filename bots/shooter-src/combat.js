@@ -593,6 +593,18 @@ export class Combat {
     const aim = this.blindAim(obs);
     const w = this.weapon(me.weapon);
     if (aim === null || w === undefined || dist(me.x, me.y, aim.x, aim.y) > w.range * UNIT) return false;
+    // 2.6.1：隊友在煙裡、或在我前方（沿線 1.5 格以外）離我到目標點的線段 P.blindMateGap 格內就不打（盲射中隊友走進來也立刻停）
+    const smokes = [...this.smokes.values()];
+    const len = Math.max(1, dist(me.x, me.y, aim.x, aim.y));
+    /** @param {{ x: number, y: number }} m */
+    const onLine = (m) => {
+      const q = segDist(m.x, m.y, me.x, me.y, aim.x, aim.y);
+      return q.d < P.blindMateGap * UNIT && q.t * len > 1.5 * UNIT;
+    };
+    if (obs.teammates.some((m) => m.alive && (onLine(m) || smokes.some((q) => dist(m.x, m.y, q.x, q.y) < this.smokeR(q, t) + UNIT)))) {
+      this.blind = null;
+      return false;
+    }
     let s = this.blind;
     if (s === null) {
       const burst = Math.round(3 + 2 * (1 - this.attrs.discipline));

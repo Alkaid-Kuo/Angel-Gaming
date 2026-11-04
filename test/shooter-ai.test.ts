@@ -38,7 +38,7 @@ describe('射擊基準 Bot：檔案與宣告', () => {
     expect(baseline.sizeBytes).toBeLessThanOrEqual(256 * 1024);
     const c = new ShooterBatchController(baseline, 'baseline', 1, 0, MAPS.redrock());
     expect(c.declaration.name).toBe('shooter-baseline');
-    expect(c.declaration.version).toBe('2.6');
+    expect(c.declaration.version).toBe('2.6.1');
     expect(c.declaration.style).toBe('基準');
     expect(c.declaration.knobs.length).toBeGreaterThanOrEqual(3);
     expect(c.declaration.knobs.length).toBeLessThanOrEqual(6);
@@ -122,7 +122,7 @@ describe('射擊基準 Bot：地圖分析', () => {
   }
 });
 
-describe('射擊基準 Bot：情境測試 P0～P13、T1～T26、R1～R6（每個情境 5 個種子；T25、T26 自己跑 50 場算比例）', () => {
+describe('射擊基準 Bot：情境測試 P0～P13、T1～T27、R1～R6（每個情境 5 個種子；T25、T26 自己跑 50 場算比例）', () => {
   for (const s of AI_SCENARIOS) {
     it(`${s.id} ${s.name}：${s.expect}`, () => {
       for (const seed of AI_SCENARIO_SEEDS) {

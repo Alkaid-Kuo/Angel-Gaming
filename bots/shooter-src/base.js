@@ -164,6 +164,8 @@ export const P = {
   blindMemo: 2,
   blindGroups: 2,
   blindPush: 0.7,
+  /** 盲射的友軍限制（2.6.1）：隊友在煙裡、或離我到目標點的線段這麼近（格）就不打 */
+  blindMateGap: 3,
   /** 開火時蹲的最短距離（格） */
   crouchFireMin: 8,
   /** 停步開火的乾淨度：movement 0 → 100 時「這次先不停」的機率 */
@@ -203,8 +205,16 @@ export const P = {
   flashClaimSec: 2,
   flashStagger: 0.5,
   flashHolders: false,
-  /** 側翼（2.6）：主力進點時組裡一人看側翼來向，最多幾秒（不到 4 人改丟煙或閃；false ＝ 2.5） */
-  flankCover: true,
+  /** 有效連閃（2.6.1）：同入口第一顆後 flashSecondAfter～flashSecondWin 秒內可以再丟一顆；非 rush 的爆點要離第一顆 flashSecondGap 格以上 */
+  flashSecond: true,
+  flashSecondAfter: 0.8,
+  flashSecondWin: 3,
+  flashSecondGap: 6,
+  /** 收到隊友的 E:flashing 就先躲（2.6.1；false ＝ 等 E:flash） */
+  flashClaimDodge: true,
+  /** 側翼（2.6）：主力進點時組裡一人看側翼來向，最多幾秒（不到 4 人改丟煙或閃）。2.6.1 預設關：實測看側翼的人擊殺 30、陣亡 44，
+   * 情境做不出側翼傷害，等觀戰回放找到使用者截圖那種回合再開 */
+  flankCover: false,
   flankCoverSec: 5,
   /** 守包：離炸彈至少幾格、彼此至少隔幾格 */
   postMin: 5,
@@ -237,6 +247,9 @@ export const P = {
   /** 回防／保槍：時間不夠的裕度（秒）；保槍要離炸彈幾格 */
   saveMargin: 2,
   saveDist: 22,
+  /** 保槍躲遠（2.6.1）：走到離炸彈與敵人（記得的、腳步聲）最遠的掩體格、每幾秒重找；false ＝ 2.5 的夠遠就原地 */
+  saveHide: true,
+  saveEvery: 2,
   /** 殘局：只剩自己、對方 ≤ 2 人時，侵略 ≥ 這個值（0～1）的 CT 會主動找人 */
   huntAggr: 0.65,
   /** 換血：隊友在這麼近（格）陣亡就朝他死的方向架槍幾秒 */

@@ -190,3 +190,69 @@ describe('Bot 2.6：側翼與繞後', () => {
     expect(t.lurkOf(obs, plan)).toBeNull();
   });
 });
+
+describe('Bot 2.6.1：有效連閃、盲射友軍、保槍躲遠', () => {
+  afterEach(() => {
+    P.flashSecond = true;
+  });
+
+  it('同入口第二顆：第一顆確定出手 0.8 秒後才行（依順序再錯開），有人宣告中不行、兩顆以上不行；非 rush 要避開第一顆爆點', () => {
+    const f = live(1);
+    const t = f.bot.tactics;
+    const ent = f.bot.intel.sites.A.entrances[0];
+    const obs = f.match.observe(1);
+    expect(t.flashNext(obs, ent, false, 0)).toEqual({ ok: true, avoid: null, second: false });
+    t.flashSpots.push({ x: ent.ix, y: ent.iy, tick: obs.tick });
+    expect(t.flashNext(obs, ent, false, 0).ok).toBe(false);
+    const later = { ...obs, tick: obs.tick + 27 };
+    const r = t.flashNext(later, ent, false, 0);
+    expect(r.ok && r.second).toBe(true);
+    expect(r.avoid).toEqual({ x: ent.ix, y: ent.iy });
+    expect(t.flashNext(later, ent, true, 0).avoid).toBeNull();
+    expect(t.flashNext(later, ent, false, 1).ok).toBe(false);
+    expect(t.flashNext({ ...obs, tick: obs.tick + 42 }, ent, false, 1).ok).toBe(true);
+    t.flashClaims.push({ x: ent.ix + 8000, y: ent.iy, until: later.tick + 30 });
+    if (t.flashOf(ent, { x: ent.ix + 8000, y: ent.iy })) expect(t.flashNext(later, ent, false, 0).ok).toBe(false);
+    t.flashClaims.length = 0;
+    t.flashSpots.push({ x: ent.ix + 5000, y: ent.iy, tick: obs.tick });
+    if (t.flashOf(ent, { x: ent.ix + 5000, y: ent.iy })) expect(t.flashNext(later, ent, false, 0).ok).toBe(false);
+    P.flashSecond = false;
+    t.flashSpots.length = 1;
+    expect(t.flashNext(later, ent, false, 0).ok).toBe(false);
+  });
+
+  it('隊友站在煙裡：不盲射', () => {
+    const f = live(5);
+    const c = f.bot.combat;
+    const me = f.match.players[5];
+    let target = null;
+    for (let deg = 0; deg < 360 && target === null; deg += 15) {
+      const q = { x: Math.round(me.x + Math.cos((deg * Math.PI) / 180) * 10 * UNIT), y: Math.round(me.y + Math.sin((deg * Math.PI) / 180) * 10 * UNIT) };
+      if (f.bot.g.walkable(f.bot.g.cellOf(q.x, q.y)) && f.bot.g.los(me.x, me.y, q.x, q.y)) target = { ...q, deg };
+    }
+    if (target === null) throw new Error('找不到開闊方向');
+    f.match.teleport(5, me.x, me.y, target.deg);
+    const base = f.match.observe(5);
+    const obs = { ...base, teammates: base.teammates.map((m) => ({ ...m, alive: false })), me: { ...base.me, weapon: 'm4' as const, ammoMag: 30, loadout: { ...base.me.loadout, primary: 'm4' as const } } };
+    f.bot.perc.known.set(0, { id: 0, x: target.x, y: target.y, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: obs.tick - 5, seenTick: obs.tick - 5, conf: 90, src: 'see' });
+    c.smokes.set('s', { x: target.x, y: target.y, radius: 3 * UNIT, tick: obs.tick, until: obs.tick + 300 });
+    expect(c.engage(obs, { holding: true, objective: false }).fire).toBe(true);
+    c.blind = null;
+    // 隊友在煙的另一側邊緣（不在彈道上）也不打
+    const side = { x: target.x + Math.round(Math.cos(((target.deg + 90) * Math.PI) / 180) * 2500), y: target.y + Math.round(Math.sin(((target.deg + 90) * Math.PI) / 180) * 2500) };
+    const inSmoke = { ...obs, teammates: obs.teammates.map((m, i) => (i === 0 ? { ...m, alive: true, ...side } : m)) };
+    expect(c.engage(inSmoke, { holding: true, objective: false }).fire).toBe(false);
+  });
+
+  it('保槍：選離炸彈 saveDist 以上、有掩體、離記得的敵人遠的格，不是原地', () => {
+    const f = live(5);
+    const t = f.bot.tactics;
+    const site = f.bot.intel.sites.B;
+    const bomb = site.plants[0];
+    const obs = f.match.observe(5);
+    const sp = t.saveSpot(obs, bomb.x, bomb.y);
+    expect(sp).not.toBeNull();
+    expect(dist(sp!.x, sp!.y, bomb.x, bomb.y)).toBeGreaterThanOrEqual(P.saveDist * UNIT);
+    expect(f.bot.intel.cover[f.bot.g.cellOf(sp!.x, sp!.y)]).not.toBe(0);
+  });
+});
