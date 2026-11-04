@@ -520,10 +520,10 @@ export class Navigator {
 
   /**
    * 找掩體：自己周圍 P.coverRadius 格內（可走、走得到），對每個威脅點都沒有視線的格；取路徑最近的
-   * @param {import('./base.js').Observation} obs @param {readonly import('./base.js').Pt[]} threats
+   * @param {import('./base.js').Observation} obs @param {readonly import('./base.js').Pt[]} threats @param {(i: number) => boolean} [ok] 只考慮這些格（2.6 探點縮回：不往前）
    * @returns {import('./base.js').Pt | null}
    */
-  findCover(obs, threats) {
+  findCover(obs, threats, ok) {
     if (threats.length === 0) return null;
     const g = this.g;
     const start = g.cellOf(obs.me.x, obs.me.y);
@@ -536,7 +536,7 @@ export class Navigator {
       const i = queue[h];
       const d = /** @type {number} */ (depth.get(i));
       const p = g.center(i);
-      if (i !== start && threats.every((th) => !g.los(th.x, th.y, p.x, p.y))) return p;
+      if (i !== start && (ok === undefined || ok(i)) && threats.every((th) => !g.los(th.x, th.y, p.x, p.y))) return p;
       if (d >= P.coverRadius) continue;
       const x = i % W;
       const y = (i - x) / W;

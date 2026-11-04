@@ -80,6 +80,8 @@ export class Combat {
     this.fires = new Map();
     /** 看過的煙：只依公開擴散規則與到期時間外推 @type {Map<string, { x: number, y: number, radius: number, tick: number, until: number }>} */
     this.smokes = new Map();
+    /** 穿煙盲射：目標點、這組已打幾發／一組幾發、打完幾組、下一組最早的 tick、線索到期、打完還能前推一次 @type {{ x: number, y: number, shots: number, burst: number, groups: number, rest: number, until: number, push: boolean } | null} */
+    this.blind = null;
     this.smokeRadius = data.grenades.find((e) => e.id === 'smoke')?.radius ?? 0;
     this.smokeGrowth = this.smokeRadius / Math.max(1, data.rules.grenadeRules.smokeBloomTicks);
   }
@@ -87,6 +89,7 @@ export class Combat {
   reset() {
     this.fires = new Map();
     this.smokes.clear();
+    this.blind = null;
     this.noticed = new Map();
     this.targetId = -1;
     this.seen = 0;
@@ -475,6 +478,7 @@ export class Combat {
     this.engagedDecisions = 0;
     this.blocked = 0;
     if (t - this.lostTick > this.tps / 2) this.targetId = -1;
+    if (this.blindFire(obs, out, ctx)) return out;
     if (this.lostPos !== null && t - this.lostTick < this.holdAngle && !ctx.objective) {
       out.aim = this.lostPos;
       out.crouch = false;
@@ -502,6 +506,112 @@ export class Combat {
       }
     }
     return out;
+  }
+
+  /** 煙此刻的半徑（依公開擴散規則外推） @param {{ radius: number, tick: number }} s @param {number} t */
+  smokeR(s, t) {
+    return Math.max(s.radius, Math.min(this.smokeRadius, s.radius + Math.floor((t - s.tick) * this.smokeGrowth)));
+  }
+
+  /** 這條線穿過（或終點在）看過的煙裡 @param {number} ax @param {number} ay @param {number} bx @param {number} by @param {number} t */
+  smoked(ax, ay, bx, by, t) {
+    for (const s of this.smokes.values()) if (segDist(s.x, s.y, ax, ay, bx, by).d < this.smokeR(s, t)) return true;
+    return false;
+  }
+
+  /**
+   * 盲射的目標（2.6）：記得的敵人（自己剛看到的、隊友雷達、彈道）P.blindMemo 秒內的位置加外推，我到那裡只隔著煙（沒有牆）；
+   * 沒有就看聲音：煙的方向傳來近／中距離的腳步、槍聲、下包拆包聲（警覺越高越會對聲音開槍）
+   * @param {import('./base.js').Observation} obs @returns {import('./base.js').Pt | null}
+   */
+  blindAim(obs) {
+    const me = obs.me;
+    const t = obs.tick;
+    const g = this.g;
+    /** @type {import('./base.js').Pt | null} */
+    let best = null;
+    let bestT = -1;
+    for (const k of this.perc.known.values()) {
+      if (t - k.tick > P.blindMemo * this.tps || k.tick <= bestT) continue;
+      const dt = Math.min(t - k.tick, this.tps);
+      let x = k.x + k.vx * dt;
+      let y = k.y + k.vy * dt;
+      if (!g.walkable(g.cellOf(x, y))) {
+        x = k.x;
+        y = k.y;
+      }
+      if (!g.los(me.x, me.y, x, y) || !this.smoked(me.x, me.y, x, y, t)) continue;
+      bestT = k.tick;
+      best = { x, y };
+    }
+    if (best !== null) return best;
+    for (const q of obs.sounds) {
+      if (q.friendly || q.range === 'far' || (q.kind !== 'footstep' && q.kind !== 'shot' && q.kind !== 'plant' && q.kind !== 'defuse')) continue;
+      const band = q.range === 'near' ? P.bandNear : P.bandMid;
+      for (const s of this.smokes.values()) {
+        const d = dist(me.x, me.y, s.x, s.y) / UNIT;
+        if (d < band[0] - 3 || d > band[1] + 3 || Math.abs(adiff(angleTo(me.x, me.y, s.x, s.y), q.dirDeg)) > P.sectorHalfDeg) continue;
+        const p = { x: me.x + cosd(q.dirDeg) * d * UNIT, y: me.y + sind(q.dirDeg) * d * UNIT };
+        if (g.los(me.x, me.y, p.x, p.y) && this.h.random() < this.notice) return p;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 穿煙盲射（2.6，煙只擋視線不擋子彈）：步槍對 blindAim 點放，一組 3～5 發（紀律越低越多）、最多 P.blindGroups 組，
+   * 兩組打完侵略高的往前一步。狙擊槍、手槍不打；被閃、血低於撤退門檻、彈匣不足一組、換彈中、下包拆包中不打；
+   * 看到人就交給 engage（每次決策重算）
+   * @param {import('./base.js').Observation} obs @param {Fight} out @param {{ holding: boolean, objective: boolean }} ctx
+   */
+  blindFire(obs, out, ctx) {
+    const me = obs.me;
+    const t = obs.tick;
+    const b = this.blind;
+    if (b !== null) {
+      b.shots += me.shots.length;
+      if (b.shots >= b.burst) {
+        b.shots = 0;
+        b.groups++;
+        b.rest = t + Math.round(0.4 * this.tps);
+      }
+    }
+    if (b !== null && t > b.until) this.blind = null;
+    const ok = P.blindFire && (me.team === 'CT' || P.blindT) && !ctx.objective && obs.enemies.length === 0 && me.blindTicks === 0 && me.hp >= this.retreatHp &&
+      me.weapon === me.loadout.primary && me.weapon !== 'awp' && me.reloadTicksLeft === 0;
+    if (!ok) return false;
+    if (b !== null && b.groups >= P.blindGroups) {
+      // 打完了：侵略高的往前一步（一次），之後等線索過期
+      if (!b.push || this.attrs.aggression < P.blindPush) return false;
+      b.push = false;
+      const k = Math.min(1, (1.5 * UNIT) / Math.max(1, dist(me.x, me.y, b.x, b.y)));
+      out.move = { x: Math.round(me.x + (b.x - me.x) * k), y: Math.round(me.y + (b.y - me.y) * k) };
+      out.aim = { x: b.x, y: b.y };
+      out.why = '盲射・前推';
+      return true;
+    }
+    const aim = this.blindAim(obs);
+    const w = this.weapon(me.weapon);
+    if (aim === null || w === undefined || dist(me.x, me.y, aim.x, aim.y) > w.range * UNIT) return false;
+    let s = this.blind;
+    if (s === null) {
+      const burst = Math.round(3 + 2 * (1 - this.attrs.discipline));
+      if (me.ammoMag < burst) return false;
+      s = { x: aim.x, y: aim.y, shots: 0, groups: 0, burst, rest: -1, until: 0, push: true };
+      this.blind = s;
+    } else if (me.ammoMag < s.burst - s.shots) return false;
+    s.x = aim.x;
+    s.y = aim.y;
+    s.until = t + 2 * this.tps;
+    out.engaged = true;
+    out.aim = aim;
+    out.move = 'stop';
+    out.crouch = false;
+    // 準心轉到了、休息時間過了、彈道上沒有隊友才開
+    const turned = Math.abs(adiff(angleTo(me.x, me.y, aim.x, aim.y), me.facing)) < 6;
+    out.fire = turned && t >= s.rest && this.lineClear(obs, [aim]);
+    out.why = out.fire ? '盲射' : '盲射・瞄';
+    return true;
   }
 
   /**

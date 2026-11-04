@@ -100,6 +100,8 @@ export class MapIntel {
       T: { A: this.routeSet('T', 'A'), B: this.routeSet('T', 'B') },
       CT: { A: this.routeSet('CT', 'A'), B: this.routeSet('CT', 'B') },
     };
+    /** T 的繞後路線（2.6，另外存，路線集序號不變） @type {Record<'A' | 'B', Route | null>} */
+    this.lurk = { A: this.lurkRoute('A'), B: this.lurkRoute('B') };
   }
 
   /** @param {'A' | 'B'} id */
@@ -372,6 +374,62 @@ export class MapIntel {
    * @returns {Route[]}
    */
   routeSet(team, id) {
+    const e = this.enumRoutes(team, id, P.routeSlack);
+    if (e === null) return [];
+    const { found, overlap } = e;
+    /** @type {Route[]} */
+    const out = [];
+    for (const f of found) {
+      if (out.length >= P.routeMax) break;
+      if (out.every((o) => overlap(o.regions, f.regions) < 0.6)) out.push({ site: id, team, regions: f.regions, regionSet: new Set(f.regions), portals: f.portals, points: f.points, length: Math.round(f.length) });
+    }
+    if (out.length === 1 && found.length > 1) {
+      // 只找到一條差異夠大的：補上差異最大的那條
+      const first = out[0];
+      let pick = found[1];
+      for (const f of found) if (overlap(first.regions, f.regions) < overlap(first.regions, pick.regions)) pick = f;
+      out.push({ site: id, team, regions: pick.regions, regionSet: new Set(pick.regions), portals: pick.portals, points: pick.points, length: Math.round(pick.length) });
+    }
+    // T：區域重疊率看不出入口不同，被濾掉的入口補回最短的一條（排在後面，前面的路線序號不變）
+    if (team === 'T') {
+      const kept = new Set(out.map((r) => r.portals[r.portals.length - 1]));
+      for (const f of found) {
+        const last = f.portals[f.portals.length - 1];
+        if (kept.has(last)) continue;
+        kept.add(last);
+        out.push({ site: id, team, regions: f.regions, regionSet: new Set(f.regions), portals: f.portals, points: f.points, length: Math.round(f.length) });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 繞後路線（2.6，游擊用，不進 rush／default 的抽選）：長度 ≤ 最短 × P.lurkSlack、和路線集每一條的區域重疊都小於 60%、
+   * 重疊最大值最小（同樣就取短的）的一條；沒有就 null
+   * @param {'A' | 'B'} id @returns {Route | null}
+   */
+  lurkRoute(id) {
+    const e = P.lurkSlack > 0 ? this.enumRoutes('T', id, P.lurkSlack) : null;
+    const base = this.routes.T[id];
+    if (e === null || base.length === 0) return null;
+    let best = null;
+    let bestO = 0.6;
+    for (const f of e.found) {
+      const o = Math.max(...base.map((r) => e.overlap(r.regions, f.regions)));
+      if (o < bestO) {
+        bestO = o;
+        best = f;
+      }
+    }
+    return best === null ? null : { site: id, team: 'T', regions: best.regions, regionSet: new Set(best.regions), portals: best.portals, points: best.points, length: Math.round(best.length) };
+  }
+
+  /**
+   * 列舉路線：在區域鄰接圖上從出生區到包點區域的簡單路徑（長度 ≤ 最短 × slack），由短到長；overlap 是兩條路線的區域重疊率
+   * @param {'T' | 'CT'} team @param {'A' | 'B'} id @param {number} slack
+   * @returns {{ found: { portals: number[], regions: number[], points: import('./base.js').Pt[], length: number }[], overlap: (a: number[], b: number[]) => number } | null}
+   */
+  enumRoutes(team, id, slack) {
     const g = this.g;
     const zone = this.map.spawnZones[team];
     const startCell = this.nearestOpen(Math.floor((zone.x0 + zone.x1) / 2), Math.floor((zone.y0 + zone.y1) / 2));
@@ -379,8 +437,8 @@ export class MapIntel {
     const site = this.sites[id];
     const startRegion = this.region[startCell];
     const shortest = this.distSite[id][startCell] / 10;
-    if (!Number.isFinite(shortest)) return [];
-    const bound = shortest * P.routeSlack * UNIT;
+    if (!Number.isFinite(shortest)) return null;
+    const bound = shortest * slack * UNIT;
     /** @type {{ portals: number[], regions: number[], points: import('./base.js').Pt[], length: number }[]} */
     const found = [];
     /** 區域 → 交界清單 */
@@ -424,8 +482,6 @@ export class MapIntel {
     };
     dfs(startRegion, start.x, start.y, 0);
     found.sort((a, b) => a.length - b.length);
-    /** @type {Route[]} */
-    const out = [];
     /** @param {number[]} a @param {number[]} b */
     const overlap = (a, b) => {
       const sa = new Set(a.filter((r) => r !== startRegion && !site.regions.has(r)));
@@ -435,27 +491,6 @@ export class MapIntel {
       const uni = sa.size + sb.size - inter;
       return uni === 0 ? 1 : inter / uni;
     };
-    for (const f of found) {
-      if (out.length >= P.routeMax) break;
-      if (out.every((o) => overlap(o.regions, f.regions) < 0.6)) out.push({ site: id, team, regions: f.regions, regionSet: new Set(f.regions), portals: f.portals, points: f.points, length: Math.round(f.length) });
-    }
-    if (out.length === 1 && found.length > 1) {
-      // 只找到一條差異夠大的：補上差異最大的那條
-      const first = out[0];
-      let pick = found[1];
-      for (const f of found) if (overlap(first.regions, f.regions) < overlap(first.regions, pick.regions)) pick = f;
-      out.push({ site: id, team, regions: pick.regions, regionSet: new Set(pick.regions), portals: pick.portals, points: pick.points, length: Math.round(pick.length) });
-    }
-    // T：區域重疊率看不出入口不同，被濾掉的入口補回最短的一條（排在後面，前面的路線序號不變）
-    if (team === 'T') {
-      const kept = new Set(out.map((r) => r.portals[r.portals.length - 1]));
-      for (const f of found) {
-        const last = f.portals[f.portals.length - 1];
-        if (kept.has(last)) continue;
-        kept.add(last);
-        out.push({ site: id, team, regions: f.regions, regionSet: new Set(f.regions), portals: f.portals, points: f.points, length: Math.round(f.length) });
-      }
-    }
-    return out;
+    return { found, overlap };
   }
 }

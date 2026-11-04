@@ -40,6 +40,10 @@ export const P = {
   /** 路線集：長度不超過最短路線的倍數、每個包點最多幾條 */
   routeSlack: 1.6,
   routeMax: 3,
+  /** 繞後路線（2.6）：長度上限 × 最短；游擊走繞後的機率（再乘 0.6～1.4 依侵略）、主力喊執行後幾秒才進（lurkSlack 0 ＝ 關） */
+  lurkSlack: 2.4,
+  lurkProb: 0.35,
+  lurkDelay: 4,
 
   // ── 感知 ──
   confSee: 100,
@@ -154,6 +158,12 @@ export const P = {
   /** 目標消失後架槍幾秒（侵略 0 → 100） */
   holdAngle0: 2.6,
   holdAngle100: 0.4,
+  /** 穿煙盲射（2.6）：開關、T 也打（false ＝ 只有 CT；煙裡的 T 對外守包不在 2.6）、線索幾秒內有效、最多幾組、侵略多少以上打完前推一步 */
+  blindFire: true,
+  blindT: false,
+  blindMemo: 2,
+  blindGroups: 2,
+  blindPush: 0.7,
   /** 開火時蹲的最短距離（格） */
   crouchFireMin: 8,
   /** 停步開火的乾淨度：movement 0 → 100 時「這次先不停」的機率 */
@@ -187,6 +197,15 @@ export const P = {
   flashEdge: 1.5,
   /** 輪到丟閃的人沒丟：幾秒後換誰有誰丟 */
   flashTurn: 0.8,
+  /** 閃光去重（2.6）：瞄準時先喊 E:flashing，隊友把爆點當成已認領幾秒；入口判定放寬到 flashDeep；看得到飛行中的閃光也算；
+   * 輪到的人沒丟時組內每人錯開 flashStagger 秒接手；flashHolders 改成只在喊過有閃光（E:fl）的組員之間輪（false ＝ 2.5 的時間到誰有誰丟） */
+  flashClaim: true,
+  flashClaimSec: 2,
+  flashStagger: 0.5,
+  flashHolders: false,
+  /** 側翼（2.6）：主力進點時組裡一人看側翼來向，最多幾秒（不到 4 人改丟煙或閃；false ＝ 2.5） */
+  flankCover: true,
+  flankCoverSec: 5,
   /** 守包：離炸彈至少幾格、彼此至少隔幾格 */
   postMin: 5,
   postGap: 6,
@@ -263,6 +282,11 @@ export const P = {
   /** CT 開局探點：開打後幾秒內去看一眼；T 至少晚這麼多秒才會到那裡 */
   probeTime: 12,
   probeMargin: 4,
+  /** 探點 2.6：站交界 CT 側貼牆的格、到位後最多停幾秒（沒有掩體格只停一半）、探到情報就縮回掩體（false ＝ 2.5 的交界中心、時間到才回） */
+  probeCover: true,
+  probeStay: 4.5,
+  /** 探點縮回用撤離模式（轉身跑；T25 實測背後中彈變多，預設不用） */
+  probeRun: false,
   /** 手雷：兩個以上記得的敵人彼此在這麼近（格）內算聚集 */
   nadeCluster: 3.5,
   /** CT 燃燒：敵人離入口這麼近（格）時封入口外側 */

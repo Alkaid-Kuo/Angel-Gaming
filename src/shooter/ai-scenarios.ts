@@ -1816,7 +1816,199 @@ const SITUATION_SCENARIOS: readonly AiScenario[] = [
       return { pass: enter >= 0 && enter <= 2 * TPS && defused, detail: `開始推進 ${(enter / TPS).toFixed(2)} 秒、拆除 ${defused}、遠方隊友通路 ${(field[far] / 10).toFixed(1)} 格` };
     }),
   },
+  // ── Bot 2.6 ──
+  {
+    id: 'T25',
+    name: '探點生還',
+    expect: 'CT 五人開局，探點者（開打 10 秒內最靠近 T 出生的 CT）站定 1 秒後，兩個 T 帶 AK 從 T 那側 20 格外衝過他的位置、各往一個包點；25 個種子 × 兩張圖：探點者開打 15 秒內陣亡 < 25%，並列出 T 到包點前 CT 喊 contact 的比例',
+    run: (bot) => batchOnce(bot, 'T25', () => {
+      let n = 0, dead = 0, told = 0;
+      for (const mapId of teamMaps) for (let seed = 1; seed <= 25; seed++) {
+        const r = probeOnce(bot, seed, mapId);
+        if (r === null) continue;
+        n++;
+        if (r.dead) dead++;
+        if (r.told) told++;
+      }
+      const rate = n > 0 ? dead / n : 1;
+      return { pass: n >= 40 && rate < 0.25, detail: `${n} 場：探點者 15 秒內陣亡 ${(rate * 100).toFixed(1)}%、T 到包點前喊 contact ${((told / Math.max(1, n)) * 100).toFixed(1)}%` };
+    }),
+  },
+  {
+    id: 'T26',
+    name: '煙後補槍',
+    expect: 'CT 兩人在 A 點，T（不開槍）在 CT 視線內從側面走進 6～12 格外的煙並停在裡面；25 個種子 × 兩張圖：進煙後 1.5 秒內 CT 至少一人開火 ≥ 70%，CT 沒有誤傷隊友',
+    run: (bot) => batchOnce(bot, 'T26', () => {
+      let n = 0, fired = 0, ff = 0;
+      for (const mapId of teamMaps) for (let seed = 1; seed <= 25; seed++) {
+        const r = smokeOnce(bot, seed, mapId);
+        if (r === null) continue;
+        n++;
+        if (r.fired) fired++;
+        if (r.ff) ff++;
+      }
+      const rate = n > 0 ? fired / n : 0;
+      return { pass: n >= 40 && rate >= 0.7 && ff === 0, detail: `${n} 場：對煙開火 ${(rate * 100).toFixed(1)}%、誤傷隊友 ${ff} 場` };
+    }),
+  },
 ];
+
+const batchMemos = new WeakMap<CompiledBot, Map<string, AiScenarioResult>>();
+/** 比例型情境（T25、T26）：自己跑 50 場算比例，5 個種子共用同一個結果（依選手、地圖組、凍結時間快取） */
+function batchOnce(bot: CompiledBot, id: string, f: () => AiScenarioResult): AiScenarioResult {
+  let memo = batchMemos.get(bot);
+  if (memo === undefined) { memo = new Map(); batchMemos.set(bot, memo); }
+  const key = `${id}:${teamMaps.join(',')}:${scenarioFreeze}`;
+  const hit = memo.get(key);
+  if (hit !== undefined) return hit;
+  const res = f();
+  memo.set(key, res);
+  return res;
+}
+
+/** 腳本：照格子路徑往前跑（看前面 2 格），看到敵人就邊跑邊打；go() 為假時不動 */
+function runner(map: ShooterMap, path: () => readonly number[], go: () => boolean): Script {
+  let k = 0;
+  return (obs) => {
+    const p = path();
+    if (!go() || !obs.me.alive || p.length === 0) return [];
+    while (k < p.length - 1 && d2(centerOf(map, p[k]), [obs.me.x, obs.me.y]) < 1.2 * UNIT) k++;
+    const goal = centerOf(map, p[Math.min(k + 2, p.length - 1)]);
+    const e = obs.enemies[0];
+    const aim: Pt = e !== undefined ? [e.x, e.y] : goal;
+    return [{ type: 'move', x: Math.round(goal[0]), y: Math.round(goal[1]) }, { type: 'aim', x: Math.round(aim[0]), y: Math.round(aim[1]) }, { type: 'fire', on: e !== undefined }];
+  };
+}
+
+/**
+ * T25 一場：先跑一次 T 不出現，找探點者與他站定的時間位置；同種子重跑（到那時為止完全相同），
+ * 站定 1 秒後把兩個 T 放到 T 出生到探點位路徑上 20 格前，衝過探點位再各往 A、B
+ */
+function probeOnce(bot: CompiledBot, seed: number, mapId: string): { dead: boolean; told: boolean } | null {
+  let go = false;
+  const paths: number[][] = [[], []];
+  const log: Said[] = [];
+  const make = (scripted: boolean): ShooterDriver => {
+    const d = driver(bot, { seed, map: mapId, seats: CTS, alive: [...CTS, T0, T1], log: scripted ? log : undefined, opts: { defaultLoadout: { T: 'ak', CT: 'm4' } }, scripts: scripted ? { [T0]: runner(MAPS[mapId](), () => paths[0], () => go), [T1]: runner(MAPS[mapId](), () => paths[1], () => go) } : undefined });
+    toLive(d);
+    park(d.match, T0);
+    park(d.match, T1);
+    return d;
+  };
+  const a = make(false);
+  const m0 = a.match;
+  const data = shooterInitData(m0.map, CT0, {});
+  initTrig(shooterHelpers(m0.map, seed, CT0));
+  const g = new Grid(data.map);
+  const intel = new MapIntel(data.map, g);
+  const tF = intel.distSpawn.T;
+  let who = -1;
+  let best = Infinity;
+  let at = -1;
+  let arrive = -1;
+  const t0 = m0.tick;
+  run(a, 10 * TPS, (mm) => {
+    for (const pid of CTS) {
+      const p = mm.players[pid];
+      const c = g.cellOf(p.x, p.y);
+      if (c < 0 || tF[c] >= best - 5) continue;
+      best = tF[c];
+      who = pid;
+      at = c;
+      arrive = mm.tick - t0;
+    }
+  });
+  if (who < 0 || at < 0) return null;
+  const tStart = cellAt(m0.map, openSpot(m0.map, m0.map.spawnZones.T, 1));
+  const toProbe = bfsPath(m0.map, tStart, at);
+  if (toProbe === null || toProbe.length < 10) return null;
+  const from = Math.max(1, toProbe.length - 21);
+  for (const [k, s] of (['A', 'B'] as const).entries()) {
+    const rest = bfsPath(m0.map, at, rectCenterCell(m0.map, siteRect(m0.map, s)));
+    if (rest === null) return null;
+    paths[k] = [...toProbe.slice(from), ...rest.slice(1)];
+  }
+  const d = make(true);
+  const m = d.match;
+  run(d, arrive + TPS);
+  const start = centerOf(m.map, toProbe[from]);
+  const next = centerOf(m.map, toProbe[from + 1]);
+  const back = centerOf(m.map, toProbe[from - 1]);
+  m.teleport(T0, start[0], start[1], ang(start, next));
+  m.teleport(T1, back[0], back[1], ang(back, start));
+  m.players[T0].hp = 100;
+  m.players[T1].hp = 100;
+  go = true;
+  let diedAt = -1;
+  let inSite = -1;
+  run(d, Math.max(0, 25 * TPS - (m.tick - t0)), (mm) => {
+    if (diedAt < 0 && !mm.players[who].alive) diedAt = mm.tick - t0;
+    if (inSite < 0 && tInSite(mm, [T0, T1])) inSite = mm.tick;
+    return !mm.players[T0].alive && !mm.players[T1].alive;
+  });
+  const told = log.some((x) => x.text.startsWith('E:contact') && (inSite < 0 || x.tick < inSite));
+  return { dead: diedAt >= 0 && diedAt <= 15 * TPS, told };
+}
+
+/** T26 一場：A 點 CT0 看著 9 格外的煙（已散開），T 從煙側 6 格外、CT 看得到的地方慢走進煙停住；量進煙後 1.5 秒內有沒有開火 */
+function smokeOnce(bot: CompiledBot, seed: number, mapId: string): { fired: boolean; ff: boolean } | null {
+  const map = MAPS[mapId]();
+  // 找得到的第一組：CT 看得到煙心、T 從煙側 5～7 格外走進去（沿路 CT 都看得到）
+  let s: Pt = [0, 0];
+  let deg = 0;
+  let c: Pt = [0, 0];
+  let e: Pt | null = null;
+  for (const cells of [14, 12, 16, 10, 18]) {
+    let base: { s: Pt; deg: number };
+    try {
+      base = duel(map, cells);
+    } catch {
+      continue;
+    }
+    s = base.s;
+    deg = base.deg;
+    c = snap(map, along(s, deg, Math.round(cells * 0.65)));
+    if (!walkable(map, cellAt(map, c)) || !see(map, s, c)) continue;
+    for (const off of [6, 5, 7]) {
+      for (const side of [90, -90]) {
+        const q = snap(map, along(c, deg + side, off));
+        if (walkable(map, cellAt(map, q)) && see(map, s, q) && see(map, q, c)) e = q;
+        if (e !== null) break;
+      }
+      if (e !== null) break;
+    }
+    if (e !== null) break;
+  }
+  if (e === null) return null;
+  const mate = [90, -90].map((side) => snap(map, along(s, deg + side, 2))).find((q) => walkable(map, cellAt(map, q)) && see(map, q, c)) ?? null;
+  let seen = false;
+  const walker: Script = (obs) => (obs.me.alive ? [{ type: 'walk', on: true }, { type: 'move', x: Math.round(c[0]), y: Math.round(c[1]) }] : []);
+  const d = driver(bot, { seed, map: mapId, seats: [CT0, CT1], alive: mate !== null ? [CT0, CT1, T0] : [CT0, T0], opts: { defaultLoadout: { CT: 'm4' } }, scripts: { [T0]: walker }, onCommands: (pid, obs) => {
+    if (pid === CT0 && obs.enemies.length > 0) seen = true;
+  } });
+  toLive(d);
+  const m = d.match;
+  m.teleport(CT0, s[0], s[1], ang(s, e));
+  if (mate !== null) m.teleport(CT1, mate[0], mate[1], ang(mate, e));
+  m.teleport(T0, e[0], e[1], ang(e, c));
+  m.players[T0].hp = 100000;
+  for (const pid of [CT0, CT1]) m.players[pid].grenades = [];
+  m.smokes.push({ x: Math.round(c[0]), y: Math.round(c[1]), owner: CT1, startTick: m.tick - GRENADE_RULES.smokeBloomTicks, endTick: m.tick + GRENADES.smoke.durationTicks });
+  const r = GRENADES.smoke.radius;
+  let enter = -1;
+  run(d, 6 * TPS, (mm) => {
+    const p = mm.players[T0];
+    if (enter < 0 && d2([p.x, p.y], c) < r - UNIT / 2) enter = mm.tick;
+    return enter >= 0;
+  });
+  if (enter < 0 || !seen) return null;
+  const hp0 = [m.players[CT0].hp, m.players[CT1].hp];
+  run(d, Math.round(0.2 * TPS));
+  const a0 = ammo(m, CT0) + ammo(m, CT1);
+  run(d, Math.round(1.3 * TPS));
+  const fired = ammo(m, CT0) + ammo(m, CT1) < a0;
+  return { fired, ff: m.players[CT0].hp < hp0[0] || (mate !== null && m.players[CT1].hp < hp0[1]) };
+}
 
 /** 真實控制器、延遲指令、投擲與效果的端到端情境；位置由包點與入口幾何推導。 */
 function postNadeScenario(bot: CompiledBot, seed: number, mapId: string, kind: 'smoke' | 'molotov'): AiScenarioResult {
