@@ -231,7 +231,8 @@ export class Tactics {
     this.execTick = -1;
     this.stageArrive = -1;
     this.noiseLeft = 0;
-    /** 隊友的閃光：躲或轉身到爆完（claim：只收到宣告、爆炸時間是估的） @type {{ x: number, y: number, pop: number, claim?: boolean }[]} */
+    /** 隊友的閃光：躲或轉身到爆完（claim：只收到宣告、爆炸時間是估的；seen：自己看到飛行中的閃光推算的，
+     * lx／ly／lt 是上一次看到的位置與 tick，aim＝已經推出落點） @type {{ x: number, y: number, pop: number, claim?: boolean, seen?: boolean, lx?: number, ly?: number, lt?: number, aim?: boolean }[]} */
     this.mateFlash = [];
     this.flashHeard = -1;
     this.smokeHeard = -1;
@@ -254,6 +255,8 @@ export class Tactics {
     this.giftMiss = false;
     this.reBought = false;
     this.pickAt = -1000000;
+    /** 本回合進過包點的隊友（等突破手、狙擊手等人用） @type {Set<number>} */
+    this.wentIn = new Set();
     /** 本回合我方煙霧的位置（自己丟的與隊友喊的） @type {import('./base.js').Pt[]} */
     this.smokes = [];
     /** 閃光爆點候選（依入口與煙霧數快取） */
@@ -383,6 +386,8 @@ export class Tactics {
     this.giftMiss = false;
     this.reBought = false;
     this.pickAt = -1000000;
+    /** 本回合進過包點的隊友（等突破手、狙擊手等人用） @type {Set<number>} */
+    this.wentIn = new Set();
     /** 本回合我方煙霧的位置（自己丟的與隊友喊的） @type {import('./base.js').Pt[]} */
     this.smokes = [];
     /** 閃光爆點候選（依入口與煙霧數快取） */
@@ -564,6 +569,7 @@ export class Tactics {
     const tid = this.combat?.targetId ?? -1;
     for (const s of me.shots) if (s.hit === 'enemy' && tid >= 0) this.dealt.set(tid, (this.dealt.get(tid) ?? 0) + s.damage);
     for (const m of obs.teammates) {
+      if (m.alive && (this.inRectSite(m.x, m.y, 'A') || this.inRectSite(m.x, m.y, 'B'))) this.wentIn.add(m.id);
       if (!m.alive) this.kits.delete(m.id);
       if (m.alive && m.defusing) { if (!this.defuseStarted.has(m.id)) this.defuseStarted.set(m.id, t); }
       else this.defuseStarted.delete(m.id);
@@ -694,8 +700,8 @@ export class Tactics {
         const c = this.regionCell(e.region);
         this.noteContact(e.region, e.n, t, this.siteNear(c));
       } else if (e.kind === 'flash') {
-        // 宣告時估的爆炸時間換成準確的
-        this.mateFlash = this.mateFlash.filter((f) => !f.claim || dist(f.x, f.y, e.x, e.y) > 4 * UNIT);
+        // 宣告時估的、自己看到推算的爆炸時間換成準確的
+        this.mateFlash = this.mateFlash.filter((f) => !(f.claim || f.seen) || dist(f.x, f.y, e.x, e.y) > 6 * UNIT);
         this.mateFlash.push({ x: e.x, y: e.y, pop: e.pop });
       }
       else if (e.kind === 'claim') {
@@ -1380,7 +1386,20 @@ export class Tactics {
       const near = st !== null && dist(me.x, me.y, st.x, st.y) < 6 * UNIT;
       // 第一顆煙給支援丟：支援活著、還沒人丟煙、執行不到 8 秒時，其他人先不丟
       const supportFirst = role !== SUPPORT && this.isAlive(obs, this.roles.who(SUPPORT)) && this.smokeHeard < 0 && sinceExec < 8;
-      if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
+      // 2.6.3：入口被燒住（還要燒 2 秒以上、我方還沒丟煙在上面）：煙霧手先丟煙滅火（煙和火重疊整團火熄滅）
+      // 火在計畫入口旁，或擋在自己往包點的路上（20 格內；實際走的入口可能不是計畫的那個）
+      const onWay = (/** @type {{ x: number, y: number, radius: number }} */ q) => Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT || (dist(me.x, me.y, q.x, q.y) < 20 * UNIT && segDist(q.x, q.y, me.x, me.y, site.cx, site.cy).d < q.radius + 2 * UNIT);
+      const burning = P.smokeFire ? obs.effects.find((q) => q.kind === 'fire' && q.ticksLeft > 2 * this.tps && onWay(q) && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) > q.radius + 2 * UNIT)) : undefined;
+      // 煙霧手丟（或他離火超過投擲距離時，組裡離火最近的人丟；看不到隊友身上有沒有煙，沒有就沒人丟）
+      const reach = this.data.rules.grenadeRules.maxThrowRange * UNIT;
+      const gid = this.groupOf(obs, me.id, p);
+      const smokerId = this.ids.find((x) => this.isAlive(obs, x) && this.groupOf(obs, x, p) === gid && this.memberIndex(obs, x, p) === this.smokerIndex(obs, me.id, p));
+      const sm = smokerId === undefined ? undefined : smokerId === me.id ? me : obs.teammates.find((m) => m.id === smokerId);
+      const closest = burning === undefined ? -1 : [me, ...obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) === gid)].sort((a, b) => dist(a.x, a.y, burning.x, burning.y) - dist(b.x, b.y, burning.x, burning.y) || a.id - b.id)[0].id;
+      const mine = burning !== undefined && (idx === this.smokerIndex(obs, me.id, p) || ((sm === undefined || dist(sm.x, sm.y, burning.x, burning.y) > reach) && closest === me.id));
+      if (burning !== undefined && mine && this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
+        wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
+      } else if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
         // 封架點；從這裡丟不到就改封入口內側
         const sp = supportFirst ? null : this.smokeTarget(obs, p, exec, ent);
         if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
@@ -1798,10 +1817,11 @@ export class Tactics {
     const c = this.g.cellOf(me.x, me.y);
     if (role === ENTRY || c < 0 || this.inRectSite(me.x, me.y, s)) return false;
     const mates = obs.teammates.filter((m) => m.alive);
-    if (role === AWP) return mates.filter((m) => this.inRectSite(m.x, m.y, s)).length < Math.min(2, mates.length);
+    // 進過包點就算（2.6.3：守位可能在矩形外，進去再退出來的人不能讓大家一直等；每個決策在 trackTeam 記）
+    if (role === AWP) return mates.filter((m) => this.wentIn.has(m.id)).length < Math.min(2, mates.length);
     const e = mates.find((m) => m.id === this.roles.who(ENTRY));
     const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
-    return e !== undefined && ce >= 0 && !this.inRectSite(e.x, e.y, s) && dS[ce] >= dS[c] - 10;
+    return e !== undefined && ce >= 0 && !this.wentIn.has(e.id) && dS[ce] >= dS[c] - 10;
   }
 
   /** 路線的包點入口 @param {SiteId} site @param {number} routeIdx */
@@ -2810,9 +2830,51 @@ export class Tactics {
     // 閃光（自己丟的或隊友喊的）：致盲距離內看得到爆點就躲到最近看不到的格（7 步內），沒有就轉身
     const own = this.util.away !== null && t >= this.util.away.from ? this.util.away : null;
     this.mateFlash = this.mateFlash.filter((x) => t <= x.pop + 2);
+    // 2.6.3：看到飛行中的閃光（不是自己丟的）：當作從現在起算引信（只會比實際晚，躲得久一點）
+    // 有人喊過爆炸時間（準確的落點與時間）就不用看到的：飛行中的位置不是落點，拿它來躲會躲錯方向
+    const told = this.mateFlash.some((x) => !x.seen && !x.claim && t <= x.pop + 2);
+    if (P.flashSeeDodge && me.team === 'T' && !told) {
+      const away = this.util.away;
+      for (const q of obs.projectiles) {
+        if (q.kind !== 'flash' || (away !== null && dist(away.x, away.y, q.x, q.y) < 6 * UNIT)) continue;
+        // 用上一次看到的位置對上這顆（飛得快，一個決策可飛 1.7 格）
+        const e = this.mateFlash.find((x) => x.seen === true && x.lx !== undefined && dist(x.lx, x.ly ?? 0, q.x, q.y) < 4 * UNIT);
+        if (e === undefined) {
+          // 第一次看到：還不知道往哪飛，先記下位置，落點等下一次看到再推
+          if (this.mateFlash.some((x) => dist(x.x, x.y, q.x, q.y) < 6 * UNIT)) continue;
+          this.mateFlash.push({ x: q.x, y: q.y, pop: t + (this.util.fuse.get('flash') ?? 45), seen: true, lx: q.x, ly: q.y, lt: t, aim: false });
+          continue;
+        }
+        // 推落點：沿飛行方向推到爆炸時間，碰牆就停（背對的是「會炸的地方」，不是閃光現在的位置）
+        const dt = Math.max(1, t - (e.lt ?? t));
+        const vx = (q.x - (e.lx ?? q.x)) / dt;
+        const vy = (q.y - (e.ly ?? q.y)) / dt;
+        const left = Math.max(0, e.pop - t);
+        let px = q.x;
+        let py = q.y;
+        const sp = Math.hypot(vx, vy);
+        const steps = sp < 1 ? 0 : Math.min(Math.ceil((sp * left) / (UNIT / 2)), 80);
+        for (let k = 0; k < steps; k++) {
+          const nx = px + (vx / sp) * (UNIT / 2);
+          const ny = py + (vy / sp) * (UNIT / 2);
+          if (this.g.isWall(Math.floor(nx / UNIT), Math.floor(ny / UNIT))) break;
+          px = nx;
+          py = ny;
+        }
+        e.x = px;
+        e.y = py;
+        e.lx = q.x;
+        e.ly = q.y;
+        e.lt = t;
+        e.aim = true;
+      }
+    }
     const edge = P.flashEdge * UNIT;
-    const mf = this.mateFlash.find((x) => dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
-    const f = own !== null ? own : mf !== undefined ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
+    const mf = this.mateFlash.find((x) => (!x.seen || x.aim === true) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
+    // 2.6.3：隊友的閃光提前一個反應延遲放行（指令生效時剛好炸開；爆炸時間只會估晚，不會早放）
+    // 狙擊手不提早放行（他要等兩個隊友先進點）
+    const release = P.flashRelease && this.roles.of(me.id) !== AWP ? this.data.rules.reactionTicks - P.flashReleaseMargin : -2;
+    const f = own !== null ? own : mf !== undefined && t < mf.pop - release ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
     if (f !== null && t <= f.until && !out.objective) {
       const R = this.util.blindRange;
       const g = this.g;
@@ -2857,7 +2919,7 @@ export class Tactics {
     }
     // 自己或隊友的閃光還沒爆、自己看不到爆點：再走會進視線才停在轉角，否則繼續走（炸開時人才在入口）
     const ownPending = this.util.away !== null && t < this.util.away.until - 3 ? this.util.away : null;
-    const pending = ownPending ?? this.mateFlash.find((x) => t < x.pop && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + ((x.pop - t) / this.tps) * P.routeSpeed * UNIT);
+    const pending = ownPending ?? this.mateFlash.find((x) => t < x.pop - Math.max(0, release) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + ((x.pop - t) / this.tps) * P.routeSpeed * UNIT);
     if (!out.objective && pending !== undefined && this.entersView(obs, pending)) {
       out.stop = true;
       return;

@@ -215,6 +215,13 @@ export const P = {
   /** 隊友閃光原地背身（2.6.2 試做，預設關）：不移動去躲，照 E:flash 的爆炸時間在爆前轉身、炸開就轉回來。
    * 實測 v5 鏡像 T 43.9%（移動躲 48.0%）、隊友致盲占比 24.7%（12.9%），比移動躲差 */
   flashStill: false,
+  /** 2.6.3：看到飛行中的閃光就推算爆炸時間來躲（flashSeeDodge，預設關：飛行中的位置不是落點，背對它轉身反而面向真正的爆點，
+   * 40 場被隊友閃到 17 → 85 人次）；躲閃光與停在轉角的人提前「反應延遲 − flashReleaseMargin」放行，炸開時剛好開始動（flashRelease）；
+   * 入口被燒住時煙霧手先丟煙滅火（smokeFire） */
+  flashSeeDodge: false,
+  flashRelease: true,
+  flashReleaseMargin: 2,
+  smokeFire: true,
   /** 側翼（2.6）：主力進點時組裡一人看側翼來向，最多幾秒（不到 4 人改丟煙或閃）。2.6.1 預設關：實測看側翼的人擊殺 30、陣亡 44，
    * 情境做不出側翼傷害，等觀戰回放找到使用者截圖那種回合再開 */
   flankCover: false,

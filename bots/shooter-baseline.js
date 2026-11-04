@@ -142,6 +142,10 @@ flashSecondWin: 3,
 flashSecondGap: 6,
 flashClaimDodge: true,
 flashStill: false,
+flashSeeDodge: false,
+flashRelease: true,
+flashReleaseMargin: 2,
+smokeFire: true,
 flankCover: false,
 flankCoverSec: 5,
 postMin: 5,
@@ -3553,7 +3557,8 @@ this.groupKey = '';
 this.execTick = -1;
 this.stageArrive = -1;
 this.noiseLeft = 0;
-/** @type {{ x: number, y: number, pop: number, claim?: boolean }[]} */
+/**
+* lx／ly／lt 是上一次看到的位置與 tick，aim＝已經推出落點） @type {{ x: number, y: number, pop: number, claim?: boolean, seen?: boolean, lx?: number, ly?: number, lt?: number, aim?: boolean }[]} */
 this.mateFlash = [];
 this.flashHeard = -1;
 this.smokeHeard = -1;
@@ -3575,6 +3580,8 @@ this.giftWant = null;
 this.giftMiss = false;
 this.reBought = false;
 this.pickAt = -1000000;
+/** @type {Set<number>} */
+this.wentIn = new Set();
 /** @type {Pt[]} */
 this.smokes = [];
 this.flashKey = '';
@@ -3698,6 +3705,8 @@ this.giftWant = null;
 this.giftMiss = false;
 this.reBought = false;
 this.pickAt = -1000000;
+/** @type {Set<number>} */
+this.wentIn = new Set();
 /** @type {Pt[]} */
 this.smokes = [];
 this.flashKey = '';
@@ -3865,6 +3874,7 @@ const t = obs.tick;
 const tid = this.combat?.targetId ?? -1;
 for (const s of me.shots) if (s.hit === 'enemy' && tid >= 0) this.dealt.set(tid, (this.dealt.get(tid) ?? 0) + s.damage);
 for (const m of obs.teammates) {
+if (m.alive && (this.inRectSite(m.x, m.y, 'A') || this.inRectSite(m.x, m.y, 'B'))) this.wentIn.add(m.id);
 if (!m.alive) this.kits.delete(m.id);
 if (m.alive && m.defusing) { if (!this.defuseStarted.has(m.id)) this.defuseStarted.set(m.id, t); }
 else this.defuseStarted.delete(m.id);
@@ -3984,7 +3994,7 @@ if (e.kind === 'contact') {
 const c = this.regionCell(e.region);
 this.noteContact(e.region, e.n, t, this.siteNear(c));
 } else if (e.kind === 'flash') {
-this.mateFlash = this.mateFlash.filter((f) => !f.claim || dist(f.x, f.y, e.x, e.y) > 4 * UNIT);
+this.mateFlash = this.mateFlash.filter((f) => !(f.claim || f.seen) || dist(f.x, f.y, e.x, e.y) > 6 * UNIT);
 this.mateFlash.push({ x: e.x, y: e.y, pop: e.pop });
 }
 else if (e.kind === 'claim') {
@@ -4593,7 +4603,17 @@ const next = this.flashNext(obs, ent, p.kind === 'rush', (idx - Math.min(1, gs -
 const st = this.memberStage(obs, me.id, p);
 const near = st !== null && dist(me.x, me.y, st.x, st.y) < 6 * UNIT;
 const supportFirst = role !== SUPPORT && this.isAlive(obs, this.roles.who(SUPPORT)) && this.smokeHeard < 0 && sinceExec < 8;
-if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
+const onWay = (/** @type {{ x: number, y: number, radius: number }} */ q) => Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT || (dist(me.x, me.y, q.x, q.y) < 20 * UNIT && segDist(q.x, q.y, me.x, me.y, site.cx, site.cy).d < q.radius + 2 * UNIT);
+const burning = P.smokeFire ? obs.effects.find((q) => q.kind === 'fire' && q.ticksLeft > 2 * this.tps && onWay(q) && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) > q.radius + 2 * UNIT)) : undefined;
+const reach = this.data.rules.grenadeRules.maxThrowRange * UNIT;
+const gid = this.groupOf(obs, me.id, p);
+const smokerId = this.ids.find((x) => this.isAlive(obs, x) && this.groupOf(obs, x, p) === gid && this.memberIndex(obs, x, p) === this.smokerIndex(obs, me.id, p));
+const sm = smokerId === undefined ? undefined : smokerId === me.id ? me : obs.teammates.find((m) => m.id === smokerId);
+const closest = burning === undefined ? -1 : [me, ...obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) === gid)].sort((a, b) => dist(a.x, a.y, burning.x, burning.y) - dist(b.x, b.y, burning.x, burning.y) || a.id - b.id)[0].id;
+const mine = burning !== undefined && (idx === this.smokerIndex(obs, me.id, p) || ((sm === undefined || dist(sm.x, sm.y, burning.x, burning.y) > reach) && closest === me.id));
+if (burning !== undefined && mine && this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
+wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
+} else if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
 const sp = supportFirst ? null : this.smokeTarget(obs, p, exec, ent);
 if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
 } else if (this.util.has(me, 'flash') && cue && flashTurn && next.ok && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5))) {
@@ -4956,10 +4976,10 @@ const dS = this.intel.distSite[s];
 const c = this.g.cellOf(me.x, me.y);
 if (role === ENTRY || c < 0 || this.inRectSite(me.x, me.y, s)) return false;
 const mates = obs.teammates.filter((m) => m.alive);
-if (role === AWP) return mates.filter((m) => this.inRectSite(m.x, m.y, s)).length < Math.min(2, mates.length);
+if (role === AWP) return mates.filter((m) => this.wentIn.has(m.id)).length < Math.min(2, mates.length);
 const e = mates.find((m) => m.id === this.roles.who(ENTRY));
 const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
-return e !== undefined && ce >= 0 && !this.inRectSite(e.x, e.y, s) && dS[ce] >= dS[c] - 10;
+return e !== undefined && ce >= 0 && !this.wentIn.has(e.id) && dS[ce] >= dS[c] - 10;
 }
 /** @param {SiteId} site @param {number} routeIdx */
 entranceOf(site, routeIdx) {
@@ -5856,9 +5876,44 @@ const t = obs.tick;
 if (out.escape) return;
 const own = this.util.away !== null && t >= this.util.away.from ? this.util.away : null;
 this.mateFlash = this.mateFlash.filter((x) => t <= x.pop + 2);
+const told = this.mateFlash.some((x) => !x.seen && !x.claim && t <= x.pop + 2);
+if (P.flashSeeDodge && me.team === 'T' && !told) {
+const away = this.util.away;
+for (const q of obs.projectiles) {
+if (q.kind !== 'flash' || (away !== null && dist(away.x, away.y, q.x, q.y) < 6 * UNIT)) continue;
+const e = this.mateFlash.find((x) => x.seen === true && x.lx !== undefined && dist(x.lx, x.ly ?? 0, q.x, q.y) < 4 * UNIT);
+if (e === undefined) {
+if (this.mateFlash.some((x) => dist(x.x, x.y, q.x, q.y) < 6 * UNIT)) continue;
+this.mateFlash.push({ x: q.x, y: q.y, pop: t + (this.util.fuse.get('flash') ?? 45), seen: true, lx: q.x, ly: q.y, lt: t, aim: false });
+continue;
+}
+const dt = Math.max(1, t - (e.lt ?? t));
+const vx = (q.x - (e.lx ?? q.x)) / dt;
+const vy = (q.y - (e.ly ?? q.y)) / dt;
+const left = Math.max(0, e.pop - t);
+let px = q.x;
+let py = q.y;
+const sp = Math.hypot(vx, vy);
+const steps = sp < 1 ? 0 : Math.min(Math.ceil((sp * left) / (UNIT / 2)), 80);
+for (let k = 0; k < steps; k++) {
+const nx = px + (vx / sp) * (UNIT / 2);
+const ny = py + (vy / sp) * (UNIT / 2);
+if (this.g.isWall(Math.floor(nx / UNIT), Math.floor(ny / UNIT))) break;
+px = nx;
+py = ny;
+}
+e.x = px;
+e.y = py;
+e.lx = q.x;
+e.ly = q.y;
+e.lt = t;
+e.aim = true;
+}
+}
 const edge = P.flashEdge * UNIT;
-const mf = this.mateFlash.find((x) => dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
-const f = own !== null ? own : mf !== undefined ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
+const mf = this.mateFlash.find((x) => (!x.seen || x.aim === true) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
+const release = P.flashRelease && this.roles.of(me.id) !== AWP ? this.data.rules.reactionTicks - P.flashReleaseMargin : -2;
+const f = own !== null ? own : mf !== undefined && t < mf.pop - release ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
 if (f !== null && t <= f.until && !out.objective) {
 const R = this.util.blindRange;
 const g = this.g;
@@ -5898,7 +5953,7 @@ return;
 }
 }
 const ownPending = this.util.away !== null && t < this.util.away.until - 3 ? this.util.away : null;
-const pending = ownPending ?? this.mateFlash.find((x) => t < x.pop && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + ((x.pop - t) / this.tps) * P.routeSpeed * UNIT);
+const pending = ownPending ?? this.mateFlash.find((x) => t < x.pop - Math.max(0, release) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + ((x.pop - t) / this.tps) * P.routeSpeed * UNIT);
 if (!out.objective && pending !== undefined && this.entersView(obs, pending)) {
 out.stop = true;
 return;
@@ -6573,7 +6628,7 @@ this.why = '';
 declare() {
 return {
 name: 'shooter-baseline',
-version: '2.6.2',
+version: '2.6.3',
 style: '基準',
 knobs: [
 { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
