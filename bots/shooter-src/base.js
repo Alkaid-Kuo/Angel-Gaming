@@ -320,6 +320,11 @@ export const P = {
   pickReach: 1.2,
   /** 1-5：加時的對方賽點用加時段的門檻（false ＝ 2.6.3 固定用正規的 winRounds − 1，加時第一局就當成賽點） */
   otMatchPoint: true,
+  /** 1-6：我方閃光以投擲者＋爆炸時間識別（宣告、已出手、已爆分開；同點兩次投擲算兩顆，飛行中的拋體只補已知之外的）；
+   * false ＝ 2.6.3 以 3 格距離去重 */
+  flashIdent: true,
+  /** 1-6：關掉 flashRelease（或狙擊手）時躲閃光到 pop + 2 為止含等號（false ＝ 2.6.3 的 <，和 2.6.2 差一個決策） */
+  flashOffEq: true,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */

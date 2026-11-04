@@ -228,3 +228,84 @@ describe('Bot 2.7 批 1-5：加時的賽點門檻（otMatchPoint）', () => {
     expect(chance(1, rules().rph, 1)).toBe(true);
   });
 });
+
+describe('Bot 2.7 批 1-6：閃光以投擲者＋爆炸時間識別（flashIdent）、關掉放行時的邊界（flashOffEq）', () => {
+  function rig(): { bot: ShooterBaseline; obs: ShooterObservation; ent: { ix: number; iy: number } } {
+    const { match, bot } = live(1);
+    return { bot, obs: match.observe(1), ent: bot.intel.sites.A.entrances[0] };
+  }
+  const spot = (ent: { ix: number; iy: number }, t: number, by: number, dx = 0): { x: number; y: number; tick: number; by: number; pop: number } => ({ x: ent.ix + dx, y: ent.iy, tick: t, by, pop: t + 45 });
+
+  it('同一點兩次真的投擲算兩顆：不能再丟第三顆', () => {
+    const { bot, obs, ent } = rig();
+    const t = bot.tactics;
+    t.flashSpots = [spot(ent, obs.tick - 30, 2), spot(ent, obs.tick - 27, 3)];
+    expect(t.flashNext(obs, bot.intel.sites.A.entrances[0], true, 0).ok).toBe(false);
+  });
+
+  it('只有一顆：時間到可以補第二顆；沒有就照常丟第一顆', () => {
+    const { bot, obs, ent } = rig();
+    const t = bot.tactics;
+    const e = bot.intel.sites.A.entrances[0];
+    t.flashSpots = [spot(ent, obs.tick - 30, 2)];
+    expect(t.flashNext(obs, e, true, 0)).toMatchObject({ ok: true, second: true });
+    t.flashSpots = [];
+    expect(t.flashNext(obs, e, true, 0)).toMatchObject({ ok: true, second: false });
+  });
+
+  it('已知那一顆的飛行中拋體離落點超過 3 格：不重複計數', () => {
+    const { bot, obs, ent } = rig();
+    const t = bot.tactics;
+    t.flashSpots = [{ ...spot(ent, obs.tick - 30, 2), pop: obs.tick + 15 }];
+    const o: ShooterObservation = { ...obs, projectiles: [{ kind: 'flash', x: ent.ix + 5000, y: ent.iy, z: 1000 } as ShooterObservation['projectiles'][number]] };
+    expect(t.flashOf(bot.intel.sites.A.entrances[0], o.projectiles[0])).toBe(true);
+    expect(t.flashNext(o, bot.intel.sites.A.entrances[0], true, 0)).toMatchObject({ ok: true, second: true });
+  });
+
+  it('宣告的人丟出來了（落點和宣告不同）：宣告不再擋第二顆', () => {
+    const { bot, obs, ent } = rig();
+    const t = bot.tactics;
+    t.flashClaims = [{ x: ent.ix + 5000, y: ent.iy, until: obs.tick + 30, by: 2, at: obs.tick - 32 }];
+    t.flashSpots = [spot(ent, obs.tick - 30, 2)];
+    expect(t.flashNext(obs, bot.intel.sites.A.entrances[0], true, 0)).toMatchObject({ ok: true, second: true });
+    // 別人的宣告還沒丟：照樣擋
+    t.flashClaims.push({ x: ent.ix + 3000, y: ent.iy, until: obs.tick + 30, by: 3, at: obs.tick - 3 });
+    expect(t.flashNext(obs, bot.intel.sites.A.entrances[0], true, 0).ok).toBe(false);
+  });
+
+  it('開關關掉重現 2.6.3：同一點兩顆被去重成一顆', () => {
+    setP('flashIdent', false);
+    const { bot, obs, ent } = rig();
+    const t = bot.tactics;
+    t.flashSpots = [spot(ent, obs.tick - 30, 2), spot(ent, obs.tick - 27, 3)];
+    expect(t.flashNext(obs, bot.intel.sites.A.entrances[0], true, 0)).toMatchObject({ ok: true, second: true });
+  });
+
+  /** 隊友的閃光剛好在 pop + 2：關掉提前放行時要和 2.6.2 一樣還在躲 */
+  function boundary(): TacOut {
+    const { match, bot } = live(0);
+    const obs = match.observe(0);
+    const me = obs.me;
+    let q = null;
+    for (let i = 0; i < bot.g.N && q === null; i++) {
+      const c = bot.g.center(i);
+      const d = Math.hypot(c.x - me.x, c.y - me.y);
+      if (bot.g.walkable(i) && d > 4000 && d < 9000 && bot.g.los(me.x, me.y, c.x, c.y)) q = c;
+    }
+    bot.tactics.mateFlash = [{ x: q!.x, y: q!.y, pop: obs.tick - 2 }];
+    const a = out();
+    bot.tactics.overlay(obs, a);
+    return a;
+  }
+
+  it('關掉 flashRelease：爆炸後 2 tick 仍算在躲（2.6.2 的 <=）', () => {
+    setP('flashRelease', false);
+    expect(boundary().urgent).toBe(true);
+  });
+
+  it('flashOffEq 也關掉重現 2.6.3：剛好 pop + 2 就放掉', () => {
+    setP('flashRelease', false);
+    setP('flashOffEq', false);
+    expect(boundary().urgent).toBe(false);
+  });
+});

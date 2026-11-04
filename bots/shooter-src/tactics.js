@@ -229,9 +229,9 @@ export class Tactics {
     /** 最前面的人走到丟閃距離的 tick；我方閃光最近一次炸開的 tick；本回合我方閃光的落點 */
     this.flashCue = -1;
     this.flashPop = -1000000;
-    /** @type {{ x: number, y: number, tick: number }[]} */
+    /** by＝投擲者、pop＝爆炸 tick（2.7：同一個 by＋pop 是同一顆） @type {{ x: number, y: number, tick: number, by: number, pop: number }[]} */
     this.flashSpots = [];
-    /** 隊友宣告要丟的閃光（E:flashing，2.6）；自己最近一次宣告 @type {{ x: number, y: number, until: number }[]} */
+    /** 隊友宣告要丟的閃光（E:flashing，2.6）；by＝宣告的人、at＝收到的 tick；自己最近一次宣告 @type {{ x: number, y: number, until: number, by: number, at: number }[]} */
     this.flashClaims = [];
     /** @type {{ x: number, y: number, until: number } | null} */
     this.myClaim = null;
@@ -505,7 +505,7 @@ export class Tactics {
     if (u.thrown !== null && u.thrown.kind === 'smoke') this.smokes.push({ x: u.thrown.x, y: u.thrown.y });
     if (u.thrown !== null && u.thrown.kind === 'flash' && this.util.away !== null) {
       this.flashPop = this.util.away.until - 3;
-      this.flashSpots.push({ x: u.thrown.x, y: u.thrown.y, tick: t });
+      this.flashSpots.push({ x: u.thrown.x, y: u.thrown.y, tick: t, by: me.id, pop: this.flashPop });
     }
     if (u.thrown !== null && (u.thrown.kind === 'molotov' || u.thrown.kind === 'incendiary')) this.burns.push({ x: u.thrown.x, y: u.thrown.y, until: t + 8 * this.tps });
     out.cmds.push(...u.cmds);
@@ -670,7 +670,7 @@ export class Tactics {
         this.mateFlash.push({ x: e.x, y: e.y, pop: e.pop });
       }
       else if (e.kind === 'claim') {
-        this.flashClaims.push({ x: e.x, y: e.y, until: t + P.flashClaimSec * this.tps });
+        this.flashClaims.push({ x: e.x, y: e.y, until: t + P.flashClaimSec * this.tps, by: msg.from, at: t });
         // 2.6.1：宣告比 E:flash 早一個決策以上，先當成要炸了來躲（估計爆炸時間；E:flash 到了會補上準確的）
         // 估計值偏晚（對方還要轉向、停步才丟）：太早結束躲避會回頭吃到真的那顆
         if (P.flashClaimDodge) this.mateFlash.push({ x: e.x, y: e.y, pop: t + (this.util.fuse.get('flash') ?? 45) + 2 * this.data.rules.reactionTicks + this.tps, claim: true });
@@ -686,7 +686,7 @@ export class Tactics {
       if (e.kind === 'flash') {
         this.flashHeard = t;
         this.flashPop = e.pop;
-        this.flashSpots.push({ x: e.x, y: e.y, tick: t });
+        if (!P.flashIdent || !this.flashSpots.some((f) => f.by === msg.from && f.pop === e.pop)) this.flashSpots.push({ x: e.x, y: e.y, tick: t, by: msg.from, pop: e.pop });
       }
     }
     this.inbox = keep;
@@ -1541,9 +1541,23 @@ export class Tactics {
       else o.tick = Math.min(o.tick, tick);
     };
     // 確定丟出的（丟過、喊了 E:flash、看得到飛行中）；只宣告還沒丟的另外算：有人宣告中就不再丟（第二顆要等第一顆真的出手）
-    for (const f of this.flashSpots) add(f.x, f.y, f.tick);
-    if (P.flashClaim) for (const q of obs.projectiles) if (q.kind === 'flash') add(q.x, q.y, t);
-    const claimed = P.flashClaim && this.flashClaims.some((c) => t <= c.until && this.flashOf(ent, c) && list.every((q) => dist(q.x, q.y, c.x, c.y) > 3 * UNIT));
+    /** @type {boolean} */
+    let claimed;
+    if (P.flashIdent) {
+      // 2.7：每次投擲（投擲者＋爆炸時間）各算一顆，不用距離合併；看到的拋體不知道是誰丟的，只補「比已知還在飛的多出來的」
+      const mine = this.flashSpots.filter((f) => this.flashOf(ent, f));
+      for (const f of mine) list.push({ x: f.x, y: f.y, tick: f.tick });
+      list.sort((a, b) => a.tick - b.tick);
+      const flying = P.flashClaim ? obs.projectiles.filter((q) => q.kind === 'flash' && this.flashOf(ent, q)) : [];
+      const known = mine.filter((f) => f.pop > t).length;
+      for (const q of flying.slice(known)) list.push({ x: q.x, y: q.y, tick: t });
+      // 宣告的人之後丟出來了就不算還在宣告（落點和宣告可以不同）
+      claimed = P.flashClaim && this.flashClaims.some((c) => t <= c.until && this.flashOf(ent, c) && !this.flashSpots.some((f) => f.by === c.by && f.tick >= c.at));
+    } else {
+      for (const f of this.flashSpots) add(f.x, f.y, f.tick);
+      if (P.flashClaim) for (const q of obs.projectiles) if (q.kind === 'flash') add(q.x, q.y, t);
+      claimed = P.flashClaim && this.flashClaims.some((c) => t <= c.until && this.flashOf(ent, c) && list.every((q) => dist(q.x, q.y, c.x, c.y) > 3 * UNIT));
+    }
     if (claimed) return { ok: false, avoid: null, second: false };
     if (list.length === 0) return { ok: true, avoid: null, second: false };
     if (!P.flashClaim || !P.flashSecond || list.length >= 2) return { ok: false, avoid: null, second: false };
@@ -2722,7 +2736,9 @@ export class Tactics {
     // 2.6.3：隊友的閃光提前一個反應延遲放行（指令生效時剛好炸開；爆炸時間只會估晚，不會早放）
     // 狙擊手不提早放行（他要等兩個隊友先進點）
     const release = P.flashRelease && this.roles.of(me.id) !== AWP ? this.data.rules.reactionTicks - P.flashReleaseMargin : -2;
-    const f = own !== null ? own : mf !== undefined && t < mf.pop - release ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
+    // 不提早放行（release ＝ −2）時到 pop + 2 為止都要躲，含等號（2.6.2 的判定）
+    const open = mf !== undefined && (P.flashOffEq && release < 0 ? t <= mf.pop + 2 : t < mf.pop - release);
+    const f = own !== null ? own : open && mf !== undefined ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
     if (f !== null && t <= f.until && !out.objective) {
       const R = this.util.blindRange;
       const g = this.g;

@@ -52,7 +52,7 @@ describe('Bot 2.6：閃光認領', () => {
     const ent = f.bot.intel.sites.A.entrances[0];
     const obs = f.match.observe(1);
     expect(t.flashDone(obs, ent)).toBe(false);
-    t.flashClaims.push({ x: ent.ix, y: ent.iy, until: obs.tick + 60 });
+    t.flashClaims.push({ x: ent.ix, y: ent.iy, until: obs.tick + 60, by: 2, at: obs.tick });
     expect(t.flashDone(obs, ent)).toBe(true);
     expect(t.flashDone({ ...obs, tick: obs.tick + 61 }, ent)).toBe(false);
     P.flashClaim = false;
@@ -67,7 +67,7 @@ describe('Bot 2.6：閃光認領', () => {
     const dx = ent.ix - ent.ox;
     const dy = ent.iy - ent.oy;
     const len = Math.hypot(dx, dy);
-    const deep = { x: Math.round(ent.ix + (dx / len) * 13 * UNIT), y: Math.round(ent.iy + (dy / len) * 13 * UNIT), tick: obs.tick };
+    const deep = { x: Math.round(ent.ix + (dx / len) * 13 * UNIT), y: Math.round(ent.iy + (dy / len) * 13 * UNIT), tick: obs.tick, by: 2, pop: obs.tick + 45 };
     const others = ['A', 'B'].flatMap((s) => f.bot.intel.sites[s as 'A' | 'B'].entrances).filter((e) => e !== ent);
     if (others.some((e) => dist(deep.x, deep.y, e.ix, e.iy) < dist(deep.x, deep.y, ent.ix, ent.iy))) return;
     t.flashSpots.push(deep);
@@ -182,7 +182,7 @@ describe('Bot 2.6.1：有效連閃、盲射友軍、保槍躲遠', () => {
     const ent = f.bot.intel.sites.A.entrances[0];
     const obs = f.match.observe(1);
     expect(t.flashNext(obs, ent, false, 0)).toEqual({ ok: true, avoid: null, second: false });
-    t.flashSpots.push({ x: ent.ix, y: ent.iy, tick: obs.tick });
+    t.flashSpots.push({ x: ent.ix, y: ent.iy, tick: obs.tick, by: 2, pop: obs.tick + 45 });
     expect(t.flashNext(obs, ent, false, 0).ok).toBe(false);
     const later = { ...obs, tick: obs.tick + 27 };
     const r = t.flashNext(later, ent, false, 0);
@@ -191,10 +191,10 @@ describe('Bot 2.6.1：有效連閃、盲射友軍、保槍躲遠', () => {
     expect(t.flashNext(later, ent, true, 0).avoid).toBeNull();
     expect(t.flashNext(later, ent, false, 1).ok).toBe(false);
     expect(t.flashNext({ ...obs, tick: obs.tick + 42 }, ent, false, 1).ok).toBe(true);
-    t.flashClaims.push({ x: ent.ix + 8000, y: ent.iy, until: later.tick + 30 });
+    t.flashClaims.push({ x: ent.ix + 8000, y: ent.iy, until: later.tick + 30, by: 3, at: later.tick });
     if (t.flashOf(ent, { x: ent.ix + 8000, y: ent.iy })) expect(t.flashNext(later, ent, false, 0).ok).toBe(false);
     t.flashClaims.length = 0;
-    t.flashSpots.push({ x: ent.ix + 5000, y: ent.iy, tick: obs.tick });
+    t.flashSpots.push({ x: ent.ix + 5000, y: ent.iy, tick: obs.tick, by: 2, pop: obs.tick + 45 });
     if (t.flashOf(ent, { x: ent.ix + 5000, y: ent.iy })) expect(t.flashNext(later, ent, false, 0).ok).toBe(false);
     P.flashSecond = false;
     t.flashSpots.length = 1;

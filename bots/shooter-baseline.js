@@ -187,6 +187,8 @@ heardKeep: true,
 grabSim: true,
 pickReach: 1.2,
 otMatchPoint: true,
+flashIdent: true,
+flashOffEq: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3322,7 +3324,7 @@ out.cmds.push({ type: 'say', text: `E:flashing ${Math.round(wish.x / 100)} ${Mat
 if (u.thrown !== null && u.thrown.kind === 'smoke') this.smokes.push({ x: u.thrown.x, y: u.thrown.y });
 if (u.thrown !== null && u.thrown.kind === 'flash' && this.util.away !== null) {
 this.flashPop = this.util.away.until - 3;
-this.flashSpots.push({ x: u.thrown.x, y: u.thrown.y, tick: t });
+this.flashSpots.push({ x: u.thrown.x, y: u.thrown.y, tick: t, by: me.id, pop: this.flashPop });
 }
 if (u.thrown !== null && (u.thrown.kind === 'molotov' || u.thrown.kind === 'incendiary')) this.burns.push({ x: u.thrown.x, y: u.thrown.y, until: t + 8 * this.tps });
 out.cmds.push(...u.cmds);
@@ -3462,7 +3464,7 @@ this.mateFlash = this.mateFlash.filter((f) => !f.claim || dist(f.x, f.y, e.x, e.
 this.mateFlash.push({ x: e.x, y: e.y, pop: e.pop });
 }
 else if (e.kind === 'claim') {
-this.flashClaims.push({ x: e.x, y: e.y, until: t + P.flashClaimSec * this.tps });
+this.flashClaims.push({ x: e.x, y: e.y, until: t + P.flashClaimSec * this.tps, by: msg.from, at: t });
 if (P.flashClaimDodge) this.mateFlash.push({ x: e.x, y: e.y, pop: t + (this.util.fuse.get('flash') ?? 45) + 2 * this.data.rules.reactionTicks + this.tps, claim: true });
 }
 else if (e.kind === 'smoke') {
@@ -3476,7 +3478,7 @@ else if (e.kind === 'smoker') this.postSmokers.add(msg.from);
 if (e.kind === 'flash') {
 this.flashHeard = t;
 this.flashPop = e.pop;
-this.flashSpots.push({ x: e.x, y: e.y, tick: t });
+if (!P.flashIdent || !this.flashSpots.some((f) => f.by === msg.from && f.pop === e.pop)) this.flashSpots.push({ x: e.x, y: e.y, tick: t, by: msg.from, pop: e.pop });
 }
 }
 this.inbox = keep;
@@ -4150,9 +4152,20 @@ const o = list.find((q) => dist(q.x, q.y, x, y) < 3 * UNIT);
 if (o === undefined) list.push({ x, y, tick });
 else o.tick = Math.min(o.tick, tick);
 };
+let claimed;
+if (P.flashIdent) {
+const mine = this.flashSpots.filter((f) => this.flashOf(ent, f));
+for (const f of mine) list.push({ x: f.x, y: f.y, tick: f.tick });
+list.sort((a, b) => a.tick - b.tick);
+const flying = P.flashClaim ? obs.projectiles.filter((q) => q.kind === 'flash' && this.flashOf(ent, q)) : [];
+const known = mine.filter((f) => f.pop > t).length;
+for (const q of flying.slice(known)) list.push({ x: q.x, y: q.y, tick: t });
+claimed = P.flashClaim && this.flashClaims.some((c) => t <= c.until && this.flashOf(ent, c) && !this.flashSpots.some((f) => f.by === c.by && f.tick >= c.at));
+} else {
 for (const f of this.flashSpots) add(f.x, f.y, f.tick);
 if (P.flashClaim) for (const q of obs.projectiles) if (q.kind === 'flash') add(q.x, q.y, t);
-const claimed = P.flashClaim && this.flashClaims.some((c) => t <= c.until && this.flashOf(ent, c) && list.every((q) => dist(q.x, q.y, c.x, c.y) > 3 * UNIT));
+claimed = P.flashClaim && this.flashClaims.some((c) => t <= c.until && this.flashOf(ent, c) && list.every((q) => dist(q.x, q.y, c.x, c.y) > 3 * UNIT));
+}
 if (claimed) return { ok: false, avoid: null, second: false };
 if (list.length === 0) return { ok: true, avoid: null, second: false };
 if (!P.flashClaim || !P.flashSecond || list.length >= 2) return { ok: false, avoid: null, second: false };
@@ -5082,7 +5095,8 @@ this.mateFlash = this.mateFlash.filter((x) => t <= x.pop + 2);
 const edge = P.flashEdge * UNIT;
 const mf = this.mateFlash.find((x) => dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
 const release = P.flashRelease && this.roles.of(me.id) !== AWP ? this.data.rules.reactionTicks - P.flashReleaseMargin : -2;
-const f = own !== null ? own : mf !== undefined && t < mf.pop - release ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
+const open = mf !== undefined && (P.flashOffEq && release < 0 ? t <= mf.pop + 2 : t < mf.pop - release);
+const f = own !== null ? own : open && mf !== undefined ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
 if (f !== null && t <= f.until && !out.objective) {
 const R = this.util.blindRange;
 const g = this.g;
