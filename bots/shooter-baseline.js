@@ -182,6 +182,8 @@ probeStay: 4.5,
 nadeCluster: 3.5,
 grabAfterTask: true,
 wentInSite: true,
+heardOnce: true,
+heardKeep: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -1765,6 +1767,9 @@ this.scanIdx = 0;
 this.scanLeft = 0;
 this.soundSeen = -1;
 this.soundWait = 0;
+this.soundObj = null;
+this.soundDec = -1;
+this.soundRes = false;
 this.trail = [];
 this.trailTick = -1000000;
 this.blindBack = null;
@@ -1794,6 +1799,9 @@ this.scanIdx = 0;
 this.scanLeft = 0;
 this.soundSeen = -1;
 this.soundWait = 0;
+this.soundObj = null;
+this.soundDec = -1;
+this.soundRes = false;
 this.trail = [];
 this.trailTick = -1000000;
 this.blindBack = null;
@@ -2242,14 +2250,19 @@ if (me.ammoMag < w.magazine * P.reloadBelow && me.ammoReserve > 0 && me.reloadTi
 if (w.scopedSpread !== null && me.reloadTicksLeft === 0 && holding !== me.scoped) out.push({ type: 'scope', on: holding });
 return out;
 }
-heard(snd) {
-if (this.soundSeen !== snd.tick) {
-this.soundSeen = snd.tick;
+heard(snd, t) {
+const fresh = P.heardKeep ? this.soundObj !== snd || snd.tick - this.soundSeen > this.tps : this.soundSeen !== snd.tick;
+if (fresh) {
+this.soundObj = snd;
 this.soundWait = this.soundReact;
+this.soundDec = -1;
 }
-if (this.soundWait <= 0) return true;
-this.soundWait--;
-return false;
+this.soundSeen = snd.tick;
+if (P.heardOnce && this.soundDec === t) return this.soundRes;
+this.soundDec = t;
+this.soundRes = this.soundWait <= 0;
+if (!this.soundRes) this.soundWait--;
+return this.soundRes;
 }
 alert(obs, holding) {
 const me = obs.me;
@@ -2257,7 +2270,7 @@ const t = obs.tick;
 const hurt = this.perc.lastHurt;
 if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
 const snd = this.perc.lastSound;
-if (holding || snd === null || t - snd.tick >= this.tps || snd.r0 > 0 || Math.abs(adiff(snd.dir, me.facing)) <= this.rules.fovDeg / 2 || !this.heard(snd)) return null;
+if (holding || snd === null || t - snd.tick >= this.tps || snd.r0 > 0 || Math.abs(adiff(snd.dir, me.facing)) <= this.rules.fovDeg / 2 || !this.heard(snd, t)) return null;
 return { x: me.x + cosd(snd.dir) * 6 * UNIT, y: me.y + sind(snd.dir) * 6 * UNIT };
 }
 look(obs, ctx) {
@@ -2277,7 +2290,7 @@ if (best !== null) return { x: best.x, y: best.y };
 const hurt = this.perc.lastHurt;
 if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
 const snd = this.perc.lastSound;
-if (snd !== null && t - snd.tick < this.tps && this.heard(snd)) {
+if (snd !== null && t - snd.tick < this.tps && this.heard(snd, t)) {
 const r = clamp((snd.r0 + snd.r1) / 2, 4, 12);
 return { x: me.x + cosd(snd.dir) * r * UNIT, y: me.y + sind(snd.dir) * r * UNIT };
 }

@@ -5,6 +5,7 @@ import type { TacOut } from '../bots/shooter-src/tactics.js';
 import { ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
 import { shooterHelpers } from '../src/shooter/runner.ts';
 import type { ShooterObservation } from '../src/shooter/api.ts';
+import type { Sector } from '../bots/shooter-src/memory.js';
 
 // Bot 2.7 修正批的 regression 測試：每項測反例修好（開關開）與原本的合理行為保留；開關關掉時重現 2.6.3 的錯誤。
 // 直接用原始碼（開關 P 與 Bot 共用同一份）。反例改寫自 Astra 審查的 counterexamples.mjs／extra-counterexamples.mjs。
@@ -96,5 +97,52 @@ describe('Bot 2.7 批 1-2：進過包點按點記（wentInSite）', () => {
   it('開關關掉重現 2.6.3：進過 B 也被當成進過 A', () => {
     setP('wentInSite', false);
     expect(walkIn('B')).toEqual({ before: true, after: false });
+  });
+});
+
+describe('Bot 2.7 批 1-3：聲音反應等待（heardOnce、heardKeep）', () => {
+  const sector = (tick: number): Sector => ({ ox: 0, oy: 0, dir: 90, r0: 0, r1: 12, tick, conf: 40, kind: 'footstep' });
+  /** 反應等待 2 次決策：回傳每次決策（每 3 tick）聽到了沒；同一次決策呼叫 calls 次（alert 與 look 各一次） */
+  function run(calls: number, steps: number, merge: boolean): boolean[] {
+    const { bot } = live(5);
+    const c = bot.combat;
+    c.soundReact = 2;
+    const s = sector(600);
+    const res: boolean[] = [];
+    for (let k = 0; k < steps; k++) {
+      const t = 600 + 3 * k;
+      if (merge) s.tick = t; // 連續的腳步聲：合併進同一個扇形、tick 每次更新
+      let h = false;
+      for (let i = 0; i < calls; i++) h = c.heard(s, t);
+      res.push(h);
+    }
+    return res;
+  }
+
+  it('同一次決策叫兩次只扣一次：等滿 2 次決策才轉', () => {
+    expect(run(2, 4, false)).toEqual([false, false, true, true]);
+  });
+
+  it('連續的同方向聲音不把等待歸零', () => {
+    expect(run(1, 4, true)).toEqual([false, false, true, true]);
+  });
+
+  it('不同方向的新聲音、或停了 1 秒以上再響：重新等', () => {
+    const { bot } = live(5);
+    const c = bot.combat;
+    c.soundReact = 1;
+    const a = sector(600);
+    expect([c.heard(a, 600), c.heard(a, 603)]).toEqual([false, true]);
+    const b = sector(606);
+    expect([c.heard(b, 606), c.heard(b, 609)]).toEqual([false, true]);
+    b.tick = 660;
+    expect([c.heard(b, 660), c.heard(b, 663)]).toEqual([false, true]);
+  });
+
+  it('開關關掉重現 2.6.3：雙扣只等一半、連射期間永遠聽不到', () => {
+    setP('heardOnce', false);
+    setP('heardKeep', false);
+    expect(run(2, 3, false)).toEqual([false, true, true]);
+    expect(run(1, 4, true)).toEqual([false, false, false, false]);
   });
 });

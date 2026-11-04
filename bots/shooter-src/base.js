@@ -309,6 +309,10 @@ export const P = {
   grabAfterTask: true,
   /** 1-2：「進過包點」按點記（false ＝ 進過任何一點都算，佯攻組踩進誘餌點也讓主力少等） */
   wentInSite: true,
+  /** 1-3：聲音反應等待同一次決策只扣一次（false ＝ alert 與 look 各扣一次，等待只剩一半） */
+  heardOnce: true,
+  /** 1-3：同方向聲音合併成同一個扇形時不把等待歸零；停了 1 秒以上再響才重新等（false ＝ 連射期間永遠聽不到） */
+  heardKeep: true,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */
