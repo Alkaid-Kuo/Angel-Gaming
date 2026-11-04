@@ -481,9 +481,7 @@ export class Tactics {
       out.walk = true;
       out.role += '・讓突破手先走';
     }
-    this.grab(obs, out);
-    if (this.mission?.avoidFire(obs, out, this.combat?.fires, this.nav)) wish = null;
-    this.mission?.assess(obs, out);
+    if (this.settle(obs, out)) wish = null;
     if (wish === null && !out.commit) wish = this.anyNade(obs);
     this.overlay(obs, out);
     if (wish === null) {
@@ -1080,6 +1078,19 @@ export class Tactics {
       out.cmds.push({ type: 'pickup' });
     }
     else if (near) out.goal = { x: best.x, y: best.y };
+  }
+
+  /**
+   * 任務收尾：避火、期限判定（設 commit）、撿槍。2.7（P.grabAfterTask）起撿槍排在期限判定之後：撿槍只是可中斷的順路選項，
+   * 趕期限（commit）時不能蓋掉任務目標。回傳 true ＝ 因為避火取消這次的道具
+   * @param {import('./base.js').Observation} obs @param {TacOut} out @returns {boolean}
+   */
+  settle(obs, out) {
+    if (!P.grabAfterTask) this.grab(obs, out);
+    const fire = this.mission?.avoidFire(obs, out, this.combat?.fires, this.nav) ?? false;
+    this.mission?.assess(obs, out);
+    if (P.grabAfterTask) this.grab(obs, out);
+    return fire;
   }
 
   /**

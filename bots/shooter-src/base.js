@@ -304,6 +304,10 @@ export const P = {
   /** 手雷：兩個以上記得的敵人彼此在這麼近（格）內算聚集 */
   nadeCluster: 3.5,
 
+  // ── 2.7 修正批：每項一個開關，false ＝ 2.6.3 的行為（審核對照用） ──
+  /** 1-1：撿槍排在任務期限判定之後，commit 亮起就不撿（false ＝ 先撿槍，趕期限的拆包手也會轉去撿） */
+  grabAfterTask: true,
+
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */
   afterPistol: 'force',

@@ -180,6 +180,7 @@ probeMargin: 4,
 probeCover: true,
 probeStay: 4.5,
 nadeCluster: 3.5,
+grabAfterTask: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3279,9 +3280,7 @@ if (this.slow) {
 out.walk = true;
 out.role += '・讓突破手先走';
 }
-this.grab(obs, out);
-if (this.mission?.avoidFire(obs, out, this.combat?.fires, this.nav)) wish = null;
-this.mission?.assess(obs, out);
+if (this.settle(obs, out)) wish = null;
 if (wish === null && !out.commit) wish = this.anyNade(obs);
 this.overlay(obs, out);
 if (wish === null) {
@@ -3772,6 +3771,13 @@ this.pickAt = t;
 out.cmds.push({ type: 'pickup' });
 }
 else if (near) out.goal = { x: best.x, y: best.y };
+}
+settle(obs, out) {
+if (!P.grabAfterTask) this.grab(obs, out);
+const fire = this.mission?.avoidFire(obs, out, this.combat?.fires, this.nav) ?? false;
+this.mission?.assess(obs, out);
+if (P.grabAfterTask) this.grab(obs, out);
+return fire;
 }
 report(obs, out) {
 if (obs.round.phase === 'freeze') return;
@@ -5663,7 +5669,7 @@ this.why = '';
 declare() {
 return {
 name: 'shooter-baseline',
-version: '2.6.3',
+version: '2.7.0',
 style: '基準',
 knobs: [
 { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
