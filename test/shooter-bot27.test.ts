@@ -620,3 +620,48 @@ describe('Bot 2.7 批 1-10 A9：主武器空了也沒備彈、敵人在遠處：
     expect(fight(0).cmds.filter((c) => c === 'switch' || c === 'reload')).toEqual([]);
   });
 });
+
+describe('Bot 2.7 批 1-10 A6：視錐掃描照站姿越過矮牆（scanLow）', () => {
+  /** 找一段東西向的矮牆（1～3 格厚）：西邊 3 格、東邊 6 格都是可走的平地。before(d)＝矮牆西邊第 d 格，after(d)＝矮牆東邊第 d 格 */
+  function rig(): { bot: ShooterBaseline; t: number; before: (d: number) => { x: number; y: number }; after: (d: number) => number } {
+    const { match, bot } = live(5);
+    const g = bot.g;
+    const flat = (i: number): boolean => g.walkable(i) && g.low[i] === 0 && g.wall[i] === 0 && g.slope[i] < 0;
+    for (let i = 0; i < g.N; i++) {
+      if (g.low[i] !== 1 || g.low[i - 1] === 1) continue;
+      let n = 0;
+      while (n < 4 && g.low[i + n] === 1) n++;
+      const x = i % g.W;
+      if (n > 3 || x < 4 || x + n + 6 >= g.W) continue;
+      let ok = true;
+      for (let d = 1; d <= 3 && ok; d++) ok = flat(i - d);
+      for (let d = 1; d <= 6 && ok; d++) ok = flat(i + n - 1 + d);
+      if (!ok) continue;
+      return { bot, t: match.tick, before: (d) => g.center(i - d), after: (d) => i + n - 1 + d };
+    }
+    throw new Error('地圖上找不到矮牆');
+  }
+
+  it('站著：看得到矮牆後面 4 格以外；緊貼矮牆後面（蹲著的人躲得住）不算清過', () => {
+    const { bot, t, before, after } = rig();
+    const p = before(3);
+    bot.perc.scan(p.x, p.y, 0, 10, 14, t, false);
+    expect(bot.perc.seenTick[after(5)]).toBe(t);
+    expect(bot.perc.seenTick[after(1)]).not.toBe(t);
+  });
+
+  it('蹲著、矮牆在 2 格內：擋住（引擎的規則）', () => {
+    const { bot, t, before, after } = rig();
+    const p = before(1);
+    bot.perc.scan(p.x, p.y, 0, 10, 14, t, true);
+    expect(bot.perc.seenTick[after(5)]).not.toBe(t);
+  });
+
+  it('開關關掉重現 2.6.3：站著也被矮牆擋住', () => {
+    setP('scanLow', false);
+    const { bot, t, before, after } = rig();
+    const p = before(3);
+    bot.perc.scan(p.x, p.y, 0, 10, 14, t, false);
+    expect(bot.perc.seenTick[after(5)]).not.toBe(t);
+  });
+});

@@ -347,6 +347,9 @@ export const P = {
   critForce: true,
   /** 1-10 A9：主武器空了也沒有備彈：不管敵人多遠都切手槍（false ＝ 敵人在 pistolSwitch 外時只標「換彈」、沒有任何指令） */
   emptySwitch: true,
+  /** 1-10 A6：視錐掃描照引擎的矮牆規則（站著越過矮牆；蹲著時 2 格內的矮牆才擋；矮牆後 lowCoverRange＋1 格內蹲著的人看不到，不算清過）；
+   * false ＝ 2.6.3 碰到矮牆就停，站在矮牆後看得到的格永遠「沒清過」 */
+  scanLow: true,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */

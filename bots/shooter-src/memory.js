@@ -165,7 +165,7 @@ export class Perception {
       while (this.known.size > obs.enemiesAlive && list.length > 0) this.known.delete(/** @type {Known} */ (list.shift()).id);
     }
     // 可靠清點只用本人視錐。隊友朝向不能證明沒有本人看不到的煙；雷達仍是正面接敵證據。
-    if (me.alive && me.blindTicks === 0) this.scan(me.x, me.y, me.facing, me.scoped ? this.rules.scopedFovDeg : this.rules.fovDeg, me.scoped ? (this.rules.scopedViewRange ?? 60) : this.rules.viewRange, t);
+    if (me.alive && me.blindTicks === 0) this.scan(me.x, me.y, me.facing, me.scoped ? this.rules.scopedFovDeg : this.rules.fovDeg, me.scoped ? (this.rules.scopedViewRange ?? 60) : this.rules.viewRange, t, me.crouching);
     this.belief.update(obs, this);
     if (this.dangerDirty || t - this.dangerTick >= this.rules.ticksPerSecond) this.computeDanger(t);
   }
@@ -246,8 +246,9 @@ export class Perception {
     return s;
   }
 
-  /** 視錐掃描：記錄每格最近被看到的時間 @param {number} x @param {number} y @param {number} facing @param {number} fov @param {number} range @param {number} t */
-  scan(x, y, facing, fov, range, t) {
+  /** 視錐掃描：記錄每格最近被看到的時間 @param {number} x @param {number} y @param {number} facing @param {number} fov @param {number} range @param {number} t @param {boolean} [crouch] */
+  scan(x, y, facing, fov, range, t, crouch = false) {
+    const lowR = this.rules.lowCoverRange;
     const half = fov / 2;
     const seen = this.seenTick;
     const g = this.g;
@@ -256,12 +257,20 @@ export class Perception {
     for (let a = -half; a <= half; a += 4) {
       const c = cosd(facing + a) * (UNIT / 2);
       const s = sind(facing + a) * (UNIT / 2);
+      let lowK = -1000;
       for (let k = 1; k <= range * 2; k++) {
         const i = g.cellOf(x + c * k, y + s * k);
-        if (i < 0 || wall[i] === 1 || g.low[i] === 1) break;
+        if (i < 0 || wall[i] === 1) break;
+        if (g.low[i] === 1) {
+          // 2.7：站著越過矮牆；蹲著時貼近（lowCoverRange 格內）的矮牆才擋
+          if (!P.scanLow || (crouch && k / 2 <= lowR)) break;
+          lowK = k;
+          continue;
+        }
         const p = g.center(i);
         if (this.effects.some((e) => e.kind === 'smoke' && dist(p.x, p.y, e.x, e.y) < e.radius)) break;
-        seen[i] = t;
+        // 矮牆後面貼著牆蹲的人看不到：那幾格不算清過
+        if ((k - lowK) / 2 > lowR + 1) seen[i] = t;
       }
     }
   }

@@ -199,6 +199,7 @@ navIdle: true,
 burnMateCheck: true,
 critForce: true,
 emptySwitch: true,
+scanLow: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -1099,7 +1100,7 @@ if (this.known.size > obs.enemiesAlive) {
 const list = [...this.known.values()].filter((k) => k.tick !== t).sort((a, b) => a.conf - b.conf || a.id - b.id);
 while (this.known.size > obs.enemiesAlive && list.length > 0) this.known.delete( (list.shift()).id);
 }
-if (me.alive && me.blindTicks === 0) this.scan(me.x, me.y, me.facing, me.scoped ? this.rules.scopedFovDeg : this.rules.fovDeg, me.scoped ? (this.rules.scopedViewRange ?? 60) : this.rules.viewRange, t);
+if (me.alive && me.blindTicks === 0) this.scan(me.x, me.y, me.facing, me.scoped ? this.rules.scopedFovDeg : this.rules.fovDeg, me.scoped ? (this.rules.scopedViewRange ?? 60) : this.rules.viewRange, t, me.crouching);
 this.belief.update(obs, this);
 if (this.dangerDirty || t - this.dangerTick >= this.rules.ticksPerSecond) this.computeDanger(t);
 }
@@ -1167,7 +1168,8 @@ this.sectors.push(s);
 this.dangerDirty = true;
 return s;
 }
-scan(x, y, facing, fov, range, t) {
+scan(x, y, facing, fov, range, t, crouch = false) {
+const lowR = this.rules.lowCoverRange;
 const half = fov / 2;
 const seen = this.seenTick;
 const g = this.g;
@@ -1175,12 +1177,18 @@ const wall = g.wall;
 for (let a = -half; a <= half; a += 4) {
 const c = cosd(facing + a) * (UNIT / 2);
 const s = sind(facing + a) * (UNIT / 2);
+let lowK = -1000;
 for (let k = 1; k <= range * 2; k++) {
 const i = g.cellOf(x + c * k, y + s * k);
-if (i < 0 || wall[i] === 1 || g.low[i] === 1) break;
+if (i < 0 || wall[i] === 1) break;
+if (g.low[i] === 1) {
+if (!P.scanLow || (crouch && k / 2 <= lowR)) break;
+lowK = k;
+continue;
+}
 const p = g.center(i);
 if (this.effects.some((e) => e.kind === 'smoke' && dist(p.x, p.y, e.x, e.y) < e.radius)) break;
-seen[i] = t;
+if ((k - lowK) / 2 > lowR + 1) seen[i] = t;
 }
 }
 }
