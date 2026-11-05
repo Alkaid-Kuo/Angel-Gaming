@@ -1415,46 +1415,17 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'T9',
     name: '閃光不閃到隊友',
-    expect: '兩張圖各跑短賽（每半場 6 回合）：基準對基準一場（兩邊都算），有給對手時再加對手雙邊各一場（只算基準）；自己隊的閃光讓隊友「沒背對」的致盲總 tick（超過背對上限 0.3 秒的部分）< 讓敵方致盲的 20%；背身掩護進點的短暫致盲不算；含背對的總量也要 < 20%（原本的量法，退步看得到；40 場的統計見報告）',
-    run: (bot, seed, opponent) => {
-      let team = 0;
-      let all = 0;
-      let enemy = 0;
-      const opts = { roundsPerHalf: 6, winRounds: 7, overtime: false as const };
-      for (const mapId of teamMaps) {
-        const games: { setup: Setup; groups: number[] }[] = [{ setup: { seed, map: mapId, seats: [...TS, ...CTS], opts }, groups: [0, 1] }];
-        if (opponent !== undefined) {
-          games.push({ setup: { seed, map: mapId, seats: TS, opp: { bot: opponent, seats: CTS }, opts }, groups: [0] });
-          games.push({ setup: { seed, map: mapId, seats: CTS, opp: { bot: opponent, seats: TS }, opts }, groups: [1] });
-        }
-        for (const gm of games) {
-          const d = driver(bot, gm.setup);
-          const m = d.match;
-          let blind = m.players.map((q) => q.blindTicks);
-          let own = [...m['roundFlashTeam']];
-          while (!m.over) {
-            d.step();
-            const now = m['roundFlashTeam'];
-            for (const g of gm.groups) {
-              if (now[g] <= own[g]) continue;
-              m.players.forEach((q, i) => {
-                if (q.group === g) team += Math.max(0, q.blindTicks - blind[i] - GRENADE_RULES.flashBackTicks);
-              });
-            }
-            own = [...now];
-            blind = m.players.map((q) => q.blindTicks);
-          }
-          for (const r of m.rounds) {
-            for (const g of gm.groups) {
-              all += r.flashTeamTicks[g];
-              enemy += r.flashEnemyTicks[g];
-            }
-          }
-        }
+    expect: '20 個種子取通過比例 ≥ 85%（2.7 起；原本 5 個種子每個都要過，單一種子剛好過門檻就失敗，在量雜訊）。每個種子：兩張圖各跑短賽（每半場 6 回合）：基準對基準一場（兩邊都算），有給對手時再加對手雙邊各一場（只算基準）；自己隊的閃光讓隊友「沒背對」的致盲總 tick（超過背對上限 0.3 秒的部分）< 讓敵方致盲的 20%；背身掩護進點的短暫致盲不算；含背對的總量也要 < 20%',
+    run: (bot, _seed, opponent) => batchOnce(bot, opponent === undefined ? 'T9' : 'T9:opp', () => {
+      let ok = 0;
+      const bad: string[] = [];
+      for (let seed = 1; seed <= T9_SEEDS; seed++) {
+        const r = t9Seed(bot, seed, opponent);
+        if (r.pass) ok++;
+        else bad.push(`[${seed}] ${r.detail}`);
       }
-      // 舊量法（含背對）保留原本的 20% 上限，背身掩護變多也看得到退步
-      return { pass: (team < enemy * 0.2 && all < enemy * 0.2) || (all === 0 && enemy === 0), detail: `隊友沒背對的致盲 ${(team / TPS).toFixed(1)} 秒（含背對 ${(all / TPS).toFixed(1)} 秒）、敵方 ${(enemy / TPS).toFixed(1)} 秒（${enemy === 0 ? '-' : ((team / enemy) * 100).toFixed(1)}%）` };
-    },
+      return { pass: ok >= Math.ceil(T9_SEEDS * 0.85), detail: `${T9_SEEDS} 個種子通過 ${ok}（門檻 85%）${bad.length > 0 ? `；沒過：${bad.join('；')}` : ''}` };
+    }),
   },
   {
     id: 'T10',
@@ -1928,6 +1899,50 @@ const SITUATION_SCENARIOS: readonly AiScenario[] = [
 
 const batchMemos = new WeakMap<CompiledBot, Map<string, AiScenarioResult>>();
 /** 比例型情境（T25、T26）：自己跑 50 場算比例，5 個種子共用同一個結果（依選手、地圖組、凍結時間快取） */
+/** T9 的種子數（2.7：5 → 20，取通過比例） */
+const T9_SEEDS = 20;
+
+/** T9 一個種子的量法（2.6 的定義不變） */
+function t9Seed(bot: CompiledBot, seed: number, opponent: CompiledBot | undefined): AiScenarioResult {
+  let team = 0;
+  let all = 0;
+  let enemy = 0;
+  const opts = { roundsPerHalf: 6, winRounds: 7, overtime: false as const };
+  for (const mapId of teamMaps) {
+    const games: { setup: Setup; groups: number[] }[] = [{ setup: { seed, map: mapId, seats: [...TS, ...CTS], opts }, groups: [0, 1] }];
+    if (opponent !== undefined) {
+      games.push({ setup: { seed, map: mapId, seats: TS, opp: { bot: opponent, seats: CTS }, opts }, groups: [0] });
+      games.push({ setup: { seed, map: mapId, seats: CTS, opp: { bot: opponent, seats: TS }, opts }, groups: [1] });
+    }
+    for (const gm of games) {
+      const d = driver(bot, gm.setup);
+      const m = d.match;
+      let blind = m.players.map((q) => q.blindTicks);
+      let own = [...m['roundFlashTeam']];
+      while (!m.over) {
+        d.step();
+        const now = m['roundFlashTeam'];
+        for (const g of gm.groups) {
+          if (now[g] <= own[g]) continue;
+          m.players.forEach((q, i) => {
+            if (q.group === g) team += Math.max(0, q.blindTicks - blind[i] - GRENADE_RULES.flashBackTicks);
+          });
+        }
+        own = [...now];
+        blind = m.players.map((q) => q.blindTicks);
+      }
+      for (const r of m.rounds) {
+        for (const g of gm.groups) {
+          all += r.flashTeamTicks[g];
+          enemy += r.flashEnemyTicks[g];
+        }
+      }
+    }
+  }
+  // 舊量法（含背對）保留原本的 20% 上限，背身掩護變多也看得到退步
+  return { pass: (team < enemy * 0.2 && all < enemy * 0.2) || (all === 0 && enemy === 0), detail: `隊友沒背對的致盲 ${(team / TPS).toFixed(1)} 秒（含背對 ${(all / TPS).toFixed(1)} 秒）、敵方 ${(enemy / TPS).toFixed(1)} 秒（${enemy === 0 ? '-' : ((team / enemy) * 100).toFixed(1)}%）` };
+}
+
 function batchOnce(bot: CompiledBot, id: string, f: () => AiScenarioResult): AiScenarioResult {
   let memo = batchMemos.get(bot);
   if (memo === undefined) { memo = new Map(); batchMemos.set(bot, memo); }
@@ -2169,6 +2184,9 @@ interface ExecTrace {
   readonly scoped: number;
   readonly awps: number;
   readonly rifles: number;
+  /** 第一個人進點那一刻各 T 的位置、每個人進點的 tick（2.7 R1：認「和突破手一起進門的搭檔」） */
+  readonly snap: ReadonlyMap<number, { x: number; y: number }>;
+  readonly at: ReadonlyMap<number, number>;
   readonly m: ShooterMatch;
 }
 
@@ -2182,6 +2200,9 @@ function execTrace(bot: CompiledBot, seed: number, mapId: string, plan: number, 
   const awps = TS.filter((pid) => m.players[pid].primary?.id === 'awp').length;
   const rifles = TS.filter((pid) => m.players[pid].primary?.id === 'ak').length;
   const order: number[] = [];
+  /** 第一個人進點那一刻各 T 的位置與每個人進點的 tick（2.7 R1 用） */
+  const snap = new Map<number, { x: number; y: number }>();
+  const at = new Map<number, number>();
   let smokeBy = -1;
   let scoped = 0;
   const seen = new Set<object>();
@@ -2195,10 +2216,14 @@ function execTrace(bot: CompiledBot, seed: number, mapId: string, plan: number, 
       const p = mm.players[awper];
       if (p.alive && p.scoped && p.vx === 0 && p.vy === 0) scoped++;
     }
-    for (const pid of TS) if (mm.players[pid].alive && !order.includes(pid) && inAnySite(mm.map, mm.players[pid].x, mm.players[pid].y)) order.push(pid);
+    for (const pid of TS) if (mm.players[pid].alive && !order.includes(pid) && inAnySite(mm.map, mm.players[pid].x, mm.players[pid].y)) {
+      if (order.length === 0) for (const q of TS) snap.set(q, { x: mm.players[q].x, y: mm.players[q].y });
+      order.push(pid);
+      at.set(pid, mm.tick);
+    }
     return order.length >= TS.filter((pid) => mm.players[pid].alive).length;
   });
-  return { order, smokeBy, scoped, awps, rifles, m };
+  return { order, smokeBy, scoped, awps, rifles, m, snap, at };
 }
 
 const roleOf = (roles: readonly number[], pid: number): number => roles[TS.indexOf(pid as (typeof TS)[number])] ?? 0;
@@ -2207,15 +2232,20 @@ const ROLE_LABEL = ['無', '突破', '支援', '錨點', '狙擊', '游擊'];
 const ROLE_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'R1',
-    name: '突破手第一個進點',
-    expect: '均衡陣容（角色依種子輪轉座位）T 全買，split 與 rush 各一回合、兩張圖：第一個進包點的人是突破手（4 回合至少 3 回合）',
+    name: '突破手（或和他一起進門的搭檔）第一個進點',
+    expect: '均衡陣容（角色依種子輪轉座位）T 全買，split 與 rush 各一回合、兩張圖：第一個進包點的人是突破手，或是和突破手一起進門的搭檔（2.7 起：第一個人進點時突破手在他 4 格內、1.5 秒內也進點；成對進門時誰先踩進矩形近乎各半）（4 回合至少 3 回合）',
     run: (bot, seed) => {
       const roles = rolesFor(seed);
       const res = teamMaps.flatMap((mapId) =>
         [3, 2].map((plan) => {
           const tr = execTrace(bot, seed, mapId, plan, roles);
           const first = tr.order[0] ?? -1;
-          return { ok: first >= 0 && roleOf(roles, first) === ENTRY, txt: `${mapId}${plan === 3 ? ' split' : ' rush'} 第一個 ${first}（${ROLE_LABEL[roleOf(roles, first)] ?? '?'}）` };
+          const entry = TS.find((pid) => roleOf(roles, pid) === ENTRY) ?? -1;
+          const a0 = tr.snap.get(first);
+          const e0 = tr.snap.get(entry);
+          const pair = first >= 0 && entry >= 0 && a0 !== undefined && e0 !== undefined && (a0.x - e0.x) * (a0.x - e0.x) + (a0.y - e0.y) * (a0.y - e0.y) <= 16 * UNIT * UNIT && (tr.at.get(entry) ?? Infinity) - (tr.at.get(first) ?? 0) <= 1.5 * TPS;
+          const ok = first >= 0 && (roleOf(roles, first) === ENTRY || pair);
+          return { ok, txt: `${mapId}${plan === 3 ? ' split' : ' rush'} 第一個 ${first}（${ROLE_LABEL[roleOf(roles, first)] ?? '?'}${pair && roleOf(roles, first) !== ENTRY ? '，和突破手一起' : ''}${!pair && roleOf(roles, first) !== ENTRY && a0 !== undefined && e0 !== undefined ? `，突破手在 ${(Math.sqrt((a0.x - e0.x) * (a0.x - e0.x) + (a0.y - e0.y) * (a0.y - e0.y)) / UNIT).toFixed(1)} 格外、晚 ${(((tr.at.get(entry) ?? NaN) - (tr.at.get(first) ?? 0)) / TPS).toFixed(1)} 秒` : ''}）` };
         }),
       );
       return { pass: res.filter((r) => r.ok).length >= 3, detail: res.map((r) => r.txt).join('；') };

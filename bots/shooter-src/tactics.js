@@ -2828,12 +2828,14 @@ export class Tactics {
     const own = this.util.away !== null && t >= this.util.away.from ? this.util.away : null;
     this.mateFlash = this.mateFlash.filter((x) => t <= x.pop + 2);
     const edge = P.flashEdge * UNIT;
-    const mf = this.mateFlash.find((x) => dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
     // 2.6.3：隊友的閃光提前一個反應延遲放行（指令生效時剛好炸開；爆炸時間只會估晚，不會早放）
     // 狙擊手不提早放行（他要等兩個隊友先進點）
     const release = P.flashRelease && this.roles.of(me.id) !== AWP ? this.data.rules.reactionTicks - P.flashReleaseMargin : -2;
     // 不提早放行（release ＝ −2）時到 pop + 2 為止都要躲，含等號（2.6.2 的判定）
-    const open = mf !== undefined && (P.flashOffEq && release < 0 ? t <= mf.pop + 2 : t < mf.pop - release);
+    const threat = (/** @type {{ pop: number }} */ x) => (P.flashOffEq && release < 0 ? t <= x.pop + 2 : t < x.pop - release);
+    // 2.7（P.flashMulti）：先排除已經放行的那顆再找，第一顆放行不會遮住還要躲的第二顆
+    const mf = this.mateFlash.find((x) => dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y) && (!P.flashMulti || threat(x)));
+    const open = mf !== undefined && threat(mf);
     const f = own !== null ? own : open && mf !== undefined ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
     if (f !== null && t <= f.until && !out.objective) {
       const R = this.util.blindRange;

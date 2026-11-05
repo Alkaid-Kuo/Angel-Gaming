@@ -207,6 +207,7 @@ heatDedupe: true,
 tracerSrc: true,
 claimClear: 6,
 claimById: true,
+flashMulti: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -5202,9 +5203,10 @@ if (out.escape) return;
 const own = this.util.away !== null && t >= this.util.away.from ? this.util.away : null;
 this.mateFlash = this.mateFlash.filter((x) => t <= x.pop + 2);
 const edge = P.flashEdge * UNIT;
-const mf = this.mateFlash.find((x) => dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y));
 const release = P.flashRelease && this.roles.of(me.id) !== AWP ? this.data.rules.reactionTicks - P.flashReleaseMargin : -2;
-const open = mf !== undefined && (P.flashOffEq && release < 0 ? t <= mf.pop + 2 : t < mf.pop - release);
+const threat = ( x) => (P.flashOffEq && release < 0 ? t <= x.pop + 2 : t < x.pop - release);
+const mf = this.mateFlash.find((x) => dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && this.g.los(me.x, me.y, x.x, x.y) && (!P.flashMulti || threat(x)));
+const open = mf !== undefined && threat(mf);
 const f = own !== null ? own : open && mf !== undefined ? { x: mf.x, y: mf.y, until: mf.pop + 2 } : null;
 if (f !== null && t <= f.until && !out.objective) {
 const R = this.util.blindRange;
