@@ -4,7 +4,7 @@
 // 經濟（步驟 8）：從暫代包放大到 5 人名單跑得起來（陣容上限 8、起始資金與自由選手數約 ×5/3、每回合獎金依 13 回合一場換算、
 // 訓練中心每週場數 ÷20，因為真引擎一場要數秒）；平衡留給 M5。品階表與名字庫沿用暫代包。
 import { ROLE_TABLE, SHOOTER_ROLES, type ShooterRole } from '../shooter/players.ts';
-import { STUB_CONTENT, type ContentPack, type Economy, type PersonaSpec, type TacticSpec } from './content.ts';
+import { STUB_CONTENT, type AttributeSchema, type ContentPack, type Economy, type PersonaSpec, type TacticSpec } from './content.ts';
 import type { Persona } from './types.ts';
 
 /** 隱藏強度表：索引＝版本 − 1（scripts/shooter-strength.ts 的「採用值」；基準 Bot 2.4.3：赤岩舊城、MR6、凍結 3 秒；回合→整場 k = 12.22；量測見 Bot 2.4.3 強度與耗時重量報告） */
@@ -17,6 +17,13 @@ export const SHOOTER_POWER: Readonly<Record<ShooterRole, readonly number[]>> = {
 };
 
 const STUB_PERSONAS = STUB_CONTENT.personas;
+
+/** 屬性表（M5 第二批）：六項，強度三項可訓練，風格三項開局決定 */
+export const SHOOTER_ATTRIBUTES: AttributeSchema = {
+  keys: ['aim', 'reaction', 'awareness', 'aggression', 'discipline', 'movement'],
+  trainable: ['aim', 'reaction', 'awareness'],
+  names: { aim: '瞄準', reaction: '反應', awareness: '警覺', aggression: '侵略', discipline: '紀律', movement: '走位' },
+};
 
 /** NPC 個性：起始資金 ×5/3、陣容目標 6～7（5 人上場＋替補），版本範圍與排序風格不變 */
 export const SHOOTER_PERSONAS: Readonly<Record<Persona, PersonaSpec>> = {
@@ -58,7 +65,8 @@ export const SHOOTER_CONTENT: ContentPack = {
   formatId: 'shooter-mr6',
   lineupSize: 5,
   slotNames: ['1 號位', '2 號位', '3 號位', '4 號位', '5 號位'],
-  lineages: SHOOTER_ROLES.map((r) => ({ id: r, name: ROLE_TABLE[r].name, style: ROLE_TABLE[r].style, power: SHOOTER_POWER[r] })),
+  lineages: SHOOTER_ROLES.map((r) => ({ id: r, name: ROLE_TABLE[r].name, style: ROLE_TABLE[r].style, power: SHOOTER_POWER[r], base: { ...ROLE_TABLE[r].base }, growth: { ...ROLE_TABLE[r].growth } })),
+  attributes: SHOOTER_ATTRIBUTES,
   tactics: SHOOTER_TACTICS,
   rarities: STUB_CONTENT.rarities,
   personas: SHOOTER_PERSONAS,

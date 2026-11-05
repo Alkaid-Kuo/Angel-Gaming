@@ -21,7 +21,7 @@ const ECON_TIP = ['照隊內預設的買法', '存錢門檻高，少強起', '�
 export function tacticsScreen(ctx: Ctx): string {
   const { v, c, ui } = ctx;
   const active = canAct(v);
-  const left = Math.max(0, v.me.capacityLeft);
+  const left = Math.max(0, v.me.slotsLeft);
   const sessions = Math.max(1, Math.min(ui.rehearse.sessions, Math.max(1, left)));
   const cost = sessions * c.economy.rehearseCost;
   const lineup = lineupOf(ctx).ids.map((id) => ctx.pm.get(id));

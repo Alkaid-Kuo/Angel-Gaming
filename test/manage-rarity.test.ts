@@ -1,4 +1,4 @@
-// 選手品階與 ID 名字庫：品階只決定個人版本上限；名字開局洗牌、依序發放、不重複。
+// 選手品階與 ID 名字庫：品階只決定屬性上限（M5 第二批起；原個人版本上限）；名字開局洗牌、依序發放、不重複。
 import { describe, expect, it } from 'vitest';
 import { runSeason } from '../src/manage/autoplayer.ts';
 import { applyCommand } from '../src/manage/commands.ts';
@@ -8,7 +8,8 @@ import { advance, newGame } from '../src/manage/game.ts';
 import { FakeGateway } from '../src/manage/gateway-fake.ts';
 import { npcOffseason } from '../src/manage/npc.ts';
 import { deserialize, serialize } from '../src/manage/save.ts';
-import { humanTeam, playerMaxVersion, raritySpec, rosterOf, truePower } from '../src/manage/state.ts';
+import { attrsAt, capPub, capVersionOf, gradeOf, startCaps } from '../src/manage/attrs.ts';
+import { humanTeam, raritySpec, rosterOf, stageOfPlayer, truePower } from '../src/manage/state.ts';
 import type { GameState, Player, Rarity } from '../src/manage/types.ts';
 import { knownView } from '../src/manage/view.ts';
 
@@ -23,7 +24,8 @@ function setup(rarity: Rarity, lineageId: string, version: number, pack: Content
   const p = rosterOf(s, s.humanTeamId)[0];
   p.rarity = rarity;
   p.lineageId = lineageId;
-  p.version = version;
+  p.attrs = attrsAt(pack, lineageId, version);
+  p.caps = startCaps(pack, lineageId, rarity, p.habit, p.attrs);
   return { s, p };
 }
 
@@ -31,7 +33,7 @@ describe('品階表', () => {
   it('暫代包與射擊包同一張表，順序與數值照定案', () => {
     expect(STUB_CONTENT.rarities).toBe(RARITIES);
     expect(SHOOTER_CONTENT.rarities).toBe(RARITIES);
-    expect(RARITIES.map((r) => [r.id, r.weight, r.maxVersion, r.npcEloBonus])).toEqual([
+    expect(RARITIES.map((r) => [r.id, r.weight, r.capVersion, r.npcEloBonus])).toEqual([
       ['N', 45, 2, 0],
       ['R', 30, 3, 10],
       ['SR', 20, 4, 25],
@@ -40,33 +42,28 @@ describe('品階表', () => {
   });
 });
 
-describe('個人版本上限', () => {
-  it('品階與流派取小', () => {
-    expect(playerMaxVersion(content, setup('N', 'turtle', 1).p)).toBe(2);
-    expect(playerMaxVersion(content, setup('SSR', 'turtle', 1).p)).toBe(5); // 龜守流上限 6
-    expect(playerMaxVersion(content, setup('SSR', 'push', 1).p)).toBe(4); // 強攻流上限 4
+describe('屬性上限（品階）', () => {
+  it('上限對應的舊版本：品階與流派取小', () => {
+    expect(capVersionOf(content, 'turtle', 'N')).toBe(2);
+    expect(capVersionOf(content, 'turtle', 'SSR')).toBe(5); // 龜守流最高 6
+    expect(capVersionOf(content, 'push', 'SSR')).toBe(4); // 強攻流最高 4
   });
 
-  it('N 到 SSR 都升不過自己的上限：到上限時失敗、不扣錢、訊息提到品階；差一版時還能升', () => {
-    for (const r of RARITIES) {
-      const { s, p } = setup(r.id, 'turtle', r.maxVersion);
-      const me = humanTeam(s);
-      const cash = me.cash;
-      expect(applyCommand(s, content, me.id, { type: 'upgradeVersion', playerId: p.id })).toEqual({ ok: false, reason: `${r.id} 階選手最高只能到 v${r.maxVersion}` });
-      expect(me.cash).toBe(cash);
-      expect(p.upgradeUntilWeek).toBeNull();
-      p.version = r.maxVersion - 1;
-      expect(applyCommand(s, content, me.id, { type: 'upgradeVersion', playerId: p.id }).ok).toBe(true);
+  it('公開上限＝該版本的可訓練屬性；真實上限不低於目前屬性；品階越高上限越高', () => {
+    for (const pack of PACKS) {
+      const l = pack.lineages[0].id;
+      let prev = -1;
+      for (const r of RARITIES) {
+        const pub = capPub(pack, l, r.id);
+        const at = attrsAt(pack, l, capVersionOf(pack, l, r.id));
+        for (const k of pack.attributes.trainable) expect(pub[k]).toBe(at[k]);
+        const sum = pack.attributes.trainable.reduce((t, k) => t + pub[k], 0);
+        expect(sum).toBeGreaterThan(prev);
+        prev = sum;
+        const { p } = setup(r.id, l, r.capVersion, pack);
+        for (const k of pack.attributes.trainable) expect(p.caps[k]).toBeGreaterThanOrEqual(p.attrs[k]);
+      }
     }
-  });
-
-  it('流派上限較低時訊息提到流派（SSR 配強攻流 v4）；兩者相等時說品階（SR 配強攻流 v4）', () => {
-    const a = setup('SSR', 'push', 4);
-    const cash = humanTeam(a.s).cash;
-    expect(applyCommand(a.s, content, a.s.humanTeamId, { type: 'upgradeVersion', playerId: a.p.id })).toEqual({ ok: false, reason: '強攻流已是最高版本' });
-    expect(humanTeam(a.s).cash).toBe(cash);
-    const b = setup('SR', 'push', 4);
-    expect(applyCommand(b.s, content, b.s.humanTeamId, { type: 'upgradeVersion', playerId: b.p.id })).toEqual({ ok: false, reason: 'SR 階選手最高只能到 v4' });
   });
 
   it('品階不影響薪資與當下強度', () => {
@@ -74,25 +71,6 @@ describe('個人版本上限', () => {
     const b = setup('SSR', 'balance', 2);
     expect(b.p.weeklySalary).toBe(a.p.weeklySalary);
     expect(truePower(content, b.p)).toBe(truePower(content, a.p));
-  });
-
-  it('completeUpgrades 不會升過個人上限：升版中途被卡住時版本與週薪不變、升版狀態清掉', async () => {
-    const { s, p } = setup('N', 'turtle', 2);
-    const salary = p.weeklySalary;
-    p.upgradeUntilWeek = 1;
-    await advance(s, content, gateway); // 休賽期 → 第 1 週
-    await advance(s, content, gateway); // 第 1 週結算
-    expect(p.version).toBe(2);
-    expect(p.weeklySalary).toBe(salary);
-    expect(p.upgradeUntilWeek).toBeNull();
-  });
-
-  it('completeUpgrades 在上限內照常升：N 從 v1 升到 v2 後就不能再升', async () => {
-    const { s, p } = setup('N', 'turtle', 1);
-    expect(applyCommand(s, content, s.humanTeamId, { type: 'upgradeVersion', playerId: p.id }).ok).toBe(true);
-    for (let i = 0; i < 3; i++) await advance(s, content, gateway);
-    expect(p.version).toBe(2);
-    expect(applyCommand(s, content, s.humanTeamId, { type: 'upgradeVersion', playerId: p.id })).toEqual({ ok: false, reason: 'N 階選手最高只能到 v2' });
   });
 });
 
@@ -102,13 +80,16 @@ describe('開局抽品階', () => {
       for (let seed = 1; seed <= 100; seed++) {
         const s = newGame(seed, pack);
         s.players.forEach((p, i) => {
-          expect(p.version, `${pack.id}/${seed}/${p.id}`).toBeLessThanOrEqual(raritySpec(pack, p.rarity).maxVersion);
-          expect((pack.lineages.find((l) => l.id === p.lineageId) as ContentPack['lineages'][number]).power.length).toBeGreaterThanOrEqual(p.version);
+          // 開局屬性＝生成版本的流派屬性，所以成長階段＝生成版本
+          const version = stageOfPlayer(pack, p);
+          expect(version, `${pack.id}/${seed}/${p.id}`).toBeLessThanOrEqual(raritySpec(pack, p.rarity).capVersion);
+          expect((pack.lineages.find((l) => l.id === p.lineageId) as ContentPack['lineages'][number]).power.length).toBeGreaterThanOrEqual(version);
+          for (const k of pack.attributes.trainable) expect(p.caps[k]).toBeGreaterThanOrEqual(p.attrs[k]);
           // 名單前段是各隊原班人馬，後段是自由選手（可能已被 NPC 簽走）
           const team = i < 8 * pack.lineupSize ? s.teams.find((t) => t.id === p.teamId) : undefined;
           const [lo, hi] = team === undefined ? [1, 3] : team.persona === null ? pack.economy.humanVersions : pack.personas[team.persona].versions;
-          expect(p.version).toBeGreaterThanOrEqual(lo);
-          expect(p.version).toBeLessThanOrEqual(hi);
+          expect(version).toBeGreaterThanOrEqual(lo);
+          expect(version).toBeLessThanOrEqual(hi);
         });
       }
     }
@@ -145,7 +126,7 @@ describe('開局抽品階', () => {
     const before = s.players.map((p) => p.rarity);
     await runSeason(s, content, gateway, null);
     expect(s.players.map((p) => p.rarity)).toEqual(before);
-    expect(s.players.every((p) => p.version <= playerMaxVersion(content, p))).toBe(true);
+    expect(s.players.every((p) => content.attributes.trainable.every((k) => p.attrs[k] <= p.caps[k]))).toBe(true);
   });
 });
 
@@ -221,13 +202,14 @@ describe('NPC 簽約估值與公開視圖', () => {
     expect(cmds.find((c) => c.type === 'sign')).toEqual({ type: 'sign', playerId: free[5].id });
   });
 
-  it('視圖公開品階與個人上限，隱藏層仍不外洩', () => {
+  it('視圖公開品階；上限等級只給自己的人（公開公式），隱藏層仍不外洩', () => {
     const s = newGame(9, content);
     const v = knownView(s, content, s.humanTeamId);
     for (const kp of v.players) {
       const p = s.players.find((x) => x.id === kp.id) as Player;
       expect(kp.rarity).toBe(p.rarity);
-      expect(kp.maxVersion).toBe(playerMaxVersion(content, p));
+      if (p.teamId === s.humanTeamId) expect(kp.capGrades).toEqual(Object.fromEntries(Object.entries(capPub(content, p.lineageId, p.rarity)).map(([k, x]) => [k, gradeOf(x)])));
+      else expect(kp.capGrades).toBeUndefined();
     }
     expect(JSON.stringify(v)).not.toContain('"habit"');
   });

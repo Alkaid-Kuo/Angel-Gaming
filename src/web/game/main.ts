@@ -2,6 +2,7 @@
 // 版面是 1920×1080 的舞台，等比縮放到視窗（stage.ts）。遊戲狀態與存檔沿用 ../manage/store.ts，跟舊介面同一份存檔。
 // 開新局時選項目（攻防戰／軍團戰暫代）；攻防戰的比賽在 Worker 池裡真打，推進時顯示「模擬中 n／m 場」。
 // 觀戰：賽制自報能觀戰時，結果幕與聯賽頁的比賽有「觀戰」，把存檔裡的請求單寫成觀戰票、開新分頁 web/shooter.html#watch 重播。
+import { STAGE_NAMES } from '../../manage/attrs.ts';
 import type { Command } from '../../manage/index.ts';
 import { GAME_KINDS, ManageGame } from '../manage/store.ts';
 import { EMBLEM_NAMES, type EmblemName } from '../club/art.ts';
@@ -395,8 +396,8 @@ function writeWatchTicket(fixtureId: string): boolean {
     outcome: t.outcome,
     names: [...f.match.home, ...f.match.away].map((id) => ctx.pm.get(id)?.name ?? id),
     portraits: [...f.match.home, ...f.match.away].map((id) => ctx.pm.get(id)?.portraitId ?? ''),
-    // 打那場時的版本（之後升版不影響）
-    tags: specs.map((s) => `${lineageName(ctx.c, s.lineageId)} v${s.version}`),
+    // 打那場時的成長階段（請求單的 version 欄，M5 第二批起填階段；之後訓練不影響）
+    tags: specs.map((s) => `${lineageName(ctx.c, s.lineageId)} ${STAGE_NAMES[s.version - 1] ?? `v${s.version}`}`),
     teams: [teamName(ctx.v, f.home), teamName(ctx.v, f.away)],
     mine: f.home === me ? 0 : f.away === me ? 1 : null,
     title: stageName(f),
@@ -447,7 +448,7 @@ function startGame(g: ManageGame): void {
 /** 場數夾到滑桿級距的倍數、至少一級 */
 /** 排練節數：1～本週剩餘時段（至少 1） */
 function clampSessions(n: number): number {
-  const left = game?.view().me.capacityLeft ?? 1;
+  const left = game?.view().me.slotsLeft ?? 1;
   return Math.max(1, Math.min(Math.round(n) || 1, Math.max(1, left)));
 }
 
@@ -537,7 +538,10 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
   },
   sign: (el) => run({ type: 'sign', playerId: id(el) }, '簽約成功！歡迎加入戰隊'),
   scout: (el) => run({ type: 'scout', playerId: id(el) }, '球探出發了，推進一週後回報'),
-  upgrade: (el) => run({ type: 'upgradeVersion', playerId: id(el) }, '開始升版培訓'),
+  train: (el) => {
+    const attr = el.dataset.attr as string;
+    run({ type: 'queueTrain', playerId: id(el), attr, sessions: 1 }, `訓練排好了：${game?.content.attributes.names[attr] ?? attr} 1 節，推進一週後才漲`);
+  },
   release: (el) => {
     const name = game?.view().players.find((p) => p.id === id(el))?.name ?? '';
     confirmThen('解約', `確定要和 ${name} 解約嗎？他會回到自由市場，已付的簽約金不退。`, '解約', () => {

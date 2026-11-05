@@ -1,4 +1,5 @@
 // 狀態查詢小工具與記帳。這裡的函式都不亂數、不呼叫對戰閘道。
+import { powerOfAttrs, stageOf } from './attrs.ts';
 import type { ContentPack, Lineage, RaritySpec } from './content.ts';
 import type { SideSpec } from './gateway.ts';
 import type { GamePlan, GameState, LedgerCategory, Message, Player, PlayerId, Rarity, Team, TeamId } from './types.ts';
@@ -37,30 +38,25 @@ export function lineageOf(content: ContentPack, id: string): Lineage {
   return l;
 }
 
-export function maxVersion(content: ContentPack, lineageId: string): number {
-  return lineageOf(content, lineageId).power.length;
-}
-
 export function raritySpec(content: ContentPack, id: Rarity): RaritySpec {
   const r = content.rarities.find((x) => x.id === id);
   if (!r) throw new Error(`未知品階 ${id}`);
   return r;
 }
 
-/** 選手個人版本上限：品階上限與流派上限取小 */
-export function playerMaxVersion(content: ContentPack, p: Player): number {
-  return Math.min(raritySpec(content, p.rarity).maxVersion, maxVersion(content, p.lineageId));
+/** 成長階段（M5 第二批；1～5，由表定屬性推，公開） */
+export function stageOfPlayer(content: ContentPack, p: Player): number {
+  return stageOf(content, p.lineageId, p.attrs);
 }
 
-/** 公開先驗：只看版本號給的初始 Elo（所有流派相同），真實強度要靠戰績或情報才看得出差別 */
-export function publicPrior(version: number): number {
-  return 1450 + 40 * (version - 1);
+/** 公開先驗：只看成長階段給的初始 Elo（所有流派相同），真實強度要靠戰績或情報才看得出差別 */
+export function publicPrior(stage: number): number {
+  return 1450 + 40 * (stage - 1);
 }
 
-/** 真實強度（隱藏）。只給情報報告與內容層使用，畫面與 NPC 不可讀。 */
+/** 真實強度（隱藏）：表定屬性在流派強度表上的內插值＋習慣（M5 規格 4.5）。只給情報報告與內容層使用，畫面與 NPC 不可讀。 */
 export function truePower(content: ContentPack, p: Player): number {
-  const l = lineageOf(content, p.lineageId);
-  return l.power[Math.min(p.version, l.power.length) - 1] + p.habit;
+  return powerOfAttrs(content, p.lineageId, p.attrs) + p.habit;
 }
 
 export function salaryForVersion(content: ContentPack, version: number): number {
@@ -92,10 +88,21 @@ export function weeklySponsor(content: ContentPack, team: Team): number {
   return team.fame * content.economy.sponsorPerFame;
 }
 
-/** 本週練習賽／排練還能排幾格（練習賽一場一格、排練一節一格） */
+/** 本週練習賽還能排幾場（引擎算力，scrimCapacity） */
 export function capacityLeft(state: GameState, content: ContentPack, team: Team): number {
-  const used = state.jobs.reduce((s, j) => (j.teamId !== team.id ? s : j.kind === 'scrim' ? s + j.games : j.kind === 'rehearse' ? s + j.sessions : s), 0);
+  const used = state.jobs.reduce((s, j) => (j.teamId === team.id && j.kind === 'scrim' ? s + j.games : s), 0);
   return content.economy.scrimCapacity[team.trainingLevel - 1] - used;
+}
+
+/** 本週訓練時段還剩幾節（M5 第二批：屬性訓練與戰術排練共用 trainingSlots） */
+export function slotsLeft(state: GameState, content: ContentPack, team: Team): number {
+  const used = state.jobs.reduce((s, j) => (j.teamId !== team.id ? s : j.kind === 'train' || j.kind === 'rehearse' ? s + j.sessions : s), 0);
+  return content.economy.trainingSlots[team.trainingLevel - 1] - used;
+}
+
+/** 這名選手本週已排的訓練節數（每人每週上限 trainMaxPerPlayer） */
+export function trainedThisWeek(state: GameState, playerId: PlayerId): number {
+  return state.jobs.reduce((s, j) => (j.kind === 'train' && j.playerId === playerId ? s + j.sessions : s), 0);
 }
 
 /** 出賽名單是否有效：人數＝lineupSize、不重複、都是自己的人 */
@@ -140,15 +147,17 @@ export function defaultGamePlan(content: ContentPack): GamePlan {
 }
 
 /**
- * 組出送給對戰閘道的一方名單。每人的 config 是「習慣」＋個人熟練度 p_<戰術>（整數）；
+ * 組出送給對戰閘道的一方名單。每人的 config 是「習慣」＋表定屬性＋個人熟練度 p_<戰術>（整數）；
  * 內容包有戰術手冊時，team 帶執行熟練度 q_<戰術>、比賽計畫 pref_<戰術> 與 economy（閘道轉成開局資料與教練指令）。
  */
 export function buildSide(content: ContentPack, team: Team, players: readonly Player[]): SideSpec {
   const side: SideSpec = {
     players: players.map((p) => {
+      // 表定屬性（M5 第二批）照內容包的屬性代號放進 config；version 只剩給舊介面顯示，填成長階段
       const config: Record<string, number> = { habit: p.habit };
+      for (const k of content.attributes.keys) config[k] = p.attrs[k] ?? 0;
       for (const t of content.tactics) config[`p_${t.id}`] = Math.round(p.tactics[t.id] ?? 0);
-      return { lineageId: p.lineageId, version: p.version, config };
+      return { lineageId: p.lineageId, version: stageOfPlayer(content, p), config };
     }),
   };
   if (content.tactics.length === 0) return side;

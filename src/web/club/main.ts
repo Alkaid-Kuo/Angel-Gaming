@@ -314,7 +314,6 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     render();
   },
   scout: (el) => run({ type: 'scout', playerId: id(el) }, '球探出發了，推進一週後回報'),
-  upgrade: (el) => run({ type: 'upgradeVersion', playerId: id(el) }, '開始升版培訓'),
   release: (el) => {
     const name = game?.view().players.find((p) => p.id === id(el))?.name ?? '';
     confirmThen('解約', `確定要和 ${name} 解約嗎？他會回到自由市場，已付的簽約金不退。`, '解約', () => {

@@ -1,4 +1,5 @@
 // NPC 戰隊：與玩家一樣只讀「已知層」視圖、只發同一套指令。個性＝數值組合＋出賽排序風格。
+import { gradeMid } from './attrs.ts';
 import type { ContentPack, PersonaSpec } from './content.ts';
 import type { Prng } from '../shared/prng.ts';
 import { raritySpec } from './state.ts';
@@ -33,7 +34,7 @@ export function npcOffseason(view: KnownView, persona: Persona, spec: PersonaSpe
 
   for (const p of pool) {
     if (count >= Math.min(spec.rosterTarget, e.rosterMax)) break;
-    if (persona === 'youth' && p.version > 2) continue;
+    if (persona === 'youth' && p.stage > 2) continue;
     const fee = p.weeklySalary * e.signingFeeWeeks;
     if (cash - fee < 8 * (fixed + p.weeklySalary)) continue;
     cmds.push({ type: 'sign', playerId: p.id });
@@ -81,7 +82,7 @@ export function npcPlaybook(view: KnownView, persona: Persona, content: ContentP
   const economy = persona === 'whale' || persona === 'youth' ? 2 : persona === 'miser' ? 1 : 0;
   const cmds: Command[] = [{ type: 'setGamePlan', plan: { pref, economy } }];
 
-  const half = Math.floor(view.me.capacityLeft / 2);
+  const half = Math.floor(view.me.slotsLeft / 2);
   const afford = Math.floor((view.me.cash - 8 * view.me.weeklyFixedCost) / Math.max(1, content.economy.rehearseCost));
   const sessions = Math.min(half, afford);
   if (sessions >= 2) {
@@ -89,6 +90,38 @@ export function npcPlaybook(view: KnownView, persona: Persona, content: ContentP
     const [ct] = bySide('CT');
     if (t !== undefined) cmds.push({ type: 'queueRehearse', tactic: t, sessions: Math.ceil(sessions / 2) });
     if (ct !== undefined) cmds.push({ type: 'queueRehearse', tactic: ct, sessions: Math.floor(sessions / 2) });
+  }
+  return cmds;
+}
+
+/**
+ * 每週屬性訓練（M5 第二批）：用排練剩下的訓練時段，經同一套指令。只看已知層（自己人的屬性數字與上限等級）。
+ * 豪門：出賽名單裡離上限最遠的人優先；數據派：整隊離上限最遠的屬性優先；青訓派：只練新秀與正選（階段 ≤ 2）；守財奴：最多練 2 節。
+ * 每人每週最多 trainMaxPerPlayer 節，一次練一項（離上限最遠的那項）；費用要留 8 週固定支出當緩衝。
+ */
+export function npcTraining(view: KnownView, persona: Persona, content: ContentPack, slotsAfterPlaybook: number): Command[] {
+  const e = content.economy;
+  const keys = content.attributes.trainable;
+  let slots = Math.max(0, slotsAfterPlaybook);
+  if (persona === 'miser') slots = Math.min(slots, 2);
+  let budget = Math.floor((view.me.cash - 4 * view.me.weeklyFixedCost) / Math.max(1, e.trainCost));
+  const lineup = new Set(view.me.lineup);
+  const gap = (p: KnownPlayer, k: string): number => gradeMid(p.capGrades?.[k] ?? 'D') - (p.attrs?.[k] ?? 100);
+  const best = (p: KnownPlayer): { key: string; gap: number } =>
+    keys.map((k) => ({ key: k, gap: gap(p, k) })).sort((a, b) => b.gap - a.gap || (a.key < b.key ? -1 : 1))[0];
+  let pool = myPlayers(view).filter((p) => p.attrs !== undefined);
+  if (persona === 'youth') pool = pool.filter((p) => p.stage <= 2);
+  if (persona === 'whale') pool = pool.filter((p) => lineup.has(p.id));
+  pool.sort((a, b) => best(b).gap - best(a).gap || (a.id < b.id ? -1 : 1));
+  const cmds: Command[] = [];
+  for (const p of pool) {
+    if (slots <= 0 || budget <= 0) break;
+    const b = best(p);
+    if (b.gap <= 0) continue;
+    const n = Math.min(e.trainMaxPerPlayer, slots, budget);
+    cmds.push({ type: 'queueTrain', playerId: p.id, attr: b.key, sessions: n });
+    slots -= n;
+    budget -= n;
   }
   return cmds;
 }

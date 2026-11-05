@@ -167,7 +167,6 @@ const actions: Record<string, (el: HTMLElement) => void | Promise<void>> = {
   },
   sign: (el) => run({ type: 'sign', playerId: el.dataset.id as string }, '已簽約'),
   scout: (el) => run({ type: 'scout', playerId: el.dataset.id as string }, '球探已派出，推進一週後出報告'),
-  upgrade: (el) => run({ type: 'upgradeVersion', playerId: el.dataset.id as string }, '開始升版培訓'),
   release: (el) => {
     const v = game?.view();
     const p = v?.players.find((x) => x.id === el.dataset.id);

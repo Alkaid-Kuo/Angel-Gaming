@@ -3,7 +3,8 @@
 import type { ContentPack } from './content.ts';
 import type { BattleGateway, MatchRequest } from './gateway.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
-import { buildSide, effectiveLineup, findPlayer, grow, lineageOf, notify, playerOf, teamOf, truePower } from './state.ts';
+import { STAGE_NAMES, trainGain, trainOnce, TRAIN_FULL_GAIN } from './attrs.ts';
+import { buildSide, effectiveLineup, findPlayer, grow, lineageOf, notify, playerOf, stageOfPlayer, teamOf, truePower } from './state.ts';
 import type { GameState } from './types.ts';
 
 export async function processJobs(state: GameState, content: ContentPack, gateway: BattleGateway, onProgress?: (done: number, total: number) => void): Promise<void> {
@@ -31,6 +32,10 @@ export async function processJobs(state: GameState, content: ContentPack, gatewa
       rehearse(state, content, job.teamId, job.tactic, job.sessions);
       continue;
     }
+    if (job.kind === 'train') {
+      train(state, content, job.teamId, job.playerId, job.attr, job.sessions);
+      continue;
+    }
     // 球探
     const p = findPlayer(state, job.playerId);
     if (!p) continue;
@@ -38,10 +43,28 @@ export async function processJobs(state: GameState, content: ContentPack, gatewa
       const rng = rngFor(state.seed, STREAM.scout, job.id);
       const est = Math.round(truePower(content, p) + gauss(rng) * e.scoutSd);
       team.intel = team.intel.filter((i) => i.playerId !== p.id);
-      team.intel.push({ playerId: p.id, week: state.week, estPower: est, sd: e.scoutSd });
-      notify(state, team.id, 'report', `球探報告：${p.name}（${lineageOf(content, p.lineageId).name} v${p.version}）真實強度約 ${est}（誤差 ±${e.scoutSd}）`);
+      team.intel.push({ playerId: p.id, week: state.week, estPower: est, sd: e.scoutSd, attrs: { ...p.attrs } });
+      const at = content.attributes.trainable.map((k) => `${content.attributes.names[k] ?? k} ${p.attrs[k]}`).join('、');
+      notify(state, team.id, 'report', `球探報告：${p.name}（${lineageOf(content, p.lineageId).name}，${STAGE_LABEL(stageOfPlayer(content, p))}）${at}；真實強度約 ${est}（誤差 ±${e.scoutSd}）`);
     }
   }
+}
+
+const STAGE_LABEL = (s: number): string => STAGE_NAMES[s - 1] ?? `第 ${s} 階`;
+
+/** 屬性訓練（M5 規格 4.3）：逐節套收益（離真實上限越近越少，碰上限 0），報告寫每節收益百分比 */
+function train(state: GameState, content: ContentPack, teamId: string, playerId: string, attr: string, sessions: number): void {
+  const p = findPlayer(state, playerId);
+  // 選手已經不在這隊（解約、被簽走）就不練
+  if (!p || p.teamId !== teamId) return;
+  const before = p.attrs[attr] ?? 0;
+  const gains: number[] = [];
+  for (let i = 0; i < sessions; i++) gains.push(trainOnce(p.attrs, p.progress, p.caps, attr));
+  const total = gains.reduce((s, g) => s + g, 0);
+  const pct = gains.map((g) => `${Math.round((g * 100) / TRAIN_FULL_GAIN)}%`).join('／');
+  const name = content.attributes.names[attr] ?? attr;
+  const tail = trainGain(p.caps[attr] ?? 0, p.attrs[attr] ?? 0) === 0 ? '，已經練不上去了' : '';
+  notify(state, teamId, 'report', `訓練：${p.name} ${name} ${before} → ${p.attrs[attr]}（本週 ${sessions} 節 +${(total / 100).toFixed(1)}，收益 ${pct}）${tail}`);
 }
 
 /** 排練每節的成長（M5 規格 3.3）：隊伍默契 +6、出賽名單個人熟練度 +8，都乘 (1 − cur/100) */
