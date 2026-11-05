@@ -4208,7 +4208,7 @@ const sealer = smokeFirst && idx === this.smokerIndex(obs, me.id, p);
 const pick = burning !== undefined && P.fireChoice ? this.fireDecide(obs, out, p, exec, ent, burning, mine, sealer) : null;
 if (burning !== undefined && mine && (pick === null || pick === 'douse') && this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
 wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
-} else if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
+} else if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p) && pick !== 'wait') {
 const sp = supportFirst ? null : this.smokeTarget(obs, p, exec, ent);
 if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
 } else if (this.util.has(me, 'flash') && cue && flashTurn && next.ok && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5))) {

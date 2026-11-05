@@ -1497,8 +1497,8 @@ export class Tactics {
       const pick = burning !== undefined && P.fireChoice ? this.fireDecide(obs, out, p, exec, ent, burning, mine, sealer) : null;
       if (burning !== undefined && mine && (pick === null || pick === 'douse') && this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
         wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
-      } else if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
-        // 封架點；從這裡丟不到就改封入口內側
+      } else if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p) && pick !== 'wait') {
+        // 封架點；從這裡丟不到就改封入口內側（2.7 批 3：選了「等火熄」就把煙留到火熄後再封，「先封再等」照常封）
         const sp = supportFirst ? null : this.smokeTarget(obs, p, exec, ent);
         if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
       } else if (this.util.has(me, 'flash') && cue && flashTurn && next.ok && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5))) {
