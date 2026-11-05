@@ -212,8 +212,9 @@ function syncCoach(ctx: Ctx): void {
   }
   if (step) {
     if (step.screen !== screen) {
-      // 帶路中途換了畫面（重新整理、讀檔）：帶回那一步的畫面
+      // 帶路中途換了畫面（重新整理、讀檔）：帶回那一步的畫面；選手詳情沒選人時看陣容第一位
       screen = step.screen;
+      if (screen === 'player' && !ui.player) ui.player = ctx.v.me.roster[0];
       render();
       return;
     }

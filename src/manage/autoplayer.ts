@@ -10,6 +10,7 @@ import { rngFor, STREAM } from './rng.ts';
 import { gradeMid } from './attrs.ts';
 import { publicPrior } from './state.ts';
 import type { Command, GameState, TeamId } from './types.ts';
+import { REGULAR_WEEKS } from './types.ts';
 import type { KnownFixture, KnownPlayer, KnownView } from './view.ts';
 import { knownView } from './view.ts';
 
@@ -183,24 +184,36 @@ const moneyball: Policy = (view, content) => {
 };
 
 /**
- * 訓練派（M5 第二批的平衡量測用）：休賽期把訓練中心升到 level（資金夠才升），之後每週把訓練時段一半排練、一半屬性訓練，
- * 訓練平均分給出賽名單（每人練離公開上限等級最遠的那項，每人每週不超過上限）。
+ * 訓練派（M5 平衡量測用的自動玩家）：照整季算帳，不練到破產。
+ * - 保留金＝剩餘週數 ×（固定支出 − 九成贊助）− 剩餘例行賽週數 × 輸球獎金：假設剩下每場都輸、季後賽沒進、名氣往下掉，還付得起薪水與維護。
+ * - 升級：升完扣掉保留金，每週預算還要夠排滿 Lv1 的時段（「升後還練得動」），才往 level 升；賽季中任何一週都可以升。
+ * - 每週預算＝（現金 − 保留金）÷ 剩餘週數；時段一半排練、一半屬性訓練，訓練平均分給出賽名單（每人練離公開上限等級最遠的那項）。
  */
 export function trainerPolicy(level: number): Policy {
   return (view, content) => {
     const e = content.economy;
     const cmds: Command[] = [];
+    if (view.phase !== 'offseason' && view.phase !== 'season') return cmds;
     let cash = view.me.cash;
     let lvl = view.me.trainingLevel;
-    if (view.phase === 'offseason') {
-      while (lvl < level && lvl < e.facilityMaintenance.length && cash >= e.facilityUpgradeCost[lvl - 1]) {
-        cmds.push({ type: 'upgradeTraining' });
-        cash -= e.facilityUpgradeCost[lvl - 1];
-        lvl++;
-      }
+    let fixed = view.me.weeklyFixedCost;
+    // 還要付幾次週結算：休賽期（第 0 週）不結算，賽季第 w 週推進時要付
+    const weeksLeft = Math.max(1, view.totalWeeks - view.week + (view.phase === 'season' ? 1 : 0));
+    const regularLeft = Math.max(0, REGULAR_WEEKS - view.week + (view.phase === 'season' ? 1 : 0));
+    const reserve = (f: number): number => Math.max(0, weeksLeft * (f - 0.9 * view.me.weeklySponsor) - regularLeft * e.matchLossPrize);
+    const unit = (e.trainCost + e.rehearseCost) / 2;
+    while (lvl < level && lvl < e.facilityMaintenance.length) {
+      const cost = e.facilityUpgradeCost[lvl - 1];
+      const fixedAfter = fixed + e.facilityMaintenance[lvl] - e.facilityMaintenance[lvl - 1];
+      if ((cash - cost - reserve(fixedAfter)) / weeksLeft < e.trainingSlots[0] * unit) break;
+      cmds.push({ type: 'upgradeTraining' });
+      cash -= cost;
+      fixed = fixedAfter;
+      lvl++;
     }
-    if (view.phase !== 'offseason' && view.phase !== 'season') return cmds;
-    let slots = e.trainingSlots[lvl - 1] - (e.trainingSlots[view.me.trainingLevel - 1] - view.me.slotsLeft);
+    const budget = Math.max(0, cash - reserve(fixed)) / weeksLeft;
+    let slots = Math.min(e.trainingSlots[lvl - 1] - (e.trainingSlots[view.me.trainingLevel - 1] - view.me.slotsLeft), Math.floor(budget / Math.max(1, unit)));
+    if (slots <= 0) return cmds;
     const rehearse = content.tactics.length > 0 ? Math.floor(slots / 2) : 0;
     if (rehearse > 0) {
       const top = [...content.tactics].sort((a, b) => (view.me.effective[a.id] ?? 0) - (view.me.effective[b.id] ?? 0))[0];

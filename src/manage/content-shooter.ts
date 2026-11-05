@@ -40,10 +40,19 @@ export const SHOOTER_ECONOMY: Economy = {
   humanStartRarities: ['SR', 'R', 'R', 'N', 'N'],
   rosterMax: 8,
   freeAgentCount: 18,
-  // 聯賽 MR6 一場平均 12 回合（規則 1.2）：贏方約 7 回合 × 3 ≈ 21，比 MR12 時期（約 39）少；數值未動，平衡留給 M5
-  roundWinBonus: 3,
+  // M5 經濟平衡（2026-11-06，量測見規格 4.10）：訓練與排練成了主要支出，比賽收入跟著調高，讓訓練中心 Lv3 第一季季中付得起、
+  // NPC 的訓練＋排練佔支出到 30% 以上。聯賽 MR6 一場平均 12 回合：贏方約 7 回合 × 15 ≈ 105
+  roundWinBonus: 15,
+  matchWinPrize: 200,
+  matchLossPrize: 80,
+  sponsorPerFame: 15,
+  trainCost: 18,
+  rehearseCost: 14,
   // 真引擎一場數秒（Worker 池約 4 場並行）：練習賽每週可排的場數 ÷20；M5 戰術排練一節佔 1 格（平衡）
   scrimCapacity: [10, 30, 75],
+  // 訓練中心（M5 經濟平衡）：升級與維護變便宜，Lv3 第一季季中升得上去、升後還練得動
+  facilityUpgradeCost: [200, 400],
+  facilityMaintenance: [20, 40, 60],
 };
 
 /** 戰術手冊（M5 規格 3.1）：T 六個、CT 四個；affinity＝開局個人熟練度 +10 的角色 */
