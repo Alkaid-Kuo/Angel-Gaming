@@ -72,11 +72,19 @@ export interface Economy {
   readonly scoutSd: number;
   readonly upgradeCostWeeks: number;
   readonly upgradeWeeks: number;
-  readonly researchCapGeneric: number;
-  readonly researchCapSpecific: number;
-  readonly researchHalfSat: number;
-  readonly researchMaxPresets: number;
+  /** 戰術排練每節費用（M5） */
+  readonly rehearseCost: number;
+  /** 開局隊伍默契（M5；每個戰術相同），玩家與各 NPC 個性 */
+  readonly playbookStart: Readonly<Record<Persona | 'human', number>>;
   readonly eloK: number;
+}
+
+/** 戰術手冊的一個戰術（M5）：核心只看 id、side、name；affinity 是開局個人熟練度 +10 的流派 */
+export interface TacticSpec {
+  readonly id: string;
+  readonly side: 'T' | 'CT';
+  readonly name: string;
+  readonly affinity: readonly string[];
 }
 
 export interface ContentPack {
@@ -87,6 +95,8 @@ export interface ContentPack {
   /** 出賽位的名稱，長度＝lineupSize（只供顯示） */
   readonly slotNames: readonly string[];
   readonly lineages: readonly Lineage[];
+  /** 戰術手冊（M5）；空＝這個賽制沒有戰術手冊（排練與比賽計畫都不開放） */
+  readonly tactics: readonly TacticSpec[];
   /** 品階表，固定順序（N → SSR） */
   readonly rarities: readonly RaritySpec[];
   readonly personas: Readonly<Record<Persona, PersonaSpec>>;
@@ -141,6 +151,7 @@ export const STUB_CONTENT: ContentPack = {
     { id: 'turtle', name: '龜守流', style: '大器晚成，要養很多版', power: [1440, 1480, 1520, 1560, 1600, 1640] },
     { id: 'balance', name: '均衡流', style: '沒有明顯弱點也沒有明顯強項', power: [1450, 1500, 1550, 1600, 1650] },
   ],
+  tactics: [],
   rarities: RARITIES,
   personas: {
     whale: { label: '豪門', startCash: 4000, versions: [3, 4], rosterTarget: 5, lineup: 'strongest-first' },
@@ -178,10 +189,8 @@ export const STUB_CONTENT: ContentPack = {
     scoutSd: 35,
     upgradeCostWeeks: 8,
     upgradeWeeks: 2,
-    researchCapGeneric: 12,
-    researchCapSpecific: 36,
-    researchHalfSat: 100,
-    researchMaxPresets: 4,
+    rehearseCost: 10,
+    playbookStart: { human: 20, whale: 30, youth: 20, data: 30, miser: 15 },
     eloK: 24,
   },
   teamNames: ['雷霆電競', '北辰戰隊', '赤焰俱樂部', '蒼穹電競', '暗影工作室', '星河戰隊', '鐵壁電競'],

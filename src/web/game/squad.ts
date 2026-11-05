@@ -120,14 +120,13 @@ export function playerScreen(ctx: Ctx): string {
     return `<div class="nd ${cls}"><i>v${ver}</i><b>${tierName(ver).zh}</b><small>${wan(sal)} 萬</small></div>`;
   }).join('');
   const fillPct = maxV > 1 ? ((p.version - 1) / (maxV - 1)) * 100 : 100;
-  const presets = v.presets.filter((x) => x.playerId === p.id);
   const intel = v.intel.find((x) => x.playerId === p.id);
   const pending = v.jobs.some((j) => j.kind === 'scout' && j.playerId === p.id);
   const fee = p.weeklySalary * e.signingFeeWeeks;
   const full = v.me.roster.length >= e.rosterMax;
   let actions: string;
   if (mine) {
-    actions = `${btn('排練習賽／研發', `data-act="train-with" data-id="${p.id}" ${active ? '' : 'disabled'}`, 'ghost')}${btn('解約', `data-act="release" data-id="${p.id}" ${!active || v.me.roster.length <= c.lineupSize ? 'disabled' : ''} title="${v.me.roster.length <= c.lineupSize ? `陣容至少要 ${c.lineupSize} 人` : ''}"`, 'danger')}`;
+    actions = `${btn('排練習賽', `data-act="train-with" data-id="${p.id}" ${active ? '' : 'disabled'}`, 'ghost')}${btn('解約', `data-act="release" data-id="${p.id}" ${!active || v.me.roster.length <= c.lineupSize ? 'disabled' : ''} title="${v.me.roster.length <= c.lineupSize ? `陣容至少要 ${c.lineupSize} 人` : ''}"`, 'danger')}`;
   } else if (p.teamId === null) {
     actions = `${btn(`簽約 · ${wan(fee)} 萬`, `data-act="sign" data-id="${p.id}" ${!active || full || v.me.cash < fee ? 'disabled' : ''}`, '', 'SIGN')}${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${p.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}`;
   } else {
@@ -142,8 +141,8 @@ export function playerScreen(ctx: Ctx): string {
         ${btn(p.upgrading ? '升版中' : p.version >= maxV ? '已是最高版本' : '升版', `data-act="upgrade" data-id="${p.id}" ${!active || p.upgrading || p.version >= maxV || v.me.cash < upCost ? 'disabled' : ''}`, '', p.version >= maxV ? '' : 'UPGRADE')}</div>`
       : `<div class="upg"><div class="kv"><small>週薪</small><span class="num">${wan(p.weeklySalary)}<small class="dim"> 萬</small></span></div><div class="kv"><small>簽約金</small><span class="num">${wan(fee)}<small class="dim"> 萬</small></span></div><div class="kv"><small>出賽場數</small><span class="num">${p.games}</span></div></div>`}</div>`;
   const tac = mine
-    ? `<div class="pn p-tac in">${pt('03', '戰術預設', '練習賽研發累積')}
-      <div class="tac">${presets.length ? presets.map((x) => { const cap = x.target === 'generic' ? e.researchCapGeneric : e.researchCapSpecific; return `<div class="t ${x.valid ? '' : 'off'}"><span><b>${x.target === 'generic' ? '泛用' : `針對${esc(lineageName(c, x.target))}`}</b>${x.valid ? '' : ' · 升版後失效'}</span><span class="num ${x.valid ? 'gd' : 'dim'}">+${x.reportedBonus}<small class="dim"> /${cap}</small></span><div class="meter g" style="--v:${Math.round((x.reportedBonus / cap) * 100)}%"><i></i></div></div>`; }).join('') : '<p class="dim">還沒有戰術預設。到訓練基地排研發。</p>'}</div></div>`
+    ? `<div class="pn p-tac in">${pt('03', '戰術熟練度', '個人，跟著選手走')}
+      <div class="tac pro">${c.tactics.length ? c.tactics.map((x) => { const val = p.tactics?.[x.id] ?? 0; return `<div class="t"><span><b>${esc(x.name)}</b> ${x.side}</span><span class="num gd">${val}</span><div class="meter g" style="--v:${val}%"><i></i></div></div>`; }).join('') : '<p class="dim">這個賽制沒有戰術手冊。</p>'}</div></div>`
     : `<div class="pn p-tac in">${pt('03', '球探情報', intel ? `W${String(intel.week).padStart(2, '0')}` : '')}
       ${intel ? `<div class="intel"><span class="num gd">${intel.estPower}</span><span>真實強度估計 ±${intel.sd}</span><span>比公開評分${intel.estPower >= p.elo ? '高' : '低'} <b>${Math.abs(intel.estPower - p.elo)}</b></span></div>` : `<p class="dim">${pending ? '球探已出發，推進一週後回報。' : '還沒有情報。派球探可以知道他的真實強度（帶誤差）。'}</p>`}</div>`;
   return `<div class="back in" data-act="go" data-to="${mine ? 'squad' : 'market'}">${icon('back', 18)}${mine ? '戰隊' : '轉會市場'} · <b>選手詳情</b></div>

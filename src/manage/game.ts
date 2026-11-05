@@ -3,16 +3,19 @@
 import { settleBets } from './betting.ts';
 import { applyCommand } from './commands.ts';
 import type { ContentPack, RaritySpec } from './content.ts';
-import type { BattleGateway, MatchRequest } from './gateway.ts';
+import type { BattleGateway, MatchOutcome, MatchRequest } from './gateway.ts';
 import { assertFormat, finalScore } from './gateway.ts';
 import { processJobs } from './jobs.ts';
 import { createFinals, createRegularSeason, createSemis, finalRanks } from './league.ts';
-import { npcLineup, npcOffseason } from './npc.ts';
+import { npcLineup, npcOffseason, npcPlaybook } from './npc.ts';
 import { PORTRAITS } from './portraits.ts';
 import { eloDelta } from './rating.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
 import {
   buildSide,
+  defaultGamePlan,
+  grow,
+  proficiency,
   humanTeam,
   lineupValid,
   notify,
@@ -27,7 +30,7 @@ import {
   weeklySalaries,
   weeklySponsor,
 } from './state.ts';
-import type { Command, Fixture, GameState, Persona, Player, PlayerId, Rarity, TeamId } from './types.ts';
+import type { Command, Fixture, GameState, Persona, Player, PlayerId, Rarity, Team, TeamId } from './types.ts';
 import { REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from './types.ts';
 import { knownView } from './view.ts';
 import type { Prng } from '../shared/prng.ts';
@@ -116,7 +119,8 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, handles: 
   const lineage = candidates[rng.nextInt(candidates.length)];
   const habit = Math.max(-60, Math.min(60, Math.round(gauss(rng) * 25)));
   const salary = Math.max(1, Math.round((salaryForVersion(content, version) * (90 + rng.nextInt(21))) / 100));
-  const id = `p${state.nextId++}`;
+  const n = state.nextId++;
+  const id = `p${n}`;
   state.players.push({
     id,
     name,
@@ -131,9 +135,24 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, handles: 
     teamId,
     contractSeasons: 1,
     upgradeUntilWeek: null,
-    presets: [],
+    tactics: startTactics(content, state.seed, n, lineage.id),
+    newFace: false,
   });
   return id;
+}
+
+/**
+ * 開局個人熟練度（M5 規格 3.3）：每個戰術 10～40，角色傾向 +10，夾 0～100。
+ * 用獨立串流（STREAM.tactics, 選手序號），不吃開局主序列的亂數：既有種子的名單、品階、流派、立繪不變。
+ */
+export function startTactics(content: ContentPack, seed: number, n: number, lineageId: string): Record<string, number> {
+  const rng = rngFor(seed, STREAM.tactics, n);
+  return Object.fromEntries(content.tactics.map((t) => [t.id, Math.min(100, 10 + rng.nextInt(31) + (t.affinity.includes(lineageId) ? 10 : 0))]));
+}
+
+/** 開局隊伍默契：每個戰術相同（內容包 economy.playbookStart） */
+export function startPlaybook(content: ContentPack, who: Persona | 'human'): Record<string, number> {
+  return Object.fromEntries(content.tactics.map((t) => [t.id, content.economy.playbookStart[who]]));
 }
 
 export function newGame(seed: number, content: ContentPack, opts: NewGameOptions = {}): GameState {
@@ -180,6 +199,8 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         ledger: [],
         intel: [],
         scrims: [],
+        playbook: startPlaybook(content, 'human'),
+        gamePlan: defaultGamePlan(content),
       });
       for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, portraits, id, rng.range(e.humanVersions[0], e.humanVersions[1]), e.humanStartRarities[k]);
     } else {
@@ -197,6 +218,8 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         ledger: [],
         intel: [],
         scrims: [],
+        playbook: startPlaybook(content, persona),
+        gamePlan: defaultGamePlan(content),
       });
       for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, portraits, id, rng.range(spec.versions[0], spec.versions[1]));
       npcIndex++;
@@ -217,12 +240,13 @@ function applyAll(state: GameState, content: ContentPack, teamId: TeamId, cmds: 
   for (const c of cmds) applyCommand(state, content, teamId, c);
 }
 
-/** 開賽前補出賽名單：NPC 每週依個性重排；玩家名單無效時退回公開 Elo 最高的 lineupSize 人 */
+/** 開賽前補出賽名單：NPC 每週依個性重排、設比賽計畫、排練（M5）；玩家名單無效時退回公開 Elo 最高的 lineupSize 人 */
 function ensureLineups(state: GameState, content: ContentPack): void {
   for (const team of state.teams) {
     if (team.persona !== null) {
       const rng = rngFor(state.seed, STREAM.npc, state.week, Number(team.id.slice(1)));
       applyAll(state, content, team.id, npcLineup(knownView(state, content, team.id), content.personas[team.persona], content.lineupSize, rng));
+      applyAll(state, content, team.id, npcPlaybook(knownView(state, content, team.id), team.persona, content));
     } else if (!lineupValid(state, content, team)) {
       team.lineup = rosterOf(state, team.id)
         .sort((a, b) => b.elo - a.elo || (a.id < b.id ? -1 : 1))
@@ -238,9 +262,14 @@ async function playMatchDay(state: GameState, content: ContentPack, gateway: Bat
   const e = content.economy;
   const fixtures = state.fixtures.filter((f) => f.week === state.week && f.result === null);
   const lineups = fixtures.map((f) => [teamOf(state, f.home).lineup.map((id) => playerOf(state, id)), teamOf(state, f.away).lineup.map((id) => playerOf(state, id))] as const);
-  const reqs: MatchRequest[] = fixtures.map((_, fi) => {
+  // 新面孔第一次為本隊出賽：開打前隊伍默契打折（M5 規格 3.3）
+  fixtures.forEach((f, fi) => {
+    newFaceDiscount(teamOf(state, f.home), lineups[fi][0]);
+    newFaceDiscount(teamOf(state, f.away), lineups[fi][1]);
+  });
+  const reqs: MatchRequest[] = fixtures.map((f, fi) => {
     const [h, a] = lineups[fi];
-    return { formatId: state.formatId, a: buildSide(h, a), b: buildSide(a, h), seed: rngFor(state.seed, STREAM.match, state.week, fi).nextU32() };
+    return { formatId: state.formatId, a: buildSide(content, teamOf(state, f.home), h), b: buildSide(content, teamOf(state, f.away), a), seed: rngFor(state.seed, STREAM.match, state.week, fi).nextU32() };
   });
   const outs = await gateway.simulateBatch(reqs, opts.onProgress);
   fixtures.forEach((f, fi) => {
@@ -261,6 +290,8 @@ async function playMatchDay(state: GameState, content: ContentPack, gateway: Bat
       p.elo -= delta;
       p.games++;
     }
+    playbookFromMatch(content, home, hp, out.rounds, 'a');
+    playbookFromMatch(content, away, ap, out.rounds, 'b');
     for (const [team, mine, theirs, won, lost] of [
       [home, sc.a, sc.b, winner === f.home, winner === f.away],
       [away, sc.b, sc.a, winner === f.away, winner === f.home],
@@ -274,6 +305,28 @@ async function playMatchDay(state: GameState, content: ContentPack, gateway: Bat
     notify(state, f.away, 'result', line);
     summary.results.push({ fixtureId: f.id, stage: f.stage, home: f.home, away: f.away, homeScore: sc.a, awayScore: sc.b, winner });
   });
+}
+
+/** 新面孔每人一次：隊伍默契各項 ×NEW_FACE_KEEP，然後清掉標記 */
+export const NEW_FACE_KEEP = 0.95;
+function newFaceDiscount(team: Team, lineup: readonly Player[]): void {
+  for (const p of lineup) {
+    if (!p.newFace) continue;
+    p.newFace = false;
+    for (const k of Object.keys(team.playbook)) team.playbook[k] = proficiency(team.playbook[k] * NEW_FACE_KEEP);
+  }
+}
+
+/** 比賽使用（M5 規格 3.3）：每回合我方實際打的戰術，隊伍默契與出賽名單個人熟練度各 +0.5 × (1 − cur/100) */
+export const MATCH_USE_GAIN = 0.5;
+function playbookFromMatch(content: ContentPack, team: Team, lineup: readonly Player[], rounds: MatchOutcome['rounds'], side: 'a' | 'b'): void {
+  const known = new Set(content.tactics.map((t) => t.id));
+  for (const r of rounds) {
+    const t = r.tactics?.[side];
+    if (t === undefined || t === null || !known.has(t)) continue;
+    team.playbook[t] = grow(team.playbook[t] ?? 0, MATCH_USE_GAIN);
+    for (const p of lineup) p.tactics[t] = grow(p.tactics[t] ?? 0, MATCH_USE_GAIN);
+  }
 }
 
 function weeklyFinance(state: GameState, content: ContentPack): void {
@@ -294,8 +347,7 @@ function completeUpgrades(state: GameState, content: ContentPack): void {
     if (p.version < playerMaxVersion(content, p)) {
       p.version++;
       p.weeklySalary = Math.round((p.weeklySalary * e.salaryGrowthPct) / 100);
-      p.presets = [];
-      notify(state, p.teamId, 'report', `${p.name} 升到 v${p.version}，週薪調整為 ${p.weeklySalary}（原有戰術預設失效）`);
+      notify(state, p.teamId, 'report', `${p.name} 升到 v${p.version}，週薪調整為 ${p.weeklySalary}`);
     }
     p.upgradeUntilWeek = null;
   }

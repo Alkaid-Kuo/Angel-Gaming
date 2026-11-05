@@ -2,7 +2,7 @@
 // 開放只擋介面入口，遊戲規則與存檔不變；進度存在介面偏好（prefs.guide），舊存檔沒有這欄＝全部開放。
 import type { ContentPack, KnownView } from '../../manage/index.ts';
 
-export type Screen = 'title' | 'create' | 'hub' | 'squad' | 'player' | 'market' | 'training' | 'league' | 'betting' | 'finance' | 'inbox';
+export type Screen = 'title' | 'create' | 'hub' | 'squad' | 'player' | 'market' | 'training' | 'tactics' | 'league' | 'betting' | 'finance' | 'inbox';
 
 export interface GuideState {
   /** false＝關閉教學、全部開放 */
@@ -12,9 +12,9 @@ export interface GuideState {
 }
 
 /** 第幾週開放（v.week：0＝休賽期、1＝第 1 週）；沒列的一開始就有 */
-export const UNLOCK_WEEK: Partial<Record<Screen, number>> = { league: 1, finance: 1, training: 2, betting: 3 };
+export const UNLOCK_WEEK: Partial<Record<Screen, number>> = { league: 1, finance: 1, training: 2, tactics: 2, betting: 3 };
 
-export const SCREEN_NAME: Partial<Record<Screen, string>> = { league: '聯賽', finance: '財務', training: '訓練基地', betting: '賭盤' };
+export const SCREEN_NAME: Partial<Record<Screen, string>> = { league: '聯賽', finance: '財務', training: '訓練基地', tactics: '戰術室', betting: '賭盤' };
 
 /** 這個畫面還要等到第幾週才開放；已開放回傳 null */
 export function lockedUntil(screen: Screen, v: Pick<KnownView, 'week' | 'phase'>, guide: GuideState | undefined): number | null {
@@ -172,7 +172,15 @@ const LESSONS: readonly Lesson[] = [
         tag: 'NEW // 新功能開放',
         title: '訓練基地',
         open: 'training',
-        body: () => '每週可以排練習賽或戰術研發，<b>推進一週後才出報告</b>。<br><b>練習賽</b>：估我方對某隊的真實勝率。<b>戰術研發</b>：替選手累積比賽加成，升版後失效。<br>場數有上限，升級訓練中心可以多排，但維護費也會增加。',
+        body: () => '每週可以排練習賽，<b>推進一週後才出報告</b>：估我方對某隊的真實勝率。<br>場數有上限，升級訓練中心可以多排，但維護費也會增加。',
+      },
+      {
+        id: 'w2.tactics',
+        screen: 'hub',
+        tag: 'NEW // 新功能開放',
+        title: '戰術室',
+        open: 'tactics',
+        body: () => '<b>排練</b>一個戰術：隊伍默契和出賽五人的熟練度一起漲，選手打這個戰術會更有默契。<br><b>比賽計畫</b>：替戰術打星或禁用，選手自己選戰術時照這個偏好。排練和練習賽共用訓練時段。',
       },
     ],
   },
@@ -218,7 +226,7 @@ export const HELP: Partial<Record<Screen, { title: string; auto?: boolean; items
     title: '戰隊',
     items: [
       '上方卡片是出賽名單。點出賽位再點右邊的人，或把人拖到出賽位；選到已上場的人會互換。',
-      '點陣容裡的人看詳情：升版、解約、排訓練。',
+      '點陣容裡的人看詳情：升版、解約、戰術熟練度。',
       '<b>升版</b>要花錢和時間，替補就是拿來應付這種時候。',
     ],
   },
@@ -227,7 +235,7 @@ export const HELP: Partial<Record<Screen, { title: string; auto?: boolean; items
     auto: true,
     items: [
       '<b>版本線</b>：升下一版的費用、需時與之後的週薪。',
-      '升版後舊的戰術預設會失效，訓練的累積要重來。',
+      '<b>戰術熟練度</b>跟著選手走：簽一個很會打某個戰術的人，隊伍打那個戰術也會變好。',
       '別隊的選手不能簽，但可以派球探，或跟他的戰隊打練習賽。',
     ],
   },
@@ -243,10 +251,20 @@ export const HELP: Partial<Record<Screen, { title: string; auto?: boolean; items
     title: '訓練基地',
     auto: true,
     items: [
-      '環裡是本週還能排的場數，所有工作共用。',
+      '環裡是本週還能排的場數，練習賽與戰術排練共用。',
       '<b>練習賽</b>：我方名單對某隊，報告給估計勝率，場數越多越準；推進時要多等幾秒。',
-      '<b>戰術研發</b>：替一位選手累積加成，越練越慢，泛用上限低、針對某角色上限高。',
+      '<b>戰術排練</b>在戰術室排。',
       '這週排的工作，推進一週後才出報告。',
+    ],
+  },
+  tactics: {
+    title: '戰術室',
+    auto: true,
+    items: [
+      '<b>執行熟練度</b>：隊伍默契與出賽五人的個人熟練度各半，決定選手打這個戰術打得像不像。',
+      '<b>排練</b>：一節佔一個訓練時段，越熟越難漲；比賽裡打過的戰術也會慢慢變熟。',
+      '<b>比賽計畫</b>：星越多選手越常選；禁用的不會選。每一邊至少留一個戰術。',
+      '新人第一次上場，隊伍默契會掉一些；他自己的熟練度會帶進來。',
     ],
   },
   league: {
@@ -266,7 +284,7 @@ export const HELP: Partial<Record<Screen, { title: string; auto?: boolean; items
   },
   inbox: {
     title: '信件',
-    items: ['戰報、週結算、球探、練習賽、研發的報告都寄到這裡。', '報告信可以直接跳到相關頁面。'],
+    items: ['戰報、週結算、球探、練習賽、排練的報告都寄到這裡。', '報告信可以直接跳到相關頁面。'],
   },
 };
 

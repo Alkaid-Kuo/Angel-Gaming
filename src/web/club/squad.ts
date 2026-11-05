@@ -95,7 +95,6 @@ export function cardModal(ctx: Ctx, pid: string): string {
   const t = tierOf(p.version);
   const lineage = c.lineages.find((l) => l.id === p.lineageId);
   const intel = v.intel.find((i) => i.playerId === p.id);
-  const presets = v.presets.filter((x) => x.playerId === p.id);
   const upCost = p.weeklySalary * e.upgradeCostWeeks;
   const maxed = p.version >= maxVersionOf(c, p.lineageId);
   const active = canAct(ctx);
@@ -122,9 +121,8 @@ export function cardModal(ctx: Ctx, pid: string): string {
       <h2>${esc(p.name)}</h2>
       <div class="pm-lineage" style="--lc:${lineageColor(p.lineageId)}">${lineageGlyph(p.lineageId, 20)}<b>${lineageName(c, p.lineageId)}</b><span>${esc(lineage?.style ?? '')}</span></div>
       <dl class="pm-stats">${stats.map(([k, val]) => `<div><dt>${k}</dt><dd>${val}</dd></div>`).join('')}</dl>
-      ${mine && p.upgrading ? '<p class="pm-note">升版培訓中，完成後週薪 ×1.3，原有戰術預設失效。</p>' : ''}
+      ${mine && p.upgrading ? '<p class="pm-note">升版培訓中，完成後週薪 ×1.3。</p>' : ''}
       ${!mine ? `<p class="pm-note">${intel ? `球探報告（${intel.week === 0 ? '休賽期' : `第 ${intel.week} 週`}）：真實強度約 <b>${intel.estPower}</b>（±${intel.sd}），比評分${intel.estPower >= p.elo ? '高' : '低'} ${Math.abs(intel.estPower - p.elo)}。` : '還沒有球探情報。'}</p>` : ''}
-      ${mine ? `<div class="pm-presets"><h4>${icon('flask', 14)}戰術預設</h4>${presets.length ? presets.map((x) => `<span class="chip ${x.valid ? '' : 'off'}">${x.target === 'generic' ? '泛用' : `剋${lineageName(c, x.target)}`} 約 +${x.reportedBonus}</span>`).join('') : '<span class="muted">還沒有，到訓練基地研發</span>'}</div>` : ''}
       <div class="pm-actions">${actions}</div>
     </div></div>`;
 }

@@ -4,7 +4,7 @@
 // 經濟（步驟 8）：從暫代包放大到 5 人名單跑得起來（陣容上限 8、起始資金與自由選手數約 ×5/3、每回合獎金依 13 回合一場換算、
 // 訓練中心每週場數 ÷20，因為真引擎一場要數秒）；平衡留給 M5。品階表與名字庫沿用暫代包。
 import { ROLE_TABLE, SHOOTER_ROLES, type ShooterRole } from '../shooter/players.ts';
-import { STUB_CONTENT, type ContentPack, type Economy, type PersonaSpec } from './content.ts';
+import { STUB_CONTENT, type ContentPack, type Economy, type PersonaSpec, type TacticSpec } from './content.ts';
 import type { Persona } from './types.ts';
 
 /** 隱藏強度表：索引＝版本 − 1（scripts/shooter-strength.ts 的「採用值」；基準 Bot 2.4.3：赤岩舊城、MR6、凍結 3 秒；回合→整場 k = 12.22；量測見 Bot 2.4.3 強度與耗時重量報告） */
@@ -35,10 +35,23 @@ export const SHOOTER_ECONOMY: Economy = {
   freeAgentCount: 18,
   // 聯賽 MR6 一場平均 12 回合（規則 1.2）：贏方約 7 回合 × 3 ≈ 21，比 MR12 時期（約 39）少；數值未動，平衡留給 M5
   roundWinBonus: 3,
-  // 真引擎一場數秒（Worker 池約 4 場並行）：練習賽與研發每週可排的場數 ÷20，研發半飽和跟著 ÷20
+  // 真引擎一場數秒（Worker 池約 4 場並行）：練習賽每週可排的場數 ÷20；M5 戰術排練一節佔 1 格（平衡）
   scrimCapacity: [10, 30, 75],
-  researchHalfSat: 5,
 };
+
+/** 戰術手冊（M5 規格 3.1）：T 六個、CT 四個；affinity＝開局個人熟練度 +10 的角色 */
+export const SHOOTER_TACTICS: readonly TacticSpec[] = [
+  { id: 'rushA', side: 'T', name: 'Rush A', affinity: ['entry'] },
+  { id: 'rushB', side: 'T', name: 'Rush B', affinity: ['entry'] },
+  { id: 'default', side: 'T', name: 'Default', affinity: ['support'] },
+  { id: 'splitA', side: 'T', name: 'Split A', affinity: ['lurk'] },
+  { id: 'splitB', side: 'T', name: 'Split B', affinity: ['lurk'] },
+  { id: 'fake', side: 'T', name: 'Fake', affinity: ['lurk'] },
+  { id: 'ct212', side: 'CT', name: '2-1-2', affinity: ['awp'] },
+  { id: 'stackA', side: 'CT', name: '疊 A', affinity: ['anchor'] },
+  { id: 'stackB', side: 'CT', name: '疊 B', affinity: ['anchor'] },
+  { id: 'ctPush', side: 'CT', name: '激進探點', affinity: [] },
+];
 
 export const SHOOTER_CONTENT: ContentPack = {
   id: 'shooter-1',
@@ -46,6 +59,7 @@ export const SHOOTER_CONTENT: ContentPack = {
   lineupSize: 5,
   slotNames: ['1 號位', '2 號位', '3 號位', '4 號位', '5 號位'],
   lineages: SHOOTER_ROLES.map((r) => ({ id: r, name: ROLE_TABLE[r].name, style: ROLE_TABLE[r].style, power: SHOOTER_POWER[r] })),
+  tactics: SHOOTER_TACTICS,
   rarities: STUB_CONTENT.rarities,
   personas: SHOOTER_PERSONAS,
   economy: SHOOTER_ECONOMY,
