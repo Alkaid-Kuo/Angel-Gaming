@@ -939,3 +939,35 @@ describe('Bot 2.7 批 2（B1）：補槍不重探同一個角（tradeAngle）', 
     expect(r.diff!).toBeLessThan(25);
   });
 });
+
+describe('Bot 2.7 批 2（Astra P2-2）：放行窗裡的第一顆閃光不遮住第二顆（flashMulti）', () => {
+  /** 隊友兩顆閃光：early 已在放行窗內（剩 release tick）、late 還有 30 tick；回傳 overlay 的 urgent */
+  function dodge(both: boolean): boolean {
+    const { match, bot } = live(0);
+    const obs = match.observe(0);
+    const me = obs.me;
+    let q = null;
+    for (let i = 0; i < bot.g.N && q === null; i++) {
+      const c = bot.g.center(i);
+      const d = Math.hypot(c.x - me.x, c.y - me.y);
+      if (bot.g.walkable(i) && d > 4000 && d < 9000 && bot.g.los(me.x, me.y, c.x, c.y)) q = c;
+    }
+    const release = bot.data.rules.reactionTicks - P.flashReleaseMargin;
+    const early = { x: q!.x, y: q!.y, pop: obs.tick + release };
+    const late = { x: q!.x, y: q!.y, pop: obs.tick + 30 };
+    bot.tactics.mateFlash = both ? [early, late] : [late];
+    const a = out();
+    bot.tactics.overlay(obs, a);
+    return a.urgent;
+  }
+
+  it('只有第二顆：要躲；兩顆都在（第一顆已放行）：照樣躲第二顆', () => {
+    expect(dodge(false)).toBe(true);
+    expect(dodge(true)).toBe(true);
+  });
+
+  it('開關關掉重現 2.6.3：第一顆進入放行窗就整個不躲', () => {
+    setP('flashMulti', false);
+    expect(dodge(true)).toBe(false);
+  });
+});
