@@ -793,3 +793,34 @@ describe('Bot 2.7 批 1-13（H02）：補槍人選先篩資格再排序（coopEl
     expect(rig(false).acted(true)).toBe(false);
   });
 });
+
+describe('Bot 2.7 批 1-14（H03）：接觸熱度去重（heatDedupe）', () => {
+  /** CT 指揮：A 點附近兩筆接觸。gap＝兩筆相隔 tick、apart＝兩筆相距格數、alive＝敵方存活 */
+  function heat(gap: number, apart: number, alive: number): { heat: number; rot: string | null } {
+    const { match, bot } = live(5);
+    const obs = { ...match.observe(5), enemiesAlive: alive };
+    const t = bot.tactics;
+    const c = bot.intel.sites.A;
+    t.noteContact('one', 1, obs.tick - gap, 'A', c.cx, c.cy);
+    t.noteContact('two', 1, obs.tick, 'A', c.cx + apart * UNIT, c.cy);
+    const next = t.leadCT(obs, { kind: 'hold', a: 2, m: 1, b: 2, rot: null, go: false });
+    return { heat: t.heat(obs).A, rot: next.rot };
+  }
+
+  it('敵方只剩 1 人：兩區各報 1 人不算 2 人，不輪轉', () => {
+    expect(heat(30, 3, 1)).toEqual({ heat: 1, rot: null });
+  });
+
+  it('1 秒內在 3 格外又出現：可能是同一人移動，五人局也只算 1', () => {
+    expect(heat(30, 3, 5).heat).toBe(1);
+  });
+
+  it('同一時間、相距 20 格的兩筆：是兩個人，壓力保留（原本的行為保留）', () => {
+    expect(heat(0, 20, 5)).toEqual({ heat: 2, rot: 'A' });
+  });
+
+  it('開關關掉重現 2.6.3：敵方剩 1 人也算成 2 人並輪轉', () => {
+    setP('heatDedupe', false);
+    expect(heat(30, 3, 1)).toEqual({ heat: 2, rot: 'A' });
+  });
+});

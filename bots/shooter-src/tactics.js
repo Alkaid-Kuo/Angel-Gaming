@@ -215,7 +215,7 @@ export class Tactics {
     this.queueHeld = 0;
     /** 收到但還沒處理的喊話（警覺低的晚一點反應） @type {{ ready: number, from: number, text: string }[]} */
     this.inbox = [];
-    /** 收到的接觸：區域 → 人數與時間；接觸 → 所屬包點 @type {Map<string, { n: number, tick: number }>} */
+    /** 收到的接觸：區域 → 人數、時間、位置（2.7：去重用；不知道是 NaN）；接觸 → 所屬包點 @type {Map<string, { n: number, tick: number, x: number, y: number }>} */
     this.contacts = new Map();
     /** @type {Map<string, SiteId | null>} */
     this.contactSite = new Map();
@@ -561,7 +561,7 @@ export class Tactics {
         }
         // 隊友在某點附近陣亡：當作那裡有接觸（CT 輪轉用）
         const near = this.siteNear(this.g.cellOf(m.x, m.y));
-        if (near !== null) this.noteContact(`#dead${m.id}`, 1, t, near);
+        if (near !== null) this.noteContact(`#dead${m.id}`, 1, t, near, m.x, m.y);
       }
       this.mateAlive.set(m.id, m.alive);
     }
@@ -628,9 +628,9 @@ export class Tactics {
     return f !== null && obs.tick - f.tick <= P.enemyFlashMemo * this.tps && Math.min(dist(f.x, f.y, e.x, e.y), dist(f.x, f.y, e.ox, e.oy)) < P.enemyFlashNear * UNIT;
   }
 
-  /** @param {string} key @param {number} n @param {number} t @param {SiteId | null} site */
-  noteContact(key, n, t, site) {
-    this.contacts.set(key, { n, tick: t });
+  /** @param {string} key @param {number} n @param {number} t @param {SiteId | null} site @param {number} [x] @param {number} [y] 接觸的位置（2.7） */
+  noteContact(key, n, t, site, x = NaN, y = NaN) {
+    this.contacts.set(key, { n, tick: t, x, y });
     this.contactSite.set(key, site);
   }
 
@@ -676,7 +676,8 @@ export class Tactics {
       if (e === null) continue;
       if (e.kind === 'contact') {
         const c = this.regionCell(e.region);
-        this.noteContact(e.region, e.n, t, this.siteNear(c));
+        const p = c >= 0 ? this.g.center(c) : { x: NaN, y: NaN };
+        this.noteContact(e.region, e.n, t, this.siteNear(c), p.x, p.y);
       } else if (e.kind === 'flash') {
         // 宣告時估的、自己看到推算的爆炸時間換成準確的
         this.mateFlash = this.mateFlash.filter((f) => !f.claim || (P.claimById ? f.by !== msg.from : dist(f.x, f.y, e.x, e.y) > P.claimClear * UNIT));
@@ -913,15 +914,27 @@ export class Tactics {
       if (s !== null) seen[s]++;
     }
     const heard = { A: 0, B: 0 };
-    for (const [key, c] of this.contacts) {
+    /** 2.7（P.heatDedupe）：每點依時間排，走得到（可能是同一人移動）的接觸併成同一條軌跡、人數取大 @type {Record<SiteId, { n: number, tick: number, x: number, y: number }[]>} */
+    const tracks = { A: [], B: [] };
+    const list = [...this.contacts].sort((a, b) => a[1].tick - b[1].tick || (a[0] < b[0] ? -1 : 1));
+    for (const [key, c] of list) {
       if (t - c.tick > P.contactTtl * this.tps) {
         this.contacts.delete(key);
         continue;
       }
       const s = this.contactSite.get(key) ?? null;
-      if (s !== null) heard[s] += c.n;
+      if (s === null) continue;
+      if (!P.heatDedupe) {
+        heard[s] += c.n;
+        continue;
+      }
+      const reach = (/** @type {{ tick: number, x: number, y: number }} */ q) => Number.isFinite(c.x) && Number.isFinite(q.x) && dist(q.x, q.y, c.x, c.y) <= (P.routeSpeed * 1.5 * (c.tick - q.tick) / this.tps + 3) * UNIT;
+      const tr = tracks[s].find((q) => q.tick < c.tick && reach(q)) ?? tracks[s].find((q) => q.tick === c.tick && reach(q) && dist(q.x, q.y, c.x, c.y) < 3 * UNIT);
+      if (tr === undefined) tracks[s].push({ n: c.n, tick: c.tick, x: c.x, y: c.y });
+      else Object.assign(tr, { n: Math.max(tr.n, c.n), tick: c.tick, x: c.x, y: c.y });
     }
-    for (const s of SITES) out[s] = Math.max(seen[s], heard[s]);
+    if (P.heatDedupe) for (const s of SITES) heard[s] = tracks[s].reduce((v, q) => v + q.n, 0);
+    for (const s of SITES) out[s] = P.heatDedupe ? Math.min(Math.max(seen[s], heard[s]), obs.enemiesAlive) : Math.max(seen[s], heard[s]);
     return out;
   }
 
@@ -1157,7 +1170,8 @@ export class Tactics {
       if (last !== undefined && (last.n >= n || t - last.tick < P.contactEvery * this.tps) && t - last.tick < 4 * P.contactEvery * this.tps) continue;
       this.saidContact.set(id, { n, tick: t });
       const c = this.regionCell(id);
-      this.noteContact(id, n, t, this.siteNear(c));
+      const p = c >= 0 ? this.g.center(c) : { x: NaN, y: NaN };
+      this.noteContact(id, n, t, this.siteNear(c), p.x, p.y);
       out.cmds.push({ type: 'say', text: `E:contact ${id} ${n}` });
       return;
     }
@@ -1174,7 +1188,7 @@ export class Tactics {
       const s = this.siteNear(this.g.cellOf(q.x, q.y));
       if (s === null) continue;
       const id = this.intel.map.regions[/** @type {number} */ ([...this.intel.sites[s].regions][0])].id;
-      this.noteContact(id, P.smokeAlarmN, obs.tick, s);
+      this.noteContact(id, P.smokeAlarmN, obs.tick, s, q.x, q.y);
       out.cmds.push({ type: 'say', text: `E:contact ${id} ${P.smokeAlarmN}` });
       return true;
     }

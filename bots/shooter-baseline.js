@@ -203,6 +203,7 @@ scanLow: true,
 antiDefuse: true,
 antiDefuseRange: 12,
 coopEligible: true,
+heatDedupe: true,
 claimClear: 6,
 claimById: true,
 afterPistol: 'force',
@@ -3396,7 +3397,7 @@ const r = this.intel.region[this.g.cellOf(m.x, m.y)];
 if (r >= 0) out.cmds.push({ type: 'say', text: `E:dead ${this.intel.map.regions[r].id}` });
 }
 const near = this.siteNear(this.g.cellOf(m.x, m.y));
-if (near !== null) this.noteContact(`#dead${m.id}`, 1, t, near);
+if (near !== null) this.noteContact(`#dead${m.id}`, 1, t, near, m.x, m.y);
 }
 this.mateAlive.set(m.id, m.alive);
 }
@@ -3451,8 +3452,8 @@ flashAt(obs, e) {
 const f = this.enemyFlash;
 return f !== null && obs.tick - f.tick <= P.enemyFlashMemo * this.tps && Math.min(dist(f.x, f.y, e.x, e.y), dist(f.x, f.y, e.ox, e.oy)) < P.enemyFlashNear * UNIT;
 }
-noteContact(key, n, t, site) {
-this.contacts.set(key, { n, tick: t });
+noteContact(key, n, t, site, x = NaN, y = NaN) {
+this.contacts.set(key, { n, tick: t, x, y });
 this.contactSite.set(key, site);
 }
 readChat(obs) {
@@ -3494,7 +3495,8 @@ const e = parseEvent(text);
 if (e === null) continue;
 if (e.kind === 'contact') {
 const c = this.regionCell(e.region);
-this.noteContact(e.region, e.n, t, this.siteNear(c));
+const p = c >= 0 ? this.g.center(c) : { x: NaN, y: NaN };
+this.noteContact(e.region, e.n, t, this.siteNear(c), p.x, p.y);
 } else if (e.kind === 'flash') {
 this.mateFlash = this.mateFlash.filter((f) => !f.claim || (P.claimById ? f.by !== msg.from : dist(f.x, f.y, e.x, e.y) > P.claimClear * UNIT));
 this.mateFlash.push({ x: e.x, y: e.y, pop: e.pop });
@@ -3684,15 +3686,26 @@ const s = this.siteNear(this.g.cellOf(k.x, k.y));
 if (s !== null) seen[s]++;
 }
 const heard = { A: 0, B: 0 };
-for (const [key, c] of this.contacts) {
+const tracks = { A: [], B: [] };
+const list = [...this.contacts].sort((a, b) => a[1].tick - b[1].tick || (a[0] < b[0] ? -1 : 1));
+for (const [key, c] of list) {
 if (t - c.tick > P.contactTtl * this.tps) {
 this.contacts.delete(key);
 continue;
 }
 const s = this.contactSite.get(key) ?? null;
-if (s !== null) heard[s] += c.n;
+if (s === null) continue;
+if (!P.heatDedupe) {
+heard[s] += c.n;
+continue;
 }
-for (const s of SITES) out[s] = Math.max(seen[s], heard[s]);
+const reach = ( q) => Number.isFinite(c.x) && Number.isFinite(q.x) && dist(q.x, q.y, c.x, c.y) <= (P.routeSpeed * 1.5 * (c.tick - q.tick) / this.tps + 3) * UNIT;
+const tr = tracks[s].find((q) => q.tick < c.tick && reach(q)) ?? tracks[s].find((q) => q.tick === c.tick && reach(q) && dist(q.x, q.y, c.x, c.y) < 3 * UNIT);
+if (tr === undefined) tracks[s].push({ n: c.n, tick: c.tick, x: c.x, y: c.y });
+else Object.assign(tr, { n: Math.max(tr.n, c.n), tick: c.tick, x: c.x, y: c.y });
+}
+if (P.heatDedupe) for (const s of SITES) heard[s] = tracks[s].reduce((v, q) => v + q.n, 0);
+for (const s of SITES) out[s] = P.heatDedupe ? Math.min(Math.max(seen[s], heard[s]), obs.enemiesAlive) : Math.max(seen[s], heard[s]);
 return out;
 }
 leadCT(obs, p) {
@@ -3878,7 +3891,8 @@ const last = this.saidContact.get(id);
 if (last !== undefined && (last.n >= n || t - last.tick < P.contactEvery * this.tps) && t - last.tick < 4 * P.contactEvery * this.tps) continue;
 this.saidContact.set(id, { n, tick: t });
 const c = this.regionCell(id);
-this.noteContact(id, n, t, this.siteNear(c));
+const p = c >= 0 ? this.g.center(c) : { x: NaN, y: NaN };
+this.noteContact(id, n, t, this.siteNear(c), p.x, p.y);
 out.cmds.push({ type: 'say', text: `E:contact ${id} ${n}` });
 return;
 }
@@ -3890,7 +3904,7 @@ this.smokeSeen.push({ x: q.x, y: q.y });
 const s = this.siteNear(this.g.cellOf(q.x, q.y));
 if (s === null) continue;
 const id = this.intel.map.regions[ ([...this.intel.sites[s].regions][0])].id;
-this.noteContact(id, P.smokeAlarmN, obs.tick, s);
+this.noteContact(id, P.smokeAlarmN, obs.tick, s, q.x, q.y);
 out.cmds.push({ type: 'say', text: `E:contact ${id} ${P.smokeAlarmN}` });
 return true;
 }
