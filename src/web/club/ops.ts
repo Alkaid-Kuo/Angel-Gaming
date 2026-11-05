@@ -1,6 +1,6 @@
 // 訓練基地（設施、練習賽、戰術研發、報告）與賭盤（下注單）。
 import { esc, lineageName, wan } from '../manage/format.ts';
-import { icon, lineageColor, lineageGlyph } from './art.ts';
+import { icon } from './art.ts';
 import { coin, crest, screenHead } from './cards.ts';
 import type { Ctx } from './model.ts';
 import { publicRating, rosterOf, teamName } from './model.ts';
@@ -51,19 +51,17 @@ export function trainingScreen(ctx: Ctx): string {
   const oppAll = `${oppOpts}${freeOpts.length ? `<optgroup label="自由球員">${freeOpts.map((p) => `<option value="${p.id}" ${p.id === ui.scrim.opponentId ? 'selected' : ''}>${esc(p.name)}（${lineageName(c, p.lineageId)} v${p.version}）</option>`).join('')}</optgroup>` : ''}`;
   const slider = (field: string, val: number): string =>
     `<div class="range"><input type="range" min="10" max="${Math.max(10, left)}" step="10" value="${Math.min(val, Math.max(10, left))}" data-field="${field}" ${left < 10 ? 'disabled' : ''}><output data-out="${field}">${Math.min(val, Math.max(10, left))}</output><span>場</span></div>`;
-  const targets = [{ id: 'generic', name: '泛用', color: '#e2e8f0' }, ...c.lineages.map((l) => ({ id: l.id, name: `剋${l.name}`, color: lineageColor(l.id) }))];
   const queue = v.jobs.map((j) => {
     if (j.kind === 'scrim') return `<li>${icon('swords', 16)}<span>練習賽：對 <b>${esc(teamName(ctx, j.opponentTeamId))}</b></span><em>${j.games} 場</em></li>`;
+    if (j.kind === 'rehearse') return `<li>${icon('swords', 16)}<span>戰術排練：<b>${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}</b></span><em>${j.sessions} 節</em></li>`;
     const p = ctx.pm.get(j.playerId);
     const who = esc(p?.name ?? '?');
-    if (j.kind === 'scout') return `<li>${icon('search', 16)}<span>球探出發：<b>${who}</b>（${esc(teamName(ctx, p?.teamId ?? null))}）</span></li>`;
-    return `<li>${icon('flask', 16)}<span>研發：<b>${who}</b> 的${j.target === 'generic' ? '泛用' : `剋${lineageName(c, j.target)}`}戰術</span><em>${j.games} 場</em></li>`;
+    return `<li>${icon('search', 16)}<span>球探出發：<b>${who}</b>（${esc(teamName(ctx, p?.teamId ?? null))}）</span></li>`;
   });
   const scrims = [...v.scrims].reverse().slice(0, 6);
-  const presets = v.presets;
   const intel = [...v.intel].reverse().slice(0, 8);
   const ci = (w: number, n: number): number => Math.round(196 * Math.sqrt(((w / n) * (1 - w / n)) / n));
-  return `${screenHead('訓練基地', 'target', `訓練中心 Lv${lvl}・本週可跑 ${cap} 場（練習賽與研發共用）`)}
+  return `${screenHead('訓練基地', 'target', `訓練中心 Lv${lvl}・本週可跑 ${cap} 場`)}
     <section class="panel fac">${facilityArt(lvl)}
       <div class="fac-info"><div class="fac-lv">${[1, 2, 3].map((i) => `<i class="${i <= lvl ? 'on' : ''}"></i>`).join('')}<b>Lv${lvl}</b></div>
         <div class="energy">${bar}</div><p>本週已排 <b>${used}</b> 場，還剩 <b>${left}</b> 場。維護費每週 ${coin(e.facilityMaintenance[lvl - 1])}</p>
@@ -75,20 +73,11 @@ export function trainingScreen(ctx: Ctx): string {
         <label class="fld"><span>場數</span>${slider('scrim.games', ui.scrim.games)}</label>
         <button class="btn-main" data-act="scrim" ${!active || left < 10 ? 'disabled' : ''}>${icon('play', 16)}排入練習賽</button>
         <p class="fine">場數越多，勝率估計的誤差越小。報告在推進一週後出爐。</p></section>
-      <section class="panel"><div class="panel-hd"><h2>${icon('flask', 18)}戰術研發</h2><span>找出更好的戰術預設，賽前自動套用</span></div>
-        <label class="fld"><span>選手</span><select data-field="research.playerId">${myOpts(ui.research.playerId)}</select></label>
-        <div class="fld"><span>目標</span><div class="chips">${targets
-          .map((t) => `<button class="chip pick ${ui.research.target === t.id ? 'on' : ''}" style="--lc:${t.color}" data-act="target" data-t="${t.id}">${t.id === 'generic' ? icon('star', 13) : lineageGlyph(t.id, 13)}${t.name}</button>`)
-          .join('')}</div></div>
-        <label class="fld"><span>場數</span>${slider('research.games', ui.research.games)}</label>
-        <button class="btn-main" data-act="research" ${!active || left < 10 ? 'disabled' : ''}>${icon('play', 16)}排入研發</button>
-        <p class="fine">泛用的加成小；剋某流派的加成大，但只在遇到那個流派時有效。選手升版後預設失效。</p></section>
     </div>
     <section class="panel"><div class="panel-hd"><h2>${icon('hourglass', 18)}本週排程</h2><span>推進到下一週時一起完成</span></div>
       ${queue.length ? `<ul class="queue">${queue.join('')}</ul>` : '<p class="empty-note">還沒有排任何工作。</p>'}</section>
     <div class="three-col">
       <section class="panel report"><h3>${icon('swords', 16)}練習賽報告</h3>${scrims.length ? scrims.map((s) => `<div class="rp">對 <b>${esc(teamName(ctx, s.opponentTeamId))}</b><div class="rp-bar"><i style="width:${Math.round((s.wins * 100) / s.games)}%"></i></div><span>${s.wins}/${s.games} 勝・<b>${Math.round((s.wins * 100) / s.games)}%</b> ±${ci(s.wins, s.games)}%</span></div>`).join('') : '<p class="empty-note">還沒有報告</p>'}</section>
-      <section class="panel report"><h3>${icon('flask', 16)}戰術預設</h3>${presets.length ? presets.map((x) => `<div class="rp ${x.valid ? '' : 'off'}"><b>${esc(ctx.pm.get(x.playerId)?.name ?? '?')}</b>・${x.target === 'generic' ? '泛用' : `剋${lineageName(c, x.target)}`}<span>估計加成 <b>+${x.reportedBonus}</b>${x.valid ? '' : '（升版後失效）'}</span></div>`).join('') : '<p class="empty-note">還沒有預設</p>'}</section>
       <section class="panel report"><h3>${icon('search', 16)}球探情報</h3>${intel.length ? intel.map((i) => { const p = ctx.pm.get(i.playerId); const d = p ? i.estPower - p.elo : 0; return `<div class="rp"><b>${esc(p?.name ?? '?')}</b>（${esc(teamName(ctx, p?.teamId ?? null))}）<span>真實強度約 <b>${i.estPower}</b> ±${i.sd}・<i class="${d >= 0 ? 'up' : 'dn'}">比評分${d >= 0 ? '高' : '低'} ${Math.abs(d)}</i></span></div>`; }).join('') : '<p class="empty-note">到轉會市場派球探</p>'}</section>
     </div>`;
 }

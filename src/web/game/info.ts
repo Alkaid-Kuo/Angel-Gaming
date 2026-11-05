@@ -193,7 +193,7 @@ export function inboxScreen(ctx: Ctx, seen: number): string {
   const open = sel !== null ? v.inbox[sel] : null;
   const k = open ? (MSG[open.kind] ?? MSG.system) : MSG.system;
   const go = open?.kind === 'report' ? `<button class="btn" data-act="go" data-to="training"><b>去訓練基地</b></button><button class="btn ghost" data-act="go" data-to="market"><b>去轉會市場</b></button>` : open?.kind === 'result' ? `<button class="btn ghost" data-act="go" data-to="league"><b>看聯賽</b></button>` : open?.kind === 'finance' ? `<button class="btn ghost" data-act="go" data-to="finance"><b>看財務</b></button>` : '';
-  return `${head('INBOX // 信件', '信件', `${unread ? `未讀 <b>${unread}</b> · ` : ''}共 ${msgs.length} 封 · 球探、練習賽、研發的報告在推進一週後寄到`)}
+  return `${head('INBOX // 信件', '信件', `${unread ? `未讀 <b>${unread}</b> · ` : ''}共 ${msgs.length} 封 · 球探、練習賽、排練的報告在推進一週後寄到`)}
     <section class="body s-inbox">
       <div class="pn list in">${pt('01', '收件匣', `${msgs.length} 封`)}<div class="scroll">${msgs.map((m) => { const q = MSG[m.kind] ?? MSG.system; const who = mentions(ctx, m.text)[0]; return `<button class="msg ${m.i === sel ? 'on' : ''} ${m.unread ? 'unread' : 'read'}" data-act="mail" data-i="${m.i}">${who ? avatar(ctx, who, 52, 'ic2') : `<span class="ic2 ${q.cls}">${icon(q.ic, 24)}</span>`}<b>${q.name}</b><span class="wk">${m.week === 0 ? '休' : `W${String(m.week).padStart(2, '0')}`}</span><p>${mailText(m.text)}</p></button>`; }).join('') || '<p class="dim">信箱是空的。</p>'}</div></div>
       <div class="pn ${open?.kind === 'report' ? 'g' : ''} open in">${open ? `<div class="meta">${sel !== null && sel >= seen ? '<span class="chip fill">NEW</span>' : ''}<span class="chip ${k.cls}">${k.name}</span><span class="chip">${open.week === 0 ? '休賽期' : `第 ${open.week} 週`}</span></div>

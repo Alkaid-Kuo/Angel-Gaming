@@ -19,7 +19,6 @@ export interface Ui {
   tab: Tab;
   market: 'free' | 'others';
   scrim: { playerId: string; opponentId: string; games: number };
-  research: { playerId: string; target: string; games: number };
   stake: Record<string, number>;
   ledgerAll: boolean;
   scheduleWeek: number | null;
@@ -36,7 +35,6 @@ export function newUi(): Ui {
     tab: 'overview',
     market: 'free',
     scrim: { playerId: '', opponentId: '', games: 50 },
-    research: { playerId: '', target: 'generic', games: 50 },
     stake: {},
     ledgerAll: false,
     scheduleWeek: null,
@@ -83,14 +81,6 @@ function myFixture(v: KnownView): KnownFixture | undefined {
 
 function pdesc(c: ContentPack, p: KnownPlayer): string {
   return `${esc(p.name)}（${lineageName(c, p.lineageId)} v${p.version}）`;
-}
-
-function presetBadges(v: KnownView, c: ContentPack, playerId: string): string {
-  const list = v.presets.filter((p) => p.playerId === playerId);
-  if (list.length === 0) return '<span class="muted">—</span>';
-  return list
-    .map((p) => `<span class="mg-badge ${p.valid ? '' : 'off'}" title="${p.valid ? '' : '升版後失效'}">${p.target === 'generic' ? '泛用' : `對${lineageName(c, p.target)}`} 約+${p.reportedBonus}</span>`)
-    .join(' ');
 }
 
 function intelText(v: KnownView, p: KnownPlayer): string {
@@ -204,7 +194,7 @@ function roster(ctx: Ctx): string {
       return `<tr>
         <td>${slot >= 0 ? `<b class="accent">第 ${slot + 1} 位</b>` : '<span class="muted">替補</span>'}</td>
         <td><b>${esc(p.name)}</b></td><td>${lineageName(c, p.lineageId)}</td><td class="num">v${p.version}${p.upgrading ? ' <span class="mg-badge">升版中</span>' : ''}</td>
-        <td class="num">${p.elo}</td><td class="num">${p.games}</td><td class="num">${money(p.weeklySalary)}</td><td>${presetBadges(v, c, p.id)}</td>
+        <td class="num">${p.elo}</td><td class="num">${p.games}</td><td class="num">${money(p.weeklySalary)}</td>
         <td class="mg-act"><button data-act="upgrade" data-id="${p.id}" ${upDisabled ? 'disabled' : ''} title="${upTitle}">升版 ${money(upCost)}</button>
           <button class="ghost" data-act="release" data-id="${p.id}" ${!canAct || mine.length <= 3 ? 'disabled' : ''} title="${mine.length <= 3 ? '陣容至少要有 3 人' : '解約後成為自由選手'}">解約</button></td></tr>`;
     })
@@ -213,8 +203,8 @@ function roster(ctx: Ctx): string {
     <p class="muted small">戰隊賽三個對位：第 1 位對對手的第 1 位、第 2 位對第 2 位……贏 2 場以上的隊伍勝。雙方名單是同時公開的，對位順序就是你的猜測空間。${lu.auto ? '<br><span class="hint">目前是自動（公開 Elo 最高的 3 人），改任一位就會固定下來。</span>' : ''}</p>
     <div class="mg-lineup">${slotSel}</div></section>
     <section class="card"><h2>陣容（${mine.length} / ${e.rosterMax}）</h2>
-    <div class="mg-scroll"><table class="data"><thead><tr><th>出賽</th><th>選手</th><th>流派</th><th>版本</th><th>Elo</th><th>場數</th><th>週薪</th><th>戰術預設</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="muted small">Elo 是公開戰績；流派真正的強弱要靠打出來的戰績、球探情報或練習賽才看得出來。戰術預設的加成是研發報告的估計值，帶誤差。</p></section>`;
+    <div class="mg-scroll"><table class="data"><thead><tr><th>出賽</th><th>選手</th><th>流派</th><th>版本</th><th>Elo</th><th>場數</th><th>週薪</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted small">Elo 是公開戰績；流派真正的強弱要靠打出來的戰績、球探情報或練習賽才看得出來。</p></section>`;
 }
 
 // ───── 賽程 ─────
@@ -293,21 +283,20 @@ function training(ctx: Ctx): string {
   const queue = v.jobs
     .map((j) => {
       if (j.kind === 'scrim') return `<li>練習賽：對 ${esc(teamName(v, j.opponentTeamId))}，${j.games} 場</li>`;
+      if (j.kind === 'rehearse') return `<li>戰術排練：${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}，${j.sessions} 節</li>`;
       const p = pm.get(j.playerId);
       const who = p ? esc(p.name) : j.playerId;
-      if (j.kind === 'scout') return `<li>球探：${who}</li>`;
-      return `<li>研發：${who} 的${j.target === 'generic' ? '泛用' : `對${lineageName(c, j.target)}`}戰術預設，${j.games} 場</li>`;
+      return `<li>球探：${who}</li>`;
     })
     .join('');
   const scrims = [...v.scrims].reverse().slice(0, 8);
-  const presets = v.presets;
   const intel = v.intel;
   const ci = (w: number, n: number): string => {
     const p = w / n;
     return `±${Math.round(196 * Math.sqrt((p * (1 - p)) / n))}%`;
   };
   return `<section class="card"><h2>訓練中心</h2>
-    <div class="mg-two"><div><div><b>Lv${level}</b>　每週可跑 ${cap} 場（練習賽與研發共用）　本週已排 ${used} 場</div>
+    <div class="mg-two"><div><div><b>Lv${level}</b>　每週可跑 ${cap} 場　本週已排 ${used} 場</div>
       <div class="mg-bar"><i style="width:${Math.min(100, (used * 100) / cap)}%"></i></div>
       <div class="muted small">維護費每週 ${money(e.facilityMaintenance[level - 1])}</div></div>
       <div>${level < maxLevel ? `<button data-act="upfac" ${!canAct || v.me.cash < upCost ? 'disabled' : ''}>升到 Lv${level + 1}　${money(upCost)}（維護 ${money(e.facilityMaintenance[level])}／週）</button>` : '<span class="muted">已是最高等級</span>'}</div></div></section>
@@ -317,16 +306,9 @@ function training(ctx: Ctx): string {
       <select data-field="scrim.opponentId">${others.map((p) => opt(p, ui.scrim.opponentId)).join('')}</select>
       <input type="number" min="1" max="${Math.max(1, v.me.capacityLeft)}" step="10" value="${ui.scrim.games}" data-field="scrim.games"> 場
       <button data-act="scrim" ${!canAct || v.me.capacityLeft < 1 ? 'disabled' : ''}>排入</button></div></section>
-    <section class="card"><h2>戰術研發</h2>
-    <p class="muted small">替選手找較好的戰術預設，賽前自動套用。泛用的加成較小；針對某個流派加成較大，但只在遇到那個流派時有效。選手升版後預設失效。推進一週後出報告。</p>
-    <div class="row"><select data-field="research.playerId">${mine.map((p) => myOpt(p, ui.research.playerId)).join('')}</select>
-      目標 <select data-field="research.target"><option value="generic" ${ui.research.target === 'generic' ? 'selected' : ''}>泛用</option>${c.lineages.map((l) => `<option value="${l.id}" ${ui.research.target === l.id ? 'selected' : ''}>針對 ${l.name}</option>`).join('')}</select>
-      <input type="number" min="1" max="${Math.max(1, v.me.capacityLeft)}" step="10" value="${ui.research.games}" data-field="research.games"> 場
-      <button data-act="research" ${!canAct || v.me.capacityLeft < 1 ? 'disabled' : ''}>排入</button></div></section>
     <section class="card"><h2>本週已排的工作</h2>${queue ? `<ul class="mg-todo">${queue}</ul>` : '<p class="muted">沒有</p>'}</section>
     <section class="card"><h2>報告</h2>
       <h3>練習賽</h3>${scrims.length ? `<ul class="mg-todo">${scrims.map((s) => `<li>${weekLabel(s.week)}：對 ${esc(teamName(v, s.opponentTeamId))}　${s.wins}/${s.games} 勝（${pct(s.wins, s.games)}，${ci(s.wins, s.games)}）</li>`).join('')}</ul>` : '<p class="muted">還沒有</p>'}
-      <h3>戰術預設</h3>${presets.length ? `<ul class="mg-todo">${presets.map((p) => `<li>${esc(pm.get(p.playerId)?.name ?? '?')}：${p.target === 'generic' ? '泛用' : `對${lineageName(c, p.target)}`}，估計加成約 +${p.reportedBonus}${p.valid ? '' : '（已失效）'}</li>`).join('')}</ul>` : '<p class="muted">還沒有</p>'}
       <h3>球探情報</h3>${intel.length ? `<ul class="mg-todo">${intel.map((i) => `<li>${weekLabel(i.week)}：${esc(pm.get(i.playerId)?.name ?? '?')} 真實強度約 ${i.estPower}（±${i.sd}）</li>`).join('')}</ul>` : '<p class="muted">還沒有</p>'}</section>`;
 }
 
@@ -423,10 +405,8 @@ export function normalizeUi(ctx: Ctx): void {
   const others = v.players.filter((p) => p.teamId !== v.me.teamId).map((p) => p.id);
   if (!mine.includes(ui.scrim.playerId)) ui.scrim.playerId = mine[0] ?? '';
   if (!others.includes(ui.scrim.opponentId)) ui.scrim.opponentId = others[0] ?? '';
-  if (!mine.includes(ui.research.playerId)) ui.research.playerId = mine[0] ?? '';
   if (v.me.capacityLeft > 0) {
     ui.scrim.games = Math.max(1, Math.min(ui.scrim.games, v.me.capacityLeft));
-    ui.research.games = Math.max(1, Math.min(ui.research.games, v.me.capacityLeft));
   }
 }
 

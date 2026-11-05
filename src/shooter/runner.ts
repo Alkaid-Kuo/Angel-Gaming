@@ -12,7 +12,7 @@ import { roundHalfEven } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
 import { BotLoadError, type CompiledBot } from '../sandbox/compile.ts';
 import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
-import type { Attributes, ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, Team, WeaponId } from './api.ts';
+import type { Attributes, InitTactics, ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, Team, TeamOrders, WeaponId } from './api.ts';
 import { MIN_REACTION_TICKS, SHOOTER_ENGINE_VERSION, TIMING } from './config.ts';
 import { DEFAULT_MAP_ID, MAPS, blocksMove, regionsAt, type ShooterMap } from './map.ts';
 import { reactionEighths, reactionTicksFor } from './players.ts';
@@ -199,6 +199,26 @@ export interface ShooterRunOptions extends ShooterMatchOptions {
   readonly reactionTicks?: readonly (number | undefined)[];
   /** 依 playerId 的屬性包（步驟 7）：傳進 InitData.attributes；沒給（或該座位 undefined）＝全 50 */
   readonly attributes?: readonly (Attributes | undefined)[];
+  /** 依 playerId 的戰術熟練度（API 1.2）：傳進 InitData.tactics；沒給＝null */
+  readonly tactics?: readonly (InitTactics | null | undefined)[];
+  /** 依組別（0＝玩家 0～4、1＝玩家 5～9）的教練指令（API 1.2）：每次決策放進該組觀察資料的 coach；沒給＝null */
+  readonly orders?: readonly [TeamOrders | null, TeamOrders | null];
+}
+
+/** 回合戰術標籤的喊話格式（M5）：指揮每回合喊一次「K:<戰術代號>」；這是閘道與 Bot 的約定，引擎不解讀 */
+const TACTIC_TAG = /^K:([A-Za-z0-9_]{1,24})$/;
+
+/** 深凍結的複本（純 JSON 資料）；null 照回 */
+function frozenCopy<T>(v: T | null): T | null {
+  if (v === null) return null;
+  const deep = (x: unknown): unknown => {
+    if (x !== null && typeof x === 'object') {
+      for (const k of Object.keys(x)) deep((x as Record<string, unknown>)[k]);
+      Object.freeze(x);
+    }
+    return x;
+  };
+  return deep(structuredClone(v)) as T;
 }
 
 /** 反應延遲夾到下限；非整數取整、非數字用下限 */
@@ -223,6 +243,10 @@ export class ShooterDriver {
   readonly attributes: readonly Attributes[];
   /** 延遲由屬性算的選手：1／8 tick 的精確延遲與決定進位的 PRNG；其他人 null（固定 reactionTicks） */
   private readonly exactDelay: readonly ({ readonly eighths: number; readonly rng: Prng } | null)[];
+  /** 依組別的教練指令（API 1.2） */
+  private readonly orders: readonly [TeamOrders | null, TeamOrders | null];
+  /** 回合戰術標籤：索引＝回合數 − 1，[組 0, 組 1]＝該組本回合第一則 K: 喊話的代號（沒喊＝null） */
+  readonly tacticTags: [string | null, string | null][] = [];
   /** 排隊中的 Bot 指令（依決策順序；套用 tick 遞增） */
   private pending: { readonly at: number; readonly round: number; readonly playerId: number; readonly commands: unknown[] }[] = [];
 
@@ -236,6 +260,9 @@ export class ShooterDriver {
     this.idleRound = opts.controllers.map(() => 0);
     this.dead = opts.controllers.map(() => false);
     const knobs = opts.knobs ?? opts.controllers.map(() => ({}));
+    // 教練指令與戰術熟練度是同一個物件給同隊每個座位、每回合重用：建構時複製一份並深凍結，Bot 改不動（改了會被忽略或丟例外），隊友與之後的回合看到的永遠是原值
+    this.orders = [frozenCopy(opts.orders?.[0] ?? null), frozenCopy(opts.orders?.[1] ?? null)];
+    const tactics = opts.controllers.map((_, pid) => frozenCopy(opts.tactics?.[pid] ?? null));
     this.attributes = opts.controllers.map((_, pid) => opts.attributes?.[pid] ?? DEFAULT_ATTRIBUTES);
     this.reactionTicks = opts.controllers.map((c, pid) => {
       if (c.takeRealtime !== undefined) return 0;
@@ -246,7 +273,7 @@ export class ShooterDriver {
     this.exactDelay = opts.controllers.map((c, pid) => (c.takeRealtime === undefined && opts.reactionTicks?.[pid] === undefined && opts.attributes !== undefined ? { eighths: reactionEighths(this.attributes[pid]), rng: Prng.fromInts(opts.seed, pid, DELAY_TAG) } : null));
     opts.controllers.forEach((c, pid) => {
       const init = { roundsPerHalf: opts.roundsPerHalf, winRounds: opts.winRounds, startMoney: opts.startMoney, overtime: opts.overtime, freezeTicks: this.match.freezeTicks, reactionTicks: this.reactionTicks[pid] };
-      const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init, this.attributes[pid]));
+      const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init, this.attributes[pid], tactics[pid]));
       const rt = this.runtime[pid];
       if (out.exception !== null) this.error(pid, `init: ${out.exception}`);
       // init 超時：整場閒置（沿用 RTS／軍團戰）
@@ -287,6 +314,23 @@ export class ShooterDriver {
     if (rt.errors.length < 5) rt.errors.push(text);
   }
 
+  /** 套用指令時記下回合戰術標籤（每組每回合只記第一則） */
+  private noteTags(pid: number, cmds: readonly unknown[]): void {
+    const m = this.match;
+    if (m.roundNumber < 1) return;
+    const g = pid < PLAYER_COUNT / 2 ? 0 : 1;
+    const row = (this.tacticTags[m.roundNumber - 1] ??= [null, null]);
+    if (row[g] !== null) return;
+    for (const c of cmds) {
+      const text = typeof c === 'object' && c !== null && (c as { type?: unknown }).type === 'say' ? (c as { text?: unknown }).text : undefined;
+      const hit = typeof text === 'string' ? TACTIC_TAG.exec(text) : null;
+      if (hit !== null) {
+        row[g] = hit[1];
+        return;
+      }
+    }
+  }
+
   /** 這批指令的延遲（tick） */
   private delayOf(pid: number): number {
     const x = this.exactDelay[pid];
@@ -304,11 +348,16 @@ export class ShooterDriver {
       this.pending.shift();
       if (q.round !== m.roundNumber) continue;
       this.replay?.decisions.push({ tick: m.tick, playerId: q.playerId, commands: q.commands });
+      this.noteTags(q.playerId, q.commands);
       m.applyCommands(q.playerId, q.commands);
     }
     if (m.isDecisionTick()) {
       // 先讓每個人都觀察完，再依序下指令：後面的人不會看到前面的人剛下的指令
-      const views = this.controllers.map((_, pid) => m.observe(pid));
+      const views = this.controllers.map((_, pid) => {
+        const v = m.observe(pid) as { coach: TeamOrders | null } & ShooterObservation;
+        v.coach = this.orders[pid < PLAYER_COUNT / 2 ? 0 : 1];
+        return v;
+      });
       for (let pid = 0; pid < this.controllers.length; pid++) {
         if (this.dead[pid] || this.idleRound[pid] === m.roundNumber) continue;
         const out = this.controllers[pid].decide(views[pid]);
@@ -338,6 +387,7 @@ export class ShooterDriver {
         if (Array.isArray(cmds) && cmds.length > 0) {
           if (this.reactionTicks[pid] === 0) {
             this.replay?.decisions.push({ tick: m.tick, playerId: pid, commands: cmds });
+            this.noteTags(pid, cmds);
             m.applyCommands(pid, cmds);
           } else {
             // 依套用 tick 插入（延遲不同的選手可能後決策先生效）；同 tick 維持決策順序
@@ -356,6 +406,7 @@ export class ShooterDriver {
       const cmds = take.call(this.controllers[pid]);
       if (cmds.length === 0) continue;
       this.replay?.decisions.push({ tick: m.tick, playerId: pid, commands: cmds });
+      this.noteTags(pid, cmds);
       m.applyCommands(pid, cmds);
     }
     m.step();
@@ -373,13 +424,15 @@ export interface ShooterRunOutput {
   readonly match: ShooterMatch;
   /** 各選手的屬性包與反應延遲（步驟 7；結果顯示用） */
   readonly players: readonly { readonly attributes: Attributes; readonly reactionTicks: number }[];
+  /** 回合戰術標籤（M5）：索引＝回合數 − 1，[組 0, 組 1] */
+  readonly tacticTags: readonly (readonly [string | null, string | null])[];
 }
 
 export function runShooterMatch(opts: ShooterRunOptions): ShooterRunOutput {
   const t0 = performance.now();
   const d = new ShooterDriver(opts);
   while (!d.match.over) d.step();
-  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match, players: driverPlayers(d) };
+  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match, players: driverPlayers(d), tacticTags: d.tacticTags };
 }
 
 /** 驅動層的選手資料（屬性包、反應延遲） */

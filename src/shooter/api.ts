@@ -1,6 +1,7 @@
 // CS 射擊選手 API 的公開型別：開局資料、觀察資料、指令、事件。
 // 選手程式只依賴本檔；引擎內部型別不對外。
 //
+// 【API 1.2（2026-11-05，M5 教練層第一批；引擎 1.3.0）】開局資料加 tactics（己方戰術熟練度）、觀察資料加 coach（己方教練指令）。
 // 【API 1.1（2026-10-31，規格 v1.1；引擎 1.2.0 沿用，開局資料形狀沒變，rules.freezeTicks 改由賽制決定）】版本見 config.ts 的 SHOOTER_API_VERSION（開局資料 rules.apiVersion）。
 // 要改：升 SHOOTER_API_VERSION、寫規格修訂紀錄、重跑全部驗收與強度表。
 //
@@ -196,6 +197,8 @@ export interface ShooterInitData {
   readonly enemyIds: readonly number[];
   readonly knobs: KnobValues;
   readonly attributes: Attributes;
+  /** 戰術熟練度（API 1.2；0～100 整數，鍵＝戰術代號）：team＝隊伍執行熟練度（同隊五人相同）、personal＝本人。只含己方；沒有＝null（試玩、陪練） */
+  readonly tactics: InitTactics | null;
   readonly rules: RulesInfo;
   readonly map: MapInfo;
   readonly weapons: readonly WeaponInfo[];
@@ -440,6 +443,24 @@ export interface ShooterObservation {
   readonly chat: readonly TeamMessage[];
   /** 還活著的敵人數（計分板公開資訊） */
   readonly enemiesAlive: number;
+  /** 己方教練指令（API 1.2）：整回合不變；只含己方，對方的指令永遠不在這裡；沒有教練＝null */
+  readonly coach: TeamOrders | null;
+}
+
+/** 戰術熟練度（API 1.2） */
+export interface InitTactics {
+  readonly team: Readonly<Record<string, number>>;
+  readonly personal: Readonly<Record<string, number>>;
+}
+
+/** 教練指令（API 1.2）：比賽計畫＋本回合命令 */
+export interface TeamOrders {
+  /** 戰術偏好：-1 禁用、0 不偏好、1～3 星（鍵＝戰術代號） */
+  readonly pref: Readonly<Record<string, number>>;
+  /** 經濟風格：0 標準、1 保守、2 積極 */
+  readonly economy: 0 | 1 | 2;
+  /** 本回合命令：tactic＝該回合必打的戰術、buy＝覆蓋隊內買法；沒有＝null */
+  readonly call: { readonly tactic: string | null; readonly buy: 'full' | 'force' | 'eco' | null } | null;
 }
 
 // ───────── 指令 ─────────

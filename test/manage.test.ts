@@ -153,7 +153,7 @@ describe('指令', () => {
     expect(applyCommand(s, content, me.id, { type: 'bet', fixtureId: own.id, side: rightSide, stake: 5 }).ok).toBe(false);
   });
 
-  it('練習賽與研發共用訓練中心每週場數；練習賽對手是別隊；球探要付費', () => {
+  it('練習賽受訓練中心每週場數限制；練習賽對手是別隊；沒有戰術手冊的賽制不能排練；球探要付費', () => {
     const s = newGame(5, content);
     const me = humanTeam(s);
     const mine = rosterOf(s, me.id)[0];
@@ -161,8 +161,10 @@ describe('指令', () => {
     expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: me.id, games: 10 }).ok).toBe(false);
     expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: 'nope', games: 10 }).ok).toBe(false);
     expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: foe.teamId as string, games: 150 }).ok).toBe(true);
-    expect(applyCommand(s, content, me.id, { type: 'queueResearch', playerId: mine.id, target: 'generic', games: 60 }).ok).toBe(false);
-    expect(applyCommand(s, content, me.id, { type: 'queueResearch', playerId: mine.id, target: 'generic', games: 50 }).ok).toBe(true);
+    expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: foe.teamId as string, games: 60 }).ok).toBe(false);
+    expect(applyCommand(s, content, me.id, { type: 'queueScrim', opponentTeamId: foe.teamId as string, games: 50 }).ok).toBe(true);
+    expect(applyCommand(s, content, me.id, { type: 'queueRehearse', tactic: 'rushA', sessions: 1 })).toEqual({ ok: false, reason: '這個賽制沒有戰術手冊' });
+    expect(mine.tactics).toEqual({});
     const before = me.cash;
     expect(applyCommand(s, content, me.id, { type: 'scout', playerId: foe.id })).toEqual({ ok: true });
     expect(me.cash).toBe(before - content.economy.scoutCost);
@@ -255,7 +257,7 @@ describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
     expect(played).toHaveLength(4);
     expect(played.map((f) => f.result?.request)).toEqual(spy.sent);
     expect(s.version).toBe(SAVE_VERSION);
-    expect(SAVE_VERSION).toBe(5);
+    expect(SAVE_VERSION).toBe(6);
     for (const f of played) {
       const r = f.result as NonNullable<typeof f.result>;
       expect(r.request.formatId).toBe(s.formatId);
@@ -272,7 +274,7 @@ describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
   it('第 2 版存檔被拒，訊息說明版本', () => {
     const s = newGame(62, content);
     const old = JSON.stringify({ ...s, version: 2 });
-    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 5 不符/);
+    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 6 不符/);
   });
 
   it('watchable 由賽制自報、透傳到視圖；視圖不帶請求單（含隱藏的習慣）', async () => {
@@ -344,33 +346,27 @@ describe('背景工作與升版', () => {
     expect(Math.abs(me.intel[0].estPower - truth)).toBeLessThan(content.economy.scoutSd * 4);
   });
 
-  it('研發：場數越多加成上限越高；升版 2 週後完成並讓預設失效', async () => {
+  it('升版 2 週後完成、週薪調整', async () => {
     const s = newGame(42, content);
     const me = humanTeam(s);
     const p = rosterOf(s, me.id)[0];
     p.version = 1;
     me.cash = 5000;
-    applyCommand(s, content, me.id, { type: 'queueResearch', playerId: p.id, target: 'generic', games: 200 });
     applyCommand(s, content, me.id, { type: 'upgradeVersion', playerId: p.id });
     expect(applyCommand(s, content, me.id, { type: 'upgradeVersion', playerId: p.id }).ok).toBe(false);
     const salary = p.weeklySalary;
     await advance(s, content, gateway);
-    expect(p.presets).toHaveLength(1);
-    expect(p.presets[0].bonus).toBeLessThanOrEqual(Math.ceil(content.economy.researchCapGeneric * 1.3));
     await advance(s, content, gateway); // 第 1 週
     await advance(s, content, gateway); // 第 2 週結算後升版完成
     expect(p.version).toBe(2);
     expect(p.weeklySalary).toBe(Math.round((salary * content.economy.salaryGrowthPct) / 100));
-    expect(p.presets).toHaveLength(0);
   });
 });
 
 describe('資訊分層', () => {
-  it('已知層視圖裡看不到隱藏的習慣、戰術預設的真實加成、流派真實強度', async () => {
+  it('已知層視圖裡看不到隱藏的習慣、流派真實強度', async () => {
     const s = newGame(51, content);
     const me = humanTeam(s);
-    const p = rosterOf(s, me.id)[0];
-    applyCommand(s, content, me.id, { type: 'queueResearch', playerId: p.id, target: 'generic', games: 100 });
     await advance(s, content, gateway);
     const forbidden = new Set(['habit', 'bonus', 'power', 'truePower']);
     const walk = (v: unknown, path: string): void => {
@@ -383,7 +379,6 @@ describe('資訊分層', () => {
       }
     };
     walk(knownView(s, content, me.id), 'view');
-    expect(knownView(s, content, me.id).presets).toHaveLength(1);
   });
 
   it('視圖：資金跑道不會是負數；別隊的視圖看不到玩家的信箱', () => {

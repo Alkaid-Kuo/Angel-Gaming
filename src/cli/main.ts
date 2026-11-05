@@ -446,7 +446,7 @@ function playShooter(files: readonly BotFile[], seed: number, mapId: string, opt
     d.step();
     probe(d.match);
   }
-  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match, players: driverPlayers(d) };
+  return { result: d.match.result(), replay: d.replay, runtime: d.runtime, finalHash: d.match.hash(), wallMs: performance.now() - t0, match: d.match, players: driverPlayers(d), tacticTags: d.tacticTags };
 }
 
 /** 炸彈點到達時間：每回合從開打到第一個 T 踏進 A／B 點的秒數（v1.0，量走位與碰撞的影響） */

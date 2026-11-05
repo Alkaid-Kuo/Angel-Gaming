@@ -1,4 +1,4 @@
-// 正式版外框：頂列（隊徽、週次、資金、名氣、資金跑道、信件、選單）與左側導覽（8 個入口＋比賽日按鈕）。
+// 正式版外框：頂列（隊徽、週次、資金、名氣、資金跑道、信件、選單）與左側導覽（9 個入口＋比賽日按鈕）。
 import type { Ctx, Screen } from './kit.ts';
 import { crestSpec, esc, icon, wan, weekLabel } from './kit.ts';
 import { crestSvg, type IconName } from '../club/art.ts';
@@ -9,6 +9,7 @@ const NAV: { id: Screen; label: string; ic: IconName }[] = [
   { id: 'squad', label: '戰隊', ic: 'users' },
   { id: 'market', label: '市場', ic: 'contract' },
   { id: 'training', label: '訓練', ic: 'target' },
+  { id: 'tactics', label: '戰術', ic: 'swords' },
   { id: 'league', label: '聯賽', ic: 'trophy' },
   { id: 'betting', label: '賭盤', ic: 'ticket' },
   { id: 'finance', label: '財務', ic: 'chart' },

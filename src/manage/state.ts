@@ -1,7 +1,7 @@
 // 狀態查詢小工具與記帳。這裡的函式都不亂數、不呼叫對戰閘道。
 import type { ContentPack, Lineage, RaritySpec } from './content.ts';
 import type { SideSpec } from './gateway.ts';
-import type { GameState, LedgerCategory, Message, Player, PlayerId, Rarity, Team, TeamId } from './types.ts';
+import type { GamePlan, GameState, LedgerCategory, Message, Player, PlayerId, Rarity, Team, TeamId } from './types.ts';
 
 export function findPlayer(state: GameState, id: PlayerId): Player | undefined {
   return state.players.find((p) => p.id === id);
@@ -92,9 +92,9 @@ export function weeklySponsor(content: ContentPack, team: Team): number {
   return team.fame * content.economy.sponsorPerFame;
 }
 
-/** 本週練習賽／研發還能排幾場 */
+/** 本週練習賽／排練還能排幾格（練習賽一場一格、排練一節一格） */
 export function capacityLeft(state: GameState, content: ContentPack, team: Team): number {
-  const used = state.jobs.reduce((s, j) => (j.teamId === team.id && j.kind !== 'scout' ? s + j.games : s), 0);
+  const used = state.jobs.reduce((s, j) => (j.teamId !== team.id ? s : j.kind === 'scrim' ? s + j.games : j.kind === 'rehearse' ? s + j.sessions : s), 0);
   return content.economy.scrimCapacity[team.trainingLevel - 1] - used;
 }
 
@@ -114,22 +114,51 @@ export function effectiveLineup(state: GameState, content: ContentPack, team: Te
     .map((p) => p.id);
 }
 
+/** 熟練度的存法：0～100、小數一位 */
+export function proficiency(v: number): number {
+  return Math.round(Math.max(0, Math.min(100, v)) * 10) / 10;
+}
+
+/** 遞減式成長：cur += gain × (1 − cur/100)（M5 規格 3.3） */
+export function grow(cur: number, gain: number): number {
+  return proficiency(cur + gain * (1 - cur / 100));
+}
+
+/** 執行熟練度（M5 規格 3.3）：round(0.5 × 隊伍默契 ＋ 0.5 × 出賽名單個人熟練度平均) */
+export function effectiveTactics(content: ContentPack, team: Team, lineup: readonly Player[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const t of content.tactics) {
+    const avg = lineup.length === 0 ? 0 : lineup.reduce((s, p) => s + (p.tactics[t.id] ?? 0), 0) / lineup.length;
+    out[t.id] = Math.round(0.5 * (team.playbook[t.id] ?? 0) + 0.5 * avg);
+  }
+  return out;
+}
+
+/** 預設比賽計畫：每個戰術 0、經濟標準 */
+export function defaultGamePlan(content: ContentPack): GamePlan {
+  return { pref: Object.fromEntries(content.tactics.map((t) => [t.id, 0])), economy: 0 };
+}
+
 /**
- * 組出送給對戰閘道的一方名單。每人的 config 是「習慣」與「本場可用的戰術預設加成」：
- * 泛用預設一律可用；針對某流派的預設在對方名單裡有任何人是該流派時可用；取最高的一個。
+ * 組出送給對戰閘道的一方名單。每人的 config 是「習慣」＋個人熟練度 p_<戰術>（整數）；
+ * 內容包有戰術手冊時，team 帶執行熟練度 q_<戰術>、比賽計畫 pref_<戰術> 與 economy（閘道轉成開局資料與教練指令）。
  */
-export function buildSide(players: readonly Player[], opponents: readonly Player[]): SideSpec {
-  const foes = new Set(opponents.map((o) => o.lineageId));
-  return {
+export function buildSide(content: ContentPack, team: Team, players: readonly Player[]): SideSpec {
+  const side: SideSpec = {
     players: players.map((p) => {
-      let best = 0;
-      for (const pr of p.presets) {
-        if (pr.version !== p.version) continue;
-        if (pr.target === 'generic' || foes.has(pr.target)) best = Math.max(best, pr.bonus);
-      }
-      return { lineageId: p.lineageId, version: p.version, config: { habit: p.habit, presetBonus: best } };
+      const config: Record<string, number> = { habit: p.habit };
+      for (const t of content.tactics) config[`p_${t.id}`] = Math.round(p.tactics[t.id] ?? 0);
+      return { lineageId: p.lineageId, version: p.version, config };
     }),
   };
+  if (content.tactics.length === 0) return side;
+  const eff = effectiveTactics(content, team, players);
+  const bag: Record<string, number> = { economy: team.gamePlan.economy };
+  for (const t of content.tactics) {
+    bag[`q_${t.id}`] = eff[t.id];
+    bag[`pref_${t.id}`] = team.gamePlan.pref[t.id] ?? 0;
+  }
+  return { ...side, team: bag };
 }
 
 /** 記帳：所有資金進出都走這裡，team.cash ＝ 起始資金 ＋ 帳本總和 */

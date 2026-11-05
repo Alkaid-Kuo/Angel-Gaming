@@ -3,20 +3,23 @@
 // 所以同一張請求單在兩邊得到同一個結果。
 //
 // 名單 → 引擎：流派 id ＝ 角色（ShooterRole）；derivePlayer({ role, version, habit: 0 }) 得到屬性包與旋鈕 role，
-// 再把經營層的「習慣」與「本場戰術預設加成」換成強度屬性（aim、reaction、awareness）的同一個偏移：
-//   shift ＝ clamp(round(habit / 15), −4, 4) ＋ clamp(round(presetBonus / 15), 0, 6)
+// 再把經營層的「習慣」換成強度屬性（aim、reaction、awareness）的同一個偏移：shift ＝ clamp(round(habit / 15), −4, 4)
+// （舊請求單的 presetBonus 另加 clamp(round(presetBonus / 15), 0, 6)，見 attributeShift）
 // 係數 15 來自步驟 7 的梯度（整隊每屬性點約 15～20 整場 Elo）；用固定換算而不用亂數，讓真實強度與球探報告方向一致。
+// M5（API 1.2）：戰術手冊不改屬性。選手 config 的 p_<戰術>（個人熟練度）與隊伍 team 的 q_<戰術>（執行熟練度）變成開局資料 tactics；
+// team 的 pref_<戰術>（-1～3）與 economy（0～2）變成每次觀察資料的 coach（第一批沒有暫停，整場都是賽前計畫、沒有命令）。
+// 成績單的回合戰術標籤來自 Bot 每回合的「K:<戰術>」喊話（驅動層 tacticTags）。
 // 反應延遲由驅動層依屬性重算（reactionTicksFor）。
 // 座位：A 名單 0～4、B 名單 5～9（A 上半場當 T）；地圖照請求單的 mapId，沒有就是預設地圖 redrock（赤岩舊城）；種子＝請求單的種子。
 // 確定性：控制器關掉逾時判定（timeLimits: false），結果只由程式碼與種子決定；Bot 例外仍算「該次無指令」。
 // 觀戰回放（步驟 9）：可玩版的觀戰 Worker 用同一個 gatewayDriverOptions 建 ShooterDriver、逐 tick 推進，
 // 所以重播與經營層當時打的那一場是同一場（成績單與終局雜湊相同，test/manage-shooter.test.ts）。
 // 試玩頁的基準 Bot 座位（src/web/shooter/lineup.ts）也呼叫 seatOf、seatController、seatKnobs，座位邏輯只有這一份。
-import type { MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec } from '../manage/gateway.ts';
+import type { MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec, SideSpec } from '../manage/gateway.ts';
 import type { KnobValues } from '../api/types.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
-import type { Attributes } from './api.ts';
+import type { Attributes, InitTactics, TeamOrders } from './api.ts';
 import { ROUND, TEAM_SIZE } from './config.ts';
 import { MAPS, type ShooterMap } from './map.ts';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES, type ShooterRole } from './players.ts';
@@ -57,9 +60,36 @@ export function formatOptions(id: string): FormatOptions {
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const num = (v: number | string | undefined): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
-/** 經營層 config → 強度屬性偏移（habit：±60 左右的隱藏習慣；presetBonus：本場可用的戰術預設加成） */
+/**
+ * 經營層 config → 強度屬性偏移（habit：±60 左右的隱藏習慣）。
+ * presetBonus（M4 的戰術預設加成，M5 退場）只為舊存檔裡的請求單保留：經營層不再送，但第 5 版存檔遷移後，舊賽程的觀戰重跑要和當時同一場。
+ */
 export function attributeShift(config: PlayerSpec['config']): number {
   return clamp(Math.round(num(config.habit) / 15), -4, 4) + clamp(Math.round(num(config.presetBonus) / 15), 0, 6);
+}
+
+/** 不透明資料裡某個前綴的數值欄位（例 p_rushA → { rushA }），夾到 lo～hi 的整數 */
+function prefixed(bag: Readonly<Record<string, number | string>> | undefined, prefix: string, lo: number, hi: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (bag === undefined) return out;
+  for (const [k, v] of Object.entries(bag)) {
+    if (k.startsWith(prefix) && typeof v === 'number' && Number.isFinite(v)) out[k.slice(prefix.length)] = clamp(Math.round(v), lo, hi);
+  }
+  return out;
+}
+
+/** 一方的戰術熟練度（每座位一份）；隊伍沒有 team 資料＝null（舊請求單、試玩） */
+export function sideTactics(side: SideSpec): (InitTactics | null)[] {
+  if (side.team === undefined) return side.players.map(() => null);
+  const team = prefixed(side.team, 'q_', 0, 100);
+  return side.players.map((p) => ({ team, personal: prefixed(p.config, 'p_', 0, 100) }));
+}
+
+/** 一方的教練指令（比賽計畫，沒有命令）；沒有 team 資料＝null */
+export function sideOrders(side: SideSpec): TeamOrders | null {
+  if (side.team === undefined) return null;
+  const e = num(side.team.economy);
+  return { pref: prefixed(side.team, 'pref_', -1, 3), economy: e === 1 ? 1 : e === 2 ? 2 : 0, call: null };
 }
 
 export interface GatewaySeat {
@@ -110,15 +140,17 @@ export function roundPhase(n: number, rules: Pick<ShooterMatch, 'roundsPerHalf' 
   return `加時 ${Math.floor((n - reg - 1) / per) + 1}`;
 }
 
-/** 引擎結果 → 成績單（A＝組 0＝玩家 0～4）；rules：該場的半場長度與加時規則（ShooterMatch 本身就有） */
-export function outcomeOf(result: ShooterResult, rules: Pick<ShooterMatch, 'roundsPerHalf' | 'overtimeRule'>): MatchOutcome {
+/** 引擎結果 → 成績單（A＝組 0＝玩家 0～4）；rules：該場的半場長度與加時規則（ShooterMatch 本身就有）；tags：驅動層的回合戰術標籤 */
+export function outcomeOf(result: ShooterResult, rules: Pick<ShooterMatch, 'roundsPerHalf' | 'overtimeRule'>, tags: readonly (readonly [string | null, string | null] | undefined)[] = []): MatchOutcome {
   const regulation = rules.roundsPerHalf * 2;
   let a = 0;
   let b = 0;
   const rounds: MatchRound[] = result.rounds.map((r) => {
     if (r.winnerGroup === 0) a++;
     else b++;
-    return { label: roundLabel(r.number, regulation), winner: r.winnerGroup === 0 ? 'a' : 'b', scoreA: a, scoreB: b, phase: roundPhase(r.number, rules) };
+    const t = tags[r.number - 1];
+    const tactics = t !== undefined && (t[0] !== null || t[1] !== null) ? { tactics: { a: t[0], b: t[1] } } : {};
+    return { label: roundLabel(r.number, regulation), winner: r.winnerGroup === 0 ? 'a' : 'b', scoreA: a, scoreB: b, phase: roundPhase(r.number, rules), ...tactics };
   });
   return { winner: result.winner === 0 ? 'a' : result.winner === 1 ? 'b' : 'draw', rounds };
 }
@@ -150,14 +182,17 @@ export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, op
   const controllers = Array.from({ length: PLAYER_COUNT }, (_, pid) => seatController(bot, request.seed, pid, map));
   const knobs = controllers.map((c, pid) => seatKnobs(c, seats[pid]));
   const fo = formatOptions(format.id);
-  return { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), record: opts.record === true, ...fo };
+  // 戰術手冊資料（M5）：至少一方有 team 才帶；都沒有時選項與試玩頁、舊請求單逐欄相同
+  const orders: [TeamOrders | null, TeamOrders | null] = [sideOrders(request.a), sideOrders(request.b)];
+  const playbook = request.a.team !== undefined || request.b.team !== undefined ? { tactics: [...sideTactics(request.a), ...sideTactics(request.b)], orders } : {};
+  return { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), ...playbook, record: opts.record === true, ...fo };
 }
 
 /** 打一場：同一張請求單＋同一份 Bot 程式碼 → 同一個結果 */
 export function runGatewayMatch(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): GatewayMatch {
   const run = runShooterMatch(gatewayDriverOptions(request, bot, opts));
   return {
-    outcome: outcomeOf(run.result, run.match),
+    outcome: outcomeOf(run.result, run.match, run.tacticTags),
     ...(run.replay ? { replay: run.replay } : {}),
     finalHash: run.finalHash,
     wallMs: run.wallMs,
