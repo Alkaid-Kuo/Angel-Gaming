@@ -3001,6 +3001,14 @@ const MAIN_PRI = [3, 0, 1, 2, 5, 4];
 const SMOKE_PREF = [SUPPORT, ANCHOR, LURK, 0, ENTRY, AWP];
 const SITES = (['A', 'B']);
 const other = (s) => (s === 'A' ? 'B' : 'A');
+const T_TACTICS = (['rushA', 'rushB', 'default', 'splitA', 'splitB', 'fake']);
+const CT_TACTICS = (['ct212', 'stackA', 'stackB', 'ctPush']);
+function tacticOf(p) {
+if (p.kind === 'hold') return p.push ? 'ctPush' : p.a >= 3 ? 'stackA' : p.b >= 3 ? 'stackB' : 'ct212';
+if (p.kind === 'go' || p.kind === 'rush') return `rush${p.site}`;
+if (p.kind === 'split') return `split${p.site}`;
+return p.kind;
+}
 const rollOf = (round, salt) => {
 const a = Math.imul(round + 1, 2654435761) ^ Math.imul(salt + 1, 40503);
 return (a ^ (a >>> 15)) >>> 0;
@@ -3020,8 +3028,8 @@ return { kind, site, r1, r2: m[4] !== undefined ? Number(m[4]) : r1, exec: kind 
 }
 m = /^P:(default|fake) ([AB]) (\d+) (\d+)(?: >([AB]))?$/.exec(text);
 if (m !== null) return { kind: (m[1]), site: (m[2]), r1: Number(m[3]), r2: Number(m[4]), exec: m[5] !== undefined ? (m[5]) : null };
-m = /^P:hold A=(\d) (?:M=(\d) )?B=(\d)(?: rot=([AB]))?( go)?$/.exec(text);
-if (m !== null) return { kind: 'hold', a: Number(m[1]), m: m[2] !== undefined ? Number(m[2]) : 0, b: Number(m[3]), rot: m[4] !== undefined ? (m[4]) : null, go: m[5] !== undefined };
+m = /^P:hold A=(\d) (?:M=(\d) )?B=(\d)( push)?(?: rot=([AB]))?( go)?$/.exec(text);
+if (m !== null) return { kind: 'hold', a: Number(m[1]), m: m[2] !== undefined ? Number(m[2]) : 0, b: Number(m[3]), rot: m[5] !== undefined ? (m[5]) : null, go: m[6] !== undefined, push: m[4] !== undefined };
 return null;
 }
 function planText(p) {
@@ -3036,7 +3044,7 @@ case 'default':
 case 'fake':
 return `P:${p.kind} ${p.site} ${p.r1} ${p.r2}${p.exec !== null ? ` >${p.exec}` : ''}`;
 default:
-return `P:hold A=${p.a}${p.m > 0 ? ` M=${p.m}` : ''} B=${p.b}${p.rot !== null ? ` rot=${p.rot}` : ''}${p.go ? ' go' : ''}`;
+return `P:hold A=${p.a}${p.m > 0 ? ` M=${p.m}` : ''} B=${p.b}${p.push ? ' push' : ''}${p.rot !== null ? ` rot=${p.rot}` : ''}${p.go ? ' go' : ''}`;
 }
 }
 function parseEvent(text) {
@@ -3071,6 +3079,12 @@ this.h = h;
 this.opts = opts;
 this.attrs = attrs;
 this.tps = data.rules.ticksPerSecond;
+this.prof = data.tactics ?? null;
+this.coach = null;
+this.used = new Map();
+this.usedTeam = '';
+this.tagSaid = false;
+this.tagPick = null;
 const reaction = clamp(data.attributes.reaction, 0, 100);
 const nominal = 5 + Math.max(0, 70 - reaction) / 8;
 const exact = 5 + Math.max(0, 70 - Math.round(reaction)) / 8;
@@ -3191,7 +3205,15 @@ this.saveCache = null;
 this.saveAt = -1000000;
 }
 reset(obs) {
+this.tagSaid = false;
+this.tagPick = null;
 if (obs !== null) {
+this.coach = obs.coach ?? null;
+this.econ.opts.economy = this.coach !== null ? this.coach.economy : this.opts.economy;
+if (obs.me.team !== this.usedTeam) {
+this.used = new Map();
+this.usedTeam = obs.me.team;
+}
 this.econ.roundStart(obs);
 this.adapt.begin(obs, this.econ.lastWon);
 const won = this.econ.lastWon;
@@ -3475,6 +3497,11 @@ const me = obs.me;
 const t = obs.tick;
 for (const c of obs.chat) {
 if (c.from === me.id) continue;
+if (c.text.startsWith('K:')) {
+if (!this.tagSaid) this.used.set(c.text.slice(2), (this.used.get(c.text.slice(2)) ?? 0) + 1);
+this.tagSaid = true;
+continue;
+}
 const r = parseRole(c.text);
 if (r > 0) {
 this.roles.hear(c.from, r);
@@ -3545,6 +3572,12 @@ if (prev !== null && prev.kind !== 'hold' && p.kind !== 'hold' && prev.r1 !== p.
 }
 lead(obs, out) {
 if (this.plan === null) this.setPlan(this.choosePlan(obs), obs);
+if (!this.tagSaid && this.plan !== null) {
+this.tagSaid = true;
+const k = this.tagPick ?? tacticOf(this.plan);
+this.used.set(k, (this.used.get(k) ?? 0) + 1);
+out.cmds.push({ type: 'say', text: `K:${k}` });
+}
 const p = (this.plan);
 const next = p.kind === 'hold' ? this.leadCT(obs, p) : this.dodgeLine(obs, this.leadT(obs, p));
 if (next !== p) this.setPlan(next, obs);
@@ -3800,7 +3833,7 @@ out.cmds.push({ type: 'say', text: 'E:kit' });
 return;
 }
 if (isCmd && this.buyCall === null) {
-this.buyCall = this.econ.teamCall(obs);
+this.buyCall = this.coach?.call?.buy ?? this.econ.teamCall(obs);
 out.cmds.push({ type: 'say', text: `B:${this.buyCall}` });
 const awper = this.roles.awper();
 const people = [{ id: me.id, money: me.money, good: this.econ.hasGood(me.loadout.primary), awp: me.loadout.primary === 'awp', awper: awper === me.id }, ...obs.teammates.filter((m) => m.alive).map((m) => ({ id: m.id, money: m.money, good: this.econ.hasGood(m.weapon), awp: m.weapon === 'awp', awper: awper === m.id }))];
@@ -4924,10 +4957,11 @@ if (this.probed || obs.round.phase !== 'live' || p.rot !== null || this.alive(ob
 const lay = this.ctLayout(obs, p);
 const lurk = this.roles.who(LURK);
 const who = lurk >= 0 && this.isAlive(obs, lurk) && lay.get(lurk)?.site === null ? lurk : this.roles.who(ENTRY);
-if (who !== me.id) return null;
+const who2 = p.push ? [this.roles.who(ENTRY), this.roles.who(SUPPORT)].find((x) => x >= 0 && x !== who && this.isAlive(obs, x)) ?? -1 : -1;
+if (who !== me.id && who2 !== me.id) return null;
 const list = this.probeSpots();
 if (list.length === 0) return null;
-const sp = list[rollOf(obs.round.number, 7) % list.length];
+const sp = list[(rollOf(obs.round.number, 7) + (me.id === who2 ? 1 : 0)) % list.length];
 if (this.probeAt < 0 && dist(me.x, me.y, sp.x, sp.y) < 1.5 * UNIT) this.probeAt = t;
 const stay = (this.probeBare.has(sp.cell) ? 0.5 : 1) * P.probeStay * this.tps;
 const late = t - this.liveStart > P.probeTime * this.tps || (P.probeCover && this.probeAt >= 0 && t - this.probeAt > stay);

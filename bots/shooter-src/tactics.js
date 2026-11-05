@@ -26,7 +26,7 @@ const SMOKE_PREF = [SUPPORT, ANCHOR, LURK, 0, ENTRY, AWP];
 
 /** @typedef {'A' | 'B'} SiteId */
 /** T 計畫：site 主力的點、r1／r2 兩組的路線序號、exec 執行哪個點（null = 還在佈置） @typedef {{ kind: 'go' | 'default' | 'rush' | 'split' | 'fake', site: SiteId, r1: number, r2: number, exec: SiteId | null }} TPlan */
-/** CT 計畫：A／中路／B 人數、輪轉目標、回防開始 @typedef {{ kind: 'hold', a: number, m: number, b: number, rot: SiteId | null, go: boolean }} CTPlan */
+/** CT 計畫：A／中路／B 人數、輪轉目標、回防開始 @typedef {{ kind: 'hold', a: number, m: number, b: number, rot: SiteId | null, go: boolean, push?: boolean }} CTPlan */
 /** @typedef {TPlan | CTPlan} Plan */
 /** @typedef {{ kind: 'contact', region: string, n: number } | { kind: 'dead', region: string } | { kind: 'planted', site: SiteId } | { kind: 'flash', x: number, y: number, pop: number } | { kind: 'claim', x: number, y: number } | { kind: 'smoke', x: number, y: number } | { kind: 'burn', x: number, y: number, until: number } | { kind: 'awp', x: number, y: number } | { kind: 'kit' | 'smoker' | 'lurk' }} TeamEvent */
 /**
@@ -38,6 +38,21 @@ const SMOKE_PREF = [SUPPORT, ANCHOR, LURK, 0, ENTRY, AWP];
 const SITES = /** @type {const} */ (['A', 'B']);
 /** @param {SiteId} s @returns {SiteId} */
 const other = (s) => (s === 'A' ? 'B' : 'A');
+
+/** 戰術手冊（M5 規格 3.1）的代號：T 六個、CT 四個（2.8） */
+const T_TACTICS = /** @type {const} */ (['rushA', 'rushB', 'default', 'splitA', 'splitB', 'fake']);
+const CT_TACTICS = /** @type {const} */ (['ct212', 'stackA', 'stackB', 'ctPush']);
+
+/**
+ * 計畫 → 戰術代號（2.8，喊 K: 用）。eco 的 go（集中直走）視為 rush；CT 一點 3 人以上是疊點、push 是激進探點
+ * @param {Plan} p @returns {string}
+ */
+export function tacticOf(p) {
+  if (p.kind === 'hold') return p.push ? 'ctPush' : p.a >= 3 ? 'stackA' : p.b >= 3 ? 'stackB' : 'ct212';
+  if (p.kind === 'go' || p.kind === 'rush') return `rush${p.site}`;
+  if (p.kind === 'split') return `split${p.site}`;
+  return p.kind;
+}
 
 /** 回合數算出的固定亂數（全隊相同） @param {number} round @param {number} salt */
 // 例外（使用者 2026-11-05 明文允許）：以公開回合資訊做種子的確定性雜湊，當全隊一致的平手打破器與抽選；不算違反「亂數只能用 helpers」，不改成 helpers 抽樣
@@ -62,8 +77,8 @@ export function parsePlan(text) {
   }
   m = /^P:(default|fake) ([AB]) (\d+) (\d+)(?: >([AB]))?$/.exec(text);
   if (m !== null) return { kind: /** @type {'default' | 'fake'} */ (m[1]), site: /** @type {SiteId} */ (m[2]), r1: Number(m[3]), r2: Number(m[4]), exec: m[5] !== undefined ? /** @type {SiteId} */ (m[5]) : null };
-  m = /^P:hold A=(\d) (?:M=(\d) )?B=(\d)(?: rot=([AB]))?( go)?$/.exec(text);
-  if (m !== null) return { kind: 'hold', a: Number(m[1]), m: m[2] !== undefined ? Number(m[2]) : 0, b: Number(m[3]), rot: m[4] !== undefined ? /** @type {SiteId} */ (m[4]) : null, go: m[5] !== undefined };
+  m = /^P:hold A=(\d) (?:M=(\d) )?B=(\d)( push)?(?: rot=([AB]))?( go)?$/.exec(text);
+  if (m !== null) return { kind: 'hold', a: Number(m[1]), m: m[2] !== undefined ? Number(m[2]) : 0, b: Number(m[3]), rot: m[5] !== undefined ? /** @type {SiteId} */ (m[5]) : null, go: m[6] !== undefined, push: m[4] !== undefined };
   return null;
 }
 
@@ -80,7 +95,7 @@ export function planText(p) {
     case 'fake':
       return `P:${p.kind} ${p.site} ${p.r1} ${p.r2}${p.exec !== null ? ` >${p.exec}` : ''}`;
     default:
-      return `P:hold A=${p.a}${p.m > 0 ? ` M=${p.m}` : ''} B=${p.b}${p.rot !== null ? ` rot=${p.rot}` : ''}${p.go ? ' go' : ''}`;
+      return `P:hold A=${p.a}${p.m > 0 ? ` M=${p.m}` : ''} B=${p.b}${p.push ? ' push' : ''}${p.rot !== null ? ` rot=${p.rot}` : ''}${p.go ? ' go' : ''}`;
   }
 }
 
@@ -124,6 +139,17 @@ export class Tactics {
     this.opts = opts;
     this.attrs = attrs;
     this.tps = data.rules.ticksPerSecond;
+    /** 2.8：戰術熟練度（init.tactics，整場不變；null＝沒有資料，一律當 50） */
+    this.prof = data.tactics ?? null;
+    /** 2.8：本回合的教練指令（obs.coach，整回合不變；null＝沒有教練） @type {import('./base.js').Observation['coach']} */
+    this.coach = null;
+    /** 2.8：本半場每個戰術用過幾次（自己喊的＋聽到隊友喊的 K:；換邊清空） @type {Map<string, number>} */
+    this.used = new Map();
+    this.usedTeam = '';
+    /** 2.8：本回合已經喊過／聽到 K:（一回合只算一次）；指揮本回合選的戰術代號 */
+    this.tagSaid = false;
+    /** @type {string | null} */
+    this.tagPick = null;
     // 公開 reactionTicks 是四捨五入值；由公開屬性／公式推得可能區間，不預知本批的隨機進位。
     const reaction = clamp(data.attributes.reaction, 0, 100);
     const nominal = 5 + Math.max(0, 70 - reaction) / 8;
@@ -305,7 +331,16 @@ export class Tactics {
 
   /** 新回合（obs 為 null 時只清狀態） @param {import('./base.js').Observation | null} obs */
   reset(obs) {
+    this.tagSaid = false;
+    this.tagPick = null;
     if (obs !== null) {
+      // 2.8：教練指令整回合不變；經濟風格取代旋鈕 economy（沒有教練照旋鈕）
+      this.coach = obs.coach ?? null;
+      this.econ.opts.economy = this.coach !== null ? this.coach.economy : this.opts.economy;
+      if (obs.me.team !== this.usedTeam) {
+        this.used = new Map();
+        this.usedTeam = obs.me.team;
+      }
       this.econ.roundStart(obs);
       this.adapt.begin(obs, this.econ.lastWon);
       // 上回合的結果記進整場記憶
@@ -640,6 +675,12 @@ export class Tactics {
     const t = obs.tick;
     for (const c of obs.chat) {
       if (c.from === me.id) continue;
+      // 2.8：隊友喊的戰術標籤：累計本半場用過次數（指揮換人時新指揮也知道）
+      if (c.text.startsWith('K:')) {
+        if (!this.tagSaid) this.used.set(c.text.slice(2), (this.used.get(c.text.slice(2)) ?? 0) + 1);
+        this.tagSaid = true;
+        continue;
+      }
       const r = parseRole(c.text);
       if (r > 0) {
         this.roles.hear(c.from, r);
@@ -721,6 +762,13 @@ export class Tactics {
   /** 指揮：決定、更新、廣播計畫 @param {import('./base.js').Observation} obs @param {TacOut} out */
   lead(obs, out) {
     if (this.plan === null) this.setPlan(this.choosePlan(obs), obs);
+    // 2.8：每回合第一次決策喊本回合的戰術（K:<代號>），一回合一次
+    if (!this.tagSaid && this.plan !== null) {
+      this.tagSaid = true;
+      const k = this.tagPick ?? tacticOf(this.plan);
+      this.used.set(k, (this.used.get(k) ?? 0) + 1);
+      out.cmds.push({ type: 'say', text: `K:${k}` });
+    }
     const p = /** @type {Plan} */ (this.plan);
     const next = p.kind === 'hold' ? this.leadCT(obs, p) : this.dodgeLine(obs, this.leadT(obs, p));
     if (next !== p) this.setPlan(next, obs);
@@ -1036,7 +1084,8 @@ export class Tactics {
       return;
     }
     if (isCmd && this.buyCall === null) {
-      this.buyCall = this.econ.teamCall(obs);
+      // 2.8：教練命令的買法蓋過隊內買法
+      this.buyCall = this.coach?.call?.buy ?? this.econ.teamCall(obs);
       out.cmds.push({ type: 'say', text: `B:${this.buyCall}` });
       // 發槍計畫（2.6.2）：隊友的金錢公開、主武器只看得到手上拿的
       const awper = this.roles.awper();
@@ -2478,10 +2527,12 @@ export class Tactics {
     const lay = this.ctLayout(obs, p);
     const lurk = this.roles.who(LURK);
     const who = lurk >= 0 && this.isAlive(obs, lurk) && lay.get(lurk)?.site === null ? lurk : this.roles.who(ENTRY);
-    if (who !== me.id) return null;
+    // 2.8：激進探點（ctPush）多派一個人（突破手，或游擊探了就換突破手以外的支援）去另一個探點
+    const who2 = p.push ? [this.roles.who(ENTRY), this.roles.who(SUPPORT)].find((x) => x >= 0 && x !== who && this.isAlive(obs, x)) ?? -1 : -1;
+    if (who !== me.id && who2 !== me.id) return null;
     const list = this.probeSpots();
     if (list.length === 0) return null;
-    const sp = list[rollOf(obs.round.number, 7) % list.length];
+    const sp = list[(rollOf(obs.round.number, 7) + (me.id === who2 ? 1 : 0)) % list.length];
     if (this.probeAt < 0 && dist(me.x, me.y, sp.x, sp.y) < 1.5 * UNIT) this.probeAt = t;
     const stay = (this.probeBare.has(sp.cell) ? 0.5 : 1) * P.probeStay * this.tps;
     const late = t - this.liveStart > P.probeTime * this.tps || (P.probeCover && this.probeAt >= 0 && t - this.probeAt > stay);
