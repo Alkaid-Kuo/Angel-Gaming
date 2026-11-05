@@ -1,13 +1,13 @@
 // 資訊分層的「已知層」：畫面、NPC、自動玩家只能讀這裡產生的視圖。
-// 真實層（隱藏的習慣、戰術預設的真實加成、流派真實強度）不會出現在視圖裡；
+// 真實層（隱藏的習慣、流派真實強度、別隊的戰術手冊）不會出現在視圖裡；
 // 玩家要知道，只能靠公開戰績、花錢買的情報、練習賽樣本。
 import { fixtureOdds } from './betting.ts';
 import type { ContentPack } from './content.ts';
 import type { MatchFormat } from './gateway.ts';
 import type { StandingRow } from './league.ts';
 import { standings } from './league.ts';
-import { capacityLeft, playerMaxVersion, rosterOf, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
-import type { Bet, FixtureId, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, ScrimReport, SeasonResult, Stage, TeamId, Winner } from './types.ts';
+import { capacityLeft, effectiveLineup, effectiveTactics, playerMaxVersion, playerOf, rosterOf, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
+import type { Bet, FixtureId, GamePlan, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, RoundResult, ScrimReport, SeasonResult, Stage, TeamId, Winner } from './types.ts';
 import { TOTAL_WEEKS } from './types.ts';
 
 export interface KnownPlayer {
@@ -25,6 +25,8 @@ export interface KnownPlayer {
   weeklySalary: number;
   teamId: TeamId | null;
   upgrading: boolean;
+  /** 個人戰術熟練度（M5，整數）：只有自己隊的人有 */
+  tactics?: Record<string, number>;
 }
 
 export interface KnownFixture {
@@ -41,20 +43,13 @@ export interface KnownFixture {
     away: PlayerId[];
     winner: TeamId | null;
     /** phase：閘道給的賽段標籤（上半場、加時等），沒有就不畫分隔 */
-    rounds: { label: string; winner: Winner; home: number; away: number; phase?: string }[];
+    /** tactic：我方本回合打的戰術（M5；只有我方的比賽、只給我方那一半，對方的不給） */
+    rounds: { label: string; winner: Winner; home: number; away: number; phase?: string; tactic?: string | null }[];
     /** 賽制自報能觀戰（knownView 有傳賽制時才可能 true；請求單本身含隱藏資料，不放進視圖） */
     watchable: boolean;
   } | null;
 }
 
-export interface KnownPreset {
-  playerId: PlayerId;
-  id: string;
-  target: string;
-  /** 研發報告上的估計值（帶誤差） */
-  reportedBonus: number;
-  valid: boolean;
-}
 
 export interface KnownView {
   week: number;
@@ -73,6 +68,12 @@ export interface KnownView {
     weeklySponsor: number;
     /** 現金還撐得幾週（固定支出 − 贊助 ≤ 0 時為 null＝不燒錢） */
     runwayWeeks: number | null;
+    /** 隊伍默契（M5，整數） */
+    playbook: Record<string, number>;
+    /** 執行熟練度（M5）：依目前會出賽的名單算 */
+    effective: Record<string, number>;
+    /** 賽前比賽計畫（M5） */
+    gamePlan: GamePlan;
   };
   players: KnownPlayer[];
   teams: { id: TeamId; name: string; fame: number; roster: PlayerId[] }[];
@@ -82,13 +83,17 @@ export interface KnownView {
   standings: StandingRow[];
   intel: IntelReport[];
   scrims: ScrimReport[];
-  presets: KnownPreset[];
   bets: Bet[];
   jobs: Job[];
   /** 我方帳本與收件匣（玩家的戰隊才有收件匣） */
   ledger: LedgerEntry[];
   inbox: Message[];
   seasonResult: SeasonResult | null;
+}
+
+/** 回合戰術標籤只給我方那一半（對方打什麼是隱藏的） */
+function ownTactic(r: RoundResult, side: 'a' | 'b' | null): { tactic?: string | null } {
+  return side === null || r.tactics === undefined ? {} : { tactic: r.tactics[side] };
 }
 
 /** format：目前賽制（只拿 watchable 透傳給畫面；NPC、自動玩家不傳＝不能觀戰） */
@@ -114,6 +119,9 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       weeklyFixedCost: fixed,
       weeklySponsor: sponsor,
       runwayWeeks: burn <= 0 ? null : Math.max(0, Math.floor(team.cash / burn)),
+      playbook: Object.fromEntries(Object.entries(team.playbook).map(([k, v]) => [k, Math.round(v)])),
+      effective: effectiveTactics(content, team, effectiveLineup(state, content, team).map((id) => playerOf(state, id))),
+      gamePlan: { pref: { ...team.gamePlan.pref }, economy: team.gamePlan.economy },
     },
     players: state.players.map((p) => ({
       id: p.id,
@@ -128,6 +136,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       weeklySalary: p.weeklySalary,
       teamId: p.teamId,
       upgrading: p.upgradeUntilWeek !== null,
+      ...(p.teamId === teamId ? { tactics: Object.fromEntries(Object.entries(p.tactics).map(([k, v]) => [k, Math.round(v)])) } : {}),
     })),
     teams: state.teams.map((t) => ({ id: t.id, name: t.name, fame: t.fame, roster: rosterOf(state, t.id).map((p) => p.id) })),
     fixtures: state.fixtures.map((f) => ({
@@ -142,7 +151,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
             home: [...f.result.lineupA],
             away: [...f.result.lineupB],
             winner: f.result.winner,
-            rounds: f.result.rounds.map((r) => ({ label: r.label, winner: r.winner, home: r.scoreA, away: r.scoreB, ...(r.phase !== undefined ? { phase: r.phase } : {}) })),
+            rounds: f.result.rounds.map((r) => ({ label: r.label, winner: r.winner, home: r.scoreA, away: r.scoreB, ...(r.phase !== undefined ? { phase: r.phase } : {}), ...ownTactic(r, f.home === teamId ? 'a' : f.away === teamId ? 'b' : null) })),
             watchable: format?.watchable === true,
           }
         : null,
@@ -156,9 +165,6 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
     standings: standings(state),
     intel: team.intel.map((i) => ({ ...i })),
     scrims: team.scrims.map((s) => ({ ...s })),
-    presets: mine.flatMap((p) =>
-      p.presets.map((pr) => ({ playerId: p.id, id: pr.id, target: pr.target, reportedBonus: pr.reportedBonus, valid: pr.version === p.version })),
-    ),
     bets: state.bets.filter((b) => b.teamId === teamId).map((b) => ({ ...b })),
     jobs: state.jobs.filter((j) => j.teamId === teamId).map((j) => ({ ...j })),
     ledger: team.ledger.map((e) => ({ ...e })),

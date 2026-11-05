@@ -2,7 +2,7 @@
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
 import type { MatchRequest } from './gateway.ts';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -29,17 +29,15 @@ export interface LedgerEntry {
   memo: string;
 }
 
-/** 戰術預設（練習賽研發的產出） */
-export interface Preset {
-  id: string;
-  /** 'generic'＝泛用；否則為針對的流派代號 */
-  target: string;
-  /** 建立時選手的版本；升版後失效 */
-  version: number;
-  /** 隱藏：真實加成 */
-  bonus: number;
-  /** 公開：研發報告上顯示的估計值（帶誤差） */
-  reportedBonus: number;
+/** 戰術代號（內容包 tactics[].id；M5） */
+export type TacticId = string;
+
+/** 比賽計畫（M5）：Bot 自己選戰術時的權重；暫停（第四批）可改 */
+export interface GamePlan {
+  /** 每個戰術的偏好：-1 禁用、0 不偏好、1～3 星（內容包的每個戰術都有一筆） */
+  pref: Record<TacticId, number>;
+  /** 經濟風格：0 標準、1 保守、2 積極 */
+  economy: 0 | 1 | 2;
 }
 
 export interface Player {
@@ -63,7 +61,10 @@ export interface Player {
   /** 剩餘賽季（M4 固定 1，留給 M5 的合約續約） */
   contractSeasons: number;
   upgradeUntilWeek: number | null;
-  presets: Preset[];
+  /** 個人戰術熟練度（M5；0～100，存到小數一位）：跟著選手走，轉會帶走。自己的選手公開，別隊隱藏 */
+  tactics: Record<TacticId, number>;
+  /** 新面孔（M5）：簽約時設 true，第一次為本隊出賽後清掉；出賽名單有新面孔的那場開打前，隊伍默契打折 */
+  newFace: boolean;
 }
 
 export interface IntelReport {
@@ -95,6 +96,10 @@ export interface Team {
   ledger: LedgerEntry[];
   intel: IntelReport[];
   scrims: ScrimReport[];
+  /** 隊伍默契（M5；0～100，存到小數一位）：自己公開、別隊隱藏 */
+  playbook: Record<TacticId, number>;
+  /** 賽前比賽計畫（M5）：自己公開、別隊隱藏 */
+  gamePlan: GamePlan;
 }
 
 export interface RoundResult {
@@ -104,6 +109,8 @@ export interface RoundResult {
   scoreB: number;
   /** 賽段標籤（閘道給的，只供顯示） */
   phase?: string;
+  /** 雙方本回合打的戰術（M5；a＝主隊）；隱藏：對方的那一半不進別隊的已知層 */
+  tactics?: { a: string | null; b: string | null };
 }
 
 /** 一場戰隊賽（名單對名單一場比賽）。A＝主隊、B＝客隊 */
@@ -143,7 +150,7 @@ export interface Bet {
 
 export type Job =
   | { kind: 'scrim'; id: number; teamId: TeamId; opponentTeamId: TeamId; games: number }
-  | { kind: 'research'; id: number; teamId: TeamId; playerId: PlayerId; target: string; games: number }
+  | { kind: 'rehearse'; id: number; teamId: TeamId; tactic: TacticId; sessions: number }
   | { kind: 'scout'; id: number; teamId: TeamId; playerId: PlayerId };
 
 export interface Message {
@@ -186,7 +193,8 @@ export type Command =
   | { type: 'upgradeVersion'; playerId: PlayerId }
   | { type: 'bet'; fixtureId: FixtureId; side: Side; stake: number }
   | { type: 'queueScrim'; opponentTeamId: TeamId; games: number }
-  | { type: 'queueResearch'; playerId: PlayerId; target: string; games: number }
+  | { type: 'queueRehearse'; tactic: TacticId; sessions: number }
+  | { type: 'setGamePlan'; plan: GamePlan }
   | { type: 'scout'; playerId: PlayerId };
 
 export type CommandResult = { ok: true } | { ok: false; reason: string };

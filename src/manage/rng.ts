@@ -6,10 +6,15 @@ export const STREAM = {
   newGame: 1,
   match: 2,
   scrim: 3,
+  /** M4 戰術研發（M5 退場；編號保留不重用） */
   research: 4,
   scout: 5,
   npc: 6,
   auto: 7,
+  /** M5：開局個人戰術熟練度 */
+  tactics: 8,
+  /** M5：第 5 版存檔遷移補熟練度 */
+  migrate: 9,
 } as const;
 
 export function rngFor(seed: number, stream: number, ...keys: number[]): Prng {
