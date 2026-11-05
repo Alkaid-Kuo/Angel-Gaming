@@ -949,6 +949,25 @@ describe('Bot 2.7 批 3：煙滅火選項化（fireChoice）', () => {
     expect(Object.entries(s).sort((a, b) => a[1] - b[1])[0][0]).toBe('wait');
   });
 
+  it('先封再等和等火熄在平手範圍內（兩個都可能被選，不會永遠是等火熄）', () => {
+    const s = options('default', true, 6, 60);
+    expect(Math.abs(s.wait - s.seal)).toBeLessThan(P.fireTie);
+  });
+
+  it('決定的人身上沒有煙：不替全組選、不喊 E:fire（開關關掉時照樣選）', () => {
+    const { match, bot } = live(2);
+    const o = match.observe(2);
+    const ent = bot.intel.sites.A.entrances[0];
+    const obs: ShooterObservation = { ...o, me: { ...o.me, x: ent.ox, y: ent.oy, loadout: { ...o.me.loadout, grenades: [] } } };
+    const fire = { x: ent.ox, y: ent.oy, radius: 2 * UNIT, ticksLeft: 6 * 30 };
+    const a = out();
+    expect(bot.tactics.fireDecide(obs, a, plan('default'), 'A', ent, fire, true, false)).toBeNull();
+    expect(a.cmds.some((c) => c.type === 'say' && String((c as { text?: string }).text).startsWith('E:fire'))).toBe(false);
+    setP('fireNeedSmoke', false);
+    const b = out();
+    expect(bot.tactics.fireDecide(obs, b, plan('default'), 'A', ent, fire, true, false)).not.toBeNull();
+  });
+
   it('E:fire 解析；只算還在的煙（散掉的不算）', () => {
     expect(parseEvent('E:fire detour 120 340')).toEqual({ kind: 'fire', k: 'detour', x: 12000, y: 34000 });
     const { bot } = live(2);

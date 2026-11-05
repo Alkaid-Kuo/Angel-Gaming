@@ -2234,6 +2234,8 @@ export class Tactics {
       this.fireRounds++;
     }
     if (!mine) return this.fireCall?.k ?? null;
+    // 2.7 批 3（P.fireNeedSmoke）：決定的人沒有煙就不替全組選（只剩繞門／等火熄時，整組停下來等很吃虧）
+    if (P.fireNeedSmoke && !this.util.has(obs.me, 'smoke')) return null;
     const opts = this.fireOptions(obs, p, exec, ent, fire, sealer);
     const key = `${Math.round(fire.x / UNIT)},${Math.round(fire.y / UNIT)}`;
     const c = this.fireChoice.choose(key, t, opts, rollOf(obs.round.number, 29), { tie: P.fireTie, hold: P.fireHold * this.tps, margin: P.fireMargin });

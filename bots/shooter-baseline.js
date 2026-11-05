@@ -217,12 +217,13 @@ fireDetour: 0.9,
 fireDetourSec: 0.08,
 fireWait: 1.1,
 fireWaitSec: 0.12,
-fireSeal: 1.0,
+fireSeal: 1.1,
 fireSealSec: 0.1,
 fireTie: 0.15,
 fireHold: 3,
 fireMargin: 0.2,
 fireBackup: true,
+fireNeedSmoke: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -4776,6 +4777,7 @@ this.fireRoundSeen = true;
 this.fireRounds++;
 }
 if (!mine) return this.fireCall?.k ?? null;
+if (P.fireNeedSmoke && !this.util.has(obs.me, 'smoke')) return null;
 const opts = this.fireOptions(obs, p, exec, ent, fire, sealer);
 const key = `${Math.round(fire.x / UNIT)},${Math.round(fire.y / UNIT)}`;
 const c = this.fireChoice.choose(key, t, opts, rollOf(obs.round.number, 29), { tie: P.fireTie, hold: P.fireHold * this.tps, margin: P.fireMargin });
