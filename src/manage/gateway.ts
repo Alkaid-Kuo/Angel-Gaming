@@ -7,6 +7,7 @@
 // 4. 攻守與座位的公平由賽制自己處理（每方輪到各個角色），經營層不管。
 // 5. 賽制自報每場回合數、估計耗時與名單人數，經營層才估得出「推進一週要等多久」、開局時才查得出內容包配不配。
 // 6. 賽制自報能不能觀戰（watchable）；經營層不解讀，只透傳給畫面決定要不要放「觀戰」。
+// 7. 隊伍層資料（M5）：SideSpec.team 是不透明的一包；成績單可回報每回合雙方的戰術代號（MatchRound.tactics），代號由內容包定義。
 import type { Winner } from './types.ts';
 
 export interface MatchFormat {
@@ -32,6 +33,8 @@ export interface PlayerSpec {
 /** 一方的出賽名單：順序＝出賽名單順序＝隊內序號 */
 export interface SideSpec {
   readonly players: readonly PlayerSpec[];
+  /** 隊伍層的不透明資料（M5：攻防戰放戰術執行熟練度與比賽計畫），內容由內容包的 schema 決定；沒有＝賽制預設 */
+  readonly team?: Readonly<Record<string, number | string>>;
 }
 
 export interface MatchRequest {
@@ -51,6 +54,8 @@ export interface MatchRound {
   readonly scoreB: number;
   /** 賽段標籤（例如「上半場」「下半場」「加時 1」）；有給時畫面在標籤改變處畫分隔，經營層不解讀 */
   readonly phase?: string;
+  /** 雙方本回合打的戰術代號（M5；閘道依賽制填，至少一方有才給）；經營層只存、只顯示、只用來累計熟練度 */
+  readonly tactics?: { readonly a: string | null; readonly b: string | null };
 }
 
 export interface MatchOutcome {

@@ -18,8 +18,10 @@ class Probe implements ShooterController {
   init0: ShooterInitData | null = null;
   coaches: (TeamOrders | null)[] = [];
   private said = new Set<number>();
-  constructor(label: string, private readonly say: ((round: number) => string | null) | null = null) {
+  private readonly say: ((round: number) => string | null) | null;
+  constructor(label: string, say: ((round: number) => string | null) | null = null) {
     this.label = label;
+    this.say = say;
     this.declaration = { name: label, version: '', style: 'probe', knobs: [] };
   }
   init(data: ShooterInitData): CallOutcome<null> {
