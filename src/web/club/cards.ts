@@ -1,4 +1,5 @@
 // 共用元件：選手卡、迷你卡、隊徽標、金幣、畫面標題。
+import { STAGE_NAMES } from '../../manage/attrs.ts';
 import type { KnownPlayer } from '../../manage/index.ts';
 import { esc, lineageName, wan } from '../manage/format.ts';
 import type { IconName } from './art.ts';
@@ -40,7 +41,7 @@ export interface CardOpts {
 }
 
 export function playerCard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
-  const t = tierOf(p.version);
+  const t = tierOf(p.stage);
   const team = teamColor(ctx, p.teamId);
   const intel = o.intel ? ctx.v.intel.find((i) => i.playerId === p.id) : undefined;
   const diff = intel ? intel.estPower - p.elo : 0;
@@ -50,10 +51,9 @@ export function playerCard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
         <div class="pc-lg" style="--lc:${lineageColor(p.lineageId)}" title="${lineageName(ctx.c, p.lineageId)}">${lineageGlyph(p.lineageId, 16)}<span>${lineageName(ctx.c, p.lineageId)}</span></div></div>
       <div class="pc-art">${avatarSvg(p.id + p.name, team, 132)}
         ${o.slot !== undefined && o.slot >= 0 ? `<span class="pc-slot">${SLOT_NAMES[o.slot]}</span>` : ''}
-        ${p.upgrading ? '<span class="pc-flag">升版中</span>' : ''}
         ${intel ? `<span class="pc-intel" title="球探報告：真實強度估計 ±誤差">情報 <b>${intel.estPower}</b><i class="${diff >= 0 ? 'up' : 'dn'}">${diff >= 0 ? '+' : ''}${diff}</i></span>` : ''}</div>
       <div class="pc-name">${esc(p.name)}</div>
-      <div class="pc-sub"><span class="pc-ver">v${p.version}・${t.name}</span>${o.record ? `<span>${o.record.w}勝${o.record.l}敗</span>` : `<span>${p.games} 場</span>`}</div>
+      <div class="pc-sub"><span class="pc-ver">${STAGE_NAMES[p.stage - 1]}・${t.name}</span>${o.record ? `<span>${o.record.w}勝${o.record.l}敗</span>` : `<span>${p.games} 場</span>`}</div>
       <div class="pc-foot"><span>週薪 <b>${wan(p.weeklySalary)}</b>萬</span></div>
     </div>${o.footer ?? ''}</div>`;
 }
@@ -61,10 +61,10 @@ export function playerCard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
 /** 迷你卡：出賽位、對戰畫面用 */
 export function miniCard(ctx: Ctx, p: KnownPlayer | undefined, extra = ''): string {
   if (!p) return `<div class="mc empty">${icon('users', 22)}<span>未指定</span></div>`;
-  const t = tierOf(p.version);
+  const t = tierOf(p.stage);
   const team = teamColor(ctx, p.teamId);
   return `<div class="mc t${t.idx}" style="--tier:${t.color};--team:${team}">${avatarSvg(p.id + p.name, team, 54)}
-    <div class="mc-txt"><b>${esc(p.name)}</b><span>${lineageGlyph(p.lineageId, 13)}${lineageName(ctx.c, p.lineageId)} v${p.version}</span></div><em>${p.elo}</em>${extra}</div>`;
+    <div class="mc-txt"><b>${esc(p.name)}</b><span>${lineageGlyph(p.lineageId, 13)}${lineageName(ctx.c, p.lineageId)} ${STAGE_NAMES[p.stage - 1]}</span></div><em>${p.elo}</em>${extra}</div>`;
 }
 
 export function slotLabel(i: number): string {

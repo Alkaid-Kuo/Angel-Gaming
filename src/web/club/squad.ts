@@ -1,10 +1,11 @@
 // 戰隊（出賽名單＋選手卡）、轉會市場、選手詳情視窗。
+import { STAGE_NAMES } from '../../manage/attrs.ts';
 import type { KnownPlayer } from '../../manage/index.ts';
 import { esc, lineageName, wan } from '../manage/format.ts';
 import { icon, lineageColor, lineageGlyph, tierOf } from './art.ts';
 import { coin, crest, miniCard, playerCard, screenHead, slotLabel, teamTag } from './cards.ts';
 import type { Ctx } from './model.ts';
-import { lineupOf, maxVersionOf, playerRecords, publicRating, rosterOf, teamName } from './model.ts';
+import { lineupOf, playerRecords, publicRating, rosterOf, teamName } from './model.ts';
 
 const canAct = (ctx: Ctx): boolean => ctx.v.phase === 'offseason' || ctx.v.phase === 'season';
 
@@ -64,7 +65,7 @@ export function marketScreen(ctx: Ctx): string {
   const seg = `<div class="seg"><button class="${ui.market === 'free' ? 'on' : ''}" data-act="market" data-m="free">自由球員</button><button class="${ui.market === 'teams' ? 'on' : ''}" data-act="market" data-m="teams">各隊名單</button></div>`;
   let body: string;
   if (ui.market === 'free') {
-    const free = v.players.filter((p) => p.teamId === null).sort((a, b) => b.version - a.version || b.elo - a.elo);
+    const free = v.players.filter((p) => p.teamId === null).sort((a, b) => b.stage - a.stage || b.elo - a.elo);
     body = free.length
       ? `<div class="card-grid">${free.map((p) => playerCard(ctx, p, { intel: true, footer: `<div class="pc-actions">${signBtn(ctx, p)}${scoutBtn(ctx, p)}</div>` })).join('')}</div>`
       : '<p class="empty-note">市場上沒有自由球員了。</p>';
@@ -92,22 +93,21 @@ export function cardModal(ctx: Ctx, pid: string): string {
   const e = c.economy;
   const mine = p.teamId === v.me.teamId;
   const rec = playerRecords(v).get(p.id) ?? { w: 0, l: 0 };
-  const t = tierOf(p.version);
+  const t = tierOf(p.stage);
   const lineage = c.lineages.find((l) => l.id === p.lineageId);
   const intel = v.intel.find((i) => i.playerId === p.id);
-  const upCost = p.weeklySalary * e.upgradeCostWeeks;
-  const maxed = p.version >= maxVersionOf(c, p.lineageId);
+  void e;
   const active = canAct(ctx);
   const stats: [string, string][] = [
     ['評分', `<b>${p.elo}</b>`],
     ['戰績', `${rec.w} 勝 ${rec.l} 敗`],
-    ['版本', `v${p.version}・<span style="color:${t.color}">${t.name}</span>`],
+    ['階段', `${STAGE_NAMES[p.stage - 1]}・<span style="color:${t.color}">${t.name}</span>`],
+    ['強度', c.attributes.trainable.map((k) => `${c.attributes.names[k] ?? k} ${p.grades[k]}`).join('、')],
     ['週薪', coin(p.weeklySalary)],
   ];
   let actions: string;
   if (mine) {
-    actions = `<button class="btn-main" data-act="upgrade" data-id="${p.id}" ${!active || p.upgrading || maxed || v.me.cash < upCost ? 'disabled' : ''}>${icon('levelup', 16)}${p.upgrading ? '升版中' : maxed ? '已是最高版本' : `升版培訓 ${wan(upCost)} 萬`}</button>
-      <button class="btn-sub" data-act="train-with" data-id="${p.id}" ${!active ? 'disabled' : ''}>${icon('target', 16)}排訓練</button>
+    actions = `<button class="btn-sub" data-act="train-with" data-id="${p.id}" ${!active ? 'disabled' : ''}>${icon('target', 16)}排訓練</button>
       <button class="btn-sub danger" data-act="release" data-id="${p.id}" ${!active || v.me.roster.length <= 3 ? 'disabled' : ''} title="${v.me.roster.length <= 3 ? '陣容至少要 3 人' : ''}">${icon('exit', 16)}解約</button>`;
   } else if (p.teamId === null) {
     actions = `${signBtn(ctx, p)}${scoutBtn(ctx, p)}`;
@@ -121,7 +121,7 @@ export function cardModal(ctx: Ctx, pid: string): string {
       <h2>${esc(p.name)}</h2>
       <div class="pm-lineage" style="--lc:${lineageColor(p.lineageId)}">${lineageGlyph(p.lineageId, 20)}<b>${lineageName(c, p.lineageId)}</b><span>${esc(lineage?.style ?? '')}</span></div>
       <dl class="pm-stats">${stats.map(([k, val]) => `<div><dt>${k}</dt><dd>${val}</dd></div>`).join('')}</dl>
-      ${mine && p.upgrading ? '<p class="pm-note">升版培訓中，完成後週薪 ×1.3。</p>' : ''}
+      ${mine ? '<p class="pm-note">屬性訓練請到正式版介面（game.html）的選手詳情排。</p>' : ''}
       ${!mine ? `<p class="pm-note">${intel ? `球探報告（${intel.week === 0 ? '休賽期' : `第 ${intel.week} 週`}）：真實強度約 <b>${intel.estPower}</b>（±${intel.sd}），比評分${intel.estPower >= p.elo ? '高' : '低'} ${Math.abs(intel.estPower - p.elo)}。` : '還沒有球探情報。'}</p>` : ''}
       <div class="pm-actions">${actions}</div>
     </div></div>`;

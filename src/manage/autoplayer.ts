@@ -7,6 +7,7 @@ import type { ContentPack } from './content.ts';
 import { advance } from './game.ts';
 import type { BattleGateway } from './gateway.ts';
 import { rngFor, STREAM } from './rng.ts';
+import { gradeMid } from './attrs.ts';
 import { publicPrior } from './state.ts';
 import type { Command, GameState, TeamId } from './types.ts';
 import type { KnownFixture, KnownPlayer, KnownView } from './view.ts';
@@ -166,7 +167,7 @@ const moneyball: Policy = (view, content) => {
     let count = view.me.roster.length;
     const picks = free
       .filter((p) => view.intel.some((i) => i.playerId === p.id))
-      .map((p) => ({ p, gain: estStrength(view, p) - publicPrior(p.version) }))
+      .map((p) => ({ p, gain: estStrength(view, p) - publicPrior(p.stage) }))
       .filter((x) => x.gain >= 25)
       .sort((a, b) => b.gain / b.p.weeklySalary - a.gain / a.p.weeklySalary);
     for (const { p } of picks) {
@@ -181,7 +182,49 @@ const moneyball: Policy = (view, content) => {
   return cmds;
 };
 
-export const POLICIES: Readonly<Record<string, Policy>> = { passive, steady, splurge, randomBettor, scoutBettor, moneyball };
+/**
+ * 訓練派（M5 第二批的平衡量測用）：休賽期把訓練中心升到 level（資金夠才升），之後每週把訓練時段一半排練、一半屬性訓練，
+ * 訓練平均分給出賽名單（每人練離公開上限等級最遠的那項，每人每週不超過上限）。
+ */
+export function trainerPolicy(level: number): Policy {
+  return (view, content) => {
+    const e = content.economy;
+    const cmds: Command[] = [];
+    let cash = view.me.cash;
+    let lvl = view.me.trainingLevel;
+    if (view.phase === 'offseason') {
+      while (lvl < level && lvl < e.facilityMaintenance.length && cash >= e.facilityUpgradeCost[lvl - 1]) {
+        cmds.push({ type: 'upgradeTraining' });
+        cash -= e.facilityUpgradeCost[lvl - 1];
+        lvl++;
+      }
+    }
+    if (view.phase !== 'offseason' && view.phase !== 'season') return cmds;
+    let slots = e.trainingSlots[lvl - 1] - (e.trainingSlots[view.me.trainingLevel - 1] - view.me.slotsLeft);
+    const rehearse = content.tactics.length > 0 ? Math.floor(slots / 2) : 0;
+    if (rehearse > 0) {
+      const top = [...content.tactics].sort((a, b) => (view.me.effective[a.id] ?? 0) - (view.me.effective[b.id] ?? 0))[0];
+      cmds.push({ type: 'queueRehearse', tactic: top.id, sessions: rehearse });
+      slots -= rehearse;
+    }
+    const players = playerMap(view);
+    const lineup = (view.me.lineup.length === content.lineupSize ? view.me.lineup : view.me.roster.slice(0, content.lineupSize)).map((id) => players.get(id) as KnownPlayer);
+    const per = Math.min(e.trainMaxPerPlayer, Math.floor(slots / Math.max(1, lineup.length)));
+    let extra = slots - per * lineup.length;
+    for (const p of lineup) {
+      const n = Math.min(e.trainMaxPerPlayer, per + (extra > 0 ? 1 : 0));
+      if (extra > 0 && n > per) extra--;
+      if (n <= 0) continue;
+      const k = content.attributes.trainable
+        .map((key) => ({ key, gap: gradeMid(p.capGrades?.[key] ?? 'D') - (p.attrs?.[key] ?? 100) }))
+        .sort((a, b) => b.gap - a.gap || (a.key < b.key ? -1 : 1))[0].key;
+      cmds.push({ type: 'queueTrain', playerId: p.id, attr: k, sessions: n });
+    }
+    return cmds;
+  };
+}
+
+export const POLICIES: Readonly<Record<string, Policy>> = { passive, steady, splurge, randomBettor, scoutBettor, moneyball, trainer: trainerPolicy(2) };
 
 /** 用指定策略打完整個賽段（policy 為 null＝完全不介入） */
 export async function runSeason(state: GameState, content: ContentPack, gateway: BattleGateway, policy: Policy | null): Promise<GameState> {

@@ -5,6 +5,7 @@ import type { ContentPack } from './content.ts';
 import { defaultGamePlan } from './state.ts';
 import { logTactics, startPlaybook, startTactics } from './game.ts';
 import { emptySeason } from './stats.ts';
+import { attrsAt, capVersionOf, startCaps } from './attrs.ts';
 import type { GameState } from './types.ts';
 import { SAVE_VERSION } from './types.ts';
 
@@ -59,11 +60,46 @@ export function migrate6to7(s: GameState): GameState {
   return s;
 }
 
+/** 第 7 版（M4～M5 第三批）的選手：版本制，升版中有完成週 */
+type V7Player = Omit<GameState['players'][number], 'attrs' | 'progress' | 'caps'> & { version?: number; upgradeUntilWeek?: number | null; attrs?: Record<string, number>; progress?: Record<string, number>; caps?: Record<string, number> };
+
+/**
+ * 第 7 版 → 第 8 版（M5 第二批：屬性制與訓練；第三批先做，所以第二批是 7 → 8）。
+ * 表定屬性＝該版本的流派屬性（和新開局同一套）；升版中的人直接完成那一版再轉（費用已付，週薪照舊制調升）；
+ * 真實上限由品階與習慣補；訓練進度 0。球探報告補上「報告當下的屬性」（取遷移後的值）。Elo、戰績不動。
+ */
+export function migrate7to8(s: GameState, content: ContentPack): GameState {
+  const e = content.economy;
+  let finished = 0;
+  for (const raw of s.players as V7Player[]) {
+    let v = raw.version ?? 1;
+    if (raw.upgradeUntilWeek !== null && raw.upgradeUntilWeek !== undefined && v < capVersionOf(content, raw.lineageId, raw.rarity)) {
+      v += 1;
+      raw.weeklySalary = Math.round((raw.weeklySalary * e.salaryGrowthPct) / 100);
+      if (raw.teamId === s.humanTeamId) finished++;
+    }
+    const attrs = attrsAt(content, raw.lineageId, v);
+    raw.attrs = attrs;
+    raw.caps = startCaps(content, raw.lineageId, raw.rarity, raw.habit, attrs);
+    raw.progress = Object.fromEntries(content.attributes.trainable.map((k) => [k, 0]));
+    delete raw.version;
+    delete raw.upgradeUntilWeek;
+  }
+  const byId = new Map(s.players.map((p) => [p.id, p]));
+  for (const t of s.teams) {
+    for (const i of t.intel as (GameState['teams'][number]['intel'][number] & { attrs?: Record<string, number> })[]) i.attrs = { ...(byId.get(i.playerId)?.attrs ?? {}) };
+  }
+  s.inbox.push({ week: s.week, kind: 'system', text: `版本更新：選手改成屬性制，升版改成每週訓練（${content.attributes.trainable.map((k) => content.attributes.names[k] ?? k).join('、')}逐點練）${finished > 0 ? `；升版中的 ${finished} 人已直接完成那一版` : ''}。` });
+  s.version = 8;
+  return s;
+}
+
 export function deserialize(json: string, content: ContentPack): GameState {
   let s = JSON.parse(json) as GameState;
   if (s.contentId !== content.id) throw new Error(`存檔的內容包 ${s.contentId} 與目前 ${content.id} 不符`);
   if (s.version === 5) s = migrate5to6(s, content);
   if (s.version === 6) s = migrate6to7(s);
+  if (s.version === 7) s = migrate7to8(s, content);
   if (s.version !== SAVE_VERSION) throw new Error(`存檔版本 ${s.version} 與目前 ${SAVE_VERSION} 不符`);
   return s;
 }

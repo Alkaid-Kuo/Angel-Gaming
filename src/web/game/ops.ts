@@ -27,6 +27,7 @@ export function trainingScreen(ctx: Ctx): string {
     if (j.kind === 'rehearse') return `<div class="job"><span class="ic2">${icon('swords', 24)}</span><b>戰術排練<small>${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}</small></b><span class="num">${j.sessions}</span><div class="meter g" style="--v:${Math.round((j.sessions / cap) * 100)}%"><i></i></div></div>`;
     const p = ctx.pm.get(j.playerId);
     const who = esc(p?.name ?? '?');
+    if (j.kind === 'train') return `<div class="job"><span class="ic2">${icon('levelup', 24)}</span><b>屬性訓練<small>${who} · ${esc(c.attributes.names[j.attr] ?? j.attr)}</small></b><span class="num">${j.sessions}</span><div class="meter g" style="--v:100%"><i></i></div></div>`;
     return `<div class="job"><span class="ic2 w">${icon('search', 24)}</span><b>球探<small>${who} · ${esc(teamName(v, p?.teamId ?? null))}</small></b><span class="num sm">${wan(e.scoutCost)}萬</span><div class="meter" style="--v:100%"><i></i></div></div>`;
   });
   const step = runStep(cap);

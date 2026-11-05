@@ -1,8 +1,10 @@
 // 假比賽：依隱藏強度算勝率再擲骰，幾乎瞬間出結果。
 // 用途：在不接對戰引擎的情況下，讓經營核心與自動玩家能跑上百個賽段。
 // 只有這個檔案（與 content.ts 的真實強度表）知道「強度怎麼換成勝負」。
-// 隊伍強度＝名單每人（版本強度＋習慣＋舊請求單的戰術預設加成）的平均；一場一回合擲骰（stub-bo1，比分 1:0）。
+// 隊伍強度＝名單每人（強度＋習慣＋舊請求單的戰術預設加成）的平均；強度：config 有全部屬性時依屬性在強度表上內插（M5 第二批），
+// 沒有（舊請求單）時照版本查表。一場一回合擲骰（stub-bo1，比分 1:0）。
 import { Prng } from '../shared/prng.ts';
+import { powerOfAttrs } from './attrs.ts';
 import type { ContentPack, Lineage } from './content.ts';
 import type { BattleGateway, MatchFormat, MatchOutcome, MatchRequest, PlayerSpec, SideSpec } from './gateway.ts';
 import { expectedPermille } from './rating.ts';
@@ -10,8 +12,10 @@ import { expectedPermille } from './rating.ts';
 export class FakeGateway implements BattleGateway {
   readonly formats: readonly MatchFormat[];
   private readonly lineages: ReadonlyMap<string, Lineage>;
+  private readonly content: ContentPack;
 
   constructor(content: ContentPack) {
+    this.content = content;
     this.lineages = new Map(content.lineages.map((l) => [l.id, l]));
     this.formats = [{ id: 'stub-bo1', name: '暫代賽制（單回合擲骰）', rounds: 1, estMsPerRound: 0, lineupSize: content.lineupSize, watchable: false }];
   }
@@ -25,7 +29,9 @@ export class FakeGateway implements BattleGateway {
   private power(p: PlayerSpec): number {
     const lg = this.lineages.get(p.lineageId);
     if (!lg) throw new Error(`未知流派 ${p.lineageId}`);
-    const base = lg.power[Math.min(p.version, lg.power.length) - 1];
+    const keys = this.content.attributes.keys;
+    const hasAttrs = keys.length > 0 && keys.every((k) => typeof p.config[k] === 'number');
+    const base = hasAttrs ? powerOfAttrs(this.content, p.lineageId, Object.fromEntries(keys.map((k) => [k, Number(p.config[k])]))) : lg.power[Math.min(p.version, lg.power.length) - 1];
     return base + Number(p.config.habit ?? 0) + Number(p.config.presetBonus ?? 0);
   }
 

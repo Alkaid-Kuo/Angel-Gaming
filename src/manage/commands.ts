@@ -2,7 +2,7 @@
 // 指令直接修改傳入的 state（純 JSON 物件）；要保留舊狀態請先 structuredClone。
 import { betLimit, fixtureOdds } from './betting.ts';
 import type { ContentPack } from './content.ts';
-import { capacityLeft, findPlayer, lineageOf, maxVersion, playerMaxVersion, post, raritySpec, rosterOf, teamOf } from './state.ts';
+import { capacityLeft, findPlayer, post, rosterOf, slotsLeft, teamOf, trainedThisWeek } from './state.ts';
 import type { Command, CommandResult, GameState, TeamId } from './types.ts';
 
 const OK: CommandResult = { ok: true };
@@ -36,7 +36,8 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       if (rosterOf(state, teamId).length <= content.lineupSize) return fail(`陣容至少要有 ${content.lineupSize} 人才排得出出賽名單`);
       p.teamId = null;
       p.newFace = false;
-      p.upgradeUntilWeek = null;
+      // 排了還沒練的訓練跟著取消（費用不退，和放棄一節一樣）
+      state.jobs = state.jobs.filter((j) => !(j.kind === 'train' && j.playerId === p.id));
       team.lineup = team.lineup.filter((id) => id !== p.id);
       return OK;
     }
@@ -55,19 +56,17 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       team.trainingLevel++;
       return OK;
     }
-    case 'upgradeVersion': {
+    case 'queueTrain': {
       const p = findPlayer(state, cmd.playerId);
       if (!p || p.teamId !== teamId) return fail('不是自己的選手');
-      if (p.upgradeUntilWeek !== null) return fail('已經在升版中');
-      if (p.version >= playerMaxVersion(content, p)) {
-        // 兩個上限相等時算卡在品階
-        const cap = raritySpec(content, p.rarity).maxVersion;
-        return fail(cap <= maxVersion(content, p.lineageId) ? `${p.rarity} 階選手最高只能到 v${cap}` : `${lineageOf(content, p.lineageId).name}已是最高版本`);
-      }
-      const cost = p.weeklySalary * e.upgradeCostWeeks;
+      if (!content.attributes.trainable.includes(cmd.attr)) return fail('只能訓練強度屬性');
+      if (!Number.isInteger(cmd.sessions) || cmd.sessions < 1) return fail('節數需為正整數');
+      if (trainedThisWeek(state, p.id) + cmd.sessions > e.trainMaxPerPlayer) return fail(`每名選手每週最多練 ${e.trainMaxPerPlayer} 節`);
+      if (cmd.sessions > slotsLeft(state, content, team)) return fail('超過本週訓練中心的時段');
+      const cost = cmd.sessions * e.trainCost;
       if (team.cash < cost) return fail('資金不足');
-      post(state, team, 'training', -cost, `${p.name} 升版培訓`);
-      p.upgradeUntilWeek = state.week + e.upgradeWeeks;
+      post(state, team, 'training', -cost, `訓練 ${p.name} ${content.attributes.names[cmd.attr] ?? cmd.attr} ×${cmd.sessions}`);
+      state.jobs.push({ kind: 'train', id: state.nextId++, teamId, playerId: p.id, attr: cmd.attr, sessions: cmd.sessions });
       return OK;
     }
     case 'bet': {
@@ -96,7 +95,7 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       if (content.tactics.length === 0) return fail('這個賽制沒有戰術手冊');
       if (!content.tactics.some((t) => t.id === cmd.tactic)) return fail('未知的戰術');
       if (!Number.isInteger(cmd.sessions) || cmd.sessions < 1) return fail('節數需為正整數');
-      if (cmd.sessions > capacityLeft(state, content, team)) return fail('超過本週訓練中心可排的時段');
+      if (cmd.sessions > slotsLeft(state, content, team)) return fail('超過本週訓練中心的時段');
       const cost = cmd.sessions * e.rehearseCost;
       if (team.cash < cost) return fail('資金不足');
       post(state, team, 'training', -cost, `排練 ${content.tactics.find((t) => t.id === cmd.tactic)?.name ?? cmd.tactic} ×${cmd.sessions}`);
@@ -130,5 +129,8 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       state.jobs.push({ kind: 'scout', id: state.nextId++, teamId, playerId: p.id });
       return OK;
     }
+    default:
+      // 舊介面或舊存檔送來已移除的指令（例如 M5 第二批移除的 upgradeVersion）
+      return fail('未知的指令');
   }
 }

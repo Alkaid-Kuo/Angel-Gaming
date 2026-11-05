@@ -229,11 +229,19 @@ describe('經營層：賽季累計、戰術紀錄、已知層', () => {
     await advance(s, content, g);
     const v6 = JSON.parse(serialize(s)) as GameState & Record<string, unknown>;
     v6.version = 6;
+    // 第 6 版的選手是版本制：給回版本、拿掉屬性（遷移串到第 8 版時由版本補回）
+    for (const p of v6.players as unknown as Record<string, unknown>[]) {
+      p.version = 2;
+      p.upgradeUntilWeek = null;
+      delete p.attrs;
+      delete p.caps;
+      delete p.progress;
+    }
     for (const p of v6.players as unknown as Record<string, unknown>[]) delete p.season;
     for (const t of v6.teams as unknown as Record<string, unknown>[]) delete t.tacticLog;
     for (const f of v6.fixtures) if (f.result !== null) delete f.result.stats;
     const m = deserialize(JSON.stringify(v6), content);
-    expect(m.version).toBe(7);
+    expect(m.version).toBe(8);
     expect(m.players.every((p) => p.season.games === 0 && p.season.kills === 0)).toBe(true);
     for (const t of m.teams) expect(t.tacticLog).toEqual(s.teams.find((x) => x.id === t.id)?.tacticLog);
     expect(m.fixtures.every((f) => f.result === null || f.result.stats === undefined)).toBe(true);

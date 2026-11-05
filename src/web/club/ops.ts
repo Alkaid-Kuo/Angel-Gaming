@@ -1,4 +1,5 @@
 // 訓練基地（設施、練習賽、戰術研發、報告）與賭盤（下注單）。
+import { STAGE_NAMES } from '../../manage/attrs.ts';
 import { esc, lineageName, wan } from '../manage/format.ts';
 import { icon } from './art.ts';
 import { coin, crest, screenHead } from './cards.ts';
@@ -38,17 +39,17 @@ export function trainingScreen(ctx: Ctx): string {
   const segs = 12;
   const bar = Array.from({ length: segs }, (_, i) => `<i class="${i < Math.round((used / cap) * segs) ? 'used' : ''}"></i>`).join('');
   const upCost = lvl < maxLvl ? e.facilityUpgradeCost[lvl - 1] : 0;
-  const myOpts = (sel: string): string => mine.map((p) => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}（${lineageName(c, p.lineageId)} v${p.version}・評分 ${p.elo}）</option>`).join('');
+  const myOpts = (sel: string): string => mine.map((p) => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}（${lineageName(c, p.lineageId)} ${STAGE_NAMES[p.stage - 1]}・評分 ${p.elo}）</option>`).join('');
   const oppOpts = v.teams
     .filter((t) => t.id !== v.me.teamId)
     .map(
       (t) => `<optgroup label="${esc(t.name)}">${rosterOf(ctx, t.id)
-        .map((p) => `<option value="${p.id}" ${p.id === ui.scrim.opponentId ? 'selected' : ''}>${esc(p.name)}（${lineageName(c, p.lineageId)} v${p.version}・評分 ${p.elo}）</option>`)
+        .map((p) => `<option value="${p.id}" ${p.id === ui.scrim.opponentId ? 'selected' : ''}>${esc(p.name)}（${lineageName(c, p.lineageId)} ${STAGE_NAMES[p.stage - 1]}・評分 ${p.elo}）</option>`)
         .join('')}</optgroup>`,
     )
     .join('');
   const freeOpts = v.players.filter((p) => p.teamId === null);
-  const oppAll = `${oppOpts}${freeOpts.length ? `<optgroup label="自由球員">${freeOpts.map((p) => `<option value="${p.id}" ${p.id === ui.scrim.opponentId ? 'selected' : ''}>${esc(p.name)}（${lineageName(c, p.lineageId)} v${p.version}）</option>`).join('')}</optgroup>` : ''}`;
+  const oppAll = `${oppOpts}${freeOpts.length ? `<optgroup label="自由球員">${freeOpts.map((p) => `<option value="${p.id}" ${p.id === ui.scrim.opponentId ? 'selected' : ''}>${esc(p.name)}（${lineageName(c, p.lineageId)} ${STAGE_NAMES[p.stage - 1]}）</option>`).join('')}</optgroup>` : ''}`;
   const slider = (field: string, val: number): string =>
     `<div class="range"><input type="range" min="10" max="${Math.max(10, left)}" step="10" value="${Math.min(val, Math.max(10, left))}" data-field="${field}" ${left < 10 ? 'disabled' : ''}><output data-out="${field}">${Math.min(val, Math.max(10, left))}</output><span>場</span></div>`;
   const queue = v.jobs.map((j) => {

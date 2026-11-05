@@ -20,7 +20,7 @@ import type { KnobValues } from '../api/types.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
 import type { Attributes, InitTactics, TeamOrders } from './api.ts';
-import { ROUND, TEAM_SIZE } from './config.ts';
+import { ATTRIBUTE_KEYS, ROUND, TEAM_SIZE, type AttributeKey } from './config.ts';
 import { MAPS, type ShooterMap } from './map.ts';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES, type ShooterRole } from './players.ts';
 import { ShooterBatchController, runShooterMatch, type ShooterReplay, type ShooterRunOptions } from './runner.ts';
@@ -99,13 +99,24 @@ export interface GatewaySeat {
   readonly reactionTicks: number;
 }
 
-/** 一位選手的規格 → 座位（屬性包、旋鈕、反應延遲） */
+/** config 帶齊六項表定屬性（M5 第二批的請求單）就用它，否則（舊請求單、試玩）null */
+function configAttributes(config: PlayerSpec['config']): Attributes | null {
+  const out: Partial<Record<AttributeKey, number>> = {};
+  for (const k of ATTRIBUTE_KEYS) {
+    const v = config[k];
+    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+    out[k] = clamp(Math.round(v), 0, 100);
+  }
+  return out as Attributes;
+}
+
+/** 一位選手的規格 → 座位（屬性包、旋鈕、反應延遲）：表定屬性取 config（沒有就由版本衍生），再加習慣偏移 */
 export function seatOf(p: PlayerSpec): GatewaySeat {
   if (!(SHOOTER_ROLES as readonly string[]).includes(p.lineageId)) throw new Error(`攻防戰沒有流派 ${p.lineageId}`);
   const role = p.lineageId as ShooterRole;
-  const d = derivePlayer({ role, version: p.version, habit: 0 });
+  const d = derivePlayer({ role, version: Math.max(1, Math.min(5, Math.round(p.version))), habit: 0 });
   const shift = attributeShift(p.config);
-  const a = d.attributes;
+  const a = configAttributes(p.config) ?? d.attributes;
   const attributes: Attributes = { ...a, aim: clamp(a.aim + shift, 0, 100), reaction: clamp(a.reaction + shift, 0, 100), awareness: clamp(a.awareness + shift, 0, 100) };
   return { role, attributes, knobs: { role: Number(d.knobs.role) }, reactionTicks: reactionTicksFor(attributes) };
 }

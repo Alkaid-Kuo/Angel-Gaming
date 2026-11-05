@@ -8,7 +8,7 @@ import { FakeGateway } from '../src/manage/gateway-fake.ts';
 import { roundRobin, standings } from '../src/manage/league.ts';
 import { expectedPermille, updateElo } from '../src/manage/rating.ts';
 import { deserialize, serialize } from '../src/manage/save.ts';
-import { humanTeam, rosterOf } from '../src/manage/state.ts';
+import { humanTeam, rosterOf, truePower } from '../src/manage/state.ts';
 import type { GameState } from '../src/manage/types.ts';
 import { REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from '../src/manage/types.ts';
 import { knownView } from '../src/manage/view.ts';
@@ -257,7 +257,7 @@ describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
     expect(played).toHaveLength(4);
     expect(played.map((f) => f.result?.request)).toEqual(spy.sent);
     expect(s.version).toBe(SAVE_VERSION);
-    expect(SAVE_VERSION).toBe(7);
+    expect(SAVE_VERSION).toBe(8);
     for (const f of played) {
       const r = f.result as NonNullable<typeof f.result>;
       expect(r.request.formatId).toBe(s.formatId);
@@ -274,7 +274,7 @@ describe('存檔第 3 版：請求單入存檔（觀戰回放用）', () => {
   it('第 2 版存檔被拒，訊息說明版本', () => {
     const s = newGame(62, content);
     const old = JSON.stringify({ ...s, version: 2 });
-    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 7 不符/);
+    expect(() => deserialize(old, content)).toThrow(/存檔版本 2 與目前 8 不符/);
   });
 
   it('watchable 由賽制自報、透傳到視圖；視圖不帶請求單（含隱藏的習慣）', async () => {
@@ -341,25 +341,20 @@ describe('背景工作與升版', () => {
     expect(knownView(s, content, me.id).intel).toHaveLength(1);
     const other = s.teams.find((t) => t.id !== me.id) as GameState['teams'][number];
     expect(knownView(s, content, other.id).intel).toHaveLength(0);
-    const lineage = content.lineages.find((l) => l.id === foe.lineageId) as (typeof content.lineages)[number];
-    const truth = lineage.power[foe.version - 1] + foe.habit;
+    const truth = truePower(content, foe);
     expect(Math.abs(me.intel[0].estPower - truth)).toBeLessThan(content.economy.scoutSd * 4);
   });
 
-  it('升版 2 週後完成、週薪調整', async () => {
+  it('升版已移除（M5 第二批）：改成訓練，週薪不因訓練改變', async () => {
     const s = newGame(42, content);
     const me = humanTeam(s);
     const p = rosterOf(s, me.id)[0];
-    p.version = 1;
     me.cash = 5000;
-    applyCommand(s, content, me.id, { type: 'upgradeVersion', playerId: p.id });
-    expect(applyCommand(s, content, me.id, { type: 'upgradeVersion', playerId: p.id }).ok).toBe(false);
+    expect(applyCommand(s, content, me.id, { type: 'upgradeVersion', playerId: p.id } as unknown as Parameters<typeof applyCommand>[3])).toEqual({ ok: false, reason: '未知的指令' });
     const salary = p.weeklySalary;
+    expect(applyCommand(s, content, me.id, { type: 'queueTrain', playerId: p.id, attr: content.attributes.trainable[0], sessions: 3 }).ok).toBe(true);
     await advance(s, content, gateway);
-    await advance(s, content, gateway); // 第 1 週
-    await advance(s, content, gateway); // 第 2 週結算後升版完成
-    expect(p.version).toBe(2);
-    expect(p.weeklySalary).toBe(Math.round((salary * content.economy.salaryGrowthPct) / 100));
+    expect(p.weeklySalary).toBe(salary);
   });
 });
 

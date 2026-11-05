@@ -1,4 +1,5 @@
 // 經營頁各畫面：只讀「已知層」視圖（KnownView），輸出 HTML 字串；操作用 data-act 屬性交給 main.ts 處理。
+import { STAGE_NAMES } from '../../manage/attrs.ts';
 import type { AdvanceSummary, ContentPack, KnownFixture, KnownPlayer, KnownView } from '../../manage/index.ts';
 import { CATEGORY_NAME, STAGE_NAME, esc, lineageName, money, pct, signedMoney, weekLabel } from './format.ts';
 
@@ -80,7 +81,7 @@ function myFixture(v: KnownView): KnownFixture | undefined {
 }
 
 function pdesc(c: ContentPack, p: KnownPlayer): string {
-  return `${esc(p.name)}（${lineageName(c, p.lineageId)} v${p.version}）`;
+  return `${esc(p.name)}（${lineageName(c, p.lineageId)} ${STAGE_NAMES[p.stage - 1]}）`;
 }
 
 function intelText(v: KnownView, p: KnownPlayer): string {
@@ -187,23 +188,18 @@ function roster(ctx: Ctx): string {
   const rows = mine
     .map((p) => {
       const slot = lu.ids.indexOf(p.id);
-      const maxed = p.version >= (c.lineages.find((l) => l.id === p.lineageId)?.power.length ?? 1);
-      const upCost = p.weeklySalary * e.upgradeCostWeeks;
-      const upDisabled = !canAct || p.upgrading || maxed || v.me.cash < upCost;
-      const upTitle = p.upgrading ? '升版中' : maxed ? '已是最高版本' : v.me.cash < upCost ? '資金不足' : `花 ${money(upCost)}，${e.upgradeWeeks} 週後升到 v${p.version + 1}，週薪 ×${e.salaryGrowthPct / 100}`;
       return `<tr>
         <td>${slot >= 0 ? `<b class="accent">第 ${slot + 1} 位</b>` : '<span class="muted">替補</span>'}</td>
-        <td><b>${esc(p.name)}</b></td><td>${lineageName(c, p.lineageId)}</td><td class="num">v${p.version}${p.upgrading ? ' <span class="mg-badge">升版中</span>' : ''}</td>
+        <td><b>${esc(p.name)}</b></td><td>${lineageName(c, p.lineageId)}</td><td class="num">${STAGE_NAMES[p.stage - 1]}</td>
         <td class="num">${p.elo}</td><td class="num">${p.games}</td><td class="num">${money(p.weeklySalary)}</td>
-        <td class="mg-act"><button data-act="upgrade" data-id="${p.id}" ${upDisabled ? 'disabled' : ''} title="${upTitle}">升版 ${money(upCost)}</button>
-          <button class="ghost" data-act="release" data-id="${p.id}" ${!canAct || mine.length <= 3 ? 'disabled' : ''} title="${mine.length <= 3 ? '陣容至少要有 3 人' : '解約後成為自由選手'}">解約</button></td></tr>`;
+        <td class="mg-act"><button class="ghost" data-act="release" data-id="${p.id}" ${!canAct || mine.length <= 3 ? 'disabled' : ''} title="${mine.length <= 3 ? '陣容至少要有 3 人' : '解約後成為自由選手'}">解約</button></td></tr>`;
     })
     .join('');
   return `<section class="card"><h2>出賽名單</h2>
     <p class="muted small">戰隊賽三個對位：第 1 位對對手的第 1 位、第 2 位對第 2 位……贏 2 場以上的隊伍勝。雙方名單是同時公開的，對位順序就是你的猜測空間。${lu.auto ? '<br><span class="hint">目前是自動（公開 Elo 最高的 3 人），改任一位就會固定下來。</span>' : ''}</p>
     <div class="mg-lineup">${slotSel}</div></section>
     <section class="card"><h2>陣容（${mine.length} / ${e.rosterMax}）</h2>
-    <div class="mg-scroll"><table class="data"><thead><tr><th>出賽</th><th>選手</th><th>流派</th><th>版本</th><th>Elo</th><th>場數</th><th>週薪</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="mg-scroll"><table class="data"><thead><tr><th>出賽</th><th>選手</th><th>流派</th><th>階段</th><th>Elo</th><th>場數</th><th>週薪</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="muted small">Elo 是公開戰績；流派真正的強弱要靠打出來的戰績、球探情報或練習賽才看得出來。</p></section>`;
 }
 
@@ -242,7 +238,7 @@ function market(ctx: Ctx): string {
   const free = ui.market === 'free';
   const list = v.players
     .filter((p) => (free ? p.teamId === null : p.teamId !== null && p.teamId !== v.me.teamId))
-    .sort((a, b) => b.version - a.version || b.elo - a.elo);
+    .sort((a, b) => b.stage - a.stage || b.elo - a.elo);
   const canAct = v.phase === 'offseason' || v.phase === 'season';
   const full = v.me.roster.length >= e.rosterMax;
   const pending = new Set(v.jobs.filter((j) => j.kind === 'scout').map((j) => j.playerId));
@@ -252,7 +248,7 @@ function market(ctx: Ctx): string {
       const signDis = !canAct || full || v.me.cash < fee;
       const signTitle = full ? '陣容已滿' : v.me.cash < fee ? '資金不足' : `簽約金 ${money(fee)}`;
       const scoutDis = !canAct || pending.has(p.id) || v.me.cash < e.scoutCost;
-      return `<tr><td><b>${esc(p.name)}</b></td>${free ? '' : `<td>${teamName(v, p.teamId)}</td>`}<td>${lineageName(c, p.lineageId)}</td><td class="num">v${p.version}</td><td class="num">${p.elo}</td><td class="num">${p.games}</td><td class="num">${money(p.weeklySalary)}</td><td>${intelText(v, p)}</td>
+      return `<tr><td><b>${esc(p.name)}</b></td>${free ? '' : `<td>${teamName(v, p.teamId)}</td>`}<td>${lineageName(c, p.lineageId)}</td><td class="num">${STAGE_NAMES[p.stage - 1]}</td><td class="num">${p.elo}</td><td class="num">${p.games}</td><td class="num">${money(p.weeklySalary)}</td><td>${intelText(v, p)}</td>
         <td class="mg-act">${free ? `<button data-act="sign" data-id="${p.id}" ${signDis ? 'disabled' : ''} title="${signTitle}">簽約 ${money(fee)}</button>` : ''}
         <button data-act="scout" data-id="${p.id}" ${scoutDis ? 'disabled' : ''} title="${pending.has(p.id) ? '球探已派出，推進一週後出報告' : '推進一週後出報告'}">${pending.has(p.id) ? '偵察中' : `球探 ${money(e.scoutCost)}`}</button></td></tr>`;
     })
@@ -261,8 +257,8 @@ function market(ctx: Ctx): string {
     <div class="row"><button class="${free ? 'active' : ''}" data-act="market" data-m="free">自由選手（${v.players.filter((p) => p.teamId === null).length}）</button>
       <button class="${free ? '' : 'active'}" data-act="market" data-m="others">其他戰隊的選手</button>
       <span class="muted small">你的陣容 ${v.me.roster.length} / ${e.rosterMax}　現金 ${money(v.me.cash)}</span></div>
-    <div class="mg-scroll"><table class="data"><thead><tr><th>選手</th>${free ? '' : '<th>戰隊</th>'}<th>流派</th><th>版本</th><th>Elo</th><th>場數</th><th>週薪</th><th>情報（真實強度 ±誤差，對 Elo 差）</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="muted">沒有選手</td></tr>'}</tbody></table></div>
-    <p class="muted small">公開 Elo 的起點只看版本號，所有流派一樣；某個流派的 v3 實際比別的 v3 強多少，要靠球探情報（花 ${money(e.scoutCost)}，誤差 ±${e.scoutSd}）或打出來的戰績。簽約金＝${e.signingFeeWeeks} 週薪資。</p></section>`;
+    <div class="mg-scroll"><table class="data"><thead><tr><th>選手</th>${free ? '' : '<th>戰隊</th>'}<th>流派</th><th>階段</th><th>Elo</th><th>場數</th><th>週薪</th><th>情報（真實強度 ±誤差，對 Elo 差）</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="muted">沒有選手</td></tr>'}</tbody></table></div>
+    <p class="muted small">公開 Elo 的起點只看成長階段，所有流派一樣；同階段的人實際強多少，要靠球探情報（花 ${money(e.scoutCost)}，誤差 ±${e.scoutSd}）或打出來的戰績。簽約金＝${e.signingFeeWeeks} 週薪資。</p></section>`;
 }
 
 // ───── 訓練 ─────
@@ -278,7 +274,7 @@ function training(ctx: Ctx): string {
   const upCost = level < maxLevel ? e.facilityUpgradeCost[level - 1] : 0;
   const canAct = v.phase === 'offseason' || v.phase === 'season';
   const others = v.players.filter((p) => p.teamId !== v.me.teamId);
-  const opt = (p: KnownPlayer, sel: string): string => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}（${teamName(v, p.teamId)}，${lineageName(c, p.lineageId)} v${p.version}）</option>`;
+  const opt = (p: KnownPlayer, sel: string): string => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}（${teamName(v, p.teamId)}，${lineageName(c, p.lineageId)} ${STAGE_NAMES[p.stage - 1]}）</option>`;
   const myOpt = (p: KnownPlayer, sel: string): string => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${pdesc(c, p)}</option>`;
   const queue = v.jobs
     .map((j) => {
