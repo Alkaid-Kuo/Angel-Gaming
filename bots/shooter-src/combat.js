@@ -577,7 +577,7 @@ export class Combat {
       }
     }
     if (b !== null && t > b.until) this.blind = null;
-    const ok = P.blindFire && (me.team === 'CT' || P.blindT) && !ctx.objective && obs.enemies.length === 0 && me.blindTicks === 0 && me.hp >= this.retreatHp &&
+    const ok = P.blindFire && me.team === 'CT' && !ctx.objective && obs.enemies.length === 0 && me.blindTicks === 0 && me.hp >= this.retreatHp &&
       me.weapon === me.loadout.primary && me.weapon !== 'awp' && me.reloadTicksLeft === 0;
     if (!ok) return false;
     if (b !== null && b.groups >= P.blindGroups) {

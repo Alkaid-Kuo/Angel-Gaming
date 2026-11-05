@@ -34,7 +34,6 @@ export class Utility {
     this.away = null;
     /** 本回合丟過的種類（每種每人一次） @type {Set<string>} */
     this.used = new Set();
-    this.throws = 0;
   }
 
   reset() {
@@ -168,7 +167,6 @@ export class Utility {
     out.cmds.push({ type: 'throw', grenade: wish.kind, deg: s.deg, power: s.power });
     this.lastThrow = t;
     this.used.add(wish.kind);
-    this.throws++;
     out.thrown = { ...wish, x: Math.round(s.x), y: Math.round(s.y) };
     if (wish.kind === 'flash') {
       const pop = t + this.rules.reactionTicks + (this.fuse.get('flash') ?? 45);

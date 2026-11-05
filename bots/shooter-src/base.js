@@ -70,8 +70,6 @@ export const P = {
   trust100: 1,
   /** 守位時輪流看幾個方向：每幾次決策換一個 */
   scanEvery: 9,
-  /** 隊友視錐掃描（已清空）每幾次決策做一次 */
-  mateScanEvery: 2,
 
   // ── 導航（A* 基本成本：直走 10、斜走 14） ──
   /** 危險格成本 = 信心 × 係數（敵人看得到的格；距離衰減：dangerRange 格處剩一半） */
@@ -158,9 +156,8 @@ export const P = {
   /** 目標消失後架槍幾秒（侵略 0 → 100） */
   holdAngle0: 2.6,
   holdAngle100: 0.4,
-  /** 穿煙盲射（2.6）：開關、T 也打（false ＝ 只有 CT；煙裡的 T 對外守包不在 2.6）、線索幾秒內有效、最多幾組、侵略多少以上打完前推一步 */
+  /** 穿煙盲射（2.6）：開關（只有 CT 打；T 也打的 blindT 在 2.7 刪掉）、線索幾秒內有效、最多幾組、侵略多少以上打完前推一步 */
   blindFire: true,
-  blindT: false,
   blindMemo: 2,
   blindGroups: 2,
   blindPush: 0.7,
@@ -200,11 +197,10 @@ export const P = {
   /** 輪到丟閃的人沒丟：幾秒後換誰有誰丟 */
   flashTurn: 0.8,
   /** 閃光去重（2.6）：瞄準時先喊 E:flashing，隊友把爆點當成已認領幾秒；入口判定放寬到 flashDeep；看得到飛行中的閃光也算；
-   * 輪到的人沒丟時組內每人錯開 flashStagger 秒接手；flashHolders 改成只在喊過有閃光（E:fl）的組員之間輪（false ＝ 2.5 的時間到誰有誰丟） */
+   * 輪到的人沒丟時組內每人錯開 flashStagger 秒接手（false ＝ 2.5 的時間到誰有誰丟；只在喊過有閃光的組員之間輪的 flashHolders 在 2.7 刪掉） */
   flashClaim: true,
   flashClaimSec: 2,
   flashStagger: 0.5,
-  flashHolders: false,
   /** 有效連閃（2.6.1）：同入口第一顆後 flashSecondAfter～flashSecondWin 秒內可以再丟一顆；非 rush 的爆點要離第一顆 flashSecondGap 格以上 */
   flashSecond: true,
   flashSecondAfter: 0.8,
@@ -212,20 +208,12 @@ export const P = {
   flashSecondGap: 6,
   /** 收到隊友的 E:flashing 就先移動去躲（2.6.1） */
   flashClaimDodge: true,
-  /** 隊友閃光原地背身（2.6.2 試做，預設關）：不移動去躲，照 E:flash 的爆炸時間在爆前轉身、炸開就轉回來。
-   * 實測 v5 鏡像 T 43.9%（移動躲 48.0%）、隊友致盲占比 24.7%（12.9%），比移動躲差 */
-  flashStill: false,
-  /** 2.6.3：看到飛行中的閃光就推算爆炸時間來躲（flashSeeDodge，預設關：飛行中的位置不是落點，背對它轉身反而面向真正的爆點，
-   * 40 場被隊友閃到 17 → 85 人次）；躲閃光與停在轉角的人提前「反應延遲 − flashReleaseMargin」放行，炸開時剛好開始動（flashRelease）；
-   * 入口被燒住時煙霧手先丟煙滅火（smokeFire） */
-  flashSeeDodge: false,
+  /** 2.6.3：躲閃光與停在轉角的人提前「反應延遲 − flashReleaseMargin」放行，炸開時剛好開始動（flashRelease）；
+   * 入口被燒住時煙霧手先丟煙滅火（smokeFire）。2.7 刪掉預設關的 flashStill（原地背身）、flashSeeDodge（看飛行中的閃光推落點）、
+   * flashHolders（E:fl 輪替）、flankCover（看側翼）、rotDeep、giveUpRun、probeRun、blindT，要回頭做從 git 取回 */
   flashRelease: true,
   flashReleaseMargin: 2,
   smokeFire: true,
-  /** 側翼（2.6）：主力進點時組裡一人看側翼來向，最多幾秒（不到 4 人改丟煙或閃）。2.6.1 預設關：實測看側翼的人擊殺 30、陣亡 44，
-   * 情境做不出側翼傷害，等觀戰回放找到使用者截圖那種回合再開 */
-  flankCover: false,
-  flankCoverSec: 5,
   /** 守包：離炸彈至少幾格、彼此至少隔幾格 */
   postMin: 5,
   postGap: 6,
@@ -303,25 +291,18 @@ export const P = {
   /** CT 放棄點：估計這麼多 T 已經進點、自己點上不超過幾人就退到回防位 */
   giveUpIn: 3,
   giveUpMine: 2,
-  giveUpRun: false,
   /** 退到包點裡看不到的退守位（false ＝ 回防集結位） */
   fallHide: true,
   /** CT 看到對面在包點附近封煙：當成幾人的接觸（1 ＝ 只提高警覺，單獨不夠輪轉） */
   smokeAlarmN: 1,
-  /** CT 輪轉：點還沒失守就直接進點補空的深位（false ＝ 2.4.3 起的在點外集結位等） */
-  rotDeep: false,
   /** CT 開局探點：開打後幾秒內去看一眼；T 至少晚這麼多秒才會到那裡 */
   probeTime: 12,
   probeMargin: 4,
   /** 探點 2.6：站交界 CT 側貼牆的格、到位後最多停幾秒（沒有掩體格只停一半）、探到情報就縮回掩體（false ＝ 2.5 的交界中心、時間到才回） */
   probeCover: true,
   probeStay: 4.5,
-  /** 探點縮回用撤離模式（轉身跑；T25 實測背後中彈變多，預設不用） */
-  probeRun: false,
   /** 手雷：兩個以上記得的敵人彼此在這麼近（格）內算聚集 */
   nadeCluster: 3.5,
-  /** CT 燃燒：敵人離入口這麼近（格）時封入口外側 */
-  molotovNear: 16,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */

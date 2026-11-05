@@ -1,6 +1,8 @@
 // 把 bots/shooter-src/ 的多個原始碼檔案合併成單一檔案的選手模組 bots/shooter-baseline.js（選手模組不能 import）。
 // 從入口 baseline.js 開始，依 import 順序展開本地模組（先展開被依賴的），去掉 import／export 與跨檔的型別前綴。
-// 步驟 7 起合成時剝掉整行註解、空行與只有說明的 JSDoc（有 @ 標籤的保留，產生檔仍然能型別檢查）；原始碼保留註解，--check 比對剝過的結果。
+// 合成時用詞法分析重排：拿掉全部註解（含 JSDoc 型別標籤）、縮排與空行，token 之間有換行的保留換行（不改 ASI），同一行的空白縮成一格；
+// 字串、template 與正規表示式整個原樣保留。原始碼保留註解與型別，型別檢查對 bots/shooter-src/ 做（產生檔不再型別檢查，tsconfig 排除）。
+// --check 比對重排過的結果。2.7 起（2.6.3 以前保留型別標籤，產生檔 260 KB、只剩 2 KB）。
 // 用法：node scripts/build-shooter-bots.ts          產生
 //       node scripts/build-shooter-bots.ts --check  只檢查產生的檔案是否和原始碼一致（不一致時結束碼為 1）
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -38,40 +40,20 @@ function body(file: string, entry: boolean): string[] {
 }
 
 /**
- * 剝註解：整行 // 註解、空行；JSDoc 只保留型別標籤（第一個 @ 以前的說明行拿掉，整塊沒有 @ 就整塊拿掉）。
- * 只動整行，不碰行內的字串、正規表示式與行內型別轉換。
+ * 剝註解與排版：依 acorn 的 token 重排，token 之間的間隔（空白、註解）有換行就換成一個換行，否則有東西就換成一格空白、沒有就不放。
+ * token 本身（字串、template 片段、正規表示式）原樣保留，所以語意與 ASI 都不變；回傳的行沒有縮排與空行。
  */
 export function stripComments(src: readonly string[]): string[] {
   const source = src.join('\n');
-  const literals: [number, number][] = [];
+  let out = '';
+  let last = 0;
   for (const token of tokenizer(source, { ecmaVersion: 2020, sourceType: 'module' })) {
-    if (source.slice(token.start, token.end).includes('\n')) literals.push([token.start, token.end]);
+    const gap = source.slice(last, token.start);
+    if (out !== '') out += gap.includes('\n') ? '\n' : gap === '' ? '' : ' ';
+    out += source.slice(token.start, token.end);
+    last = token.end;
   }
-  const offsets: number[] = [];
-  let offset = 0;
-  for (const l of src) { offsets.push(offset); offset += l.length + 1; }
-  const out: string[] = [];
-  for (let i = 0; i < src.length; i++) {
-    const l = src[i];
-    if (literals.some(([a, b]) => offsets[i] >= a && offsets[i] < b)) { out.push(l); continue; }
-    const t = l.trim();
-    if (t === '' || (t.startsWith('//') && t !== '// @ts-check')) continue;
-    if (t.startsWith('/**') && !t.includes('*/')) {
-      let j = i;
-      while (j < src.length && !src[j].includes('*/')) j++;
-      const block = src.slice(i, j + 1);
-      const first = block.findIndex((x) => x.includes('@'));
-      if (first >= 0) out.push(...(first === 0 ? block : [block[0].replace(/\/\*\*.*$/, '/**'), ...block.slice(first)]));
-      i = j;
-      continue;
-    }
-    if (t.startsWith('/**') && t.endsWith('*/')) {
-      if (t.includes('@')) out.push(`${l.slice(0, l.indexOf('/**') + 3)} ${l.slice(l.indexOf('@'))}`);
-      continue;
-    }
-    out.push(l);
-  }
-  return out;
+  return out === '' ? [] : out.split('\n');
 }
 
 export function buildShooterBot(entry: string): string {
@@ -80,7 +62,6 @@ export function buildShooterBot(entry: string): string {
   const head = body(entry, true);
   const firstCode = head.findIndex((l) => !l.startsWith('//'));
   const out = [
-    '// @ts-check',
     ...head.slice(0, firstCode),
     '// 本檔由 scripts/build-shooter-bots.ts 從 bots/shooter-src/ 產生：請修改原始碼後重新產生，不要直接改這個檔案。',
     '',

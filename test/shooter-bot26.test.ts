@@ -41,10 +41,9 @@ describe('Bot 2.6：閃光認領', () => {
     P.flashClaim = true;
   });
 
-  it('E:flashing 解析成認領、E:fl 解析成身上有沒有閃光', () => {
+  it('E:flashing 解析成認領；E:fl（flashHolders，2.7 刪掉）不再解析', () => {
     expect(parseEvent('E:flashing 12 34')).toEqual({ kind: 'claim', x: 1200, y: 3400 });
-    expect(parseEvent('E:fl 1')).toEqual({ kind: 'fl', has: true });
-    expect(parseEvent('E:fl 0')).toEqual({ kind: 'fl', has: false });
+    expect(parseEvent('E:fl 1')).toBeNull();
   });
 
   it('隊友認領的爆點在入口：認領期間算已經閃過，過期就不算；關掉 flashClaim 回到 2.5', () => {
@@ -136,26 +135,7 @@ describe('Bot 2.6：穿煙盲射', () => {
   });
 });
 
-describe('Bot 2.6：側翼與繞後', () => {
-  it('赤岩舊城：走鐘樓院進 A 的路線，側翼口在北街那側，看側翼的格看得到它、不在路線外', () => {
-    const { bot, match } = make(0);
-    const t = bot.tactics;
-    const name = (i: number): string => match.map.regions[i].id;
-    let checked = 0;
-    bot.intel.routes.T.A.forEach((r, i) => {
-      const e = t.entranceOf('A', i);
-      if (e === null || name(bot.intel.region[bot.g.cellOf(e.ox, e.oy)]) !== 'bellYard') return;
-      const w = t.flankSpot('A', i);
-      expect(w).not.toBeNull();
-      const side = bot.intel.portals.find((q) => q.x === w!.fx && q.y === w!.fy);
-      expect(side !== undefined && [side.a, side.b].map(name).includes('northSt')).toBe(true);
-      expect(bot.g.los(w!.x, w!.y, w!.fx, w!.fy)).toBe(true);
-      expect(r.regionSet.has(bot.intel.region[w!.cell])).toBe(true);
-      checked++;
-    });
-    expect(checked).toBeGreaterThan(0);
-  });
-
+describe('Bot 2.6：繞後（看側翼 flankCover 在 2.7 刪掉）', () => {
   it.each(['redrock', 'dust'])('%s：繞後路線和路線集每一條的區域重疊都小於 60%，長度不超過最短 × lurkSlack，不在路線集裡', (mapId) => {
     const { bot } = make(0, mapId);
     for (const s of ['A', 'B'] as const) {
