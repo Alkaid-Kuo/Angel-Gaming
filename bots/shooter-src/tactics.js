@@ -169,6 +169,9 @@ export class Tactics {
     this.burns = [];
     this.defuseAlarm = -1;
     this.alarmAlive = 5;
+    /** 這一波拆包證據第一次出現的 tick（反拆的最晚干預時間從這裡算）、最後一次看到／聽到的 tick */
+    this.defuseSince = -1;
+    this.defuseLast = -1000000;
     this.postSaid = false;
     /** @type {Set<number>} */
     this.postSmokers = new Set();
@@ -399,6 +402,9 @@ export class Tactics {
     this.burns = [];
     this.defuseAlarm = -1;
     this.alarmAlive = 5;
+    /** 這一波拆包證據第一次出現的 tick（反拆的最晚干預時間從這裡算）、最後一次看到／聽到的 tick */
+    this.defuseSince = -1;
+    this.defuseLast = -1000000;
     this.postSaid = false;
     this.postSmokers.clear();
     this.coop.reset();
@@ -2067,6 +2073,7 @@ export class Tactics {
     if (defusing) {
       const kind = this.util.pick(me, ['molotov', 'he']);
       if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, by) < 3 * UNIT) && !this.burnsMate(obs, bx, by)) return { kind, x: bx, y: by, why: '燒拆包' };
+      if (this.antiDefuse(obs, out, bx, by)) return null;
     }
     return this.postUtility(obs, bx, by, s);
   }
@@ -2098,6 +2105,35 @@ export class Tactics {
     return null;
   }
 
+  /**
+   * 反拆（2.7 批 1-12，Astra H01）：沒有道具可丟時，離炸彈最近的守包者轉向炸彈、走到看得到炸彈的位置、照炸彈位置開火（煙裡也打）。
+   * 證據（看到在拆、1 秒內的拆包聲）過期就不去（假拆不送掉優勢）；最晚干預時間＝這波開始拆＋不帶拆彈器的拆包時間，到位前就來不及也不去。回傳 true ＝ 接手了
+   * @param {import('./base.js').Observation} obs @param {TacOut} out @param {number} bx @param {number} by
+   */
+  antiDefuse(obs, out, bx, by) {
+    if (!P.antiDefuse) return false;
+    const me = obs.me;
+    const t = obs.tick;
+    if (t - this.defuseLast > this.tps) return false;
+    const guard = [...this.alive(obs)].sort((a, b) => dist(a.x, a.y, bx, by) - dist(b.x, b.y, bx, by) || a.id - b.id)[0];
+    if (guard === undefined || guard.id !== me.id) return false;
+    const d = dist(me.x, me.y, bx, by);
+    const sees = d < P.antiDefuseRange * UNIT && this.g.los(me.x, me.y, bx, by);
+    const deadline = this.defuseSince + this.data.rules.defuseTicks;
+    if (!sees && t + (this.judge?.travel(me, bx, by) ?? 0) * this.tps > deadline) return false;
+    out.goal = sees ? null : { x: bx, y: by };
+    out.hold = null;
+    out.route = null;
+    out.look = { x: bx, y: by };
+    out.urgent = true;
+    out.walk = false;
+    out.allowPeek = false;
+    out.stop = sees;
+    out.noise = sees;
+    out.role = '守包・反拆';
+    return true;
+  }
+
   /** 燃燒落點 4 格內有活著的隊友（2.7，P.burnMateCheck；關掉時永遠 false） @param {import('./base.js').Observation} obs @param {number} x @param {number} y */
   burnsMate(obs, x, y) {
     return P.burnMateCheck && obs.teammates.some((m) => m.alive && dist(m.x, m.y, x, y) < 4 * UNIT);
@@ -2111,6 +2147,8 @@ export class Tactics {
   defuseNow(obs) {
     const t = obs.tick;
     if (obs.bomb.state === 'defusing' || (this.perc.lastSound?.kind === 'defuse' && t - this.perc.lastSound.tick < this.tps)) {
+      if (t - this.defuseLast > 2 * this.tps) this.defuseSince = t;
+      this.defuseLast = t;
       this.defuseAlarm = t + this.data.rules.defuseTicks;
       this.alarmAlive = obs.enemiesAlive;
     } else if (P.defuseAlarmKill && obs.enemiesAlive < this.alarmAlive) this.defuseAlarm = -1;

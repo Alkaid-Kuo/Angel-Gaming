@@ -3,7 +3,7 @@ import ShooterBaseline from '../bots/shooter-src/baseline.js';
 import { P, UNIT } from '../bots/shooter-src/base.js';
 import { parseEvent, type TacOut } from '../bots/shooter-src/tactics.js';
 import { ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
-import { shooterHelpers } from '../src/shooter/runner.ts';
+import { ScriptController, ShooterDriver, shooterHelpers } from '../src/shooter/runner.ts';
 import type { ShooterObservation, WeaponId } from '../src/shooter/api.ts';
 import type { Sector } from '../bots/shooter-src/memory.js';
 
@@ -663,5 +663,80 @@ describe('Bot 2.7 批 1-10 A6：視錐掃描照站姿越過矮牆（scanLow）',
     const p = before(3);
     bot.perc.scan(p.x, p.y, 0, 10, 14, t, false);
     expect(bot.perc.seenTick[after(5)]).not.toBe(t);
+  });
+});
+
+describe('Bot 2.7 批 1-12（H01）：守包反拆責任人（antiDefuse）', () => {
+  /** 單一 T（AK、沒有道具）守包對只拆包的腳本 CT；smoke＝炸彈上有煙、kit＝CT 有拆彈器 */
+  function defuse(o: { mapId?: string; smoke: boolean; kit: boolean }): { fired: number; reason: string; ctAlive: boolean; roles: string[]; moved: number } {
+    const bot = new ShooterBaseline();
+    let fired = 0;
+    let live = false;
+    const roles: string[] = [];
+    const controllers = Array.from({ length: 10 }, (_, id) => new ScriptController(`h01-${id}`, (obs: ShooterObservation): unknown[] => {
+      if (!live) return [];
+      if (id === 5) return obs.round.phase === 'planted' ? [{ type: 'defuse' }] : [];
+      if (id !== 0) return [];
+      const cmds = bot.decide(obs);
+      fired += cmds.filter((c) => c.type === 'fire' && c.on).length;
+      if (obs.tick % 30 === 0) roles.push(bot.why);
+      return cmds;
+    }));
+    const d = new ShooterDriver({ seed: 43001, mapId: o.mapId ?? 'redrock', freezeTicks: 3, defaultLoadout: { T: 'ak', CT: 'm4' }, controllers, record: false });
+    const m = d.match;
+    for (let i = 1; i < 10; i++) if (i !== 5) m.kill(i);
+    while (m.phase !== 'live') d.step();
+    bot.init(shooterInitData(m.map, 0, {}), shooterHelpers(m.map, 43001, 0));
+    const bomb = bot.intel.sites.A.plants[0];
+    const spot = bot.tactics.postSpots('A', bomb.x, bomb.y, true)[0];
+    m.teleport(0, spot.x, spot.y, 180);
+    m.teleport(5, bomb.x, bomb.y, 0);
+    for (const p of m.players) { p.hasBomb = false; p.grenades = []; }
+    m.players[5].kit = o.kit;
+    Object.assign(m.bomb, { state: 'planted', carrier: -1, x: bomb.x, y: bomb.y, site: 'A', explodeTick: m.tick + 1200, planter: 0, defuser: -1 });
+    m.phase = 'planted';
+    m.phaseEnd = m.bomb.explodeTick;
+    if (o.smoke) m.smokes.push({ x: bomb.x, y: bomb.y, owner: 5, startTick: m.tick - 30, endTick: m.tick + 1000 });
+    bot.newRound(m.observe(0));
+    live = true;
+    const start = m.tick;
+    let moved = 0;
+    while (m.rounds.length === 0 && m.tick - start < 450) {
+      d.step();
+      moved = Math.max(moved, Math.hypot(m.players[0].x - spot.x, m.players[0].y - spot.y));
+    }
+    return { fired, reason: m.rounds[0]?.reason ?? 'none', ctAlive: m.players[5].alive, roles, moved };
+  }
+
+  it.each([['redrock', false], ['redrock', true], ['dust', false], ['dust', true]] as const)('%s 煙裡拆包（拆彈器 %s）：T 要出手反拆（開火或殺掉 CT），不是站著看', (mapId, kit) => {
+    const r = defuse({ mapId, smoke: true, kit });
+    expect(r.fired > 0 || !r.ctAlive).toBe(true);
+  });
+
+  it('沒有煙：照常看得到就打（原本的行為保留）', () => {
+    const r = defuse({ smoke: false, kit: false });
+    expect(r.ctAlive).toBe(false);
+  });
+
+  it('假拆：證據過 1 秒就不再接手；來不及在最晚干預時間前到位也不去', () => {
+    const { match, bot } = live(0);
+    const o = match.observe(0);
+    const t = bot.tactics;
+    const bomb = bot.intel.sites.A.plants[0];
+    const obs: ShooterObservation = { ...o, teammates: o.teammates.map((m) => ({ ...m, alive: false })), me: { ...o.me, x: bomb.x + 6000, y: bomb.y } };
+    t.defuseSince = obs.tick - 10;
+    t.defuseLast = obs.tick - 10;
+    expect(t.antiDefuse(obs, out(), bomb.x, bomb.y)).toBe(true);
+    t.defuseLast = obs.tick - 40;
+    expect(t.antiDefuse(obs, out(), bomb.x, bomb.y)).toBe(false);
+    t.defuseLast = obs.tick;
+    t.defuseSince = obs.tick - bot.data.rules.defuseTicks + 5;
+    const far: ShooterObservation = { ...obs, me: { ...obs.me, x: bomb.x + 30000 } };
+    expect(t.antiDefuse(far, out(), bomb.x, bomb.y)).toBe(false);
+  });
+
+  it('開關關掉重現 2.6.3：煙裡拆包 T 一槍不開', () => {
+    setP('antiDefuse', false);
+    expect(defuse({ smoke: true, kit: false }).fired).toBe(0);
   });
 });

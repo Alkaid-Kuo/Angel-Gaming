@@ -200,6 +200,8 @@ burnMateCheck: true,
 critForce: true,
 emptySwitch: true,
 scanLow: true,
+antiDefuse: true,
+antiDefuseRange: 12,
 claimClear: 6,
 claimById: true,
 afterPistol: 'force',
@@ -3085,6 +3087,8 @@ this.fakeProbe = false;
 this.burns = [];
 this.defuseAlarm = -1;
 this.alarmAlive = 5;
+this.defuseSince = -1;
+this.defuseLast = -1000000;
 this.postSaid = false;
 this.postSmokers = new Set();
 this.hide = null;
@@ -3261,6 +3265,8 @@ this.util.reset();
 this.burns = [];
 this.defuseAlarm = -1;
 this.alarmAlive = 5;
+this.defuseSince = -1;
+this.defuseLast = -1000000;
 this.postSaid = false;
 this.postSmokers.clear();
 this.coop.reset();
@@ -4589,6 +4595,7 @@ if (obs.enemiesAlive === 0) return null;
 if (defusing) {
 const kind = this.util.pick(me, ['molotov', 'he']);
 if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, by) < 3 * UNIT) && !this.burnsMate(obs, bx, by)) return { kind, x: bx, y: by, why: '燒拆包' };
+if (this.antiDefuse(obs, out, bx, by)) return null;
 }
 return this.postUtility(obs, bx, by, s);
 }
@@ -4614,12 +4621,37 @@ const reserve = burners[0] ?? alive[0];
 if (near && me.id !== reserve && this.util.has(me, 'molotov') && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return { kind: 'molotov', ...target, why: '燒回防入口' };
 return null;
 }
+antiDefuse(obs, out, bx, by) {
+if (!P.antiDefuse) return false;
+const me = obs.me;
+const t = obs.tick;
+if (t - this.defuseLast > this.tps) return false;
+const guard = [...this.alive(obs)].sort((a, b) => dist(a.x, a.y, bx, by) - dist(b.x, b.y, bx, by) || a.id - b.id)[0];
+if (guard === undefined || guard.id !== me.id) return false;
+const d = dist(me.x, me.y, bx, by);
+const sees = d < P.antiDefuseRange * UNIT && this.g.los(me.x, me.y, bx, by);
+const deadline = this.defuseSince + this.data.rules.defuseTicks;
+if (!sees && t + (this.judge?.travel(me, bx, by) ?? 0) * this.tps > deadline) return false;
+out.goal = sees ? null : { x: bx, y: by };
+out.hold = null;
+out.route = null;
+out.look = { x: bx, y: by };
+out.urgent = true;
+out.walk = false;
+out.allowPeek = false;
+out.stop = sees;
+out.noise = sees;
+out.role = '守包・反拆';
+return true;
+}
 burnsMate(obs, x, y) {
 return P.burnMateCheck && obs.teammates.some((m) => m.alive && dist(m.x, m.y, x, y) < 4 * UNIT);
 }
 defuseNow(obs) {
 const t = obs.tick;
 if (obs.bomb.state === 'defusing' || (this.perc.lastSound?.kind === 'defuse' && t - this.perc.lastSound.tick < this.tps)) {
+if (t - this.defuseLast > 2 * this.tps) this.defuseSince = t;
+this.defuseLast = t;
 this.defuseAlarm = t + this.data.rules.defuseTicks;
 this.alarmAlive = obs.enemiesAlive;
 } else if (P.defuseAlarmKill && obs.enemiesAlive < this.alarmAlive) this.defuseAlarm = -1;
