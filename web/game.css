@@ -434,14 +434,22 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 
 /* ═════ 訓練基地 ═════ */
 .v-training .fac { left: 0; top: 0; width: 520px; height: 470px; }
-.v-training .ringbox { position: relative; width: 280px; height: 280px; margin: 0 auto; }
+.v-training .ringbox { position: relative; width: 200px; height: 200px; margin: 0 auto; }
 .v-training .ringbox > svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
 .v-training .ringbox .spin { transform-box: view-box; transform-origin: 150px 150px; animation: spin 40s linear infinite; }
 .v-training .ringbox .v { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.v-training .ringbox .v .num { font-size: 92px; line-height: 0.85; }
+.v-training .ringbox .v .num { font-size: 68px; line-height: 0.85; }
 .v-training .ringbox .v small { font-family: var(--mono); font-size: max(12px, var(--fmin, 0px)); letter-spacing: 0.24em; color: var(--grey); margin-top: 6px; }
 .v-training .ringbox .v span { font-size: max(15px, var(--fmin, 0px)); color: var(--grey); margin-top: 2px; }
 .v-training .lv { display: flex; align-items: center; gap: 16px; margin-top: 10px; }
+/* 訓練時段（M5 第二批）：屬性訓練＋戰術排練共用 */
+.v-training .slots { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px 14px; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.v-training .slots .t { display: flex; flex-direction: column; }
+.v-training .slots .t small { font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.2em; color: var(--grey); }
+.v-training .slots .t span { font-size: max(15px, var(--fmin, 0px)); color: var(--grey); }
+.v-training .slots .t .num { font-size: 26px; color: var(--gold2); }
+.v-training .slots .to { display: flex; gap: 6px; }
+.v-training .ringbox .v span { font-size: max(12px, var(--fmin, 0px)); }
 .v-training .lv .fl3 { display: flex; flex-direction: column-reverse; gap: 4px; }
 .v-training .lv .fl3 i { width: 46px; height: 10px; background: rgba(255, 255, 255, 0.1); transform: skewX(-24deg); }
 .v-training .lv .fl3 i.on { background: var(--gold); box-shadow: 0 0 10px rgba(var(--gold-rgb), 0.6); }

@@ -182,6 +182,23 @@ const LESSONS: readonly Lesson[] = [
         open: 'tactics',
         body: () => '<b>排練</b>一個戰術：隊伍默契和出賽五人的熟練度一起漲，選手打這個戰術會更有默契。<br><b>比賽計畫</b>：替戰術打星或禁用，選手自己選戰術時照這個偏好。排練和屬性訓練共用每週的訓練時段。',
       },
+      {
+        id: 'w2.train',
+        screen: 'squad',
+        target: '.v-squad .roster',
+        go: 'player',
+        tag: 'NEW // 新功能開放',
+        title: '訓練屬性',
+        body: () => '選手靠<b>每週訓練</b>變強。點陣容裡的一位選手，到選手詳情排訓練。',
+      },
+      {
+        id: 'w2.train2',
+        screen: 'player',
+        target: '.p-attr',
+        ok: '知道了',
+        title: '練 1 節',
+        body: (_v, c) => `瞄準、反應、警覺旁邊的<b>「練 1 節」</b>：推進一週後才漲。每節 ${wan(c.economy.trainCost)} 萬，每人每週最多 ${c.economy.trainMaxPerPlayer} 節，跟戰術排練共用訓練時段。<br>離上限越近漲得越慢；「上限 約 A-」是同角色同品階的標準值。`,
+      },
     ],
   },
   {
