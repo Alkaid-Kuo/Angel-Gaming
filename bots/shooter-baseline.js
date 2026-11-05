@@ -208,7 +208,6 @@ tracerSrc: true,
 claimClear: 6,
 claimById: true,
 flashMulti: true,
-pairSync: true,
 tradeAngle: 25,
 tradePen: 2,
 afterPistol: 'force',
@@ -3947,27 +3946,6 @@ const last = this.roles.of(carrier) === ENTRY ? -1 : carrier;
 const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => (a === last ? 1 : 0) - (b === last ? 1 : 0) || this.mainPri(a) - this.mainPri(b));
 return Math.max(0, list.indexOf(id));
 }
-pairNow(obs, p, exec, ent) {
-if (!P.pairSync || p.kind === 'go' || ent === null || this.inRectSite(obs.me.x, obs.me.y, exec)) return null;
-const site = this.intel.sites[exec];
-if (obs.effects.some((q) => q.kind === 'fire' && (Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT || segDist(q.x, q.y, ent.ix, ent.iy, site.cx, site.cy).d < q.radius + 2 * UNIT))) return null;
-const gid = this.groupOf(obs, obs.me.id, p);
-const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => this.memberIndex(obs, a, p) - this.memberIndex(obs, b, p) || a - b);
-const k = Math.max(0, list.indexOf(obs.me.id));
-const partner = list[k ^ 1] ?? -1;
-return partner < 0 ? null : { k, partner, side: k % 2 === 0 ? -1 : 1 };
-}
-pairLook(ent, side) {
-const len = Math.max(1, dist(ent.ox, ent.oy, ent.ix, ent.iy));
-const ux = (ent.ix - ent.ox) / len;
-const uy = (ent.iy - ent.oy) / len;
-return { x: ent.ix + (ux * 3 - uy * side * 8) * UNIT, y: ent.iy + (uy * 3 + ux * side * 8) * UNIT };
-}
-flashInFlight(obs, ent) {
-if (ent === null) return false;
-const t = obs.tick;
-return this.mateFlash.some((x) => x.pop > t && this.flashOf(ent, x)) || this.flashSpots.some((f) => f.pop > t && this.flashOf(ent, f)) || (P.flashClaim && this.flashClaims.some((c) => t <= c.until && this.flashOf(ent, c) && !this.flashSpots.some((f) => f.by === c.by && f.tick >= c.at))) || obs.projectiles.some((q) => q.kind === 'flash' && this.flashOf(ent, q));
-}
 inGroup(obs, id, p, gid) {
 return this.groupOf(obs, id, p) === gid && !this.lurking(obs, id);
 }
@@ -4171,13 +4149,7 @@ return wish;
 }
 out.role = `執行 ${exec}`;
 const flashed = t >= this.flashPop && t < this.flashPop + 2 * this.tps;
-const pr = this.pairNow(obs, p, exec, ent);
-const release = pr !== null && pr.k <= 1 && (flashed || !this.flashInFlight(obs, ent));
-const withEntry = release && pr.partner === this.roles.who(ENTRY) && this.roles.of(me.id) !== AWP;
-if (pr !== null && pr.k <= 1 && ent !== null && dist(me.x, me.y, ent.ix, ent.iy) < P.entryZone * UNIT && !me.hasBomb && obs.enemies.length === 0) {
-out.look = pr.k === 0 ? { x: site.cx, y: site.cy } : this.pairLook(ent, pr.side);
-}
-if (p.kind !== 'go' && !withEntry && (!flashed || this.roles.of(me.id) === AWP) && this.yieldTo(obs, exec)) {
+if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && this.yieldTo(obs, exec)) {
 out.stop = true;
 out.look = { x: site.cx, y: site.cy };
 out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
@@ -4185,7 +4157,7 @@ const st = this.memberStage(obs, me.id, p);
 if (this.roles.of(me.id) === AWP && st !== null) out.hold = { ...st, x: me.x, y: me.y };
 return wish;
 }
-if (p.kind !== 'go' && !flashed && ent !== null && obs.enemies.length === 0 && !release && this.tooClose(obs, exec, ent)) {
+if (p.kind !== 'go' && !flashed && ent !== null && obs.enemies.length === 0 && this.tooClose(obs, exec, ent)) {
 out.walk = true;
 out.role = '拉開間距';
 }
@@ -4584,10 +4556,8 @@ const mates = obs.teammates.filter((m) => m.alive);
 let best = null;
 let bestS = 0;
 let tries = 0;
-const side = this.pairLook(e, 1);
 for (const c of this.flashList) {
 if (avoid !== null && dist(c.x, c.y, avoid.x, avoid.y) < P.flashSecondGap * UNIT) continue;
-if (P.pairSync && dist(c.x, c.y, side.x, side.y) < 5 * UNIT && g.los(e.ix, e.iy, c.x, c.y)) continue;
 if (++tries > 12) break;
 if (this.util.solve(me.x, me.y, c.x, c.y) === null) continue;
 let cost = 0;
