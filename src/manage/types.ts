@@ -1,8 +1,8 @@
 // M4 經營層：狀態與指令型別。
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
-import type { MatchRequest } from './gateway.ts';
+import type { MatchRequest, PlayerStat } from './gateway.ts';
 
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -65,6 +65,29 @@ export interface Player {
   tactics: Record<TacticId, number>;
   /** 新面孔（M5）：簽約時設 true，第一次為本隊出賽後清掉；出賽名單有新面孔的那場開打前，隊伍默契打折 */
   newFace: boolean;
+  /** 公開：本季個人統計累計（M5 第三批；一個存檔一季，不必換季歸零） */
+  season: SeasonStat;
+}
+
+/** 賽季累計的個人統計：PlayerStat 各欄加總＋場數 */
+export interface SeasonStat {
+  games: number;
+  kills: number;
+  deaths: number;
+  damage: number;
+  firstKills: number;
+  firstDeaths: number;
+  survived: number;
+  plants: number;
+  defuses: number;
+  clutches: number;
+  rounds: number;
+}
+
+/** 一個戰術本季打了幾回合、贏了幾回合 */
+export interface TacticRecord {
+  played: number;
+  won: number;
 }
 
 export interface IntelReport {
@@ -100,6 +123,8 @@ export interface Team {
   playbook: Record<TacticId, number>;
   /** 賽前比賽計畫（M5）：自己公開、別隊隱藏 */
   gamePlan: GamePlan;
+  /** 本季戰術紀錄（M5 第三批）：由我方回合戰術標籤累計；自己公開、別隊隱藏 */
+  tacticLog: Record<TacticId, TacticRecord>;
 }
 
 export interface RoundResult {
@@ -124,6 +149,8 @@ export interface FixtureResult {
   scoreB: number;
   /** 逐回合（累計比分，只供顯示） */
   rounds: RoundResult[];
+  /** 公開：雙方個人統計 [A 名單, B 名單]（各依名單順序；閘道沒給統計、或第 7 版以前打的比賽＝沒有） */
+  stats?: [PlayerStat[], PlayerStat[]];
   /** 隱藏：當時送出的請求單原樣（雙方 PlayerSpec 快照＋種子＋賽制）；觀戰回放由它重跑，含習慣與預設加成，不進已知層視圖 */
   request: MatchRequest;
 }

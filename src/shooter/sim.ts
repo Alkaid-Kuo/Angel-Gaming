@@ -157,6 +157,8 @@ export interface Player {
   blindTicks: number;
   kills: number;
   deaths: number;
+  /** 對敵人造成的總傷害（M5 統計；每次最多算到對方剩下的血量，隊友與炸彈不算）；不進雜湊 */
+  damage: number;
 }
 
 export interface BombEntity {
@@ -249,6 +251,10 @@ export interface RoundRecord {
   readonly flashEnemyTicks: readonly [number, number];
   /** 各組的閃光讓自己隊（含自己）致盲的總 tick 數 */
   readonly flashTeamTicks: readonly [number, number];
+  /** 下包者（playerId；本回合沒下包＝−1）（M5 統計） */
+  readonly planter: number;
+  /** 拆包成功者（playerId；沒拆成＝−1）（M5 統計） */
+  readonly defuser: number;
 }
 
 export interface KillRecord {
@@ -265,7 +271,8 @@ export interface ShooterResult {
   readonly score: readonly [number, number];
   readonly rounds: readonly RoundRecord[];
   readonly ticks: number;
-  readonly stats: readonly { readonly kills: number; readonly deaths: number }[];
+  /** 每位選手的擊殺（敵人）、死亡、對敵傷害（M5） */
+  readonly stats: readonly { readonly kills: number; readonly deaths: number; readonly damage: number }[];
   /** 打了幾段加時（0 = 正規結束） */
   readonly overtimes: number;
 }
@@ -537,6 +544,7 @@ function newPlayer(id: number): Player {
     blindTicks: 0,
     kills: 0,
     deaths: 0,
+    damage: 0,
   };
 }
 
@@ -852,7 +860,7 @@ export class ShooterMatch {
     const lossPay = ladder[this.lossLevel[lg] - 1];
     const plantedLoss = winner === 'CT' && this.bomb.planter >= 0 ? ECONOMY.plantedLossBonus : 0;
     for (const p of this.players) this.addMoney(p, p.team === winner ? winPay : lossPay + plantedLoss);
-    this.rounds.push({ number: this.roundNumber, winner, winnerGroup: g, reason, endTick: this.tick, tGroup: this.groupOf('T'), money: [this.roundMoneyAvg[0], this.roundMoneyAvg[1]], fullBuy: [this.fullBuy[0], this.fullBuy[1]], throws: [this.roundThrows[0], this.roundThrows[1]], flashEnemyTicks: [this.roundFlashEnemy[0], this.roundFlashEnemy[1]], flashTeamTicks: [this.roundFlashTeam[0], this.roundFlashTeam[1]] });
+    this.rounds.push({ number: this.roundNumber, winner, winnerGroup: g, reason, endTick: this.tick, tGroup: this.groupOf('T'), money: [this.roundMoneyAvg[0], this.roundMoneyAvg[1]], fullBuy: [this.fullBuy[0], this.fullBuy[1]], throws: [this.roundThrows[0], this.roundThrows[1]], flashEnemyTicks: [this.roundFlashEnemy[0], this.roundFlashEnemy[1]], flashTeamTicks: [this.roundFlashTeam[0], this.roundFlashTeam[1]], planter: this.bomb.planter, defuser: reason === 'defuse' ? this.bomb.defuser : -1 });
     this.ended = { winner, reason };
     this.phase = 'over';
     this.phaseEnd = this.tick + ROUND.roundEndTicks;
@@ -1463,6 +1471,7 @@ export class ShooterMatch {
       v.armor -= armorLoss;
       const wasAlive = v.hp > 0;
       h.rec.damage = Math.min(hpLoss, Math.max(0, v.hp));
+      this.credit(a, v, h.rec.damage);
       v.hp -= hpLoss;
       if (wasAlive && v.hp <= 0) {
         killedBy[v.id] = h.attacker;
@@ -1683,6 +1692,7 @@ export class ShooterMatch {
       this.hurtLog.push({ tick: this.tick, victim: p.id, fx: g.x, fy: g.y });
       const { hpLoss, armorLoss } = armorSplit(applyPercent(raw, this.grenadeDamagePct(owner, p)), p.armor, 100 - GRENADE_RULES.heArmorPct);
       p.armor -= armorLoss;
+      this.credit(owner, p, Math.min(hpLoss, Math.max(0, p.hp)));
       p.hp -= hpLoss;
     }
     for (const p of this.players) if (p.alive && p.hp <= 0) this.die(p, g.owner, 'he');
@@ -1697,6 +1707,11 @@ export class ShooterMatch {
   }
 
   /** 煙霧到時消失；生效中（含擴散中）與火圈重疊（圓心距 < 兩半徑和）就撲滅該火 */
+  /** 對敵傷害記到攻擊者（M5 統計；只記數字，不影響模擬） */
+  private credit(attacker: Player, victim: Player, hp: number): void {
+    if (hp > 0 && attacker.team !== victim.team) attacker.damage += hp;
+  }
+
   private smokeTick(): void {
     this.smokes = this.smokes.filter((sm) => this.tick < sm.endTick);
     if (this.fires.length === 0) return;
@@ -1714,7 +1729,9 @@ export class ShooterMatch {
       const owner = this.players[f.owner];
       for (const p of this.players) {
         if (!p.alive || p.hp <= 0 || !f.cells.includes(cellOf(p.y) * this.map.width + cellOf(p.x))) continue;
-        p.hp -= applyPercent(FIRE_TICK_DAMAGE, this.grenadeDamagePct(owner, p));
+        const loss = applyPercent(FIRE_TICK_DAMAGE, this.grenadeDamagePct(owner, p));
+        this.credit(owner, p, Math.min(loss, p.hp));
+        p.hp -= loss;
         if (p.hp <= 0) {
           killedBy[p.id] = f.owner;
           killKind[p.id] = f.kind;
@@ -1985,7 +2002,7 @@ export class ShooterMatch {
       score: [this.score[0], this.score[1]],
       rounds: this.rounds.slice(),
       ticks: this.tick,
-      stats: this.players.map((p) => ({ kills: p.kills, deaths: p.deaths })),
+      stats: this.players.map((p) => ({ kills: p.kills, deaths: p.deaths, damage: p.damage })),
       overtimes: this.overtime,
     };
   }

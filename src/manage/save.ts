@@ -3,7 +3,8 @@
 // M5 起每批提供「上一版 → 本版」的遷移函式，串起來讀得了 M5 開始前（第 5 版）的存檔；第 4 版以前照舊讀不了。
 import type { ContentPack } from './content.ts';
 import { defaultGamePlan } from './state.ts';
-import { startPlaybook, startTactics } from './game.ts';
+import { logTactics, startPlaybook, startTactics } from './game.ts';
+import { emptySeason } from './stats.ts';
 import type { GameState } from './types.ts';
 import { SAVE_VERSION } from './types.ts';
 
@@ -40,10 +41,29 @@ export function migrate5to6(s: GameState, content: ContentPack): GameState {
   return s;
 }
 
+/**
+ * 第 6 版 → 第 7 版（M5 第三批：個人統計）。
+ * 舊賽程沒有個人統計，留空；選手賽季累計從 0 開始。戰術紀錄由第 6 版之後已打的比賽的回合戰術標籤補回（和比賽當下累計的規則相同）。
+ */
+export function migrate6to7(s: GameState): GameState {
+  for (const p of s.players) p.season = emptySeason();
+  for (const t of s.teams) {
+    t.tacticLog = {};
+    for (const f of s.fixtures) {
+      if (f.result === null) continue;
+      if (f.home === t.id) logTactics(t.tacticLog, f.result.rounds, 'a');
+      else if (f.away === t.id) logTactics(t.tacticLog, f.result.rounds, 'b');
+    }
+  }
+  s.version = 7;
+  return s;
+}
+
 export function deserialize(json: string, content: ContentPack): GameState {
   let s = JSON.parse(json) as GameState;
   if (s.contentId !== content.id) throw new Error(`存檔的內容包 ${s.contentId} 與目前 ${content.id} 不符`);
   if (s.version === 5) s = migrate5to6(s, content);
+  if (s.version === 6) s = migrate6to7(s);
   if (s.version !== SAVE_VERSION) throw new Error(`存檔版本 ${s.version} 與目前 ${SAVE_VERSION} 不符`);
   return s;
 }

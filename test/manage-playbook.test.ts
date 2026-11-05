@@ -250,32 +250,36 @@ describe('NPC 戰術手冊', () => {
 });
 
 describe('存檔', () => {
-  it('第 6 版存讀一致', async () => {
+  it('第 7 版存讀一致', async () => {
     const s = newGame(16, content);
     applyCommand(s, content, humanTeam(s).id, { type: 'setGamePlan', plan: { pref: { rushA: 2 }, economy: 1 } });
     await advance(s, content, fake);
     const back = deserialize(serialize(s), content);
     expect(back).toEqual(s);
     expect(back.version).toBe(SAVE_VERSION);
-    expect(SAVE_VERSION).toBe(6);
+    expect(SAVE_VERSION).toBe(7);
   });
 
-  it('第 5 版 → 第 6 版：刪預設與研發、補熟練度與計畫、收件匣說明；第 4 版照舊拒絕', () => {
+  it('第 5 版 → 第 6 版 → 第 7 版：刪預設與研發、補熟練度與計畫、收件匣說明，再補統計；第 4 版照舊拒絕', () => {
     const s = newGame(17, content);
     const v5 = JSON.parse(serialize(s)) as Record<string, unknown> & GameState;
     v5.version = 5;
     for (const p of v5.players as unknown as Record<string, unknown>[]) {
       delete p.tactics;
       delete p.newFace;
+      delete p.season;
       p.presets = [{ id: 'r1', target: 'generic', version: 1, bonus: 10, reportedBonus: 12 }];
     }
     for (const t of v5.teams as unknown as Record<string, unknown>[]) {
       delete t.playbook;
       delete t.gamePlan;
+      delete t.tacticLog;
     }
     (v5.jobs as unknown[]).push({ kind: 'research', id: 999, teamId: s.humanTeamId, playerId: s.players[0].id, target: 'generic', games: 5 });
     const m = deserialize(JSON.stringify(v5), content);
-    expect(m.version).toBe(6);
+    expect(m.version).toBe(7);
+    for (const p of m.players) expect(p.season.games).toBe(0);
+    for (const t of m.teams) expect(t.tacticLog).toEqual({});
     expect(m.jobs.some((j) => (j.kind as string) === 'research')).toBe(false);
     for (const p of m.players) {
       expect('presets' in p).toBe(false);
