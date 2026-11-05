@@ -71,6 +71,10 @@ export class Combat {
     this.scanLeft = 0;
     this.soundSeen = -1;
     this.soundWait = 0;
+    /** 正在等的聲音扇形、上次扣等待的決策 tick（2.7） @type {import('./memory.js').Sector | null} */
+    this.soundObj = null;
+    this.soundDec = -1;
+    this.soundRes = false;
     /** 走過的位置（被閃時退回）：每 0.5 秒記一次 @type {import('./base.js').Pt[]} */
     this.trail = [];
     this.trailTick = -1000000;
@@ -108,6 +112,10 @@ export class Combat {
     this.scanLeft = 0;
     this.soundSeen = -1;
     this.soundWait = 0;
+    /** 正在等的聲音扇形、上次扣等待的決策 tick（2.7） @type {import('./memory.js').Sector | null} */
+    this.soundObj = null;
+    this.soundDec = -1;
+    this.soundRes = false;
     /** 走過的位置（被閃時退回）：每 0.5 秒記一次 @type {import('./base.js').Pt[]} */
     this.trail = [];
     this.trailTick = -1000000;
@@ -316,7 +324,7 @@ export class Combat {
       return this.finishMove(obs, out, e, false, d, ctx);
     }
     if (me.ammoMag === 0 && w.magazine > 0) {
-      if (wid === primary && secondary !== null && dc < P.pistolSwitch) {
+      if (wid === primary && secondary !== null && (dc < P.pistolSwitch || (P.emptySwitch && me.ammoReserve === 0))) {
         out.cmds.push({ type: 'switch', slot: 'secondary' });
         this.pistolUntil = t + 3 * this.tps;
         out.why = '沒子彈・切手槍';
@@ -651,15 +659,22 @@ export class Combat {
     return out;
   }
 
-  /** 聲音過了反應時間了沒 @param {import('./memory.js').Sector} snd */
-  heard(snd) {
-    if (this.soundSeen !== snd.tick) {
-      this.soundSeen = snd.tick;
+  /** 聲音過了反應時間了沒 @param {import('./memory.js').Sector} snd @param {number} t */
+  heard(snd, t) {
+    // 2.7：同一個扇形（合併的同方向聲音）算同一個聲音，停了 1 秒以上再響才重新等；同一次決策只扣一次
+    const fresh = P.heardKeep ? this.soundObj !== snd || snd.tick - this.soundSeen > this.tps : this.soundSeen !== snd.tick;
+    if (fresh) {
+      this.soundObj = snd;
       this.soundWait = this.soundReact;
+      this.soundDec = -1;
     }
-    if (this.soundWait <= 0) return true;
-    this.soundWait--;
-    return false;
+    this.soundSeen = snd.tick;
+    // 同一次決策的第二次呼叫（alert 之後的 look）沿用第一次的結果
+    if (P.heardOnce && this.soundDec === t) return this.soundRes;
+    this.soundDec = t;
+    this.soundRes = this.soundWait <= 0;
+    if (!this.soundRes) this.soundWait--;
+    return this.soundRes;
   }
 
   /**
@@ -673,7 +688,7 @@ export class Combat {
     const hurt = this.perc.lastHurt;
     if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
     const snd = this.perc.lastSound;
-    if (holding || snd === null || t - snd.tick >= this.tps || snd.r0 > 0 || Math.abs(adiff(snd.dir, me.facing)) <= this.rules.fovDeg / 2 || !this.heard(snd)) return null;
+    if (holding || snd === null || t - snd.tick >= this.tps || snd.r0 > 0 || Math.abs(adiff(snd.dir, me.facing)) <= this.rules.fovDeg / 2 || !this.heard(snd, t)) return null;
     return { x: me.x + cosd(snd.dir) * 6 * UNIT, y: me.y + sind(snd.dir) * 6 * UNIT };
   }
 
@@ -701,9 +716,9 @@ export class Combat {
     // 2. 受傷方向
     const hurt = this.perc.lastHurt;
     if (hurt !== null && t - hurt.tick < this.tps) return { x: me.x + cosd(hurt.dir) * 8 * UNIT, y: me.y + sind(hurt.dir) * 8 * UNIT };
-    // 3. 敵方聲音（反應延遲後）
+    // 3. 敵方聲音（反應延遲後）；守位中不轉（2.7：和 alert 一樣，守位只看挨打，近處腳步常在牆後）
     const snd = this.perc.lastSound;
-    if (snd !== null && t - snd.tick < this.tps && this.heard(snd)) {
+    if (snd !== null && !(P.lookHoldQuiet && ctx.holding) && t - snd.tick < this.tps && this.heard(snd, t)) {
       const r = clamp((snd.r0 + snd.r1) / 2, 4, 12);
       return { x: me.x + cosd(snd.dir) * r * UNIT, y: me.y + sind(snd.dir) * r * UNIT };
     }

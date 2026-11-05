@@ -48,7 +48,7 @@ export default class ShooterBaseline {
   declare() {
     return {
       name: 'shooter-baseline',
-      version: '2.6.3',
+      version: '2.7.0',
       style: '基準',
       knobs: [
         { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },
@@ -141,6 +141,7 @@ export default class ShooterBaseline {
     const check = ahead !== null && !fight.engaged && ev === null && !tac.objective && !tac.urgent && !tac.stop && !tac.escape && !tac.commit && dist(me.x, me.y, ahead.x, ahead.y) > 900 ? this.judge?.approach(obs, ahead) : null;
     // ── 移動：自保 → 交戰 → 架槍 → 導航 ──
     let moving = false;
+    let navUsed = false;
     if (!tac.objective) {
       if (ev !== null && ev.move !== null) {
         out.push({ type: 'move', x: Math.round(ev.move.x), y: Math.round(ev.move.y) });
@@ -149,9 +150,11 @@ export default class ShooterBaseline {
       else if (tac.escape) {
         out.push(...nav.cmds);
         moving = nav.moving;
+        navUsed = true;
       } else if (tac.commit && !fight.engaged) {
         out.push(...nav.cmds);
         moving = nav.moving;
+        navUsed = true;
       } else if (fight.move === 'stop') out.push({ type: 'stop' });
       else if (fight.move !== null) {
         out.push({ type: 'move', x: Math.round(fight.move.x), y: Math.round(fight.move.y) });
@@ -160,8 +163,10 @@ export default class ShooterBaseline {
       else {
         out.push(...nav.cmds);
         moving = nav.moving;
+        navUsed = true;
       }
     }
+    if (!navUsed) this.nav.idle();
     // ── 瞄準 ──
     const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
     const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : this.combat.alert(obs, holding) ?? check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
