@@ -202,6 +202,7 @@ emptySwitch: true,
 scanLow: true,
 antiDefuse: true,
 antiDefuseRange: 12,
+coopEligible: true,
 claimClear: 6,
 claimById: true,
 afterPistol: 'force',
@@ -2822,7 +2823,8 @@ const cues = [...this.cues].sort((a, b) => b[1].tick - a[1].tick || a[0] - b[0])
 for (const [id, cue] of cues) {
 const d = dist(me.x, me.y, cue.x, cue.y);
 if (d < 1800 || d > 9 * UNIT || me.hasBomb) continue;
-const helpers = [{ id: me.id, x: me.x, y: me.y, hasBomb: me.hasBomb, blind: me.blindTicks > 0 }, ...obs.teammates.filter((m) => m.alive && !m.planting && !m.defusing)].filter((m) => m.id !== id && !m.hasBomb && !m.blind && dist(m.x, m.y, cue.x, cue.y) <= 9 * UNIT).sort((a, b) => dist(a.x, a.y, cue.x, cue.y) - dist(b.x, b.y, cue.x, cue.y) || a.id - b.id);
+const able = ( m) => !P.coopEligible || (this.g.los(m.x, m.y, cue.x, cue.y) && (m.id !== me.id || me.reloadTicksLeft === 0));
+const helpers = [{ id: me.id, x: me.x, y: me.y, hasBomb: me.hasBomb, blind: me.blindTicks > 0 }, ...obs.teammates.filter((m) => m.alive && !m.planting && !m.defusing)].filter((m) => m.id !== id && !m.hasBomb && !m.blind && dist(m.x, m.y, cue.x, cue.y) <= 9 * UNIT && able(m)).sort((a, b) => dist(a.x, a.y, cue.x, cue.y) - dist(b.x, b.y, cue.x, cue.y) || a.id - b.id);
 if (helpers[0]?.id !== me.id) continue;
 const target = this.perc.threats(cue.x, cue.y, 45).find((p) => dist(p.x, p.y, cue.x, cue.y) < 18 * UNIT);
 const trace = obs.tracers.find((p) => p.friendly && dist(p.x0, p.y0, cue.x, cue.y) < 1500);

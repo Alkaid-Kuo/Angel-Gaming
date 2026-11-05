@@ -740,3 +740,56 @@ describe('Bot 2.7 批 1-12（H01）：守包反拆責任人（antiDefuse）', ()
     expect(defuse({ smoke: true, kit: false }).fired).toBe(0);
   });
 });
+
+describe('Bot 2.7 批 1-13（H02）：補槍人選先篩資格再排序（coopEligible）', () => {
+  /** 找一組幾何：隊友 0 在 cue 開火、目標在 cue 前 6 格；自己在 cue 後 5 格；near＝離 cue 2～5 格但隔牆的隊友 1 */
+  function rig(visibleNear: boolean): { acted: (nearAlive: boolean) => boolean } {
+    const { match, bot } = live(2);
+    const base = match.observe(2);
+    const g = bot.g;
+    let found = null;
+    outer: for (let i = 0; i < g.N; i += 3) {
+      if (!g.walkable(i)) continue;
+      const cue = g.center(i);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const me = { x: cue.x - dx * 5000, y: cue.y - dy * 5000 };
+        const target = { x: cue.x + dx * 6000, y: cue.y + dy * 6000 };
+        if (!g.walkLine(me.x, me.y, target.x, target.y)) continue;
+        for (let ay = -4; ay <= 4; ay++) for (let ax = -4; ax <= 4; ax++) {
+          const near = { x: cue.x + ax * 1000, y: cue.y + ay * 1000 };
+          const d = Math.hypot(ax, ay);
+          if (d < 2 || d >= 5 || !g.walkable(g.cellOf(near.x, near.y)) || g.los(near.x, near.y, cue.x, cue.y) !== visibleNear) continue;
+          if (visibleNear && Math.hypot(near.x - cue.x, near.y - cue.y) >= Math.hypot(me.x - cue.x, me.y - cue.y)) continue;
+          found = { cue, me, target, near };
+          break outer;
+        }
+      }
+    }
+    if (found === null) throw new Error('找不到幾何');
+    const { cue, me, target, near } = found;
+    const obs: ShooterObservation = { ...base, enemies: [], radar: [], effects: [], me: { ...base.me, ...me, hasBomb: false }, teammates: base.teammates.map((m) => ({ ...m, alive: m.id === 0 || m.id === 1, hasBomb: false, planting: false, defusing: false, blind: false, ...(m.id === 0 ? cue : near) })) };
+    bot.perc.known.set(5, { id: 5, ...target, tick: 600, seenTick: 600, conf: 100, src: 'see', vx: 0, vy: 0, facing: 0, weapon: 'ak' });
+    return {
+      acted: (nearAlive) => {
+        bot.tactics.coop.cues.set(0, { ...cue, facing: 0, tick: 600, dead: false });
+        bot.tactics.coop.apply(nearAlive ? obs : { ...obs, teammates: obs.teammates.map((m) => (m.id === 1 ? { ...m, alive: false } : m)) }, out({ role: 'execute', task: 'execute' }));
+        return bot.tactics.coop.acted;
+      },
+    };
+  }
+
+  it('最近的隊友隔牆看不到線索：由真正能補的人接手', () => {
+    const r = rig(false);
+    expect(r.acted(true)).toBe(true);
+    expect(r.acted(false)).toBe(true);
+  });
+
+  it('更近的隊友看得到線索：讓他接手，我不搶（原本的行為保留）', () => {
+    expect(rig(true).acted(true)).toBe(false);
+  });
+
+  it('開關關掉重現 2.6.3：隔牆的最近隊友占住名額，沒人接手', () => {
+    setP('coopEligible', false);
+    expect(rig(false).acted(true)).toBe(false);
+  });
+});

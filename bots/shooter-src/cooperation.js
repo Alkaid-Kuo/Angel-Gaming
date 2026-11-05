@@ -1,6 +1,6 @@
 // @ts-check
 // 近距離接戰跟進與互補守角。所有協調只用可觀察隊友、雷達與既有戰術目標，沒有共享隱藏狀態。
-import { UNIT, dist, segDist } from './base.js';
+import { P, UNIT, dist, segDist } from './base.js';
 
 export class Cooperation {
   /** @param {import('./base.js').Grid} g @param {import('./analysis.js').MapIntel} intel @param {import('./memory.js').Perception} perc @param {import('./base.js').InitData} data */
@@ -36,7 +36,9 @@ export class Cooperation {
       for (const [id, cue] of cues) {
         const d = dist(me.x, me.y, cue.x, cue.y);
         if (d < 1800 || d > 9 * UNIT || me.hasBomb) continue;
-        const helpers = [{ id: me.id, x: me.x, y: me.y, hasBomb: me.hasBomb, blind: me.blindTicks > 0 }, ...obs.teammates.filter((m) => m.alive && !m.planting && !m.defusing)].filter((m) => m.id !== id && !m.hasBomb && !m.blind && dist(m.x, m.y, cue.x, cue.y) <= 9 * UNIT).sort((a, b) => dist(a.x, a.y, cue.x, cue.y) - dist(b.x, b.y, cue.x, cue.y) || a.id - b.id);
+        // 2.7（P.coopEligible）：先篩掉不能支援的人（看不到線索、換彈中的自己），再依距離選；不然隔牆的最近隊友會占住名額
+        const able = (/** @type {{ id: number, x: number, y: number }} */ m) => !P.coopEligible || (this.g.los(m.x, m.y, cue.x, cue.y) && (m.id !== me.id || me.reloadTicksLeft === 0));
+        const helpers = [{ id: me.id, x: me.x, y: me.y, hasBomb: me.hasBomb, blind: me.blindTicks > 0 }, ...obs.teammates.filter((m) => m.alive && !m.planting && !m.defusing)].filter((m) => m.id !== id && !m.hasBomb && !m.blind && dist(m.x, m.y, cue.x, cue.y) <= 9 * UNIT && able(m)).sort((a, b) => dist(a.x, a.y, cue.x, cue.y) - dist(b.x, b.y, cue.x, cue.y) || a.id - b.id);
         if (helpers[0]?.id !== me.id) continue;
         // 補槍方向來自真實接敵或隊友公開開火方向；沒有接敵時只預瞄，不盲射。
         const target = this.perc.threats(cue.x, cue.y, 45).find((p) => dist(p.x, p.y, cue.x, cue.y) < 18 * UNIT);
