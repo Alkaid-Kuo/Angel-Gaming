@@ -335,11 +335,13 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .v-player .upg .btn { margin-left: auto; }
 .v-player .p-hist { left: 820px; top: 204px; width: 424px; height: 300px; }
 .v-player .hist { display: flex; flex-direction: column; gap: 4px; }
-.v-player .hrow { display: grid; grid-template-columns: 44px 64px 1fr 70px; align-items: center; gap: 8px; height: 38px; padding: 0 10px; font-size: max(15px, var(--fmin, 0px)); background: rgba(255, 255, 255, 0.025); }
+.v-player .hrow { display: grid; grid-template-columns: 40px 1fr 50px 40px 64px; align-items: center; gap: 8px; height: 38px; padding: 0 10px; font-size: max(15px, var(--fmin, 0px)); background: rgba(255, 255, 255, 0.025); }
 .v-player .hrow .wk { font-family: var(--mono); font-size: max(12px, var(--fmin, 0px)); letter-spacing: 0.1em; color: var(--grey2); }
 .v-player .hrow .sl { font-size: max(13px, var(--fmin, 0px)); color: var(--gold2); white-space: nowrap; }
 .v-player .hrow .vs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v-player .hrow .vs small { color: var(--grey); }
+.v-player .hrow .kd { font-size: max(14px, var(--fmin, 0px)); color: var(--grey); text-align: right; }
+.v-player .hrow .rt { font-size: max(14px, var(--fmin, 0px)); color: var(--white); text-align: right; }
 .v-player .hrow .stamp { justify-self: end; font-size: max(15px, var(--fmin, 0px)); padding: 1px 10px; transform: rotate(-4deg); }
 .v-player .p-tac { left: 1268px; top: 204px; width: 424px; height: 300px; }
 .v-player .tac { display: flex; flex-direction: column; gap: 16px; }
@@ -353,7 +355,18 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .v-player .intel .num { font-size: 72px; line-height: 0.9; }
 .v-player .intel b { color: var(--white); }
 .v-player .p-con { left: 820px; top: 528px; width: 872px; height: 238px; }
-.v-player .acts { display: flex; gap: 14px; margin-top: 30px; }
+.v-player .acts { display: flex; gap: 14px; margin-top: 16px; }
+/* 本季數據（M5 第三批） */
+.v-player .season { display: flex; align-items: flex-end; gap: 26px; margin-top: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); min-height: 50px; }
+.v-player .season .kv { display: flex; flex-direction: column; }
+.v-player .season .kv small { font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.16em; color: var(--grey); white-space: nowrap; }
+.v-player .season .kv .num { font-size: 26px; line-height: 1.1; }
+.v-player .season .kv .num.gd { color: var(--gold2); }
+.v-player .season .trend { display: flex; gap: 4px; margin-top: 4px; }
+.v-player .season .trend i { width: 26px; height: 24px; display: grid; place-items: center; font-style: normal; font-size: max(12px, var(--fmin, 0px)); background: rgba(255, 255, 255, 0.05); color: var(--grey); }
+.v-player .season .trend i.up { color: var(--gold2); }
+.v-player .season .trend i.dn { color: var(--red2); }
+.v-player .season .dim { font-size: max(14px, var(--fmin, 0px)); }
 .v-player .acts .btn.danger { margin-left: auto; }
 
 /* ═════ 轉會市場 ═════ */
@@ -464,14 +477,16 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .v-tactics .tt { left: 0; top: 0; width: 1000px; height: 430px; }
 .v-tactics .tc { left: 0; top: 450px; width: 1000px; height: 316px; }
 .v-tactics .reh { left: 1020px; top: 0; width: 672px; height: 470px; }
-.v-tactics .tr { display: grid; grid-template-columns: 150px 1fr 90px 80px 132px 150px; gap: 0 16px; align-items: center; height: 54px; padding: 0 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
-.v-tactics .tr.hd { height: 30px; font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.2em; color: var(--grey2); border-bottom: 0; }
+.v-tactics .tr { display: grid; grid-template-columns: 150px 1fr 84px 64px 96px 132px 140px; gap: 0 16px; align-items: center; height: 54px; padding: 0 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.v-tactics .tr.hd { height: 30px; font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.12em; color: var(--grey2); border-bottom: 0; white-space: nowrap; }
 .v-tactics .tr > b { font-size: 20px; font-weight: 900; letter-spacing: 0.04em; transform: skewX(-7deg); white-space: nowrap; }
 .v-tactics .tr.off > b, .v-tactics .tr.off .bar, .v-tactics .tr.off .num { opacity: 0.45; }
 .v-tactics .tr .bar { display: grid; grid-template-columns: 1fr 40px; gap: 12px; align-items: center; }
 .v-tactics .tr .bar .num { text-align: right; font-size: 20px; }
 .v-tactics .tr .num.pa { font-size: 20px; color: var(--grey); text-align: right; }
 .v-tactics .tr .num.eff { font-size: 30px; color: var(--gold2); text-align: right; }
+.v-tactics .tr .lg { font-size: max(13px, var(--fmin, 0px)); color: var(--grey); white-space: nowrap; text-align: right; }
+.v-tactics .tr .lg .num { font-size: 18px; color: var(--white); }
 .v-tactics .tr .pf { height: 36px; display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
 .v-tactics .tr .pf:hover:not(:disabled) { box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.6); }
 .v-tactics .tr .pf:disabled { cursor: default; opacity: 0.8; }
@@ -1069,6 +1084,24 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 /* 對手的評分上升不用金（金只給我方） */
 .md-result.md-team .ch.foe em.up { color: var(--white); }
 .md-result.md-team .gains { top: 800px; }
+/* 結果幕的數據板（M5 第三批）：按「數據」切換，名單與收穫換成雙方個人統計 */
+.md-result .rs-tg { display: none; }
+.md-result .ctl label { cursor: pointer; }
+.md-result .board { display: none; position: absolute; left: 200px; right: 200px; top: 662px; grid-template-columns: 1fr 1fr; gap: 24px; }
+.md-result .rs-tg:checked ~ .board { display: grid; }
+.md-result .rs-tg:checked ~ .lineups, .md-result .rs-tg:checked ~ .gains { display: none; }
+.md-result .ctl label .off, .md-result .rs-tg:checked ~ .ctl label .on { display: none; }
+.md-result .rs-tg:checked ~ .ctl label .off { display: inline; }
+.md-result .board .sb { padding: 8px 14px; background: rgba(var(--ink-rgb), 0.55); box-shadow: inset 0 2px 0 var(--gold), inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.md-result .board .sb.foe { box-shadow: inset 0 2px 0 rgba(var(--red-rgb), 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.md-result .board .sr { display: grid; grid-template-columns: 1fr 84px 60px 56px 56px; align-items: center; gap: 10px; height: 30px; font-size: max(15px, var(--fmin, 0px)); }
+.md-result .board .sr + .sr { border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.md-result .board .sr.hd { height: 24px; font-size: max(12px, var(--fmin, 0px)); letter-spacing: 0.06em; color: var(--grey2); white-space: nowrap; }
+.md-result .board .sr > span { text-align: right; }
+.md-result .board .sr b { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.md-result .board .sr b i { font-style: normal; color: var(--gold); margin-right: 6px; }
+.md-result .board .sr.mvp b { color: var(--gold2); }
+.md-result .board .sr .num { font-size: 17px; }
 
 /* ───── 選手立繪與品階（src/web/portrait.ts）─────
    頭像保留原色、不染金，裁緊到臉佔滿圓；我方框金、本週對手框紅、其他人框灰。

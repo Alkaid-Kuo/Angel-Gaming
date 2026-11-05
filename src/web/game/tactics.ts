@@ -34,6 +34,7 @@ export function tacticsScreen(ctx: Ctx): string {
     const eff = v.me.effective[t.id] ?? 0;
     const p = plan.pref[t.id] ?? 0;
     const q = queued(t.id);
+    const log = v.me.tacticLog[t.id];
     // 每邊至少留一個戰術：最後一個不能再按成禁用
     const lastOpen = p === 3 && sideOpen(t.side) <= 1;
     return `<div class="tr ${p === -1 ? 'off' : ''}">
@@ -41,13 +42,14 @@ export function tacticsScreen(ctx: Ctx): string {
       <div class="bar"><div class="meter g" style="--v:${team}%"><i></i></div><span class="num">${team}</span></div>
       <span class="num pa">${avg(t.id)}</span>
       <span class="num eff">${eff}</span>
+      <span class="lg">${log ? `<b class="num">${log.played}</b> 打 <b class="num">${log.won}</b> 贏` : '—'}</span>
       <button class="pf" data-act="pref" data-t="${t.id}" ${!active || lastOpen ? 'disabled' : ''} title="${lastOpen ? '這一邊至少要留一個戰術' : '點一下切換：不偏好 → 1～3 星 → 禁用'}">${stars(p)}</button>
       <button class="rh" data-act="rehearse" data-t="${t.id}" ${!active || left < sessions || v.me.cash < cost ? 'disabled' : ''}>${q ? `已排 ${q} 節 · ` : ''}排練</button>
     </div>`;
   };
   const table = (side: 'T' | 'CT', no: string, title: string, en: string): string =>
     `<div class="pn ${side === 'T' ? 'tt' : 'tc'} in">${pt(no, title, '', en)}
-      <div class="tr hd"><span>戰術</span><span>隊伍默契</span><span>出賽平均</span><span>執行</span><span>比賽計畫</span><span></span></div>
+      <div class="tr hd"><span>戰術</span><span>隊伍默契</span><span>出賽平均</span><span>執行</span><span>本季</span><span>比賽計畫</span><span></span></div>
       ${c.tactics.filter((t) => t.side === side).map(row).join('')}</div>`;
   return `${head('TACTICS // 戰術室', '戰術室', `執行熟練度 ＝ 隊伍默契與出賽五人個人熟練度各半 · 比賽計畫決定選手自己選戰術時偏好什麼 · 本週剩 <b>${left}</b> 個訓練時段`)}
     <section class="body s-tactics">

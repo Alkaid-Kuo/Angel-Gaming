@@ -5,6 +5,7 @@ import { lineageName } from '../manage/format.ts';
 import { lineupOf, myFixture, playerRecords, publicRating, rankOf, rosterOf, teamForm } from '../club/model.ts';
 import { avatarSvg } from '../club/art.ts';
 import { portraitFull } from '../portrait.ts';
+import { gameCells, playedGames, seasonStrip } from './stats.ts';
 import type { Ctx } from './kit.ts';
 import { avatar, btn, canAct, crest, crestRing, esc, foeOf, head, icon, intelNote, lineage, pcard, pt, rarityBadge, rimOf, slotEn, slotName, teamName, tierName, verCap, wan } from './kit.ts';
 
@@ -77,23 +78,14 @@ export function squadScreen(ctx: Ctx): string {
 }
 
 // ───── 選手詳情 ─────
+/** 近五場：週、對手與比分、K／D、評分（M5 第三批；沒有統計的舊比賽留空）、勝負 */
 function history(ctx: Ctx, p: KnownPlayer): string {
   const { v } = ctx;
-  const games: { week: number; opp: string; won: boolean | null; slot: number; my: number; their: number }[] = [];
-  for (const f of v.fixtures) {
-    const x = f.match;
-    const s = f.score;
-    if (!x || !s) continue;
-    const home = x.home.includes(p.id);
-    const i = (home ? x.home : x.away).indexOf(p.id);
-    if (i < 0) continue;
-    const won = x.winner === null ? null : (x.winner === f.home) === home;
-    games.push({ week: f.week, opp: home ? f.away : f.home, won, slot: i, my: home ? s.home : s.away, their: home ? s.away : s.home });
-  }
+  const games = playedGames(v, p);
   if (!games.length) return '<p class="dim">還沒有出賽紀錄。</p>';
   return `<div class="hist">${games
     .slice(-5)
-    .map((g) => `<div class="hrow"><span class="wk">${g.week <= 7 ? `W${String(g.week).padStart(2, '0')}` : g.week === 8 ? '準決' : '決賽'}</span><span class="sl">${esc(slotName(ctx, g.slot))}</span><span class="vs">vs ${esc(teamName(v, g.opp))} <small class="num">${g.my}:${g.their}</small></span><span class="stamp ${g.won ? 'w' : 'l'}">${g.won === null ? 'DRAW' : g.won ? 'WIN' : 'LOSE'}</span></div>`)
+    .map((g) => `<div class="hrow"><span class="wk">${g.week <= 7 ? `W${String(g.week).padStart(2, '0')}` : g.week === 8 ? '準決' : '決賽'}</span><span class="vs">vs ${esc(teamName(v, g.opp))} <small class="num">${g.my}:${g.their}</small></span>${gameCells(g)}<span class="stamp ${g.won ? 'w' : 'l'}">${g.won === null ? 'DRAW' : g.won ? 'WIN' : 'LOSE'}</span></div>`)
     .join('')}</div>`;
 }
 
@@ -162,7 +154,8 @@ export function playerScreen(ctx: Ctx): string {
     <section class="body s-player">${verPanel}
       <div class="pn p-hist in">${pt('02', '出賽紀錄', `${rec.w} 勝 ${rec.l} 敗`)}${history(ctx, p)}</div>
       ${tac}
-      <div class="pn p-con in">${pt('04', mine ? '合約與安排' : '動作', mine ? `週薪 <b>${wan(p.weeklySalary)}</b> 萬 · 出賽 ${p.games} 場` : esc(teamName(v, p.teamId)))}
+      <div class="pn p-con in">${pt('04', '本季數據', mine ? `週薪 <b>${wan(p.weeklySalary)}</b> 萬 · 出賽 ${p.games} 場` : esc(teamName(v, p.teamId)), 'SEASON')}
+        ${seasonStrip(v, p)}
         <div class="acts">${actions}</div></div>
     </section>`;
 }

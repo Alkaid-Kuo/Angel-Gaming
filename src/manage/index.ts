@@ -11,5 +11,6 @@ export type { KnownView, KnownPlayer, KnownFixture } from './view.ts';
 export { standings } from './league.ts';
 export type { StandingRow } from './league.ts';
 export { serialize, deserialize } from './save.ts';
+export { emptySeason, mvpIndex, ratingOf } from './stats.ts';
 export { POLICIES, runSeason } from './autoplayer.ts';
 export type { Policy } from './autoplayer.ts';

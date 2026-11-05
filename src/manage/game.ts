@@ -3,7 +3,7 @@
 import { settleBets } from './betting.ts';
 import { applyCommand } from './commands.ts';
 import type { ContentPack, RaritySpec } from './content.ts';
-import type { BattleGateway, MatchOutcome, MatchRequest } from './gateway.ts';
+import type { BattleGateway, MatchOutcome, MatchRequest, PlayerStat } from './gateway.ts';
 import { assertFormat, finalScore } from './gateway.ts';
 import { processJobs } from './jobs.ts';
 import { createFinals, createRegularSeason, createSemis, finalRanks } from './league.ts';
@@ -30,7 +30,8 @@ import {
   weeklySalaries,
   weeklySponsor,
 } from './state.ts';
-import type { Command, Fixture, GameState, Persona, Player, PlayerId, Rarity, Team, TeamId } from './types.ts';
+import type { Command, Fixture, GameState, Persona, Player, PlayerId, Rarity, RoundResult, TacticRecord, Team, TeamId } from './types.ts';
+import { addMatch, emptySeason } from './stats.ts';
 import { REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from './types.ts';
 import { knownView } from './view.ts';
 import type { Prng } from '../shared/prng.ts';
@@ -137,6 +138,7 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, handles: 
     upgradeUntilWeek: null,
     tactics: startTactics(content, state.seed, n, lineage.id),
     newFace: false,
+    season: emptySeason(),
   });
   return id;
 }
@@ -201,6 +203,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         scrims: [],
         playbook: startPlaybook(content, 'human'),
         gamePlan: defaultGamePlan(content),
+        tacticLog: {},
       });
       for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, portraits, id, rng.range(e.humanVersions[0], e.humanVersions[1]), e.humanStartRarities[k]);
     } else {
@@ -220,6 +223,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         scrims: [],
         playbook: startPlaybook(content, persona),
         gamePlan: defaultGamePlan(content),
+        tacticLog: {},
       });
       for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, portraits, id, rng.range(spec.versions[0], spec.versions[1]));
       npcIndex++;
@@ -279,7 +283,14 @@ async function playMatchDay(state: GameState, content: ContentPack, gateway: Bat
     const out = outs[fi];
     const sc = finalScore(out);
     const winner = out.winner === 'a' ? f.home : out.winner === 'b' ? f.away : null;
-    f.result = { lineupA: hp.map((p) => p.id), lineupB: ap.map((p) => p.id), winner, scoreA: sc.a, scoreB: sc.b, rounds: out.rounds.map((r) => ({ ...r })), request: structuredClone(reqs[fi]) };
+    const stats = splitStats(out, hp.length);
+    f.result = { lineupA: hp.map((p) => p.id), lineupB: ap.map((p) => p.id), winner, scoreA: sc.a, scoreB: sc.b, rounds: out.rounds.map((r) => ({ ...r })), ...(stats !== null ? { stats } : {}), request: structuredClone(reqs[fi]) };
+    if (stats !== null) {
+      hp.forEach((p, i) => addMatch(p.season, stats[0][i]));
+      ap.forEach((p, i) => addMatch(p.season, stats[1][i]));
+    }
+    logTactics(home.tacticLog, out.rounds, 'a');
+    logTactics(away.tacticLog, out.rounds, 'b');
     // 名單平均 Elo 算期望值，名單內每人加同一個 delta（兩隊人數相同，總分守恆）
     const delta = eloDelta(mean(hp), mean(ap), out.winner === 'a' ? 1000 : out.winner === 'b' ? 0 : 500, e.eloK);
     for (const p of hp) {
@@ -305,6 +316,24 @@ async function playMatchDay(state: GameState, content: ContentPack, gateway: Bat
     notify(state, f.away, 'result', line);
     summary.results.push({ fixtureId: f.id, stage: f.stage, home: f.home, away: f.away, homeScore: sc.a, awayScore: sc.b, winner });
   });
+}
+
+/** 成績單的個人統計切成 [A 名單, B 名單]；沒有或長度不對＝null（不存、不累計） */
+function splitStats(out: MatchOutcome, size: number): [PlayerStat[], PlayerStat[]] | null {
+  const ps = out.players;
+  if (ps === undefined || ps.length !== size * 2) return null;
+  return [ps.slice(0, size).map((s) => ({ ...s })), ps.slice(size).map((s) => ({ ...s }))];
+}
+
+/** 本季戰術紀錄（M5 第三批）：我方有標籤的回合，該戰術 played +1、贏了 won +1 */
+export function logTactics(log: Record<string, TacticRecord>, rounds: readonly RoundResult[] | MatchOutcome['rounds'], side: 'a' | 'b'): void {
+  for (const r of rounds) {
+    const t = r.tactics?.[side];
+    if (t === undefined || t === null) continue;
+    const rec = (log[t] ??= { played: 0, won: 0 });
+    rec.played += 1;
+    if (r.winner === side) rec.won += 1;
+  }
 }
 
 /** 新面孔每人一次：隊伍默契各項 ×NEW_FACE_KEEP，然後清掉標記 */

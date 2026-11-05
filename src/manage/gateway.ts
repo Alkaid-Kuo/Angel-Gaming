@@ -8,6 +8,7 @@
 // 5. 賽制自報每場回合數、估計耗時與名單人數，經營層才估得出「推進一週要等多久」、開局時才查得出內容包配不配。
 // 6. 賽制自報能不能觀戰（watchable）；經營層不解讀，只透傳給畫面決定要不要放「觀戰」。
 // 7. 隊伍層資料（M5）：SideSpec.team 是不透明的一包；成績單可回報每回合雙方的戰術代號（MatchRound.tactics），代號由內容包定義。
+// 8. 個人統計（M5 第三批）：成績單可回報每位出賽選手的統計（MatchOutcome.players，A 名單在前）；沒有統計的賽制回 undefined，經營層只存、只累計、只顯示。
 import type { Winner } from './types.ts';
 
 export interface MatchFormat {
@@ -58,9 +59,32 @@ export interface MatchRound {
   readonly tactics?: { readonly a: string | null; readonly b: string | null };
 }
 
+/** 一位出賽選手整場的統計（M5 第三批） */
+export interface PlayerStat {
+  /** 擊殺敵人數（隊殺不算） */
+  readonly kills: number;
+  /** 死亡數（含被隊友、炸彈、自己的道具） */
+  readonly deaths: number;
+  /** 對敵人造成的總傷害（每次最多算到對方剩下的血量） */
+  readonly damage: number;
+  /** 回合第一殺（該回合第一個「敵人殺敵人」的擊殺者） */
+  readonly firstKills: number;
+  /** 回合第一死（同一則擊殺的死者） */
+  readonly firstDeaths: number;
+  /** 活到回合結束的回合數 */
+  readonly survived: number;
+  readonly plants: number;
+  readonly defuses: number;
+  /** 殘局勝：本隊剩自己一人、敵方 ≥ 1 人時，最後本隊贏下該回合 */
+  readonly clutches: number;
+  readonly rounds: number;
+}
+
 export interface MatchOutcome {
   readonly winner: Winner;
   readonly rounds: readonly MatchRound[];
+  /** 個人統計（長度＝雙方名單人數和，A 名單在前、各依名單順序）；賽制沒有統計＝undefined */
+  readonly players?: readonly PlayerStat[];
 }
 
 export interface BattleGateway {

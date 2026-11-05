@@ -5,6 +5,7 @@ import { CATEGORY_NAME, lineageName } from '../manage/format.ts';
 import { lineupOf, rankOf, weekBreakdown } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
 import { avatar, crest, crestRing, esc, glyph, icon, slotName, teamName, wan } from './kit.ts';
+import { sidesOf, statsBoard } from './stats.ts';
 
 export interface Snapshot {
   cash: number;
@@ -194,20 +195,23 @@ function resultScene(ctx: Ctx, f: KnownFixture, before: Snapshot, summaryWeek: n
     return `<div class="ch ${foe ? 'foe' : ''}" style="--d:${0.5 + i * 0.06}s">${avatar(ctx, p, 46)}<span class="c"><b>${esc(p?.name ?? '?')}</b><small>${p ? `${glyph(p.lineageId, 12)}${esc(lineageName(c, p.lineageId))}` : ''}</small></span><em class="${d >= 0 ? 'up' : 'dn'}">${d ? `${d > 0 ? '+' : ''}${d}` : ''}</em></div>`;
   };
   const fameD = v.me.fame - before.fame;
+  // 個人統計（M5 第三批）：「數據」切換名單＋收穫 ↔ 雙方數據板（純 CSS 勾選框，不必重畫）
+  const sides = sidesOf(v, f);
   return {
     key: 'result',
-    html: `<div class="md md-result md-team ${m.res}"><div class="flare"></div><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span>FINAL</span></div>
+    html: `<div class="md md-result md-team ${m.res}">${sides ? '<input type="checkbox" id="rs-stats" class="rs-tg">' : ''}<div class="flare"></div><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span>FINAL</span></div>
       <section class="big"><span class="huge">${m.res === 'win' ? 'WIN' : m.res === 'lose' ? 'LOSE' : 'DRAW'}</span><span class="zh">${m.res === 'win' ? '勝利' : m.res === 'lose' ? '落敗' : '平手'}</span></section>
       <section class="vsrow"><div class="t">${crestRing(ctx, me, 80)}${esc(teamName(v, me))}</div><div class="sc"><b>${m.my}</b><i>:</i>${m.their}</div><div class="t r">${crestRing(ctx, m.opp, 80, m.opp)}<span class="rd">${esc(teamName(v, m.opp))}</span></div></section>
       <section class="strip2"><div class="cells">${roundStrip(m, false)}</div></section>
       <section class="lineups"><div class="side">${m.mine.map((id, i) => chip(id, i, false)).join('')}</div><span class="vs">VS</span><div class="side r">${m.theirs.map((id, i) => chip(id, i, true)).join('')}</div></section>
+      ${sides ? `<section class="board">${statsBoard(ctx, { mine: m.mine, theirs: m.theirs }, sides)}</section>` : ''}
       <section class="gains">
         <div class="gn ${prize > 0 ? 'g' : ''}"><small>比賽收入</small><div class="v"><span class="num up">+${wan(prize)}</span><span>萬</span></div><p>${m.res === 'win' ? `勝 ${wan(e.matchWinPrize)}` : `${m.res === 'lose' ? '敗' : '平'} ${wan(e.matchLossPrize)}`} ＋ 贏 ${m.my} 回合 × ${wan(e.roundWinBonus)}</p></div>
         <div class="gn ${bets > 0 ? 'g' : ''}"><small>下注開獎</small><div class="v"><span class="num ${bets > 0 ? 'up' : ''}">${bets > 0 ? `+${wan(bets)}` : '0'}</span><span>萬</span></div><p>${bets > 0 ? '押中的彩券已入帳' : '這週沒有押中'}</p></div>
         <div class="gn"><small>名氣</small><div class="v"><span class="num">${before.fame}</span><span>→</span><span class="num ${fameD >= 0 ? 'up' : ''}">${v.me.fame}</span></div><p>每週贊助 ${wan(v.me.weeklySponsor)} 萬</p></div>
         <div class="gn"><small>名次</small><div class="v"><span class="num">${before.rank || '—'}</span><span>→</span><span class="num ${before.rank > 0 && rankOf(v, me) < before.rank ? 'up' : ''}">${rankOf(v, me)}</span></div><p>${f.stage === 'regular' ? '例行賽積分榜' : '季後賽'}</p></div>
       </section>
-      <div class="ctl">${f.match?.watchable ? `<button class="btn ghost" data-act="watch" data-f="${esc(f.id)}"><b>觀戰</b><span>WATCH</span></button>` : ''}<button class="btn" data-act="cine-next"><b>繼續</b><span>NEXT</span></button></div></div>`,
+      <div class="ctl">${sides ? '<label class="btn ghost" for="rs-stats"><b class="on">數據</b><b class="off">收穫</b><span>STATS</span></label>' : ''}${f.match?.watchable ? `<button class="btn ghost" data-act="watch" data-f="${esc(f.id)}"><b>觀戰</b><span>WATCH</span></button>` : ''}<button class="btn" data-act="cine-next"><b>繼續</b><span>NEXT</span></button></div></div>`,
     auto: 0,
   };
 }

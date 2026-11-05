@@ -15,7 +15,7 @@
 // 觀戰回放（步驟 9）：可玩版的觀戰 Worker 用同一個 gatewayDriverOptions 建 ShooterDriver、逐 tick 推進，
 // 所以重播與經營層當時打的那一場是同一場（成績單與終局雜湊相同，test/manage-shooter.test.ts）。
 // 試玩頁的基準 Bot 座位（src/web/shooter/lineup.ts）也呼叫 seatOf、seatController、seatKnobs，座位邏輯只有這一份。
-import type { MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec, SideSpec } from '../manage/gateway.ts';
+import type { MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec, PlayerStat, SideSpec } from '../manage/gateway.ts';
 import type { KnobValues } from '../api/types.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
@@ -24,7 +24,7 @@ import { ROUND, TEAM_SIZE } from './config.ts';
 import { MAPS, type ShooterMap } from './map.ts';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES, type ShooterRole } from './players.ts';
 import { ShooterBatchController, runShooterMatch, type ShooterReplay, type ShooterRunOptions } from './runner.ts';
-import { PLAYER_COUNT, type ShooterMatch, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
+import { PLAYER_COUNT, type KillRecord, type ShooterMatch, type ShooterMatchOptions, type ShooterResult } from './sim.ts';
 
 export const GATEWAY_MAP_ID = 'redrock';
 
@@ -140,8 +140,54 @@ export function roundPhase(n: number, rules: Pick<ShooterMatch, 'roundsPerHalf' 
   return `加時 ${Math.floor((n - reg - 1) / per) + 1}`;
 }
 
-/** 引擎結果 → 成績單（A＝組 0＝玩家 0～4）；rules：該場的半場長度與加時規則（ShooterMatch 本身就有）；tags：驅動層的回合戰術標籤 */
-export function outcomeOf(result: ShooterResult, rules: Pick<ShooterMatch, 'roundsPerHalf' | 'overtimeRule'>, tags: readonly (readonly [string | null, string | null] | undefined)[] = []): MatchOutcome {
+/**
+ * 個人統計（M5 第三批）：擊殺、死亡、傷害照引擎；首殺、存活、殘局由逐回合的擊殺紀錄推，下包、拆包由回合紀錄。
+ * 首殺＝回合裡第一則「擊殺者與死者不同組」的擊殺；殘局＝某組剩一人時對方至少一人，該組最後贏下回合（同一回合每組最多一次）。
+ */
+export function playerStats(result: ShooterResult, kills: readonly KillRecord[]): PlayerStat[] {
+  const half = PLAYER_COUNT / 2;
+  const grp = (pid: number): 0 | 1 => (pid < half ? 0 : 1);
+  const st = result.stats.map((s) => ({ kills: s.kills, deaths: s.deaths, damage: s.damage, firstKills: 0, firstDeaths: 0, survived: 0, plants: 0, defuses: 0, clutches: 0, rounds: result.rounds.length }));
+  const byRound = new Map<number, KillRecord[]>();
+  for (const k of kills) {
+    const list = byRound.get(k.round) ?? [];
+    list.push(k);
+    byRound.set(k.round, list);
+  }
+  for (const r of result.rounds) {
+    const ks = byRound.get(r.number) ?? [];
+    const dead = new Set<number>();
+    const first = ks.find((k) => k.killer >= 0 && grp(k.killer) !== grp(k.victim));
+    if (first !== undefined) {
+      st[first.killer].firstKills++;
+      st[first.victim].firstDeaths++;
+    }
+    const alive = [half, half];
+    const clutcher = [-1, -1];
+    for (const k of ks) {
+      if (dead.has(k.victim)) continue;
+      dead.add(k.victim);
+      alive[grp(k.victim)]--;
+      for (const g of [0, 1] as const) {
+        if (clutcher[g] < 0 && alive[g] === 1 && alive[1 - g] >= 1) {
+          for (let pid = g * half; pid < (g + 1) * half; pid++) if (!dead.has(pid)) clutcher[g] = pid;
+        }
+      }
+    }
+    const cw = clutcher[r.winnerGroup];
+    if (cw >= 0) st[cw].clutches++;
+    for (let pid = 0; pid < st.length; pid++) if (!dead.has(pid)) st[pid].survived++;
+    if (r.planter >= 0) st[r.planter].plants++;
+    if (r.defuser >= 0) st[r.defuser].defuses++;
+  }
+  return st;
+}
+
+/**
+ * 引擎結果 → 成績單（A＝組 0＝玩家 0～4）；rules：該場的半場長度與加時規則，有 kills 時一併回個人統計（傳 ShooterMatch 本身就都有）；
+ * tags：驅動層的回合戰術標籤
+ */
+export function outcomeOf(result: ShooterResult, rules: Pick<ShooterMatch, 'roundsPerHalf' | 'overtimeRule'> & { readonly kills?: readonly KillRecord[] }, tags: readonly (readonly [string | null, string | null] | undefined)[] = []): MatchOutcome {
   const regulation = rules.roundsPerHalf * 2;
   let a = 0;
   let b = 0;
@@ -152,7 +198,7 @@ export function outcomeOf(result: ShooterResult, rules: Pick<ShooterMatch, 'roun
     const tactics = t !== undefined && (t[0] !== null || t[1] !== null) ? { tactics: { a: t[0], b: t[1] } } : {};
     return { label: roundLabel(r.number, regulation), winner: r.winnerGroup === 0 ? 'a' : 'b', scoreA: a, scoreB: b, phase: roundPhase(r.number, rules), ...tactics };
   });
-  return { winner: result.winner === 0 ? 'a' : result.winner === 1 ? 'b' : 'draw', rounds };
+  return { winner: result.winner === 0 ? 'a' : result.winner === 1 ? 'b' : 'draw', rounds, ...(rules.kills !== undefined ? { players: playerStats(result, rules.kills) } : {}) };
 }
 
 export interface GatewayMatch {

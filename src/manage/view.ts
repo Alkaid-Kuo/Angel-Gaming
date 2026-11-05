@@ -7,7 +7,8 @@ import type { MatchFormat } from './gateway.ts';
 import type { StandingRow } from './league.ts';
 import { standings } from './league.ts';
 import { capacityLeft, effectiveLineup, effectiveTactics, playerMaxVersion, playerOf, rosterOf, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
-import type { Bet, FixtureId, GamePlan, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, RoundResult, ScrimReport, SeasonResult, Stage, TeamId, Winner } from './types.ts';
+import type { Bet, FixtureId, GamePlan, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, RoundResult, ScrimReport, SeasonResult, SeasonStat, Stage, TacticRecord, TeamId, Winner } from './types.ts';
+import type { PlayerStat } from './gateway.ts';
 import { TOTAL_WEEKS } from './types.ts';
 
 export interface KnownPlayer {
@@ -27,6 +28,8 @@ export interface KnownPlayer {
   upgrading: boolean;
   /** 個人戰術熟練度（M5，整數）：只有自己隊的人有 */
   tactics?: Record<string, number>;
+  /** 本季個人統計（M5 第三批，公開：每個人都有） */
+  season: SeasonStat;
 }
 
 export interface KnownFixture {
@@ -47,6 +50,8 @@ export interface KnownFixture {
     rounds: { label: string; winner: Winner; home: number; away: number; phase?: string; tactic?: string | null }[];
     /** 賽制自報能觀戰（knownView 有傳賽制時才可能 true；請求單本身含隱藏資料，不放進視圖） */
     watchable: boolean;
+    /** 雙方個人統計（M5 第三批，公開；各依名單順序）；沒有統計的比賽沒有這欄 */
+    stats?: { home: PlayerStat[]; away: PlayerStat[] };
   } | null;
 }
 
@@ -74,6 +79,8 @@ export interface KnownView {
     effective: Record<string, number>;
     /** 賽前比賽計畫（M5） */
     gamePlan: GamePlan;
+    /** 本季戰術紀錄（M5 第三批；只有自己隊） */
+    tacticLog: Record<string, TacticRecord>;
   };
   players: KnownPlayer[];
   teams: { id: TeamId; name: string; fame: number; roster: PlayerId[] }[];
@@ -122,6 +129,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       playbook: Object.fromEntries(Object.entries(team.playbook).map(([k, v]) => [k, Math.round(v)])),
       effective: effectiveTactics(content, team, effectiveLineup(state, content, team).map((id) => playerOf(state, id))),
       gamePlan: { pref: { ...team.gamePlan.pref }, economy: team.gamePlan.economy },
+      tacticLog: Object.fromEntries(Object.entries(team.tacticLog).map(([k, v]) => [k, { ...v }])),
     },
     players: state.players.map((p) => ({
       id: p.id,
@@ -137,6 +145,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       teamId: p.teamId,
       upgrading: p.upgradeUntilWeek !== null,
       ...(p.teamId === teamId ? { tactics: Object.fromEntries(Object.entries(p.tactics).map(([k, v]) => [k, Math.round(v)])) } : {}),
+      season: { ...p.season },
     })),
     teams: state.teams.map((t) => ({ id: t.id, name: t.name, fame: t.fame, roster: rosterOf(state, t.id).map((p) => p.id) })),
     fixtures: state.fixtures.map((f) => ({
@@ -153,6 +162,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
             winner: f.result.winner,
             rounds: f.result.rounds.map((r) => ({ label: r.label, winner: r.winner, home: r.scoreA, away: r.scoreB, ...(r.phase !== undefined ? { phase: r.phase } : {}), ...ownTactic(r, f.home === teamId ? 'a' : f.away === teamId ? 'b' : null) })),
             watchable: format?.watchable === true,
+            ...(f.result.stats !== undefined ? { stats: { home: f.result.stats[0].map((s) => ({ ...s })), away: f.result.stats[1].map((s) => ({ ...s })) } } : {}),
           }
         : null,
     })),
