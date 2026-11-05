@@ -1,6 +1,7 @@
 // 經營頁的遊戲控制器：持有狀態、發指令、推進一週，並在每次變動後存到 localStorage。
 // 對戰只經由 BattleGateway：內容包決定用哪個閘道（軍團戰暫代包＝假比賽、攻防戰＝Worker 池跑真引擎）。
-// 讀檔時依存檔的 contentId 選內容包與閘道；版本不符或內容包不明時讀不了，介面顯示 saveProblem() 的訊息。
+// 讀檔時依存檔的 contentId 選內容包與閘道；第 5 版以後的舊檔自動遷移並立刻回寫成目前版本（save-parse.ts）；
+// 更舊、比目前新或內容包不明時讀不了，介面顯示 saveProblem() 的訊息。
 // 觀戰：賽制自報 watchable 時，畫面可用 watchTicket() 取得某場的請求單（存檔原樣），交給可玩版重播。
 import {
   FakeGateway,
@@ -26,16 +27,10 @@ import {
 } from '../../manage/index.ts';
 import { SHOOTER_CONTENT } from '../../manage/content-shooter.ts';
 import { WorkerShooterGateway } from './shooter-gateway.ts';
+import { VERSION_NOTE, parseSave as parseSaveWith, type ParsedSave } from './save-parse.ts';
 
 // 鍵名沿用第 2 版：同一個鍵讀到舊版存檔時才能說清楚「哪一版、為什麼不能用」
 const SAVE_KEY = 'angel-gaming-m4-save-v2';
-/** 各舊版存檔不能用的原因（標題畫面的訊息） */
-const VERSION_NOTE: Readonly<Record<number, string>> = {
-  1: '三個 1 對 1 對位',
-  2: '比賽沒有保存請求單，不能觀戰回放',
-  3: '地圖與賽制已更新，舊存檔無法沿用',
-  4: '新增選手品階與 ID，舊存檔無法沿用',
-};
 /** 舊存檔鍵（SAVE_VERSION 1，三個 1 對 1 對位的年代）；只拿來告訴玩家舊檔不能用了 */
 const OLD_SAVE_KEYS = ['angel-gaming-m4-save-v1'];
 
@@ -81,22 +76,9 @@ function summarize(state: GameState): SaveInfo {
   return { teamName: me?.name ?? '?', week: state.week, phase: state.phase, cash: me?.cash ?? 0, kind: kindOf(state.contentId)?.name ?? state.contentId };
 }
 
-/** 解析存檔：成功回傳狀態與內容包；失敗丟出給玩家看的訊息 */
-function parseSave(json: string): { state: GameState; content: ContentPack } {
-  let raw: { version?: unknown; contentId?: unknown };
-  try {
-    raw = JSON.parse(json) as typeof raw;
-  } catch {
-    throw new Error('存檔格式不對（不是 JSON）');
-  }
-  if (raw.version !== SAVE_VERSION) {
-    const note = typeof raw.version === 'number' ? VERSION_NOTE[raw.version] : undefined;
-    if (raw.version === 3 || raw.version === 4) throw new Error(`${note}（存檔第 ${raw.version} 版，目前第 ${SAVE_VERSION} 版）`);
-    throw new Error(`存檔是第 ${String(raw.version)} 版${note ? `（${note}）` : ''}，目前是第 ${SAVE_VERSION} 版，舊存檔不能繼續`);
-  }
-  const kind = kindOf(String(raw.contentId));
-  if (!kind) throw new Error(`存檔的項目（內容包 ${String(raw.contentId)}）這個版本沒有`);
-  return { state: deserialize(json, kind.content), content: kind.content };
+/** 解析存檔（舊版遷移）；失敗丟出給玩家看的訊息 */
+function parseSave(json: string): ParsedSave {
+  return parseSaveWith(json, (id) => kindOf(id)?.content);
 }
 
 function readSave(): string | null {
@@ -142,8 +124,11 @@ export class ManageGame {
     const raw = readSave();
     if (!raw) return null;
     try {
-      const { state, content } = parseSave(raw);
-      return new ManageGame(state, content);
+      const { state, content, migratedFrom } = parseSave(raw);
+      const g = new ManageGame(state, content);
+      // 舊版存檔遷移後立刻回寫成目前版本（遷移的說明已進收件匣，顯示為未讀）
+      if (migratedFrom !== null) g.save();
+      return g;
     } catch {
       return null;
     }
