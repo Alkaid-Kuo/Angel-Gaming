@@ -203,6 +203,16 @@ export class Perception {
       }
     }
     if (best !== null) {
+      // 2.7（P.tracerSrc）：身分關聯、最新觀測來源、最後直接確認時間（seenTick）、信心分開：推測不冒充目視；同一個 tick 的目視優先
+      if (P.tracerSrc) {
+        if (best.tick === t) return;
+        best.x = x;
+        best.y = y;
+        best.tick = t;
+        best.src = 'tracer';
+        best.conf = conf;
+        return;
+      }
       if (best.tick !== t) {
         best.x = x;
         best.y = y;

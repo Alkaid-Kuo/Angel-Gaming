@@ -824,3 +824,41 @@ describe('Bot 2.7 批 1-14（H03）：接觸熱度去重（heatDedupe）', () =>
     expect(heat(30, 3, 1)).toEqual({ heat: 2, rot: 'A' });
   });
 });
+
+describe('Bot 2.7 批 1-15（H04）：曳光推測不冒充目視（tracerSrc）', () => {
+  function track(): { k: { src: string; conf: number; tick: number; seenTick: number; x: number }; counted: boolean } {
+    const { match, bot } = live(5);
+    const obs = match.observe(5);
+    const p = bot.perc;
+    const k = { id: 0, x: obs.me.x + 6000, y: obs.me.y, tick: obs.tick - 30, seenTick: obs.tick - 30, conf: 95, src: 'see' as const, vx: 0, vy: 0, facing: 0, weapon: 'm4' };
+    p.known.set(0, k);
+    p.notePoint(k.x + 1500, k.y, 70, obs.tick);
+    const a = bot.tactics.adapt;
+    a.sample = a.sample ?? ({ site: null, fast: null, plan: '' } as unknown as typeof a.sample);
+    a.locations.clear();
+    a.observe(obs, p, () => 'A');
+    return { k: p.known.get(0)!, counted: a.locations.has(0) };
+  }
+
+  it('被曳光更新位置：來源改成 tracer、信心降到曳光的、最後目視時間不動，適應模組不當成新目視', () => {
+    const { k, counted } = track();
+    expect(k.src).toBe('tracer');
+    expect(k.conf).toBe(70);
+    expect(k.seenTick).toBe(k.tick - 30);
+    expect(counted).toBe(false);
+  });
+
+  it('同一個 tick 已經目視：曳光不覆蓋（真目視優先）', () => {
+    const { match, bot } = live(5);
+    const obs = match.observe(5);
+    const k = { id: 0, x: obs.me.x + 6000, y: obs.me.y, tick: obs.tick, seenTick: obs.tick, conf: 100, src: 'see' as const, vx: 0, vy: 0, facing: 0, weapon: 'm4' };
+    bot.perc.known.set(0, k);
+    bot.perc.notePoint(k.x + 1500, k.y, 70, obs.tick);
+    expect(bot.perc.known.get(0)).toMatchObject({ src: 'see', conf: 100, x: obs.me.x + 6000 });
+  });
+
+  it('開關關掉重現 2.6.3：仍是 see／95', () => {
+    setP('tracerSrc', false);
+    expect(track().k).toMatchObject({ src: 'see', conf: 95 });
+  });
+});

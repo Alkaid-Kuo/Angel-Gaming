@@ -204,6 +204,7 @@ antiDefuse: true,
 antiDefuseRange: 12,
 coopEligible: true,
 heatDedupe: true,
+tracerSrc: true,
 claimClear: 6,
 claimById: true,
 afterPistol: 'force',
@@ -1138,6 +1139,15 @@ best = k;
 }
 }
 if (best !== null) {
+if (P.tracerSrc) {
+if (best.tick === t) return;
+best.x = x;
+best.y = y;
+best.tick = t;
+best.src = 'tracer';
+best.conf = conf;
+return;
+}
 if (best.tick !== t) {
 best.x = x;
 best.y = y;
