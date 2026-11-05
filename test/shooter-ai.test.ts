@@ -129,7 +129,8 @@ describe('射擊基準 Bot：情境測試 P0～P13、T1～T28、R1～R6（每個
         const r = s.run(baseline, seed, practice);
         expect(r.pass, `種子 ${seed}：${r.detail}`).toBe(true);
       }
-    }, 400000);
+      // T9 從 2.7 起跑 20 個種子（結果快取，5 個情境種子共用一次），單跑約 807 秒，超過其他情境的 400 秒上限；只放寬這一項
+    }, s.id === 'T9' ? 1200000 : 400000);
   }
 });
 
