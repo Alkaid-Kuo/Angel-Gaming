@@ -203,6 +203,11 @@ export interface ShooterRunOptions extends ShooterMatchOptions {
   readonly tactics?: readonly (InitTactics | null | undefined)[];
   /** 依組別（0＝玩家 0～4、1＝玩家 5～9）的教練指令（API 1.2）：每次決策放進該組觀察資料的 coach；沒給＝null */
   readonly orders?: readonly [TeamOrders | null, TeamOrders | null];
+  /**
+   * 量測與測試用（M5 第一批驗收 3.10 第 5 條）：依回合、組別、陣營給教練指令，有給就蓋過 orders。
+   * 每組每回合第一次決策時取一次、深凍結，整回合不變（和 orders 同樣的保證）。閘道與經營層不用它。
+   */
+  readonly ordersOf?: (round: number, group: 0 | 1, side: Team) => TeamOrders | null;
 }
 
 /** 回合戰術標籤的喊話格式（M5）：指揮每回合喊一次「K:<戰術代號>」；這是閘道與 Bot 的約定，引擎不解讀 */
@@ -245,6 +250,12 @@ export class ShooterDriver {
   private readonly exactDelay: readonly ({ readonly eighths: number; readonly rng: Prng } | null)[];
   /** 依組別的教練指令（API 1.2） */
   private readonly orders: readonly [TeamOrders | null, TeamOrders | null];
+  private readonly ordersOf: ShooterRunOptions['ordersOf'];
+  /** ordersOf 的每回合快取：[組 0, 組 1]＝{ 回合, 指令 } */
+  private readonly roundOrders: [{ round: number; orders: TeamOrders | null }, { round: number; orders: TeamOrders | null }] = [
+    { round: -1, orders: null },
+    { round: -1, orders: null },
+  ];
   /** 回合戰術標籤：索引＝回合數 − 1，[組 0, 組 1]＝該組本回合第一則 K: 喊話的代號（沒喊＝null） */
   readonly tacticTags: [string | null, string | null][] = [];
   /** 排隊中的 Bot 指令（依決策順序；套用 tick 遞增） */
@@ -262,6 +273,7 @@ export class ShooterDriver {
     const knobs = opts.knobs ?? opts.controllers.map(() => ({}));
     // 教練指令與戰術熟練度是同一個物件給同隊每個座位、每回合重用：建構時複製一份並深凍結，Bot 改不動（改了會被忽略或丟例外），隊友與之後的回合看到的永遠是原值
     this.orders = [frozenCopy(opts.orders?.[0] ?? null), frozenCopy(opts.orders?.[1] ?? null)];
+    this.ordersOf = opts.ordersOf;
     const tactics = opts.controllers.map((_, pid) => frozenCopy(opts.tactics?.[pid] ?? null));
     this.attributes = opts.controllers.map((_, pid) => opts.attributes?.[pid] ?? DEFAULT_ATTRIBUTES);
     this.reactionTicks = opts.controllers.map((c, pid) => {
@@ -331,6 +343,18 @@ export class ShooterDriver {
     }
   }
 
+  /** 這一組本回合的教練指令：有 ordersOf 時每回合取一次並深凍結，否則是開賽給的 orders */
+  private coachOf(group: 0 | 1, side: Team): TeamOrders | null {
+    if (this.ordersOf === undefined) return this.orders[group];
+    const c = this.roundOrders[group];
+    const round = this.match.roundNumber;
+    if (c.round !== round) {
+      c.round = round;
+      c.orders = frozenCopy(this.ordersOf(round, group, side));
+    }
+    return c.orders;
+  }
+
   /** 這批指令的延遲（tick） */
   private delayOf(pid: number): number {
     const x = this.exactDelay[pid];
@@ -355,7 +379,7 @@ export class ShooterDriver {
       // 先讓每個人都觀察完，再依序下指令：後面的人不會看到前面的人剛下的指令
       const views = this.controllers.map((_, pid) => {
         const v = m.observe(pid) as { coach: TeamOrders | null } & ShooterObservation;
-        v.coach = this.orders[pid < PLAYER_COUNT / 2 ? 0 : 1];
+        v.coach = this.coachOf(pid < PLAYER_COUNT / 2 ? 0 : 1, v.me.team);
         return v;
       });
       for (let pid = 0; pid < this.controllers.length; pid++) {
