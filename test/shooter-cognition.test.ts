@@ -365,7 +365,8 @@ describe('Bot 2.4：跨回合學習與反應式佯攻', () => {
     expect(out.goal).toEqual(bot.intel.sites.B.plants[0]);
     const enemy = bot.intel.sites.B.plants[0];
     bot.perc.update({ ...next, radar: [{ id: 5, ...enemy }, { id: 6, ...enemy }], enemiesAlive: 2 });
-    const blocked = output(); bot.tactics.tGoal(next, blocked);
+    // 觀察要一致：雷達兩個不同敵人時敵方存活至少 2（2.7 起熱度以敵方存活數為上限）
+    const blocked = output(); bot.tactics.tGoal({ ...next, enemiesAlive: 2 }, blocked);
     expect(bot.tactics.fakeProbe).toBe(false);
     expect(blocked.role).toBe('佯攻');
   });
