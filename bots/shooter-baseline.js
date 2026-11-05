@@ -215,6 +215,11 @@ tacWq: 0.2,
 tacWr: 0.35,
 tacEps: 0.1,
 tacAmax: 0.3,
+qSync: 0.6,
+qSyncWait: 0.8,
+qFlash: 0.8,
+qLag: 0.8,
+qPause: 0.4,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3090,6 +3095,7 @@ this.used = new Map();
 this.usedTeam = '';
 this.tagSaid = false;
 this.tagPick = null;
+this.tagNow = null;
 const reaction = clamp(data.attributes.reaction, 0, 100);
 const nominal = 5 + Math.max(0, 70 - reaction) / 8;
 const exact = 5 + Math.max(0, 70 - Math.round(reaction)) / 8;
@@ -3212,6 +3218,7 @@ this.saveAt = -1000000;
 reset(obs) {
 this.tagSaid = false;
 this.tagPick = null;
+this.tagNow = null;
 if (obs !== null) {
 this.coach = obs.coach ?? null;
 this.econ.opts.economy = this.coach !== null ? this.coach.economy : this.opts.economy;
@@ -3505,6 +3512,7 @@ if (c.from === me.id) continue;
 if (c.text.startsWith('K:')) {
 if (!this.tagSaid) this.used.set(c.text.slice(2), (this.used.get(c.text.slice(2)) ?? 0) + 1);
 this.tagSaid = true;
+if (this.tagNow === null) this.tagNow = c.text.slice(2);
 continue;
 }
 const r = parseRole(c.text);
@@ -3580,6 +3588,7 @@ if (this.plan === null) this.setPlan(this.choosePlan(obs), obs);
 if (!this.tagSaid && this.plan !== null) {
 this.tagSaid = true;
 const k = this.tagPick ?? tacticOf(this.plan);
+this.tagNow = k;
 this.used.set(k, (this.used.get(k) ?? 0) + 1);
 out.cmds.push({ type: 'say', text: `K:${k}` });
 }
@@ -3607,6 +3616,12 @@ return clamp((this.prof?.team?.[id] ?? 50) / 100, 0, 1);
 }
 pOf(id) {
 return clamp((this.prof?.personal?.[id] ?? 50) / 100, 0, 1);
+}
+qGap() {
+return this.tagNow === null ? 0 : 0.5 - this.qOf(this.tagNow);
+}
+pLow() {
+return this.tagNow === null ? 0 : Math.max(0, 0.5 - this.pOf(this.tagNow));
 }
 pickTactic(obs, ids, state, salt) {
 const call = this.coach?.call?.tactic ?? null;
@@ -3691,12 +3706,12 @@ if (left <= P.forceExecLeft) return { ...p, exec: this.nearestSite(obs) };
 if (p.kind === 'split') {
 const ready = this.alive(obs).every((m) => {
 const s = this.memberStage(obs, m.id, p);
-return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * UNIT;
+return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * (1 + P.qSync * this.qGap()) * UNIT;
 });
 if (!ready) this.readyAt = -1;
 else if (this.readyAt < 0) this.readyAt = t;
 const far = Math.max(this.tRoute(p.site, p.r1)?.length ?? 0, this.tRoute(p.site, p.r2)?.length ?? 0);
-if ((ready && t - this.readyAt >= 1.5 * this.tps) || el >= Math.max(P.splitWait, far / P.routeSpeed)) return { ...p, exec: p.site };
+if ((ready && t - this.readyAt >= 1.5 * this.tps) || el >= Math.max(P.splitWait, far / P.routeSpeed) * (1 + P.qSyncWait * Math.max(0, this.qGap()))) return { ...p, exec: p.site };
 }
 if (p.kind === 'fake') {
 const fakers = this.alive(obs).filter((m) => this.inGroup(obs, m.id, p, 1));
@@ -4102,6 +4117,14 @@ return null;
 }
 this.awpSettle(obs, out, st);
 if (d < 10 * UNIT && this.attrs.movement >= 0.3) out.walk = true;
+const lowP = this.pLow();
+if (lowP > 0 && d > 3 * UNIT && obs.enemies.length === 0 && (this.perc.lastSound === null || t - this.perc.lastSound.tick > 2 * this.tps)) {
+const c = this.g.cellOf(me.x, me.y);
+if (c >= 0 && this.intel.cover[c] > 0 && rollOf(obs.round.number * 16 + me.id, Math.floor(t / (this.tps / 2))) % 1000 < lowP * P.qPause * 1000) {
+out.stop = true;
+out.role = '跟上隊形';
+}
+}
 if (out.role === '佯攻' && d < 2.5 * UNIT) {
 if (this.noiseLeft === 0 && this.stageArrive < 0) {
 this.stageArrive = t;
@@ -4116,6 +4139,12 @@ const site = this.intel.sites[setup.site];
 const kind = this.util.pick(me, ['he', 'flash', 'molotov']);
 if (kind !== null && kind !== 'flash') return { kind, x: site.cx, y: site.cy, why: '佯攻' };
 }
+return null;
+}
+const lag = this.pLow() * P.qLag * this.tps;
+if (lag > 0 && p.kind !== 'go' && this.execTick >= 0 && t - this.execTick < lag && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
+out.stop = true;
+out.role = '跟上';
 return null;
 }
 if (p.kind !== 'go') {
@@ -4193,7 +4222,8 @@ out.walk = true;
 out.role = '找丟道具的位置';
 return null;
 }
-const travel = (dist(me.x, me.y, ent.ox, ent.oy) / UNIT / P.routeSpeed) * this.tps;
+const qg = this.qGap();
+const travel = (dist(me.x, me.y, ent.ox, ent.oy) / UNIT / P.routeSpeed) * this.tps * (qg > 0 ? 1 - P.qFlash * qg : 1 - 0.2 * qg);
 const pending = this.mateFlash.some((x) => t <= x.pop - travel);
 const flashHere = st !== null && dist(st.x, st.y, ent.ox, ent.oy) < P.flashLead * UNIT;
 const cover = smokeFirst && near && wish === null && !cue && flashTurn && idx > 0 && sinceExec < P.stageLead + 3 && next.ok && this.util.has(me, 'flash') && this.flashPoint(obs, exec, ent, 2, next.avoid) !== null;

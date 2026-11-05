@@ -150,6 +150,8 @@ export class Tactics {
     this.tagSaid = false;
     /** @type {string | null} */
     this.tagPick = null;
+    /** 2.8：本回合打的戰術代號（自己喊的或聽到的 K:；執行品質用它的熟練度） @type {string | null} */
+    this.tagNow = null;
     // 公開 reactionTicks 是四捨五入值；由公開屬性／公式推得可能區間，不預知本批的隨機進位。
     const reaction = clamp(data.attributes.reaction, 0, 100);
     const nominal = 5 + Math.max(0, 70 - reaction) / 8;
@@ -333,6 +335,7 @@ export class Tactics {
   reset(obs) {
     this.tagSaid = false;
     this.tagPick = null;
+    this.tagNow = null;
     if (obs !== null) {
       // 2.8：教練指令整回合不變；經濟風格取代旋鈕 economy（沒有教練照旋鈕）
       this.coach = obs.coach ?? null;
@@ -679,6 +682,7 @@ export class Tactics {
       if (c.text.startsWith('K:')) {
         if (!this.tagSaid) this.used.set(c.text.slice(2), (this.used.get(c.text.slice(2)) ?? 0) + 1);
         this.tagSaid = true;
+        if (this.tagNow === null) this.tagNow = c.text.slice(2);
         continue;
       }
       const r = parseRole(c.text);
@@ -766,6 +770,7 @@ export class Tactics {
     if (!this.tagSaid && this.plan !== null) {
       this.tagSaid = true;
       const k = this.tagPick ?? tacticOf(this.plan);
+      this.tagNow = k;
       this.used.set(k, (this.used.get(k) ?? 0) + 1);
       out.cmds.push({ type: 'say', text: `K:${k}` });
     }
@@ -799,6 +804,16 @@ export class Tactics {
   /** 2.8：個人熟練度 p（0～1；沒資料 0.5） @param {string} id */
   pOf(id) {
     return clamp((this.prof?.personal?.[id] ?? 50) / 100, 0, 1);
+  }
+
+  /** 2.8：本回合戰術的隊伍執行品質偏離 0.5 多少（q＝0 → +0.5、q＝1 → −0.5；不知道戰術時 0） */
+  qGap() {
+    return this.tagNow === null ? 0 : 0.5 - this.qOf(this.tagNow);
+  }
+
+  /** 2.8：本回合戰術的個人熟練度不到 0.5 的部分（0～0.5；不知道戰術時 0） */
+  pLow() {
+    return this.tagNow === null ? 0 : Math.max(0, 0.5 - this.pOf(this.tagNow));
   }
 
   /**
@@ -916,14 +931,16 @@ export class Tactics {
     if (p.kind === 'split') {
       const ready = this.alive(obs).every((m) => {
         const s = this.memberStage(obs, m.id, p);
-        return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * UNIT;
+        // 2.8（P.qSync）：隊伍執行熟練度低，到位判定鬆（兩組常各打各的）；高則嚴（q＝0.5 時 4.5 格，同 2.7）
+        return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * (1 + P.qSync * this.qGap()) * UNIT;
       });
       // 兩組都到了再等 1.5 秒（狙擊手站定開鏡、隊友站好）
       if (!ready) this.readyAt = -1;
       else if (this.readyAt < 0) this.readyAt = t;
       // 長路線走不到 P.splitWait：等到估計抵達（第二組沒到就喊 go 等於兩路各打各的）
       const far = Math.max(this.tRoute(p.site, p.r1)?.length ?? 0, this.tRoute(p.site, p.r2)?.length ?? 0);
-      if ((ready && t - this.readyAt >= 1.5 * this.tps) || el >= Math.max(P.splitWait, far / P.routeSpeed)) return { ...p, exec: p.site };
+      // 2.8（P.qSyncWait）：熟練度低，等第二組的上限長
+      if ((ready && t - this.readyAt >= 1.5 * this.tps) || el >= Math.max(P.splitWait, far / P.routeSpeed) * (1 + P.qSyncWait * Math.max(0, this.qGap()))) return { ...p, exec: p.site };
     }
     if (p.kind === 'fake') {
       const fakers = this.alive(obs).filter((m) => this.inGroup(obs, m.id, p, 1));
@@ -1437,6 +1454,15 @@ export class Tactics {
       }
       this.awpSettle(obs, out, st);
       if (d < 10 * UNIT && this.attrs.movement >= 0.3) out.walk = true;
+      // 2.8（P.qPause）：個人熟練度低，佈置途中偶爾停半秒（只在去待命格的路上、沒看到也沒聽到敵人、站在有掩護的格；個人＋回合＋時間的確定性雜湊）
+      const lowP = this.pLow();
+      if (lowP > 0 && d > 3 * UNIT && obs.enemies.length === 0 && (this.perc.lastSound === null || t - this.perc.lastSound.tick > 2 * this.tps)) {
+        const c = this.g.cellOf(me.x, me.y);
+        if (c >= 0 && this.intel.cover[c] > 0 && rollOf(obs.round.number * 16 + me.id, Math.floor(t / (this.tps / 2))) % 1000 < lowP * P.qPause * 1000) {
+          out.stop = true;
+          out.role = '跟上隊形';
+        }
+      }
       // 佯攻：到了待命格就開幾槍、丟道具進點製造聲音
       if (out.role === '佯攻' && d < 2.5 * UNIT) {
         if (this.noiseLeft === 0 && this.stageArrive < 0) {
@@ -1452,6 +1478,13 @@ export class Tactics {
         const kind = this.util.pick(me, ['he', 'flash', 'molotov']);
         if (kind !== null && kind !== 'flash') return { kind, x: site.cx, y: site.cy, why: '佯攻' };
       }
+      return null;
+    }
+    // 2.8（P.qLag）：個人熟練度低，收到執行後晚一點出發（max(0, 0.5−p) × qLag 秒；p ≥ 0.5 時不等，同 2.7）
+    const lag = this.pLow() * P.qLag * this.tps;
+    if (lag > 0 && p.kind !== 'go' && this.execTick >= 0 && t - this.execTick < lag && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
+      out.stop = true;
+      out.role = '跟上';
       return null;
     }
     // ── 執行（go 是 6-1 的直接進點：照常探頭）──
@@ -1546,7 +1579,9 @@ export class Tactics {
       }
       // 等閃光：還在待命格附近、閃光還沒丟、執行不到 3 秒
       // 閃光：照到入口的路程提前出發，炸開時人剛好到
-      const travel = (dist(me.x, me.y, ent.ox, ent.oy) / UNIT / P.routeSpeed) * this.tps;
+      // 2.8（P.qFlash）：隊伍執行熟練度低，路程估計偏短（出發晚，閃光炸開後才到）；高則略提早（q＝0.5 時同 2.7）
+      const qg = this.qGap();
+      const travel = (dist(me.x, me.y, ent.ox, ent.oy) / UNIT / P.routeSpeed) * this.tps * (qg > 0 ? 1 - P.qFlash * qg : 1 - 0.2 * qg);
       const pending = this.mateFlash.some((x) => t <= x.pop - travel);
       // 待命位離入口遠就不等閃光（閃光改到入口附近才丟）
       const flashHere = st !== null && dist(st.x, st.y, ent.ox, ent.oy) < P.flashLead * UNIT;
