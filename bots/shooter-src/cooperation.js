@@ -1,6 +1,6 @@
 // @ts-check
 // 近距離接戰跟進與互補守角。所有協調只用可觀察隊友、雷達與既有戰術目標，沒有共享隱藏狀態。
-import { P, UNIT, dist, segDist } from './base.js';
+import { P, UNIT, adiff, angleTo, dist, segDist } from './base.js';
 
 export class Cooperation {
   /** @param {import('./base.js').Grid} g @param {import('./analysis.js').MapIntel} intel @param {import('./memory.js').Perception} perc @param {import('./base.js').InitData} data */
@@ -59,7 +59,9 @@ export class Cooperation {
           if ((!cue.dead && gap < 1600) || gap > 4000 || !this.g.walkLine(me.x, me.y, p.x, p.y) || !this.g.los(p.x, p.y, look.x, look.y)) continue;
           if (!cue.dead && segDist(p.x, p.y, cue.x, cue.y, look.x, look.y).d < 1100) continue;
           if (obs.effects.some((e) => e.kind === 'fire' && dist(p.x, p.y, e.x, e.y) < e.radius + 500)) continue;
-          const s = (this.intel.cover[i] > 0 ? 2 : 0) - dist(me.x, me.y, p.x, p.y) / UNIT - Math.abs(gap / UNIT - 2.5) - this.perc.danger[i] / 40;
+          let s = (this.intel.cover[i] > 0 ? 2 : 0) - dist(me.x, me.y, p.x, p.y) / UNIT - Math.abs(gap / UNIT - 2.5) - this.perc.danger[i] / 40;
+          // 2.7 批 2b（P.tradePen）：補陣亡的隊友偏好換一個角度看殺手（和死者同角度扣分）；只是偏好，沒有別的角照樣補
+          if (cue.dead && P.tradePen > 0) s -= P.tradePen * Math.max(0, 1 - Math.abs(adiff(angleTo(p.x, p.y, look.x, look.y), angleTo(cue.x, cue.y, look.x, look.y))) / P.tradeAngle);
           if (s > score) { score = s; best = p; }
         }
         if (best !== null) {

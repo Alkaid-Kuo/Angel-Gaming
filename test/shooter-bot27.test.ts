@@ -894,3 +894,103 @@ describe('Bot 2.7 批 2（Astra P2-2）：放行窗裡的第一顆閃光不遮�
     expect(dodge(true)).toBe(false);
   });
 });
+
+describe('Bot 2.7 批 2b（B1 重做）：成對進門跟閃光綁在一起（pairSync）', () => {
+  const plan = { kind: 'default' as const, site: 'A' as const, r1: 0, r2: 0, exec: 'A' as const };
+
+  it('組內依進點順序兩兩一對：0-1 是搭檔、看的方向左右相反；落單的人沒有搭檔', () => {
+    const seen: Record<number, { k: number; partner: number; side: number } | null> = {};
+    let ent = null;
+    for (let pid = 0; pid < 5; pid++) {
+      const { match, bot } = live(pid);
+      const obs = match.observe(pid);
+      if (bot.tactics.groupOf(obs, pid, plan) !== 0) continue;
+      ent ??= bot.intel.sites.A.entrances[0];
+      seen[pid] = bot.tactics.pairNow(obs, plan, 'A', ent);
+    }
+    const ids = Object.keys(seen).map(Number);
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    const a = ids.find((i) => seen[i]?.k === 0)!;
+    const b = ids.find((i) => seen[i]?.k === 1)!;
+    expect(seen[a]!.partner).toBe(b);
+    expect(seen[b]!.partner).toBe(a);
+    expect(seen[a]!.side).toBe(-seen[b]!.side);
+    for (const i of ids) if (seen[i] !== null && seen[i]!.k === 2) throw new Error('第三個人不該有搭檔');
+  });
+
+  it('入口被火擋住（還要燒 2 秒以上）就不配對；開關關掉也不配對', () => {
+    const { match, bot } = live(0);
+    const raw = match.observe(0);
+    const ent = bot.intel.sites.A.entrances[0];
+    const fire = { kind: 'fire', x: ent.ix, y: ent.iy, radius: 2 * UNIT, ticksLeft: 1000, owner: 7 };
+    const burning = { ...raw, effects: [...raw.effects, fire] } as typeof raw;
+    const r0 = bot.tactics.pairNow(raw, plan, 'A', ent);
+    if (r0 !== null) expect(bot.tactics.pairNow(burning, plan, 'A', ent)).toBeNull();
+    setP('pairSync', false);
+    expect(bot.tactics.pairNow(raw, plan, 'A', ent)).toBeNull();
+  });
+
+  it.each(['redrock', 'dust'])('%s：每個入口左右兩個看的角在入口兩側', (mapId) => {
+    const { bot } = live(0, mapId);
+    for (const s of ['A', 'B'] as const) for (const e of bot.intel.sites[s].entrances) {
+      const ux = e.ix - e.ox;
+      const uy = e.iy - e.oy;
+      const cross = (q: { x: number; y: number }): number => ux * (q.y - e.iy) - uy * (q.x - e.ix);
+      expect(Math.sign(cross(bot.tactics.pairLook(e, -1)))).toBe(-Math.sign(cross(bot.tactics.pairLook(e, 1))));
+    }
+  });
+
+  it('閃光在路上（還沒炸開）才算 in flight；炸開後不算', () => {
+    const { match, bot } = live(0);
+    const obs = match.observe(0);
+    const ent = bot.intel.sites.A.entrances[0];
+    expect(bot.tactics.flashInFlight(obs, ent)).toBe(false);
+    bot.tactics.flashSpots.push({ x: ent.ix, y: ent.iy, tick: obs.tick, by: 1, pop: obs.tick + 10 });
+    expect(bot.tactics.flashInFlight(obs, ent)).toBe(true);
+    expect(bot.tactics.flashInFlight({ ...obs, tick: obs.tick + 11 }, ent)).toBe(false);
+  });
+});
+
+describe('Bot 2.7 批 2b（B1 重做）：補槍偏好換角度、但不丟掉補槍（tradePen）', () => {
+  /** T 執行中：隊友在 5 格外陣亡，殺手在他前方 12 格；回傳補槍站位看殺手的角度與死者看殺手的角度差 */
+  function trade(): { diff: number | null; role: string } {
+    const { match, bot } = live(2);
+    const raw = match.observe(2);
+    const o = { ...raw, me: { ...raw.me, hasBomb: false } };
+    const g = bot.g;
+    const me = o.me;
+    let pick = null;
+    for (let deg = 0; deg < 360 && pick === null; deg += 15) {
+      const cue = { x: Math.round(me.x + Math.cos((deg * Math.PI) / 180) * 5 * UNIT), y: Math.round(me.y + Math.sin((deg * Math.PI) / 180) * 5 * UNIT) };
+      const killer = { x: Math.round(cue.x + Math.cos((deg * Math.PI) / 180) * 12 * UNIT), y: Math.round(cue.y + Math.sin((deg * Math.PI) / 180) * 12 * UNIT) };
+      if (g.walkable(g.cellOf(cue.x, cue.y)) && g.walkable(g.cellOf(killer.x, killer.y)) && g.los(me.x, me.y, cue.x, cue.y) && g.los(cue.x, cue.y, killer.x, killer.y)) pick = { cue, killer };
+    }
+    if (pick === null) throw new Error('找不到開闊方向');
+    const { cue, killer } = pick;
+    bot.tactics.coop.cues.set(1, { ...cue, facing: 0, tick: o.tick, dead: true });
+    bot.perc.known.set(7, { id: 7, x: killer.x, y: killer.y, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: o.tick, seenTick: o.tick, conf: 90, src: 'see' });
+    const a = out({ task: 'execute', goal: { x: cue.x, y: cue.y } });
+    bot.tactics.coop.apply({ ...o, enemies: [], enemiesAlive: 3, teammates: o.teammates.map((m) => (m.id === 1 ? { ...m, alive: false, ...cue } : { ...m, alive: false })) }, a);
+    if (!a.role.includes('補槍')) return { diff: null, role: a.role };
+    const ang = (p: { x: number; y: number }): number => (Math.atan2(killer.y - p.y, killer.x - p.x) * 180) / Math.PI;
+    let d = Math.abs(ang(a.goal!) - ang(cue));
+    if (d > 180) d = 360 - d;
+    return { diff: d, role: a.role };
+  }
+
+  it('開著：照樣補槍（偏好不會讓人不去），而且角度差不小於關掉時', () => {
+    const on = trade();
+    setP('tradePen', 0);
+    const off = trade();
+    expect(off.diff).not.toBeNull();
+    expect(on.diff).not.toBeNull();
+    expect(on.diff!).toBeGreaterThanOrEqual(off.diff!);
+  });
+
+  it('開關關掉重現 2.6.3：走到死者旁邊、幾乎同一個角度', () => {
+    setP('tradePen', 0);
+    const r = trade();
+    expect(r.diff).not.toBeNull();
+    expect(r.diff!).toBeLessThan(25);
+  });
+});
