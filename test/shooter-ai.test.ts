@@ -122,7 +122,7 @@ describe('射擊基準 Bot：地圖分析', () => {
   }
 });
 
-describe('射擊基準 Bot：情境測試 P0～P13、T1～T28、R1～R6（每個情境 5 個種子；T25、T26 自己跑 50 場算比例）', () => {
+describe('射擊基準 Bot：情境測試 P0～P13、T1～T28、R1～R6（每個情境 5 個種子；T9 自己跑 20 個種子、T25、T26 自己跑 50 場算比例）', () => {
   for (const s of AI_SCENARIOS) {
     it(`${s.id} ${s.name}：${s.expect}`, () => {
       for (const seed of AI_SCENARIO_SEEDS) {
