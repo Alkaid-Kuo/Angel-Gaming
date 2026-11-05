@@ -381,6 +381,29 @@ export const P = {
   flashMulti: true,
   /** 補槍接替：站的位置看殺手的角度要和陣亡隊友差這麼多度以上（0 ＝ 2.6.3 走到死者旁邊重探同一個角） */
   tradeAngle: 25,
+  // ── 2.7 批 3：煙滅火選項化（效用分數框架的第一個案例，choice.js）──
+  /** 入口被燒住時，在 滅火過門（douse）／繞另一門（detour）／等火熄（wait）／先封架點再等（seal）之間用效用分數選（false ＝ 2.6.3 煙霧手一律滅火） */
+  fireChoice: true,
+  /** 滅火：基礎分、rush 加分、這顆煙是計畫要封架點的那一顆扣分、火還要燒越久越值得滅（× 剩餘秒數 / 7） */
+  fireDouse: 1.0,
+  fireDouseRush: 0.6,
+  fireDouseSeal: 0.8,
+  fireDouseLong: 0.4,
+  /** 繞另一門：基礎分、多走的每秒扣分 */
+  fireDetour: 0.9,
+  fireDetourSec: 0.08,
+  /** 等火熄：基礎分、火每剩一秒扣分 ×（0.5 ＋ 緊迫度；回合剩 40 秒以上 0、20 秒以下 1） */
+  fireWait: 1.1,
+  fireWaitSec: 0.12,
+  /** 先封架點再等：只在這顆煙本來就要封架點時是候選 */
+  fireSeal: 1.0,
+  fireSealSec: 0.1,
+  /** 前兩名差這麼多以內才用 rollOf 打破平手；選定後鎖幾秒；之後新第一名要贏多少才換 */
+  fireTie: 0.15,
+  fireHold: 3,
+  fireMargin: 0.2,
+  /** 煙霧手已經用掉煙（喊過 E:smoke）就由組裡下一個最近的人滅火（Fable P8） */
+  fireBackup: true,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */

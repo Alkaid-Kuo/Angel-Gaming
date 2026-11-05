@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import ShooterBaseline from '../bots/shooter-src/baseline.js';
 import { P, UNIT } from '../bots/shooter-src/base.js';
 import { parseEvent, type TacOut } from '../bots/shooter-src/tactics.js';
+import { Choice } from '../bots/shooter-src/choice.js';
 import { ShooterMatch, shooterInitData } from '../src/shooter/sim.ts';
 import { ScriptController, ShooterDriver, shooterHelpers } from '../src/shooter/runner.ts';
 import type { ShooterObservation, WeaponId } from '../src/shooter/api.ts';
@@ -969,5 +970,67 @@ describe('Bot 2.7 批 2（Astra P2-2）：放行窗裡的第一顆閃光不遮�
   it('開關關掉重現 2.6.3：第一顆進入放行窗就整個不躲', () => {
     setP('flashMulti', false);
     expect(dodge(true)).toBe(false);
+  });
+});
+
+describe('Bot 2.7 批 3：效用選擇器（choice.js）', () => {
+  const cfg = { tie: 0.15, hold: 90, margin: 0.2 };
+
+  it('取最高分；同樣狀態永遠同樣選擇', () => {
+    const c = new Choice();
+    const opts = [{ id: 'a', score: 1 }, { id: 'b', score: 0.5 }];
+    expect(c.choose('k', 0, opts, 1, cfg)?.id).toBe('a');
+    expect(new Choice().choose('k', 0, opts, 1, cfg)?.id).toBe('a');
+  });
+
+  it('前兩名接近才用確定性雜湊打破平手', () => {
+    const opts = [{ id: 'a', score: 1 }, { id: 'b', score: 0.9 }];
+    expect(new Choice().choose('k', 0, opts, 0, cfg)?.id).toBe('a');
+    expect(new Choice().choose('k', 0, opts, 1, cfg)?.id).toBe('b');
+  });
+
+  it('滯後：鎖定期內不換；過了之後新第一名要贏 margin 以上才換；情況（key）變了就重選', () => {
+    const c = new Choice();
+    expect(c.choose('k', 0, [{ id: 'a', score: 1 }, { id: 'b', score: 0.5 }], 0, cfg)?.id).toBe('a');
+    expect(c.choose('k', 30, [{ id: 'a', score: 0.5 }, { id: 'b', score: 1 }], 0, cfg)?.id).toBe('a');
+    expect(c.choose('k', 120, [{ id: 'a', score: 0.9 }, { id: 'b', score: 1 }], 0, cfg)?.id).toBe('a');
+    expect(c.choose('k', 120, [{ id: 'a', score: 0.5 }, { id: 'b', score: 1 }], 0, cfg)?.id).toBe('b');
+    expect(c.choose('j', 121, [{ id: 'a', score: 1 }, { id: 'b', score: 0.5 }], 0, cfg)?.id).toBe('a');
+  });
+});
+
+describe('Bot 2.7 批 3：煙滅火選項化（fireChoice）', () => {
+  const plan = (kind: 'default' | 'rush'): { kind: 'default' | 'rush'; site: 'A'; r1: number; r2: number; exec: 'A' } => ({ kind, site: 'A' as const, r1: 0, r2: 0, exec: 'A' as const });
+  /** T 煙霧手站在 A 入口外，入口被燒住；left＝火剩幾秒、roundLeft＝回合剩幾秒 */
+  function options(kind: 'default' | 'rush', sealer: boolean, left: number, roundLeft: number): Record<string, number> {
+    const { match, bot } = live(2);
+    const o = match.observe(2);
+    const ent = bot.intel.sites.A.entrances[0];
+    const obs: ShooterObservation = { ...o, round: { ...o.round, phaseTicksLeft: roundLeft * 30 }, me: { ...o.me, x: ent.ox, y: ent.oy, loadout: { ...o.me.loadout, grenades: ['smoke'] } } };
+    bot.tactics.util.solve = () => ({ deg: 0, power: 1, x: ent.ox, y: ent.oy, ticks: 30 }) as ReturnType<typeof bot.tactics.util.solve>;
+    const fire = { x: ent.ox, y: ent.oy, ticksLeft: left * 30 };
+    return Object.fromEntries(bot.tactics.fireOptions(obs, plan(kind), 'A', ent, fire, sealer).map((q) => [q.id, q.score]));
+  }
+  const best = (s: Record<string, number>): string => Object.entries(s).sort((a, b) => b[1] - a[1])[0][0];
+
+  it('rush：滅火過門分數最高', () => {
+    expect(best(options('rush', false, 6, 60))).toBe('douse');
+  });
+
+  it('照計畫執行、這顆煙要封架點、時間還多：不拿封架點的煙滅火（等火熄或先封再等）', () => {
+    expect(['wait', 'seal']).toContain(best(options('default', true, 6, 60)));
+  });
+
+  it('回合快結束、火還要燒很久：等火熄排最後', () => {
+    const s = options('default', true, 7, 15);
+    expect(Object.entries(s).sort((a, b) => a[1] - b[1])[0][0]).toBe('wait');
+  });
+
+  it('E:fire 解析；只算還在的煙（散掉的不算）', () => {
+    expect(parseEvent('E:fire detour 120 340')).toEqual({ kind: 'fire', k: 'detour', x: 12000, y: 34000 });
+    const { bot } = live(2);
+    const t = bot.tactics;
+    t.smokes = [{ x: 0, y: 0, tick: 0, by: 2 }, { x: 0, y: 0, tick: 600, by: 3 }];
+    expect(t.activeSmokes(600 + t.smokeLife - 1).map((m) => m.by)).toEqual([3]);
   });
 });

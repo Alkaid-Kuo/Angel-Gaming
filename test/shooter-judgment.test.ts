@@ -148,7 +148,7 @@ describe('Bot 2.3：守包的道具與撤離', () => {
       const wish = bot.tactics.postUtility(obs, b.x, b.y, 'B');
       expect(wish?.kind).toBe('smoke');
       expect(dist(wish!.x, wish!.y, b.x, b.y)).toBeGreaterThan(5000);
-      bot.tactics.smokes.push({ x: wish!.x, y: wish!.y });
+      bot.tactics.smokes.push({ x: wish!.x, y: wish!.y, tick: obs.tick, by: 0 });
       expect(bot.tactics.postUtility(obs, b.x, b.y, 'B')).toBeNull();
       const fireObs = { ...obs, bomb: { ...obs.bomb, state: 'defusing' as const } };
       const fire = bot.tactics.postPlant(fireObs, output(), b.x, b.y, 'B');

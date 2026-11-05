@@ -212,6 +212,21 @@ pairWait: 1.5,
 pairGap: 2.5,
 flashMulti: true,
 tradeAngle: 25,
+fireChoice: true,
+fireDouse: 1.0,
+fireDouseRush: 0.6,
+fireDouseSeal: 0.8,
+fireDouseLong: 0.4,
+fireDetour: 0.9,
+fireDetourSec: 0.08,
+fireWait: 1.1,
+fireWaitSec: 0.12,
+fireSeal: 1.0,
+fireSealSec: 0.1,
+fireTie: 0.15,
+fireHold: 3,
+fireMargin: 0.2,
+fireBackup: true,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -2999,6 +3014,34 @@ return bait;
 return null;
 }
 }
+class Choice {
+constructor() {
+this.pick = '';
+this.since = -1;
+this.key = '';
+}
+reset() {
+this.pick = '';
+this.since = -1;
+this.key = '';
+}
+choose(key, t, options, roll, cfg) {
+if (options.length === 0) return null;
+if (key !== this.key) {
+this.key = key;
+this.pick = '';
+this.since = -1;
+}
+const sorted = [...options].sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
+let best = sorted[0];
+if (sorted.length > 1 && sorted[0].score - sorted[1].score < cfg.tie) best = sorted[roll % 2];
+const cur = options.find((o) => o.id === this.pick);
+if (cur !== undefined && (t - this.since < cfg.hold || best.score - cur.score < cfg.margin)) return cur;
+this.pick = best.id;
+this.since = t;
+return best;
+}
+}
 const MAIN_PRI = [3, 0, 1, 2, 5, 4];
 const SMOKE_PREF = [SUPPORT, ANCHOR, LURK, 0, ENTRY, AWP];
 const SITES = (['A', 'B']);
@@ -3061,6 +3104,8 @@ if (m !== null) return { kind: 'awp', x: Number(m[1]) * 100, y: Number(m[2]) * 1
 if (text === 'E:kit') return { kind: 'kit' };
 if (text === 'E:smoker') return { kind: 'smoker' };
 if (text === 'E:lurk') return { kind: 'lurk' };
+m = /^E:fire (douse|detour|wait|seal) (\d+) (\d+)$/.exec(text);
+if (m !== null) return { kind: 'fire', k: m[1], x: Number(m[2]) * 100, y: Number(m[3]) * 100 };
 return null;
 }
 class Tactics {
@@ -3093,6 +3138,10 @@ this.readyAt = -1;
 this.eventDelay = Math.round(lerp(P.eventDelay0, P.eventDelay100, attrs.awareness) * data.rules.decisionInterval);
 this.spotCache = new Map();
 this.probeBare = new Set();
+const sg = data.grenades.find((x) => x.id === 'smoke');
+this.smokeLife = (sg?.fuseTicks ?? 45) + (sg?.durationTicks ?? 540);
+this.fireChoice = new Choice();
+this.fireRounds = 0;
 this.combat = null;
 this.nav = null;
 this.judge = null;
@@ -3151,6 +3200,9 @@ this.noiseLeft = 0;
 this.mateFlash = [];
 this.flashHeard = -1;
 this.smokeHeard = -1;
+this.fireCall = null;
+this.fireDetoured = false;
+this.fireRoundSeen = false;
 this.flashCue = -1;
 this.flashPop = -1000000;
 this.flashSpots = [];
@@ -3195,6 +3247,7 @@ this.saveCache = null;
 this.saveAt = -1000000;
 }
 reset(obs) {
+this.fireChoice.reset();
 if (obs !== null) {
 this.econ.roundStart(obs);
 this.adapt.begin(obs, this.econ.lastWon);
@@ -3248,6 +3301,9 @@ this.noiseLeft = 0;
 this.mateFlash = [];
 this.flashHeard = -1;
 this.smokeHeard = -1;
+this.fireCall = null;
+this.fireDetoured = false;
+this.fireRoundSeen = false;
 this.flashCue = -1;
 this.flashPop = -1000000;
 this.flashSpots = [];
@@ -3378,7 +3434,7 @@ this.myClaim = { x: wish.x, y: wish.y, until: t + P.flashClaimSec * this.tps };
 out.cmds.push({ type: 'say', text: `E:flashing ${Math.round(wish.x / 100)} ${Math.round(wish.y / 100)}` });
 }
 }
-if (u.thrown !== null && u.thrown.kind === 'smoke') this.smokes.push({ x: u.thrown.x, y: u.thrown.y });
+if (u.thrown !== null && u.thrown.kind === 'smoke') this.smokes.push({ x: u.thrown.x, y: u.thrown.y, tick: t, by: me.id });
 if (u.thrown !== null && u.thrown.kind === 'flash' && this.util.away !== null) {
 this.flashPop = this.util.away.until - 3;
 this.flashSpots.push({ x: u.thrown.x, y: u.thrown.y, tick: t, by: me.id, pop: this.flashPop });
@@ -3527,13 +3583,14 @@ if (P.flashClaimDodge) this.mateFlash.push({ x: e.x, y: e.y, pop: t + (this.util
 }
 else if (e.kind === 'smoke') {
 this.smokeHeard = t;
-this.smokes.push({ x: e.x, y: e.y });
+this.smokes.push({ x: e.x, y: e.y, tick: t, by: msg.from });
 }
 else if (e.kind === 'kit' && this.isAlive(obs, msg.from)) this.kits.add(msg.from);
 else if (e.kind === 'burn') this.burns.push(e);
 else if (e.kind === 'awp') this.awp = { x: e.x, y: e.y, tick: t };
 else if (e.kind === 'smoker') this.postSmokers.add(msg.from);
 else if (e.kind === 'lurk') this.lurkers.add(msg.from);
+else if (e.kind === 'fire') this.fireCall = { k: e.k, x: e.x, y: e.y, until: t + 8 * this.tps };
 if (e.kind === 'flash') {
 this.flashHeard = t;
 this.flashPop = e.pop;
@@ -4137,14 +4194,19 @@ const st = this.memberStage(obs, me.id, p);
 const near = st !== null && dist(me.x, me.y, st.x, st.y) < 6 * UNIT;
 const supportFirst = role !== SUPPORT && this.isAlive(obs, this.roles.who(SUPPORT)) && this.smokeHeard < 0 && sinceExec < 8;
 const onWay = ( q) => Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT || (dist(me.x, me.y, q.x, q.y) < 20 * UNIT && segDist(q.x, q.y, me.x, me.y, site.cx, site.cy).d < q.radius + 2 * UNIT);
-const burning = P.smokeFire ? obs.effects.find((q) => q.kind === 'fire' && q.ticksLeft > 2 * this.tps && onWay(q) && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) > q.radius + 2 * UNIT)) : undefined;
+const live = P.fireChoice ? this.activeSmokes(t) : this.smokes;
+const burning = P.smokeFire ? obs.effects.find((q) => q.kind === 'fire' && q.ticksLeft > 2 * this.tps && onWay(q) && live.every((m) => dist(m.x, m.y, q.x, q.y) > q.radius + 2 * UNIT)) : undefined;
 const reach = this.data.rules.grenadeRules.maxThrowRange * UNIT;
 const gid = this.groupOf(obs, me.id, p);
 const smokerId = this.ids.find((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid) && this.memberIndex(obs, x, p) === this.smokerIndex(obs, me.id, p));
 const sm = smokerId === undefined ? undefined : smokerId === me.id ? me : obs.teammates.find((m) => m.id === smokerId);
 const closest = burning === undefined ? -1 : [me, ...obs.teammates.filter((m) => m.alive && this.inGroup(obs, m.id, p, gid))].sort((a, b) => dist(a.x, a.y, burning.x, burning.y) - dist(b.x, b.y, burning.x, burning.y) || a.id - b.id)[0].id;
-const mine = burning !== undefined && (idx === this.smokerIndex(obs, me.id, p) || ((sm === undefined || dist(sm.x, sm.y, burning.x, burning.y) > reach) && closest === me.id));
-if (burning !== undefined && mine && this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
+const usedSmoke = ( id) => P.fireBackup && this.smokes.some((m) => m.by === id);
+const backup = burning === undefined || !P.fireBackup || sm === undefined || !usedSmoke(sm.id) ? -1 : [me, ...obs.teammates.filter((m) => m.alive && this.inGroup(obs, m.id, p, gid))].filter((m) => !usedSmoke(m.id)).sort((a, b) => dist(a.x, a.y, burning.x, burning.y) - dist(b.x, b.y, burning.x, burning.y) || a.id - b.id)[0]?.id ?? -1;
+const mine = burning !== undefined && (backup >= 0 ? backup === me.id : idx === this.smokerIndex(obs, me.id, p) || ((sm === undefined || dist(sm.x, sm.y, burning.x, burning.y) > reach) && closest === me.id));
+const sealer = smokeFirst && idx === this.smokerIndex(obs, me.id, p);
+const pick = burning !== undefined && P.fireChoice ? this.fireDecide(obs, out, p, exec, ent, burning, mine, sealer) : null;
+if (burning !== undefined && mine && (pick === null || pick === 'douse') && this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
 wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
 } else if (this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p)) {
 const sp = supportFirst ? null : this.smokeTarget(obs, p, exec, ent);
@@ -4152,6 +4214,27 @@ if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
 } else if (this.util.has(me, 'flash') && cue && flashTurn && next.ok && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5))) {
 const fp = this.flashPoint(obs, exec, ent, smokeFirst && !next.second ? 2 : 5, next.avoid);
 if (fp !== null && (smokeFirst || this.viewer(fp, exec))) wish = { kind: 'flash', x: fp.x, y: fp.y, why: '閃進點' };
+}
+const fc = P.fireChoice ? this.fireCall : null;
+if (fc !== null && t <= fc.until && !this.inRectSite(me.x, me.y, exec) && obs.round.phase === 'live') {
+const fire = obs.effects.find((q) => q.kind === 'fire' && dist(q.x, q.y, fc.x, fc.y) < 3 * UNIT);
+const gone = fire === undefined ? dist(me.x, me.y, fc.x, fc.y) < 12 * UNIT && this.g.los(me.x, me.y, fc.x, fc.y) : fire.ticksLeft <= this.tps;
+if (gone) this.fireCall = null;
+else if (fc.k === 'detour' && !this.fireDetoured) {
+const e2 = this.fireDetour(obs, exec, ent);
+if (e2 !== null && dist(me.x, me.y, e2.ox, e2.oy) > 3 * UNIT) {
+out.goal = { x: e2.ox, y: e2.oy };
+out.route = this.aroundSite(exec);
+out.role = `繞開火 ${exec}`;
+return wish;
+}
+this.fireDetoured = true;
+} else if ((fc.k === 'wait' || fc.k === 'seal') && st !== null && wish === null) {
+out.goal = { x: st.x, y: st.y };
+out.hold = st;
+out.role = '等火熄';
+return wish;
+}
 }
 const smoker = this.util.has(me, 'smoke') && smokeFirst && idx === this.smokerIndex(obs, me.id, p) && !supportFirst;
 if (wish === null && smoker && sinceExec < 7 && dist(me.x, me.y, ent.ox, ent.oy) > 3 * UNIT) {
@@ -4723,6 +4806,50 @@ out.stop = sees;
 out.noise = sees;
 out.role = '守包・反拆';
 return true;
+}
+activeSmokes(t) {
+return this.smokes.filter((m) => t - m.tick < this.smokeLife);
+}
+fireDetour(obs, exec, ent) {
+const me = obs.me;
+const site = this.intel.sites[exec];
+const via = ( e) => (dist(me.x, me.y, e.ox, e.oy) + dist(e.ix, e.iy, site.cx, site.cy)) / UNIT / P.routeSpeed;
+let best = null;
+for (const e of site.entrances) {
+if (e.portal === ent.portal || obs.effects.some((q) => q.kind === 'fire' && Math.min(dist(q.x, q.y, e.ox, e.oy), dist(q.x, q.y, e.ix, e.iy)) < q.radius + 2 * UNIT)) continue;
+const extra = via(e) - via(ent);
+if (best === null || extra < best.extra) best = { ...e, extra };
+}
+return best;
+}
+fireDecide(obs, out, p, exec, ent, fire, mine, sealer) {
+const t = obs.tick;
+if (!this.fireRoundSeen) {
+this.fireRoundSeen = true;
+this.fireRounds++;
+}
+if (!mine) return this.fireCall?.k ?? null;
+const opts = this.fireOptions(obs, p, exec, ent, fire, sealer);
+const key = `${Math.round(fire.x / UNIT)},${Math.round(fire.y / UNIT)}`;
+const c = this.fireChoice.choose(key, t, opts, rollOf(obs.round.number, 29), { tie: P.fireTie, hold: P.fireHold * this.tps, margin: P.fireMargin });
+if (c === null) return null;
+if (this.fireCall === null || this.fireCall.k !== c.id || dist(this.fireCall.x, this.fireCall.y, fire.x, fire.y) > 3 * UNIT) out.cmds.push({ type: 'say', text: `E:fire ${c.id} ${Math.round(fire.x / 100)} ${Math.round(fire.y / 100)}` });
+this.fireCall = { k: c.id, x: fire.x, y: fire.y, until: t + 8 * this.tps };
+out.role += `・火：${c.id}`;
+return c.id;
+}
+fireOptions(obs, p, exec, ent, fire, sealer) {
+const me = obs.me;
+const left = fire.ticksLeft / this.tps;
+const urgency = clamp((40 - obs.round.phaseTicksLeft / this.tps) / 20, 0, 1);
+const adapt = clamp(1 + 0.08 * (this.fireRounds - 2), 0.75, 1.25);
+const opts = [];
+if (this.util.has(me, 'smoke') && this.util.solve(me.x, me.y, fire.x, fire.y) !== null) opts.push({ id: 'douse', score: P.fireDouse + (p.kind === 'rush' ? P.fireDouseRush : 0) - (sealer ? P.fireDouseSeal : 0) + P.fireDouseLong * Math.min(left, 7) / 7 });
+const e2 = this.fireDetour(obs, exec, ent);
+if (e2 !== null) opts.push({ id: 'detour', score: (P.fireDetour - Math.max(0, e2.extra) * P.fireDetourSec) * adapt });
+opts.push({ id: 'wait', score: P.fireWait - left * P.fireWaitSec * (0.5 + urgency) });
+if (sealer && this.util.has(me, 'smoke')) opts.push({ id: 'seal', score: P.fireSeal - left * P.fireSealSec * (0.5 + urgency) });
+return opts;
 }
 burnsMate(obs, x, y) {
 return P.burnMateCheck && obs.teammates.some((m) => m.alive && dist(m.x, m.y, x, y) < 4 * UNIT);
