@@ -27,6 +27,7 @@ import type {
   RoundEndReason,
   RoundPhase,
   ShooterInitData,
+  InitTactics,
   ShooterObservation,
   SoundEvent,
   SoundKind,
@@ -548,7 +549,7 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 export const DEFAULT_ATTRIBUTES: Attributes = Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, 50])) as unknown as Attributes;
 
 /** 開局資料（JSON 安全） */
-export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney' | 'overtime' | 'freezeTicks'> & { readonly reactionTicks?: number } = {}, attributes: Attributes = DEFAULT_ATTRIBUTES): ShooterInitData {
+export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobValues, opts: Pick<ShooterMatchOptions, 'roundsPerHalf' | 'winRounds' | 'startMoney' | 'overtime' | 'freezeTicks'> & { readonly reactionTicks?: number } = {}, attributes: Attributes = DEFAULT_ATTRIBUTES, tactics: InitTactics | null = null): ShooterInitData {
   const group = playerId < TEAM_SIZE ? 0 : 1;
   const ids = Array.from({ length: PLAYER_COUNT }, (_, i) => i);
   return {
@@ -559,6 +560,7 @@ export function shooterInitData(map: ShooterMap, playerId: number, knobs: KnobVa
     enemyIds: ids.filter((i) => (i < TEAM_SIZE ? 0 : 1) !== group),
     knobs,
     attributes,
+    tactics,
     rules: {
       apiVersion: SHOOTER_API_VERSION,
       ticksPerSecond: TPS,
@@ -1931,6 +1933,8 @@ export class ShooterMatch {
       projectiles,
       chat,
       enemiesAlive: foes.filter((e) => e.alive).length,
+      // 教練指令由驅動層（runner.ts）依座位的隊伍填入；引擎本身不知道教練
+      coach: null,
     };
   }
 
