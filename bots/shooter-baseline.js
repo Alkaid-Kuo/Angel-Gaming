@@ -3949,7 +3949,8 @@ return Math.max(0, list.indexOf(id));
 }
 pairNow(obs, p, exec, ent) {
 if (!P.pairSync || p.kind === 'go' || ent === null || this.inRectSite(obs.me.x, obs.me.y, exec)) return null;
-if (obs.effects.some((q) => q.kind === 'fire' && q.ticksLeft > 2 * this.tps && Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT)) return null;
+const site = this.intel.sites[exec];
+if (obs.effects.some((q) => q.kind === 'fire' && (Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT || segDist(q.x, q.y, ent.ix, ent.iy, site.cx, site.cy).d < q.radius + 2 * UNIT))) return null;
 const gid = this.groupOf(obs, obs.me.id, p);
 const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => this.memberIndex(obs, a, p) - this.memberIndex(obs, b, p) || a - b);
 const k = Math.max(0, list.indexOf(obs.me.id));

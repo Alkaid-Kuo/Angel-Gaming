@@ -1231,13 +1231,15 @@ export class Tactics {
 
   /**
    * 成對進門（2.7 批 2b，P.pairSync）：組內依進點順序兩兩一對（0-1、2-3…）；回傳我在組裡的順序 k、搭檔 id（沒有 −1）、我看左邊（−1）還是右邊（+1）。
-   * 關掉、go、已在包點、或入口被火擋住（還要燒 2 秒以上）時回傳 null
+   * 關掉、go、已在包點、或入口被火擋住（入口旁或入口到包點中心的路上有火）時回傳 null
    * @param {import('./base.js').Observation} obs @param {TPlan} p @param {SiteId} exec @param {import('./analysis.js').Entrance | null} ent
    * @returns {{ k: number, partner: number, side: number } | null}
    */
   pairNow(obs, p, exec, ent) {
     if (!P.pairSync || p.kind === 'go' || ent === null || this.inRectSite(obs.me.x, obs.me.y, exec)) return null;
-    if (obs.effects.some((q) => q.kind === 'fire' && q.ticksLeft > 2 * this.tps && Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT)) return null;
+    // 火在入口外側／內側旁，或在「入口內側→包點中心」的路上（燒多久都算）：不配對，照 2.6.3 一個一個進
+    const site = this.intel.sites[exec];
+    if (obs.effects.some((q) => q.kind === 'fire' && (Math.min(dist(q.x, q.y, ent.ox, ent.oy), dist(q.x, q.y, ent.ix, ent.iy)) < q.radius + 3 * UNIT || segDist(q.x, q.y, ent.ix, ent.iy, site.cx, site.cy).d < q.radius + 2 * UNIT))) return null;
     const gid = this.groupOf(obs, obs.me.id, p);
     const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => this.memberIndex(obs, a, p) - this.memberIndex(obs, b, p) || a - b);
     const k = Math.max(0, list.indexOf(obs.me.id));

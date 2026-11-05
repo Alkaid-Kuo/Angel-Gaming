@@ -918,7 +918,7 @@ describe('Bot 2.7 批 2b（B1 重做）：成對進門跟閃光綁在一起（pa
     for (const i of ids) if (seen[i] !== null && seen[i]!.k === 2) throw new Error('第三個人不該有搭檔');
   });
 
-  it('入口被火擋住（還要燒 2 秒以上）就不配對；開關關掉也不配對', () => {
+  it('入口旁或入口到包點中心的路上有火就不配對；開關關掉也不配對', () => {
     const { match, bot } = live(0);
     const raw = match.observe(0);
     const ent = bot.intel.sites.A.entrances[0];
