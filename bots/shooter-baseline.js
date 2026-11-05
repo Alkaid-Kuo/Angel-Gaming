@@ -208,6 +208,8 @@ tracerSrc: true,
 claimClear: 6,
 claimById: true,
 flashMulti: true,
+tradeAngle: 25,
+tradePen: 2,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -2855,7 +2857,8 @@ const gap = dist(p.x, p.y, cue.x, cue.y);
 if ((!cue.dead && gap < 1600) || gap > 4000 || !this.g.walkLine(me.x, me.y, p.x, p.y) || !this.g.los(p.x, p.y, look.x, look.y)) continue;
 if (!cue.dead && segDist(p.x, p.y, cue.x, cue.y, look.x, look.y).d < 1100) continue;
 if (obs.effects.some((e) => e.kind === 'fire' && dist(p.x, p.y, e.x, e.y) < e.radius + 500)) continue;
-const s = (this.intel.cover[i] > 0 ? 2 : 0) - dist(me.x, me.y, p.x, p.y) / UNIT - Math.abs(gap / UNIT - 2.5) - this.perc.danger[i] / 40;
+let s = (this.intel.cover[i] > 0 ? 2 : 0) - dist(me.x, me.y, p.x, p.y) / UNIT - Math.abs(gap / UNIT - 2.5) - this.perc.danger[i] / 40;
+if (cue.dead && P.tradePen > 0) s -= P.tradePen * Math.max(0, 1 - Math.abs(adiff(angleTo(p.x, p.y, look.x, look.y), angleTo(cue.x, cue.y, look.x, look.y))) / P.tradeAngle);
 if (s > score) { score = s; best = p; }
 }
 if (best !== null) {
