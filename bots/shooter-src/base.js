@@ -379,6 +379,14 @@ export const P = {
   tradeAngle: 25,
   tradePen: 2,
 
+  // ── 2.8：戰術選擇的效用分數（M5 規格 3.4；score ＝ S ＋ Wp×星級 ＋ Wq×(q−0.5) − Wr×本半場用過次數 ＋ A） ──
+  /** 星級、隊伍執行熟練度、本半場每用過一次的扣分；前兩名差這麼多以內用回合雜湊二選一；對手適應項的上限 */
+  tacWp: 0.5,
+  tacWq: 0.2,
+  tacWr: 0.35,
+  tacEps: 0.1,
+  tacAmax: 0.3,
+
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */
   afterPistol: 'force',

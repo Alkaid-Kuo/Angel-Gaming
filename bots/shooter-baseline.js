@@ -210,6 +210,11 @@ claimById: true,
 flashMulti: true,
 tradeAngle: 25,
 tradePen: 2,
+tacWp: 0.5,
+tacWq: 0.2,
+tacWr: 0.35,
+tacEps: 0.1,
+tacAmax: 0.3,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3594,32 +3599,55 @@ out.cmds.push({ type: 'say', text: `E:planted ${b.site}` });
 }
 }
 choosePlan(obs) {
-if (obs.me.team === 'CT') return this.chooseCT();
+if (obs.me.team === 'CT') return this.chooseCT(obs);
 return this.chooseT(obs);
+}
+qOf(id) {
+return clamp((this.prof?.team?.[id] ?? 50) / 100, 0, 1);
+}
+pOf(id) {
+return clamp((this.prof?.personal?.[id] ?? 50) / 100, 0, 1);
+}
+pickTactic(obs, ids, state, salt) {
+const call = this.coach?.call?.tactic ?? null;
+if (call !== null && ids.includes(call)) return call;
+const pref = this.coach?.pref ?? {};
+const all = ids.map((id) => {
+const st = state(id);
+const score = st.s + P.tacWp * Math.max(0, pref[id] ?? 0) + P.tacWq * (this.qOf(id) - 0.5) - P.tacWr * (this.used.get(id) ?? 0) + clamp(st.a, -P.tacAmax, P.tacAmax);
+return { id, score, ok: st.ok, ban: (pref[id] ?? 0) < 0 };
+});
+let list = all.filter((o) => o.ok && !o.ban);
+if (list.length === 0) list = all.filter((o) => !o.ban);
+if (list.length === 0) list = all;
+list.sort((x, y) => y.score - x.score || ids.indexOf(x.id) - ids.indexOf(y.id));
+if (list.length > 1 && list[0].score - list[1].score < P.tacEps) return list[rollOf(obs.round.number, salt) % 2].id;
+return list[0].id;
 }
 chooseT(obs) {
 const h = this.h;
 const ag = this.attrs.aggression;
-const call = this.buyCall ?? this.econ.teamCall(obs);
+const call = this.coach?.call?.buy ?? this.buyCall ?? this.econ.teamCall(obs);
 const learned = this.adapt.advice('T');
-const wA = Math.max(0.2, 1 + 0.35 * this.siteScore.A);
-const wB = Math.max(0.2, 1 + 0.35 * this.siteScore.B);
-const site = h.random() * (wA + wB) < wA ? 'A' : 'B';
+const sc = this.siteScore;
+const main = sc.A !== sc.B ? (sc.A > sc.B ? 'A' : 'B') : rollOf(obs.round.number, 31) % 2 === 0 ? 'A' : 'B';
 const forced = ['', 'default', 'rush', 'split', 'fake'][this.opts.plan] ?? '';
-let kind = forced;
-if (kind === '') {
-const w = call === 'eco' ? { default: 0, rush: 0.65, split: 0.35, fake: 0 } : this.enemyEco() ? { default: 0.1, rush: 0.35 + 0.2 * ag, split: 0.4, fake: 0.1 } : { default: 0.22, rush: 0.12 + 0.2 * ag, split: 0.4, fake: 0.18 };
-for (const k of (['default', 'rush', 'split', 'fake'])) w[k] *= learned.plans[k] ?? 1;
-w.fake *= 0.75 + learned.rotation * 0.5;
-let r = h.random() * (w.default + w.rush + w.split + w.fake);
-kind = 'fake';
-for (const k of (['default', 'rush', 'split'])) {
-if ((r -= w[k]) < 0) {
-kind = k;
-break;
-}
-}
-}
+const eco = call === 'eco' || call === 'half';
+const enemyEco = this.enemyEco();
+const kindOf = (id) => (id.replace(/[AB]$/, ''));
+const siteOf = (id) => (id.endsWith('A') ? 'A' : id.endsWith('B') ? 'B' : main);
+const id = this.pickTactic(obs, T_TACTICS, (t) => {
+const kind = kindOf(t);
+let s = kind === 'split' ? 0.15 : kind === 'rush' ? -0.1 + 0.2 * ag : kind === 'fake' ? -0.05 : 0;
+if (enemyEco) s += kind === 'default' ? -0.3 : kind === 'fake' ? -0.2 : 0.1;
+if (kind === 'rush' || kind === 'split') s += 0.15 * sc[siteOf(t)];
+const a = 0.5 * Math.log(learned.plans[kind] ?? 1) + (kind === 'fake' ? 0.25 * (learned.rotation - 0.5) : 0);
+const ok = (!eco || kind === 'rush' || kind === 'split') && (forced === '' || kind === forced);
+return { s, a, ok };
+}, 37);
+this.tagPick = id;
+const kind = kindOf(id);
+const site = siteOf(id);
 const routes = this.intel.routes.T[site];
 const n = Math.max(1, routes.length);
 if (kind === 'rush') return { kind: 'rush', site, r1: Math.floor(h.random() * Math.min(2, n)), r2: 0, exec: site };
@@ -3634,26 +3662,25 @@ const nOther = Math.max(1, this.intel.routes.T[other(site)].length);
 if (kind === 'fake') return { kind: 'fake', site, r1: 0, r2: Math.floor(h.random() * Math.min(2, nOther)), exec: null };
 return { kind: 'default', site, r1: Math.floor(h.random() * Math.min(2, n)), r2: Math.floor(h.random() * Math.min(2, nOther)), exec: null };
 }
-chooseCT() {
-let a = clamp(this.opts.ctSplitA, 0, 5);
-let b = Math.min(P.ctB, 5 - a);
-let m = 5 - a - b;
+chooseCT(obs = null) {
+const a0 = clamp(this.opts.ctSplitA, 0, 5);
+const b0 = Math.min(P.ctB, 5 - a0);
+const base = { kind: 'hold', a: a0, m: 5 - a0 - b0, b: b0, rot: null, go: false };
+if (obs === null) return base;
 const learned = this.adapt.advice('CT');
 const bias = learned.A - learned.B;
-if (learned.evidence >= 5 && Math.abs(bias) > 0.9 && learned.fast > 0.6) {
-a = bias > 0 ? 4 : 1;
-b = 5 - a;
-m = 0;
-} else if (learned.evidence >= 3 && m > 0) {
-if (bias > 0.5) {
-a++;
-m--;
-} else if (bias < -0.5) {
-b++;
-m--;
+const strong = learned.evidence >= 5 && Math.abs(bias) > 0.9 && learned.fast > 0.6;
+const id = this.pickTactic(obs, CT_TACTICS, (t) => {
+const lean = t === 'stackA' ? bias : t === 'stackB' ? -bias : 0;
+const s = t === 'ct212' ? 0.2 : t === 'ctPush' ? -0.1 : learned.evidence >= 3 ? (lean - 0.5) * 0.8 + (strong && lean > 0 ? 0.4 : 0) : -0.3;
+return { s, a: 0, ok: true };
+}, 41);
+this.tagPick = id;
+if (id === 'stackA' || id === 'stackB') {
+const n = strong ? 4 : 3;
+return { ...base, a: id === 'stackA' ? n : 5 - n, m: 0, b: id === 'stackB' ? n : 5 - n };
 }
-}
-return { kind: 'hold', a, m, b, rot: null, go: false };
+return id === 'ctPush' ? { ...base, push: true } : base;
 }
 leadT(obs, p) {
 if (obs.round.phase !== 'live' || p.exec !== null) return p;
