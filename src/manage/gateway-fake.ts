@@ -1,7 +1,7 @@
 // 假比賽：依隱藏強度算勝率再擲骰，幾乎瞬間出結果。
 // 用途：在不接對戰引擎的情況下，讓經營核心與自動玩家能跑上百個賽段。
 // 只有這個檔案（與 content.ts 的真實強度表）知道「強度怎麼換成勝負」。
-// 隊伍強度＝名單每人（版本強度＋習慣＋本場戰術預設加成）的平均；一場一回合擲骰（stub-bo1，比分 1:0）。
+// 隊伍強度＝名單每人（版本強度＋習慣＋舊請求單的戰術預設加成）的平均；一場一回合擲骰（stub-bo1，比分 1:0）。
 import { Prng } from '../shared/prng.ts';
 import type { ContentPack, Lineage } from './content.ts';
 import type { BattleGateway, MatchFormat, MatchOutcome, MatchRequest, PlayerSpec, SideSpec } from './gateway.ts';

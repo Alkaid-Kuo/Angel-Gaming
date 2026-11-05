@@ -54,3 +54,41 @@ export function npcLineup(view: KnownView, spec: PersonaSpec, size: number, rng:
   else if (spec.lineup === 'random') rng.shuffle(top);
   return [{ type: 'setLineup', lineup: top }];
 }
+
+/**
+ * 每週戰術手冊（M5）：依個性設比賽計畫，並把本週一半的訓練時段拿去排練兩邊執行熟練度最高的戰術。
+ * 計畫：豪門、數據派把每邊最熟的戰術給 2 星、次熟的 1 星；青訓派偏好 rush（1 星）；守財奴不設偏好。
+ * 經濟風格：豪門與青訓派積極、守財奴保守、數據派標準。排練費要留 8 週固定支出當緩衝。
+ */
+export function npcPlaybook(view: KnownView, persona: Persona, content: ContentPack): Command[] {
+  if (content.tactics.length === 0) return [];
+  const eff = view.me.effective;
+  const bySide = (side: 'T' | 'CT'): string[] =>
+    content.tactics
+      .filter((t) => t.side === side)
+      .map((t) => t.id)
+      .sort((a, b) => (eff[b] ?? 0) - (eff[a] ?? 0) || (a < b ? -1 : 1));
+  const pref: Record<string, number> = Object.fromEntries(content.tactics.map((t) => [t.id, 0]));
+  if (persona === 'whale' || persona === 'data') {
+    for (const side of ['T', 'CT'] as const) {
+      const [first, second] = bySide(side);
+      if (first !== undefined) pref[first] = 2;
+      if (second !== undefined) pref[second] = 1;
+    }
+  } else if (persona === 'youth') {
+    for (const t of content.tactics) if (t.id.startsWith('rush')) pref[t.id] = 1;
+  }
+  const economy = persona === 'whale' || persona === 'youth' ? 2 : persona === 'miser' ? 1 : 0;
+  const cmds: Command[] = [{ type: 'setGamePlan', plan: { pref, economy } }];
+
+  const half = Math.floor(view.me.capacityLeft / 2);
+  const afford = Math.floor((view.me.cash - 8 * view.me.weeklyFixedCost) / Math.max(1, content.economy.rehearseCost));
+  const sessions = Math.min(half, afford);
+  if (sessions >= 2) {
+    const [t] = bySide('T');
+    const [ct] = bySide('CT');
+    if (t !== undefined) cmds.push({ type: 'queueRehearse', tactic: t, sessions: Math.ceil(sessions / 2) });
+    if (ct !== undefined) cmds.push({ type: 'queueRehearse', tactic: ct, sessions: Math.floor(sessions / 2) });
+  }
+  return cmds;
+}

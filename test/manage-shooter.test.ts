@@ -20,7 +20,7 @@ import { derivePlayer, reactionTicksFor, SHOOTER_ROLES } from '../src/shooter/pl
 
 const gateway = new ShooterGateway();
 const ROLES = ['entry', 'support', 'anchor', 'lurk', 'awp'];
-const side = (version: number, habit = 0, presetBonus = 0): SideSpec => ({ players: ROLES.map((lineageId) => ({ lineageId, version, config: { habit, presetBonus } })) });
+const side = (version: number, habit = 0): SideSpec => ({ players: ROLES.map((lineageId) => ({ lineageId, version, config: { habit } })) });
 
 /** 同一張請求單只打一次（存檔重跑測試：讀檔後送出的請求單若與不中斷時相同就直接命中；不同就照打，結果比對會抓到） */
 class MemoGateway implements BattleGateway {
@@ -46,16 +46,17 @@ class MemoGateway implements BattleGateway {
 }
 
 describe('攻防戰閘道：名單 → 屬性', () => {
-  const spec = (lineageId: string, version: number, habit: number, presetBonus: number): PlayerSpec => ({ lineageId, version, config: { habit, presetBonus } });
+  const spec = (lineageId: string, version: number, habit: number, extra: Record<string, number> = {}): PlayerSpec => ({ lineageId, version, config: { habit, ...extra } });
 
-  it('偏移換算：習慣 ±4、預設加成 0～6，方向正確', () => {
-    expect(attributeShift({ habit: 0, presetBonus: 0 })).toBe(0);
-    expect(attributeShift({ habit: 60, presetBonus: 0 })).toBe(4);
-    expect(attributeShift({ habit: -60, presetBonus: 0 })).toBe(-4);
-    expect(attributeShift({ habit: 30, presetBonus: 0 })).toBe(2);
+  it('偏移換算：習慣 ±4，方向正確；戰術手冊資料不改屬性；舊請求單的 presetBonus 照舊換算（遷移後觀戰重跑一致）', () => {
+    expect(attributeShift({ habit: 0 })).toBe(0);
+    expect(attributeShift({ habit: 60 })).toBe(4);
+    expect(attributeShift({ habit: -60 })).toBe(-4);
+    expect(attributeShift({ habit: 30 })).toBe(2);
     expect(attributeShift({ habit: 0, presetBonus: 36 })).toBe(2);
     expect(attributeShift({ habit: 0, presetBonus: 500 })).toBe(6);
     expect(attributeShift({ habit: 0, presetBonus: -50 })).toBe(0);
+    expect(attributeShift({ habit: 0, p_rushA: 100 })).toBe(0);
     expect(attributeShift({})).toBe(0);
   });
 
@@ -63,9 +64,9 @@ describe('攻防戰閘道：名單 → 屬性', () => {
     for (const role of SHOOTER_ROLES) {
       for (let v = 1; v <= 5; v++) {
         const base = derivePlayer({ role, version: v, habit: 0 }).attributes;
-        for (const [habit, bonus] of [[-999, 0], [0, 0], [60, 90], [999, 999]] as const) {
-          const s = seatOf(spec(role, v, habit, bonus));
-          const shift = attributeShift({ habit, presetBonus: bonus });
+        for (const habit of [-999, 0, 60, 999]) {
+          const s = seatOf(spec(role, v, habit, { p_rushA: 90 }));
+          const shift = attributeShift({ habit });
           for (const k of ATTRIBUTE_KEYS) {
             expect(s.attributes[k]).toBeGreaterThanOrEqual(0);
             expect(s.attributes[k]).toBeLessThanOrEqual(100);
@@ -75,16 +76,50 @@ describe('攻防戰閘道：名單 → 屬性', () => {
           expect(s.reactionTicks).toBe(reactionTicksFor(s.attributes));
         }
         // 習慣好的人反應不會更慢
-        expect(seatOf(spec(role, v, 60, 0)).reactionTicks).toBeLessThanOrEqual(seatOf(spec(role, v, -60, 0)).reactionTicks);
+        expect(seatOf(spec(role, v, 60)).reactionTicks).toBeLessThanOrEqual(seatOf(spec(role, v, -60)).reactionTicks);
       }
     }
-    expect(() => seatOf(spec('ambush', 3, 0, 0))).toThrow(/沒有流派/);
+    expect(() => seatOf(spec('ambush', 3, 0))).toThrow(/沒有流派/);
+  });
+});
+
+describe('攻防戰閘道：戰術手冊（M5 第一批）', () => {
+  const teamSide = (): SideSpec => ({
+    players: ROLES.map((lineageId, i) => ({ lineageId, version: 3, config: { habit: 0, p_rushA: 10 * i, p_fake: 150 } })),
+    team: { q_rushA: 70, q_stackB: -5, pref_rushA: 3, pref_fake: -1, pref_default: 9, economy: 2, note: 'x' },
+  });
+
+  it('team 與 p_ → 開局資料 tactics（夾 0～100、只取前綴欄位）；pref／economy → coach（夾 -1～3，沒有命令）', () => {
+    const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'baseline');
+    const o = gatewayDriverOptions({ formatId: 'shooter-short', a: teamSide(), b: side(3), seed: 5 }, bot);
+    expect(o.tactics?.[0]).toEqual({ team: { rushA: 70, stackB: 0 }, personal: { rushA: 0, fake: 100 } });
+    expect(o.tactics?.[2]).toEqual({ team: { rushA: 70, stackB: 0 }, personal: { rushA: 20, fake: 100 } });
+    expect(o.tactics?.[5]).toBeNull();
+    expect(o.orders?.[0]).toEqual({ pref: { rushA: 3, fake: -1, default: 3 }, economy: 2, call: null });
+    expect(o.orders?.[1]).toBeNull();
+  });
+
+  it('現行 Bot 不讀新欄位：有 team 的請求單與沒有時成績單相同；沒喊 K: 就沒有回合戰術標籤', async () => {
+    const plain: MatchRequest = { formatId: 'shooter-short', a: side(3), b: side(3), seed: 31337 };
+    const rich: MatchRequest = { ...plain, a: teamSide() };
+    const [x] = await gateway.simulateBatch([plain]);
+    const [y] = await gateway.simulateBatch([rich]);
+    expect(y).toEqual(x);
+    expect(y.rounds.every((r) => r.tactics === undefined)).toBe(true);
+  }, 60_000);
+
+  it('回合戰術標籤 → 成績單：至少一方有才給', () => {
+    const fake = { winner: 0, score: [2, 0], rounds: [{ number: 1, winnerGroup: 0 }, { number: 2, winnerGroup: 0 }], ticks: 0, stats: [], overtimes: 0 } as unknown as ShooterResult;
+    const rules = { roundsPerHalf: 1, overtimeRule: { roundsPerHalf: 1 } } as unknown as Parameters<typeof outcomeOf>[1];
+    const o = outcomeOf(fake, rules, [['rushB', null], [null, null]]);
+    expect(o.rounds[0].tactics).toEqual({ a: 'rushB', b: null });
+    expect(o.rounds[1].tactics).toBeUndefined();
   });
 });
 
 describe('攻防戰閘道：真引擎', () => {
   it('同一張請求單跑兩次成績單相同；A／B 對調不炸；名單人數不對會拒絕', async () => {
-    const req: MatchRequest = { formatId: 'shooter-short', a: side(4, 30, 20), b: side(3, -20), seed: 424242 };
+    const req: MatchRequest = { formatId: 'shooter-short', a: side(4, 30), b: side(3, -20), seed: 424242 };
     const [x] = await gateway.simulateBatch([req]);
     const [y] = await gateway.simulateBatch([req]);
     expect(y).toEqual(x);
@@ -123,11 +158,11 @@ describe('攻防戰閘道：真引擎', () => {
 
 describe('觀戰重播一致（步驟 9）', () => {
   const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'shooter-baseline.js');
-  // 3 張請求單：不同種子、版本、習慣與預設加成、A／B 強弱互換
+  // 3 張請求單：不同種子、版本、習慣、A／B 強弱互換；第 3 張帶戰術手冊資料（M5）
   const reqs: MatchRequest[] = [
     { formatId: 'shooter-short', a: side(3), b: side(3), seed: 11 },
-    { formatId: 'shooter-short', a: side(5, 45, 30), b: side(2, -40), seed: 2_026_103 },
-    { formatId: 'shooter-short', a: side(1, -60), b: side(4, 20, 90), seed: 4_294_967_295 },
+    { formatId: 'shooter-short', a: side(5, 45), b: side(2, -40), seed: 2_026_103 },
+    { formatId: 'shooter-short', a: side(1, -60), b: { ...side(4, 20), team: { q_rushA: 80, pref_rushA: 2, economy: 1 } }, seed: 4_294_967_295 },
   ];
 
   it('runGatewayMatch 與「用 gatewayDriverOptions 建驅動、逐 tick 跑完」成績單與終局雜湊相同；錄下的回放重播雜湊也相同', () => {
@@ -140,7 +175,7 @@ describe('觀戰重播一致（步驟 9）', () => {
         ticks++;
       }
       expect(ticks).toBeGreaterThan(0);
-      expect(outcomeOf(d.match.result(), d.match)).toEqual(m.outcome);
+      expect(outcomeOf(d.match.result(), d.match, d.tacticTags)).toEqual(m.outcome);
       expect(d.match.hash()).toBe(m.finalHash);
       const rp = d.replay as NonNullable<typeof d.replay>;
       const back = runShooterReplay(JSON.parse(JSON.stringify(rp)) as typeof rp);

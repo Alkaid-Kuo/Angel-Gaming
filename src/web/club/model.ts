@@ -8,7 +8,8 @@ export interface ClubUi {
   market: 'free' | 'teams';
   pickSlot: number | null;
   scrim: { playerId: string; opponentId: string; games: number };
-  research: { playerId: string; target: string; games: number };
+  /** 戰術排練每次排幾節（M5） */
+  rehearse: { sessions: number };
   slip: { fixtureId: string; side: 'home' | 'away'; stake: number } | null;
   leagueWeek: number | null;
   ledgerOpen: boolean;
@@ -19,7 +20,7 @@ export function newClubUi(): ClubUi {
     market: 'free',
     pickSlot: null,
     scrim: { playerId: '', opponentId: '', games: 50 },
-    research: { playerId: '', target: 'generic', games: 50 },
+    rehearse: { sessions: 2 },
     slip: null,
     leagueWeek: null,
     ledgerOpen: false,

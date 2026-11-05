@@ -535,8 +535,8 @@ describe('MR3 加時（v1.0）', () => {
     expect(init.rules.economy.overtimeMoney).toBe(ECONOMY.overtimeMoney);
     expect(shooterInitData(map, 0, {}, { overtime: false }).rules.overtime).toBe(false);
     expect(init.rules.apiVersion).toBe(SHOOTER_API_VERSION);
-    expect(SHOOTER_API_VERSION).toBe('1.1');
-    expect(SHOOTER_ENGINE_VERSION).toBe('1.2.0');
+    expect(SHOOTER_API_VERSION).toBe('1.2');
+    expect(SHOOTER_ENGINE_VERSION).toBe('1.3.0');
   });
 
   it('加時狀態計入雜湊；含加時的陪練對打回放重播雜湊相同', () => {

@@ -217,7 +217,7 @@ function sendOver(): void {
       players: m.players.map((p) => ({ id: p.id, kills: p.kills, deaths: p.deaths, money: p.money })),
       overtimes: r.overtimes,
       finalHash: m.hash(),
-      ...(watching !== null ? { outcome: outcomeOf(r, m) } : {}),
+      ...(watching !== null ? { outcome: outcomeOf(r, m, d.tacticTags) } : {}),
     },
   });
 }

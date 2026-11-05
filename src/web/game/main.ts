@@ -18,6 +18,7 @@ import { financeScreen, inboxScreen, leagueScreen } from './info.ts';
 import type { Ctx, GameUi, Screen } from './kit.ts';
 import { STANDALONE, esc, icon, myCrest, newGameUi, runStep, slotName, teamName, wan } from './kit.ts';
 import { bettingScreen, scrimWaitText, trainingScreen } from './ops.ts';
+import { nextPref, tacticsScreen } from './tactics.ts';
 import { rail, topBar } from './shell.ts';
 import { buildScenes, preMatchScene, snapshot, stageName, type Scene } from './show.ts';
 import { marketScreen, playerScreen, squadScreen } from './squad.ts';
@@ -59,7 +60,7 @@ let liveFrame: HTMLIFrameElement | null = null;
 const city: CityView = mountCity(document.getElementById('city-cv') as HTMLCanvasElement, document.getElementById('fx-cv') as HTMLCanvasElement, document.getElementById('rain-cv') as HTMLCanvasElement);
 dust(document.getElementById('dust') as HTMLCanvasElement, ['rgba(255,217,138,.5)', 'rgba(220,235,255,.3)'], 60);
 const bgWord = document.querySelector('.bgx .word') as HTMLElement;
-const WORD: Partial<Record<Screen, string>> = { title: 'ANGEL', create: 'NEW TEAM', squad: 'SQUAD', player: 'PLAYER', market: 'RECRUIT', training: 'TRAINING', league: 'LEAGUE', betting: 'BETTING', finance: 'FINANCE', inbox: 'INBOX' };
+const WORD: Partial<Record<Screen, string>> = { title: 'ANGEL', create: 'NEW TEAM', squad: 'SQUAD', player: 'PLAYER', market: 'RECRUIT', training: 'TRAINING', tactics: 'TACTICS', league: 'LEAGUE', betting: 'BETTING', finance: 'FINANCE', inbox: 'INBOX' };
 
 const speed = (): number => (prefs.fast ? 0.5 : 1);
 
@@ -84,7 +85,6 @@ function context(): Ctx {
     const f = v.fixtures.find((x) => x.week === v.week && x.score === null && (x.home === v.me.teamId || x.away === v.me.teamId));
     ui.scrim.opponentId = f ? (f.home === v.me.teamId ? f.away : f.home) : (others[0] ?? '');
   }
-  if (!mine.includes(ui.research.playerId)) ui.research.playerId = mine[0] ?? '';
   return ctx;
 }
 
@@ -100,6 +100,8 @@ function screenHtml(ctx: Ctx, seen: number): string {
       return marketScreen(ctx);
     case 'training':
       return trainingScreen(ctx);
+    case 'tactics':
+      return tacticsScreen(ctx);
     case 'league':
       return leagueScreen(ctx);
     case 'betting':
@@ -404,10 +406,12 @@ function writeWatchTicket(fixtureId: string): boolean {
 }
 
 // ───── 指令 ─────
-function run(cmd: Command, okMsg: string): boolean {
+/** okMsg 不給：成功時不跳提示（例如戰術室點星，畫面本身就會變） */
+function run(cmd: Command, okMsg?: string): boolean {
   if (!game) return false;
   const r = game.command(cmd);
-  toast(r.ok ? okMsg : r.reason, !r.ok);
+  if (!r.ok) toast(r.reason, true);
+  else if (okMsg !== undefined) toast(okMsg, false);
   if (game.saveError) toast(`無法存檔：${game.saveError}（請用選單匯出備份）`, true);
   render();
   return r.ok;
@@ -441,6 +445,12 @@ function startGame(g: ManageGame): void {
 }
 
 /** 場數夾到滑桿級距的倍數、至少一級 */
+/** 排練節數：1～本週剩餘時段（至少 1） */
+function clampSessions(n: number): number {
+  const left = game?.view().me.capacityLeft ?? 1;
+  return Math.max(1, Math.min(Math.round(n) || 1, Math.max(1, left)));
+}
+
 function clampRuns(n: number): number {
   if (!game) return n;
   const c = game.content.economy;
@@ -537,13 +547,11 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
   upfac: () => run({ type: 'upgradeTraining' }, '訓練中心升級完成！'),
   'train-with': (el) => {
     ui.scrim.playerId = id(el);
-    ui.research.playerId = id(el);
     go('training');
   },
   'scrim-vs': (el) => {
     const t = game?.view().players.find((p) => p.id === id(el))?.teamId;
     if (t) ui.scrim.opponentId = t;
-    ui.trainMode = 'scrim';
     go('training');
   },
   'pick-fa': (el) => {
@@ -554,21 +562,22 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     ui.marketTab = el.dataset.t as GameUi['marketTab'];
     render();
   },
-  tmode: (el) => {
-    ui.trainMode = el.dataset.m as GameUi['trainMode'];
-    render();
+  pref: (el) => {
+    const v = game?.view();
+    if (!v) return;
+    const t = el.dataset.t as string;
+    run({ type: 'setGamePlan', plan: { pref: { ...v.me.gamePlan.pref, [t]: nextPref(v.me.gamePlan.pref[t] ?? 0) }, economy: v.me.gamePlan.economy } });
   },
-  tpick: (el) => {
-    ui.scrim.playerId = el.dataset.pid as string;
-    ui.research.playerId = el.dataset.pid as string;
-    render();
+  econ: (el) => {
+    const v = game?.view();
+    if (!v) return;
+    run({ type: 'setGamePlan', plan: { pref: v.me.gamePlan.pref, economy: Number(el.dataset.e) as 0 | 1 | 2 } });
   },
-  target: (el) => {
-    ui.research.target = el.dataset.t as string;
-    render();
+  rehearse: (el) => {
+    const name = game?.content.tactics.find((t) => t.id === el.dataset.t)?.name ?? '';
+    run({ type: 'queueRehearse', tactic: el.dataset.t as string, sessions: clampSessions(ui.rehearse.sessions) }, `${name} 排練排好了，推進一週後熟練度才漲`);
   },
   scrim: () => run({ type: 'queueScrim', opponentTeamId: ui.scrim.opponentId, games: clampRuns(ui.scrim.games) }, '練習賽排好了，推進一週後出報告'),
-  research: () => run({ type: 'queueResearch', playerId: ui.research.playerId, target: ui.research.target, games: clampRuns(ui.research.games) }, '研發排好了，推進一週後出報告'),
   slip: (el) => {
     ui.slip = { fixtureId: el.dataset.fid as string, side: el.dataset.side as 'home' | 'away', stake: ui.slip?.stake ?? 5 };
     render();
@@ -744,9 +753,12 @@ function setField(path: string, raw: string): void {
       ui.scrim.opponentId = raw;
       render();
       return;
-    case 'scrim.games':
-    case 'research.games': {
-      const k = path === 'scrim.games' ? ui.scrim : ui.research;
+    case 'rehearse.sessions':
+      ui.rehearse.sessions = clampSessions(n);
+      document.querySelectorAll('[data-out="rehearse.sessions"]').forEach((x) => (x.textContent = String(ui.rehearse.sessions)));
+      return;
+    case 'scrim.games': {
+      const k = ui.scrim;
       k.games = clampRuns(n);
       document.querySelectorAll(`[data-out="${path}"]`).forEach((x) => (x.textContent = String(k.games)));
       if (path === 'scrim.games' && game) {
@@ -856,7 +868,8 @@ async function boot(): Promise<void> {
   if (foe) g.command({ type: 'scout', playerId: foe.id });
   const fa2 = v0.players.filter((p) => p.teamId === null && p.id !== fa?.id)[0];
   if (fa2) g.command({ type: 'scout', playerId: fa2.id });
-  g.command({ type: 'queueResearch', playerId: v0.me.roster[0], target: 'generic', games: 100 });
+  const t0 = g.content.tactics[0];
+  if (t0) g.command({ type: 'queueRehearse', tactic: t0.id, sessions: 2 });
   const weeks = Number(q.get('weeks') ?? 0);
   for (let i = 0; i < weeks && (g.state.phase === 'offseason' || g.state.phase === 'season'); i++) await g.advance();
   if (q.has('broke')) (g.state.teams.find((t) => t.human) as { cash: number }).cash = -400;

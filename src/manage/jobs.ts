@@ -1,9 +1,9 @@
-// 背景工作：球探、練習賽、戰術研發。指令只是排程並扣費，結果在「推進時間」時一次算完，
-// 所以消耗一週：這週排的，下週平日才看得到報告、用得上預設。
+// 背景工作：球探、練習賽、戰術排練（M5）。指令只是排程並扣費，結果在「推進時間」時一次算完，
+// 所以消耗一週：這週排的，下週平日才看得到報告、熟練度才漲。
 import type { ContentPack } from './content.ts';
 import type { BattleGateway, MatchRequest } from './gateway.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
-import { buildSide, effectiveLineup, findPlayer, lineageOf, notify, playerOf, teamOf, truePower } from './state.ts';
+import { buildSide, effectiveLineup, findPlayer, grow, lineageOf, notify, playerOf, teamOf, truePower } from './state.ts';
 import type { GameState } from './types.ts';
 
 export async function processJobs(state: GameState, content: ContentPack, gateway: BattleGateway, onProgress?: (done: number, total: number) => void): Promise<void> {
@@ -19,7 +19,7 @@ export async function processJobs(state: GameState, content: ContentPack, gatewa
       const theirs = effectiveLineup(state, content, opp).map((id) => playerOf(state, id));
       const reqs: MatchRequest[] = [];
       for (let i = 0; i < job.games; i++) {
-        reqs.push({ formatId: state.formatId, a: buildSide(mine, theirs), b: buildSide(theirs, mine), seed: rngFor(state.seed, STREAM.scrim, job.id, i).nextU32() });
+        reqs.push({ formatId: state.formatId, a: buildSide(content, team, mine), b: buildSide(content, opp, theirs), seed: rngFor(state.seed, STREAM.scrim, job.id, i).nextU32() });
       }
       const outs = await gateway.simulateBatch(reqs, onProgress);
       const wins = outs.filter((o) => o.winner === 'a').length;
@@ -27,30 +27,39 @@ export async function processJobs(state: GameState, content: ContentPack, gatewa
       notify(state, team.id, 'report', `練習賽報告：對 ${opp.name} ${job.games} 場 ${wins} 勝（${Math.round((wins * 100) / job.games)}%）`);
       continue;
     }
-    const p = findPlayer(state, job.playerId);
-    if (!p) continue;
-    if (job.kind !== 'scout' && p.teamId !== team.id) {
-      notify(state, team.id, 'report', `${p.name} 已不在陣容，排定的工作取消`);
+    if (job.kind === 'rehearse') {
+      rehearse(state, content, job.teamId, job.tactic, job.sessions);
       continue;
     }
-
-    if (job.kind === 'scout') {
+    // 球探
+    const p = findPlayer(state, job.playerId);
+    if (!p) continue;
+    {
       const rng = rngFor(state.seed, STREAM.scout, job.id);
       const est = Math.round(truePower(content, p) + gauss(rng) * e.scoutSd);
       team.intel = team.intel.filter((i) => i.playerId !== p.id);
       team.intel.push({ playerId: p.id, week: state.week, estPower: est, sd: e.scoutSd });
       notify(state, team.id, 'report', `球探報告：${p.name}（${lineageOf(content, p.lineageId).name} v${p.version}）真實強度約 ${est}（誤差 ±${e.scoutSd}）`);
-    } else {
-      const rng = rngFor(state.seed, STREAM.research, job.id);
-      const cap = job.target === 'generic' ? e.researchCapGeneric : e.researchCapSpecific;
-      const factor = 70 + rng.nextInt(61);
-      const bonus = Math.round(((cap * job.games) / (job.games + e.researchHalfSat)) * (factor / 100));
-      const reported = Math.round(bonus + (gauss(rng) * 18) / Math.sqrt(1 + job.games / 50));
-      p.presets = p.presets.filter((x) => x.target !== job.target && x.version === p.version);
-      p.presets.push({ id: `r${job.id}`, target: job.target, version: p.version, bonus, reportedBonus: reported });
-      if (p.presets.length > e.researchMaxPresets) p.presets.shift();
-      const label = job.target === 'generic' ? '泛用' : `針對${lineageOf(content, job.target).name}`;
-      notify(state, team.id, 'report', `研發完成：${p.name} 的${label}戰術預設，估計加成約 ${reported}（${job.games} 場樣本）`);
     }
   }
+}
+
+/** 排練每節的成長（M5 規格 3.3）：隊伍默契 +6、出賽名單個人熟練度 +8，都乘 (1 − cur/100) */
+export const REHEARSE_TEAM_GAIN = 6;
+export const REHEARSE_PERSONAL_GAIN = 8;
+
+/** 排練：用目前出賽名單（無效時照開賽前補名單的規則補齊，不改存檔），逐節套遞減成長 */
+function rehearse(state: GameState, content: ContentPack, teamId: string, tactic: string, sessions: number): void {
+  const team = teamOf(state, teamId);
+  const spec = content.tactics.find((t) => t.id === tactic);
+  if (spec === undefined) return;
+  const lineup = effectiveLineup(state, content, team).map((id) => playerOf(state, id));
+  const avg = (): number => Math.round(lineup.reduce((s, p) => s + (p.tactics[tactic] ?? 0), 0) / Math.max(1, lineup.length));
+  const team0 = Math.round(team.playbook[tactic] ?? 0);
+  const avg0 = avg();
+  for (let i = 0; i < sessions; i++) {
+    team.playbook[tactic] = grow(team.playbook[tactic] ?? 0, REHEARSE_TEAM_GAIN);
+    for (const p of lineup) p.tactics[tactic] = grow(p.tactics[tactic] ?? 0, REHEARSE_PERSONAL_GAIN);
+  }
+  notify(state, team.id, 'report', `排練完成：${spec.name} ${sessions} 節，隊伍默契 ${team0} → ${Math.round(team.playbook[tactic])}，出賽五人個人平均 ${avg0} → ${avg()}`);
 }

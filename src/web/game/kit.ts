@@ -17,8 +17,6 @@ export interface GameUi extends ClubUi {
   marketPick: string | null;
   /** 市場分頁 */
   marketTab: 'free' | 'teams' | 'intel';
-  /** 新增排程：練習賽或戰術研發 */
-  trainMode: 'scrim' | 'research';
   /** 信件裡打開的那封（inbox 陣列的索引） */
   mailSel: number | null;
   /** 選手詳情看的是誰 */
@@ -26,7 +24,7 @@ export interface GameUi extends ClubUi {
 }
 
 export function newGameUi(base: ClubUi): GameUi {
-  return { ...base, marketPick: null, marketTab: 'free', trainMode: 'research', mailSel: null, player: null };
+  return { ...base, marketPick: null, marketTab: 'free', mailSel: null, player: null };
 }
 
 export interface Ctx {

@@ -145,10 +145,6 @@ function setField(path: string, value: string): void {
     if (b === 'games') ui.scrim.games = n;
     else if (b === 'playerId') ui.scrim.playerId = value;
     else if (b === 'opponentId') ui.scrim.opponentId = value;
-  } else if (a === 'research') {
-    if (b === 'games') ui.research.games = n;
-    else if (b === 'playerId') ui.research.playerId = value;
-    else if (b === 'target') ui.research.target = value;
   } else if (a === 'stake') {
     ui.stake[b] = n;
   }
@@ -179,7 +175,6 @@ const actions: Record<string, (el: HTMLElement) => void | Promise<void>> = {
   },
   upfac: () => run({ type: 'upgradeTraining' }, '訓練中心升級了'),
   scrim: () => run({ type: 'queueScrim', opponentTeamId: game?.view().players.find((p) => p.id === ui.scrim.opponentId)?.teamId ?? '', games: ui.scrim.games }, '練習賽已排入，推進一週後出報告'),
-  research: () => run({ type: 'queueResearch', playerId: ui.research.playerId, target: ui.research.target, games: ui.research.games }, '研發已排入，推進一週後出報告'),
   bet: (el) => run({ type: 'bet', fixtureId: el.dataset.fid as string, side: el.dataset.side as 'home' | 'away', stake: (ui.stake[el.dataset.fid as string] ?? 5) * 10 }, '已下注'),
   market: (el) => {
     ui.market = el.dataset.m as 'free' | 'others';

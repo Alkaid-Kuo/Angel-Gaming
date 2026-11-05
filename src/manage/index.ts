@@ -7,7 +7,7 @@ export { applyCommand } from './commands.ts';
 export { newGame, advance } from './game.ts';
 export type { NewGameOptions, AdvanceOptions, AdvanceSummary } from './game.ts';
 export { knownView } from './view.ts';
-export type { KnownView, KnownPlayer, KnownFixture, KnownPreset } from './view.ts';
+export type { KnownView, KnownPlayer, KnownFixture } from './view.ts';
 export { standings } from './league.ts';
 export type { StandingRow } from './league.ts';
 export { serialize, deserialize } from './save.ts';

@@ -65,7 +65,6 @@ function context(): Ctx {
   const others = v.players.filter((p) => p.teamId !== v.me.teamId).map((p) => p.id);
   if (!mine.includes(ui.scrim.playerId)) ui.scrim.playerId = mine[0] ?? '';
   if (!others.includes(ui.scrim.opponentId)) ui.scrim.opponentId = v.players.find((p) => p.teamId !== null && p.teamId !== v.me.teamId)?.id ?? others[0] ?? '';
-  if (!mine.includes(ui.research.playerId)) ui.research.playerId = mine[0] ?? '';
   return ctx;
 }
 
@@ -325,7 +324,6 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
   upfac: () => run({ type: 'upgradeTraining' }, '訓練中心升級完成！'),
   'train-with': (el) => {
     ui.scrim.playerId = id(el);
-    ui.research.playerId = id(el);
     modal = null;
     screen = 'training';
     render();
@@ -340,12 +338,7 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     ui.market = el.dataset.m as ClubUi['market'];
     render();
   },
-  target: (el) => {
-    ui.research.target = el.dataset.t as string;
-    render();
-  },
   scrim: () => run({ type: 'queueScrim', opponentTeamId: game?.view().players.find((p) => p.id === ui.scrim.opponentId)?.teamId ?? '', games: ui.scrim.games }, '練習賽排好了，推進一週後出報告'),
-  research: () => run({ type: 'queueResearch', playerId: ui.research.playerId, target: ui.research.target, games: ui.research.games }, '研發排好了，推進一週後出報告'),
   slip: (el) => {
     ui.slip = { fixtureId: el.dataset.fid as string, side: el.dataset.side as 'home' | 'away', stake: ui.slip?.stake ?? 5 };
     render();
@@ -481,12 +474,8 @@ function setField(path: string, raw: string): void {
     case 'scrim.opponentId':
       ui.scrim.opponentId = raw;
       return;
-    case 'research.playerId':
-      ui.research.playerId = raw;
-      return;
-    case 'scrim.games':
-    case 'research.games': {
-      const k = path === 'scrim.games' ? ui.scrim : ui.research;
+    case 'scrim.games': {
+      const k = ui.scrim;
       k.games = Math.max(10, n);
       document.querySelectorAll(`[data-out="${path}"]`).forEach((x) => (x.textContent = String(k.games)));
       return;
@@ -585,7 +574,6 @@ async function boot(): Promise<void> {
   if (fa) g.command({ type: 'sign', playerId: fa.id });
   const foe = v0.players.find((p) => p.teamId !== null && p.teamId !== v0.me.teamId);
   if (foe) g.command({ type: 'scout', playerId: foe.id });
-  g.command({ type: 'queueResearch', playerId: v0.me.roster[0], target: 'generic', games: 100 });
   const weeks = Number(q.get('weeks') ?? 0);
   if (q.has('broke')) (g.state.teams.find((t) => t.human) as { cash: number }).cash = -1;
   for (let i = 0; i < weeks && (g.state.phase === 'offseason' || g.state.phase === 'season'); i++) await g.advance();

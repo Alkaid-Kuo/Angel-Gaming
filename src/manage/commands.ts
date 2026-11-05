@@ -26,7 +26,8 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       if (team.cash < fee) return fail('資金不足以支付簽約金');
       post(state, team, 'signing', -fee, `簽約 ${p.name}`);
       p.teamId = teamId;
-      p.presets = [];
+      // 個人熟練度跟著人走；隊伍默契等他第一次為本隊出賽時才打折（game.ts 的 newFaceDiscount）
+      p.newFace = true;
       return OK;
     }
     case 'release': {
@@ -34,7 +35,7 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       if (!p || p.teamId !== teamId) return fail('不是自己的選手');
       if (rosterOf(state, teamId).length <= content.lineupSize) return fail(`陣容至少要有 ${content.lineupSize} 人才排得出出賽名單`);
       p.teamId = null;
-      p.presets = [];
+      p.newFace = false;
       p.upgradeUntilWeek = null;
       team.lineup = team.lineup.filter((id) => id !== p.id);
       return OK;
@@ -91,13 +92,33 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       state.jobs.push({ kind: 'scrim', id: state.nextId++, teamId, opponentTeamId: opp.id, games: cmd.games });
       return OK;
     }
-    case 'queueResearch': {
-      const p = findPlayer(state, cmd.playerId);
-      if (!p || p.teamId !== teamId) return fail('不是自己的選手');
-      if (cmd.target !== 'generic' && !content.lineages.some((l) => l.id === cmd.target)) return fail('未知的研發目標');
-      if (!Number.isInteger(cmd.games) || cmd.games < 1) return fail('場數需為正整數');
-      if (cmd.games > capacityLeft(state, content, team)) return fail('超過本週訓練中心可跑的場數');
-      state.jobs.push({ kind: 'research', id: state.nextId++, teamId, playerId: p.id, target: cmd.target, games: cmd.games });
+    case 'queueRehearse': {
+      if (content.tactics.length === 0) return fail('這個賽制沒有戰術手冊');
+      if (!content.tactics.some((t) => t.id === cmd.tactic)) return fail('未知的戰術');
+      if (!Number.isInteger(cmd.sessions) || cmd.sessions < 1) return fail('節數需為正整數');
+      if (cmd.sessions > capacityLeft(state, content, team)) return fail('超過本週訓練中心可排的時段');
+      const cost = cmd.sessions * e.rehearseCost;
+      if (team.cash < cost) return fail('資金不足');
+      post(state, team, 'training', -cost, `排練 ${content.tactics.find((t) => t.id === cmd.tactic)?.name ?? cmd.tactic} ×${cmd.sessions}`);
+      state.jobs.push({ kind: 'rehearse', id: state.nextId++, teamId, tactic: cmd.tactic, sessions: cmd.sessions });
+      return OK;
+    }
+    case 'setGamePlan': {
+      if (content.tactics.length === 0) return fail('這個賽制沒有戰術手冊');
+      const plan = cmd.plan;
+      if (plan === null || typeof plan !== 'object' || typeof plan.pref !== 'object' || plan.pref === null) return fail('比賽計畫格式不對');
+      if (plan.economy !== 0 && plan.economy !== 1 && plan.economy !== 2) return fail('經濟風格只能是 0、1、2');
+      const known = new Set(content.tactics.map((t) => t.id));
+      for (const [k, v] of Object.entries(plan.pref)) {
+        if (!known.has(k)) return fail(`未知的戰術 ${k}`);
+        if (!Number.isInteger(v) || v < -1 || v > 3) return fail('偏好只能是 -1（禁用）～3 星');
+      }
+      const pref = Object.fromEntries(content.tactics.map((t) => [t.id, plan.pref[t.id] ?? 0]));
+      for (const side of ['T', 'CT'] as const) {
+        const ids = content.tactics.filter((t) => t.side === side).map((t) => t.id);
+        if (ids.length > 0 && ids.every((id) => pref[id] === -1)) return fail(`${side} 方至少要留一個戰術`);
+      }
+      team.gamePlan = { pref, economy: plan.economy };
       return OK;
     }
     case 'scout': {
