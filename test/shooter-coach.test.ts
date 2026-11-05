@@ -99,7 +99,7 @@ describe('引擎 API 1.2：不讀新欄位的 Bot 結果不變', () => {
   it('基準 Bot：給了 tactics 與 orders 的比賽和沒給時終局雜湊相同', () => {
     const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'baseline');
     const map = MAPS.redrock();
-    const ctl = () => Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(bot, pid < 5 ? 'A' : 'B', short.seed, pid, map, { timeLimits: false }));
+    const ctl = (): ShooterBatchController[] => Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(bot, pid < 5 ? 'A' : 'B', short.seed, pid, map, { timeLimits: false }));
     const plain = runShooterMatch({ ...short, controllers: ctl(), record: false });
     const t: InitTactics = { team: { rushA: 90 }, personal: { rushA: 10 } };
     const rich = runShooterMatch({ ...short, controllers: ctl(), record: false, tactics: Array.from({ length: PLAYER_COUNT }, () => t), orders: [orders('rushA'), orders(null)] });

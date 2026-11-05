@@ -460,6 +460,43 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .v-training .rep .it b { color: var(--white); }
 .v-training .rep .it .num { font-size: 20px; color: var(--gold2); }
 
+/* ═════ 戰術室（M5） ═════ */
+.v-tactics .tt { left: 0; top: 0; width: 1000px; height: 430px; }
+.v-tactics .tc { left: 0; top: 450px; width: 1000px; height: 316px; }
+.v-tactics .reh { left: 1020px; top: 0; width: 672px; height: 470px; }
+.v-tactics .tr { display: grid; grid-template-columns: 150px 1fr 90px 80px 132px 150px; gap: 0 16px; align-items: center; height: 54px; padding: 0 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.v-tactics .tr.hd { height: 30px; font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.2em; color: var(--grey2); border-bottom: 0; }
+.v-tactics .tr > b { font-size: 20px; font-weight: 900; letter-spacing: 0.04em; transform: skewX(-7deg); white-space: nowrap; }
+.v-tactics .tr.off > b, .v-tactics .tr.off .bar, .v-tactics .tr.off .num { opacity: 0.45; }
+.v-tactics .tr .bar { display: grid; grid-template-columns: 1fr 40px; gap: 12px; align-items: center; }
+.v-tactics .tr .bar .num { text-align: right; font-size: 20px; }
+.v-tactics .tr .num.pa { font-size: 20px; color: var(--grey); text-align: right; }
+.v-tactics .tr .num.eff { font-size: 30px; color: var(--gold2); text-align: right; }
+.v-tactics .tr .pf { height: 36px; display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.v-tactics .tr .pf:hover:not(:disabled) { box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.6); }
+.v-tactics .tr .pf:disabled { cursor: default; opacity: 0.8; }
+.v-tactics .tr .st i { font-style: normal; font-size: 20px; color: rgba(255, 255, 255, 0.18); margin: 0 2px; }
+.v-tactics .tr .st i.on { color: var(--gold); }
+.v-tactics .tr .ban { font-size: max(14px, var(--fmin, 0px)); letter-spacing: 0.2em; color: var(--grey); text-decoration: line-through; }
+.v-tactics .tr .rh { height: 36px; font-size: max(14px, var(--fmin, 0px)); font-weight: 700; letter-spacing: 0.08em; color: var(--white); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22); white-space: nowrap; }
+.v-tactics .tr .rh:hover:not(:disabled) { color: var(--ink); background: var(--gold); box-shadow: none; }
+.v-tactics .tr .rh:disabled { color: var(--grey2); cursor: default; }
+.v-tactics .reh .lbl { font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.24em; color: var(--grey); margin: 14px 0 6px; }
+.v-tactics .reh .runs { display: flex; align-items: center; gap: 16px; }
+.v-tactics .reh .runs input { flex: 1; accent-color: var(--gold); }
+.v-tactics .reh .runs .num { width: 64px; text-align: right; font-size: 30px; }
+.v-tactics .reh p.dim { font-size: max(14px, var(--fmin, 0px)); line-height: 1.6; margin: 10px 0 0; }
+.v-tactics .reh p.dim svg { vertical-align: -2px; margin-right: 6px; }
+.v-tactics .seg3 { display: flex; gap: 8px; }
+.v-tactics .seg3 button { flex: 1; height: 40px; display: grid; place-items: center; font-size: 16px; font-weight: 700; letter-spacing: 0.12em; color: var(--grey); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); transform: skewX(-14deg); }
+.v-tactics .seg3 button:hover:not(:disabled) { color: #fff; }
+.v-tactics .seg3 button.on { color: var(--ink); background: var(--gold); box-shadow: none; }
+.v-tactics .reh .go { display: flex; justify-content: flex-end; margin-top: 24px; }
+.v-player .tac.pro { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; }
+.v-player .tac.pro .t { gap: 2px 8px; }
+.v-player .tac.pro .t span { font-size: max(13px, var(--fmin, 0px)); }
+.v-player .tac.pro .t .num { font-size: 18px; }
+
 /* ═════ 賭盤 ═════ */
 .v-betting .board { left: 0; top: 0; width: 1040px; height: 766px; }
 .v-betting .board .scroll { height: 600px; padding-right: 6px; }

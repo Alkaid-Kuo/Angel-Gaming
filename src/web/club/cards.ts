@@ -43,7 +43,6 @@ export function playerCard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
   const t = tierOf(p.version);
   const team = teamColor(ctx, p.teamId);
   const intel = o.intel ? ctx.v.intel.find((i) => i.playerId === p.id) : undefined;
-  const presets = ctx.v.presets.filter((x) => x.playerId === p.id && x.valid).length;
   const diff = intel ? intel.estPower - p.elo : 0;
   return `<div class="pc t${t.idx} pc-${o.size ?? 'md'} ${o.selected ? 'sel' : ''}" style="--tier:${t.color};--team:${team}" data-pid="${p.id}" data-act="${o.act ?? 'card'}" ${o.drag ? 'draggable="true"' : ''}>
     <div class="pc-frame">
@@ -55,7 +54,7 @@ export function playerCard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
         ${intel ? `<span class="pc-intel" title="球探報告：真實強度估計 ±誤差">情報 <b>${intel.estPower}</b><i class="${diff >= 0 ? 'up' : 'dn'}">${diff >= 0 ? '+' : ''}${diff}</i></span>` : ''}</div>
       <div class="pc-name">${esc(p.name)}</div>
       <div class="pc-sub"><span class="pc-ver">v${p.version}・${t.name}</span>${o.record ? `<span>${o.record.w}勝${o.record.l}敗</span>` : `<span>${p.games} 場</span>`}</div>
-      <div class="pc-foot"><span>週薪 <b>${wan(p.weeklySalary)}</b>萬</span>${presets ? `<span class="pc-pre" title="可用的戰術預設">${icon('flask', 12)}${presets}</span>` : ''}</div>
+      <div class="pc-foot"><span>週薪 <b>${wan(p.weeklySalary)}</b>萬</span></div>
     </div>${o.footer ?? ''}</div>`;
 }
 

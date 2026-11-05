@@ -36,7 +36,7 @@ class TagGateway implements BattleGateway {
   }
 }
 
-const lineupOf = (s: GameState, teamId: string) => effectiveLineup(s, content, s.teams.find((t) => t.id === teamId) as GameState['teams'][number]).map((id) => playerOf(s, id));
+const lineupOf = (s: GameState, teamId: string): GameState['players'] => effectiveLineup(s, content, s.teams.find((t) => t.id === teamId) as GameState['teams'][number]).map((id) => playerOf(s, id));
 
 describe('戰術手冊：開局', () => {
   it('每個戰術都有隊伍默契與個人熟練度；預設計畫全 0；開局主序列不受影響', () => {
@@ -116,7 +116,7 @@ describe('戰術手冊：排練', () => {
 });
 
 describe('比賽計畫', () => {
-  const pref = (over: Record<string, number> = {}) => ({ ...Object.fromEntries(SHOOTER_TACTICS.map((t) => [t.id, 0])), ...over });
+  const pref = (over: Record<string, number> = {}): Record<string, number> => ({ ...Object.fromEntries(SHOOTER_TACTICS.map((t) => [t.id, 0])), ...over });
 
   it('設定後送進請求單的 team（pref_、economy、q_＝執行熟練度）', async () => {
     const s = newGame(7, content);
@@ -136,7 +136,7 @@ describe('比賽計畫', () => {
   it('拒絕：未知戰術、偏好超出 -1～3、經濟風格不對、某一方全部禁用', () => {
     const s = newGame(8, content);
     const me = humanTeam(s);
-    const ok = (plan: unknown) => applyCommand(s, content, me.id, { type: 'setGamePlan', plan } as never).ok;
+    const ok = (plan: unknown): boolean => applyCommand(s, content, me.id, { type: 'setGamePlan', plan } as never).ok;
     expect(ok({ pref: { nope: 1 }, economy: 0 })).toBe(false);
     expect(ok({ pref: { rushA: 4 }, economy: 0 })).toBe(false);
     expect(ok({ pref: { rushA: 1.5 }, economy: 0 })).toBe(false);
