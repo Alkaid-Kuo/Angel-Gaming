@@ -222,9 +222,6 @@ export class Tactics {
     this.steppedIn = false;
     this.rushReady = false;
     this.queueHeld = 0;
-    /** 成對進門：等搭檔累計的 tick、已經走到自己的角（2.7 批 2） */
-    this.pairHeld = 0;
-    this.pairDone = false;
     /** 收到但還沒處理的喊話（警覺低的晚一點反應） @type {{ ready: number, from: number, text: string }[]} */
     this.inbox = [];
     /** 收到的接觸：區域 → 人數、時間、位置（2.7：去重用；不知道是 NaN）；接觸 → 所屬包點 @type {Map<string, { n: number, tick: number, x: number, y: number }>} */
@@ -362,9 +359,6 @@ export class Tactics {
     this.steppedIn = false;
     this.rushReady = false;
     this.queueHeld = 0;
-    /** 成對進門：等搭檔累計的 tick、已經走到自己的角（2.7 批 2） */
-    this.pairHeld = 0;
-    this.pairDone = false;
     this.inbox = [];
     this.contacts = new Map();
     this.contactSite = new Map();
@@ -1254,37 +1248,6 @@ export class Tactics {
     return Math.max(0, list.indexOf(id));
   }
 
-  /**
-   * 成對進門（2.7 批 2）：組內依進點順序兩兩一對（0-1、2-3…）；回傳我在組裡的順序 k、搭檔 id（沒有 −1）、我走左邊（−1）還是右邊（+1）
-   * @param {import('./base.js').Observation} obs @param {TPlan} p @returns {{ k: number, partner: number, side: number }}
-   */
-  pairOf(obs, p) {
-    const gid = this.groupOf(obs, obs.me.id, p);
-    const list = this.ids.filter((x) => this.isAlive(obs, x) && this.inGroup(obs, x, p, gid)).sort((a, b) => this.memberIndex(obs, a, p) - this.memberIndex(obs, b, p) || a - b);
-    const k = Math.max(0, list.indexOf(obs.me.id));
-    return { k, partner: list[k ^ 1] ?? -1, side: k % 2 === 0 ? -1 : 1 };
-  }
-
-  /**
-   * 成對進門的角：入口內側往包點走 1.5～2.5 格、往 side 那側偏 1～2 格、從入口內側走得到的格；look＝那一側的角落方向
-   * @param {import('./analysis.js').Entrance} ent @param {number} side @returns {{ x: number, y: number, look: import('./base.js').Pt }}
-   */
-  pairCorner(ent, side) {
-    const g = this.g;
-    const len = Math.max(1, dist(ent.ox, ent.oy, ent.ix, ent.iy));
-    const ux = (ent.ix - ent.ox) / len;
-    const uy = (ent.iy - ent.oy) / len;
-    const px = -uy * side;
-    const py = ux * side;
-    const look = { x: ent.ix + (ux * 3 + px * 8) * UNIT, y: ent.iy + (uy * 3 + py * 8) * UNIT };
-    for (const w of [2, 1.5, 1]) for (const a of [2.5, 1.5]) {
-      const x = ent.ix + (ux * a + px * w) * UNIT;
-      const y = ent.iy + (uy * a + py * w) * UNIT;
-      if (g.walkable(g.cellOf(x, y)) && g.walkLine(ent.ix, ent.iy, x, y)) return { x, y, look };
-    }
-    return { x: ent.ix, y: ent.iy, look };
-  }
-
   /** 這個隊員現在算在 gid 這組（2.7：繞後中的隊友不算，自己除外） @param {import('./base.js').Observation} obs @param {number} id @param {TPlan} p @param {number} gid */
   inGroup(obs, id, p, gid) {
     return this.groupOf(obs, id, p) === gid && !this.lurking(obs, id);
@@ -1560,12 +1523,8 @@ export class Tactics {
     out.role = `執行 ${exec}`;
     // 閃光剛炸開：直接衝，不讓位也不拉間距（對面最多瞎 2 秒）
     const flashed = t >= this.flashPop && t < this.flashPop + 2 * this.tps;
-    // 2.7 批 2：成對進門（P.pairEntry）。前一對（k ≤ 1）不排隊、突破手的搭檔不讓位，一起出去分左右角；後面的人照舊拉間距
-    const pr = P.pairEntry && p.kind !== 'go' && ent !== null && !this.inRectSite(me.x, me.y, exec) ? this.pairOf(obs, p) : null;
-    const mate = pr !== null && pr.k <= 1 ? obs.teammates.find((m) => m.alive && m.id === pr.partner) : undefined;
-    const withEntry = mate !== undefined && mate.id === this.roles.who(ENTRY) && this.roles.of(me.id) !== AWP;
     // 狙擊手不跟著衝（2.6.1：閃光一炸開就先進點，R2 的反例）
-    if (p.kind !== 'go' && !withEntry && (!flashed || this.roles.of(me.id) === AWP) && this.yieldTo(obs, exec)) {
+    if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && this.yieldTo(obs, exec)) {
       out.stop = true;
       out.look = { x: site.cx, y: site.cy };
       out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
@@ -1574,20 +1533,9 @@ export class Tactics {
       return wish;
     }
     // 進場間距：前一個人還沒拉開就等一下，不排成一條線給對面掃
-    if (p.kind !== 'go' && !flashed && ent !== null && obs.enemies.length === 0 && (pr === null || pr.k > 1) && this.tooClose(obs, exec, ent)) {
+    if (p.kind !== 'go' && !flashed && ent !== null && obs.enemies.length === 0 && this.tooClose(obs, exec, ent)) {
       out.walk = true;
       out.role = '拉開間距';
-    }
-    // 搭檔落後：在門外等他到身邊再一起拉出（每回合最多 P.pairWait 秒；閃光剛炸開不等）
-    if (mate !== undefined && ent !== null && !flashed && obs.enemies.length === 0 && this.pairHeld < P.pairWait * this.tps && !this.inRectSite(mate.x, mate.y, exec)) {
-      const mine = dist(me.x, me.y, ent.ix, ent.iy);
-      if (mine < P.entryZone * UNIT && dist(mate.x, mate.y, ent.ix, ent.iy) - mine > P.pairGap * UNIT && dist(me.x, me.y, ent.ox, ent.oy) < 2 * UNIT) {
-        this.pairHeld += this.data.rules.decisionInterval;
-        out.stop = true;
-        out.look = { x: ent.ix, y: ent.iy };
-        out.role = '等搭檔';
-        return wish;
-      }
     }
     // rush 先通過共同入口再分配各自的下包／守位；路線偏好本身不能保證入口一致。
     if (p.kind === 'rush' && ent !== null && !this.rushReady) {
@@ -1596,17 +1544,6 @@ export class Tactics {
         out.goal = dist(me.x, me.y, ent.ox, ent.oy) > 2 * UNIT ? { x: ent.ox, y: ent.oy } : { x: ent.ix, y: ent.iy };
         return wish;
       }
-    }
-    // 成對進門：前一對各走自己那一側的角，看那一側的角落；到了再照常去守位（持彈者直接去下包）
-    if (pr !== null && pr.k <= 1 && ent !== null && !me.hasBomb && dist(me.x, me.y, ent.ix, ent.iy) < P.entryZone * UNIT && !this.pairDone) {
-      const c = this.pairCorner(ent, pr.side);
-      if (dist(me.x, me.y, c.x, c.y) > 700) {
-        out.goal = { x: c.x, y: c.y };
-        out.look = c.look;
-        out.role += pr.side < 0 ? '・進門左' : '・進門右';
-        return wish;
-      }
-      this.pairDone = true;
     }
     if (me.hasBomb) {
       const spot = site.plants[0];
