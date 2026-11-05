@@ -81,6 +81,44 @@ describe('引擎 API 1.2：觀察資料 coach', () => {
   });
 });
 
+describe('引擎 API 1.2：教練指令與熟練度不能被 Bot 改', () => {
+  it('深凍結：Bot 改 obs.coach.pref 或 init.tactics 會被拒，隊友與之後的觀察不變；呼叫端的原物件不被凍結', () => {
+    const a = orders('rushA');
+    const t: InitTactics = { team: { rushA: 80 }, personal: { rushA: 60 } };
+    let tried = 0;
+    let rejected = 0;
+    const vandal = new Probe('vandal');
+    const decide = vandal.decide.bind(vandal);
+    vandal.decide = (obs: ShooterObservation): CallOutcome<unknown> => {
+      const out = decide(obs);
+      if (obs.coach !== null) {
+        tried++;
+        try {
+          (obs.coach.pref as Record<string, number>).rushA = -1;
+          (obs.coach as { economy: number }).economy = 0;
+        } catch {
+          rejected++;
+        }
+      }
+      return out;
+    };
+    const probes = Array.from({ length: PLAYER_COUNT }, (_, i) => (i === 0 ? vandal : new Probe(`p${i}`)));
+    const d = new ShooterDriver({ ...short, controllers: probes, record: false, orders: [a, null], tactics: Array.from({ length: PLAYER_COUNT }, () => t) });
+    for (let i = 0; i < 40; i++) d.step();
+    expect(tried).toBeGreaterThan(0);
+    expect(rejected).toBe(tried);
+    for (const c of [...probes[0].coaches, ...probes[1].coaches]) expect(c).toEqual(a);
+    expect(Object.isFrozen(probes[1].coaches[0]?.pref)).toBe(true);
+    const init = probes[2].init0?.tactics as InitTactics;
+    expect(Object.isFrozen(init.team) && Object.isFrozen(init.personal)).toBe(true);
+    expect(() => {
+      (init.team as Record<string, number>).rushA = 0;
+    }).toThrow();
+    expect(probes[3].init0?.tactics?.team.rushA).toBe(80);
+    expect(Object.isFrozen(a) || Object.isFrozen(t.team)).toBe(false);
+  });
+});
+
 describe('引擎 API 1.2：回合戰術標籤', () => {
   it('每組每回合記第一則 K: 喊話；格式不對、沒喊記 null', () => {
     const probes = Array.from({ length: PLAYER_COUNT }, (_, i) => {

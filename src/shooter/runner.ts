@@ -208,6 +208,19 @@ export interface ShooterRunOptions extends ShooterMatchOptions {
 /** 回合戰術標籤的喊話格式（M5）：指揮每回合喊一次「K:<戰術代號>」；這是閘道與 Bot 的約定，引擎不解讀 */
 const TACTIC_TAG = /^K:([A-Za-z0-9_]{1,24})$/;
 
+/** 深凍結的複本（純 JSON 資料）；null 照回 */
+function frozenCopy<T>(v: T | null): T | null {
+  if (v === null) return null;
+  const deep = (x: unknown): unknown => {
+    if (x !== null && typeof x === 'object') {
+      for (const k of Object.keys(x)) deep((x as Record<string, unknown>)[k]);
+      Object.freeze(x);
+    }
+    return x;
+  };
+  return deep(structuredClone(v)) as T;
+}
+
 /** 反應延遲夾到下限；非整數取整、非數字用下限 */
 export function clampReaction(v: number | undefined): number {
   if (v === undefined || !Number.isFinite(v)) return MIN_REACTION_TICKS;
@@ -247,7 +260,9 @@ export class ShooterDriver {
     this.idleRound = opts.controllers.map(() => 0);
     this.dead = opts.controllers.map(() => false);
     const knobs = opts.knobs ?? opts.controllers.map(() => ({}));
-    this.orders = opts.orders ?? [null, null];
+    // 教練指令與戰術熟練度是同一個物件給同隊每個座位、每回合重用：建構時複製一份並深凍結，Bot 改不動（改了會被忽略或丟例外），隊友與之後的回合看到的永遠是原值
+    this.orders = [frozenCopy(opts.orders?.[0] ?? null), frozenCopy(opts.orders?.[1] ?? null)];
+    const tactics = opts.controllers.map((_, pid) => frozenCopy(opts.tactics?.[pid] ?? null));
     this.attributes = opts.controllers.map((_, pid) => opts.attributes?.[pid] ?? DEFAULT_ATTRIBUTES);
     this.reactionTicks = opts.controllers.map((c, pid) => {
       if (c.takeRealtime !== undefined) return 0;
@@ -258,7 +273,7 @@ export class ShooterDriver {
     this.exactDelay = opts.controllers.map((c, pid) => (c.takeRealtime === undefined && opts.reactionTicks?.[pid] === undefined && opts.attributes !== undefined ? { eighths: reactionEighths(this.attributes[pid]), rng: Prng.fromInts(opts.seed, pid, DELAY_TAG) } : null));
     opts.controllers.forEach((c, pid) => {
       const init = { roundsPerHalf: opts.roundsPerHalf, winRounds: opts.winRounds, startMoney: opts.startMoney, overtime: opts.overtime, freezeTicks: this.match.freezeTicks, reactionTicks: this.reactionTicks[pid] };
-      const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init, this.attributes[pid], opts.tactics?.[pid] ?? null));
+      const out = c.init(shooterInitData(this.match.map, pid, knobs[pid], init, this.attributes[pid], tactics[pid]));
       const rt = this.runtime[pid];
       if (out.exception !== null) this.error(pid, `init: ${out.exception}`);
       // init 超時：整場閒置（沿用 RTS／軍團戰）
