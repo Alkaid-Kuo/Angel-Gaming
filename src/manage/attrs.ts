@@ -113,14 +113,17 @@ export function powerOfAttrs(content: ContentPack, lineageId: string, attrs: Rea
   return l.power[lo - 1] + (l.power[hi - 1] - l.power[lo - 1]) * t;
 }
 
-/** 訓練每節滿收益（百分之一點） */
-export const TRAIN_FULL_GAIN = 60;
+/** 訓練每節滿收益（百分之一點；2026-11-07 使用者決定 60 → 100：離上限 6 點以上每節 1 點） */
+export const TRAIN_FULL_GAIN = 100;
 /** 最後幾點開始遞減 */
 export const TRAIN_TAPER = 6;
-/** 碰上限前的最低收益 */
-export const TRAIN_MIN_GAIN = 10;
+/**
+ * 碰上限前的最低收益（等比例 10 → 17）。屬性與上限都是整數，離上限至少 1 點，遞減段最小值本來就是 round(100 × 1/6) = 17；
+ * 取 17 讓常數等於實際的最低值（舊值 10 也是 60 × 1/6，同理從來沒生效過）。
+ */
+export const TRAIN_MIN_GAIN = 17;
 
-/** 每節收益（百分之一點，規格 4.3）：離上限 6 點以上 60，最後 6 點線性遞減、最低 10，碰上限 0 */
+/** 每節收益（百分之一點，規格 4.3）：離上限 6 點以上 100，最後 6 點線性遞減、最低 17，碰上限 0 */
 export function trainGain(cap: number, cur: number): number {
   if (cur >= cap) return 0;
   return Math.max(TRAIN_MIN_GAIN, Math.round(TRAIN_FULL_GAIN * Math.max(0, Math.min(1, (cap - cur) / TRAIN_TAPER))));

@@ -219,7 +219,7 @@ export const STUB_CONTENT: ContentPack = {
     scoutSd: 35,
     trainingSlots: [8, 14, 22],
     trainCost: 15,
-    trainMaxPerPlayer: 3,
+    trainMaxPerPlayer: 5,
     rehearseCost: 10,
     assistantSalary: 15,
     playbookStart: { human: 20, whale: 30, youth: 20, data: 30, miser: 15 },
