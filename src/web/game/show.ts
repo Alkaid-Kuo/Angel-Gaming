@@ -67,7 +67,7 @@ interface MatchView {
   their: number;
   res: 'win' | 'lose' | 'draw';
   /** 逐回合，我方視角：mine＝我方贏這回合；phase：賽段（閘道沒給時用「加時」與否分） */
-  rounds: { label: string; phase: string; mine: boolean; my: number; their: number }[];
+  rounds: { label: string; phase: string; mine: boolean; my: number; their: number; tactic: string | null }[];
 }
 
 function matchView(ctx: Ctx, f: KnownFixture): MatchView {
@@ -85,7 +85,7 @@ function matchView(ctx: Ctx, f: KnownFixture): MatchView {
     my,
     their,
     res: x.winner === null ? 'draw' : x.winner === me ? 'win' : 'lose',
-    rounds: x.rounds.map((r) => ({ label: r.label, phase: r.phase ?? (r.label.startsWith('加時') ? '加時' : ''), mine: (r.winner === 'a') === home, my: home ? r.home : r.away, their: home ? r.away : r.home })),
+    rounds: x.rounds.map((r) => ({ label: r.label, phase: r.phase ?? (r.label.startsWith('加時') ? '加時' : ''), mine: (r.winner === 'a') === home, my: home ? r.home : r.away, their: home ? r.away : r.home, tactic: r.tactic ?? null })),
   };
 }
 
@@ -106,12 +106,22 @@ function rosterCol(ctx: Ctx, ids: string[], before: Snapshot, foe: boolean): str
     .join('');
 }
 
-/** 逐回合比分條：每回合一格（金＝我方贏、紅框＝對手贏），賽段改變處（下半場、加時）加分隔與標籤 */
-function roundStrip(m: MatchView, live: boolean): string {
+/**
+ * 逐回合比分條：每回合一格（金＝我方贏、紅框＝對手贏），賽段改變處（下半場、加時）加分隔與標籤。
+ * 結果幕（c 有給）在格子裡標我方那回合打的戰術短名（M5 3.9；只有我方，對方的不在已知層）
+ */
+function roundStrip(m: MatchView, live: boolean, c?: Ctx['c']): string {
+  const tac = (id: string | null): { abbr: string; name: string } | null => {
+    if (c === undefined || id === null) return null;
+    const t = c.tactics.find((x) => x.id === id);
+    return t === undefined ? null : { abbr: t.abbr ?? t.name, name: t.name };
+  };
+  const tagged = c !== undefined && m.rounds.some((r) => tac(r.tactic) !== null);
   return m.rounds
     .map((r, i) => {
       const sep = i > 0 && r.phase !== m.rounds[i - 1].phase ? `<i class="sep" data-ph="${esc(r.phase)}"></i>` : '';
-      return `${sep}<span class="rc ${r.mine ? 'w' : 'l'} ${live ? '' : 'on'}" data-r="${i}" title="${esc(r.label)} ${r.my}:${r.their}"></span>`;
+      const t = tac(r.tactic);
+      return `${sep}<span class="rc ${r.mine ? 'w' : 'l'} ${live ? '' : 'on'}${tagged ? ' tg' : ''}" data-r="${i}" title="${esc(r.label)} ${r.my}:${r.their}${t ? ` · ${esc(t.name)}` : ''}">${t ? `<em>${esc(t.abbr)}</em>` : ''}</span>`;
     })
     .join('');
 }
@@ -203,7 +213,7 @@ function resultScene(ctx: Ctx, f: KnownFixture, before: Snapshot, summaryWeek: n
     html: `<div class="md md-result md-team ${m.res}">${sides ? '<input type="checkbox" id="rs-stats" class="rs-tg">' : ''}<div class="flare"></div><div class="hud"><span>${stageName(f)} <b>//</b> 中央競技場</span><span>FINAL</span></div>
       <section class="big"><span class="huge">${m.res === 'win' ? 'WIN' : m.res === 'lose' ? 'LOSE' : 'DRAW'}</span><span class="zh">${m.res === 'win' ? '勝利' : m.res === 'lose' ? '落敗' : '平手'}</span></section>
       <section class="vsrow"><div class="t">${crestRing(ctx, me, 80)}${esc(teamName(v, me))}</div><div class="sc"><b>${m.my}</b><i>:</i>${m.their}</div><div class="t r">${crestRing(ctx, m.opp, 80, m.opp)}<span class="rd">${esc(teamName(v, m.opp))}</span></div></section>
-      <section class="strip2"><div class="cells">${roundStrip(m, false)}</div></section>
+      <section class="strip2"><div class="cells">${roundStrip(m, false, ctx.c)}</div></section>
       <section class="lineups"><div class="side">${m.mine.map((id, i) => chip(id, i, false)).join('')}</div><span class="vs">VS</span><div class="side r">${m.theirs.map((id, i) => chip(id, i, true)).join('')}</div></section>
       ${sides ? `<section class="board">${statsBoard(ctx, { mine: m.mine, theirs: m.theirs }, sides)}</section>` : ''}
       <section class="gains">

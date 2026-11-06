@@ -57,16 +57,16 @@ export const SHOOTER_ECONOMY: Economy = {
 
 /** 戰術手冊（M5 規格 3.1）：T 六個、CT 四個；affinity＝開局個人熟練度 +10 的角色 */
 export const SHOOTER_TACTICS: readonly TacticSpec[] = [
-  { id: 'rushA', side: 'T', name: 'Rush A', affinity: ['entry'] },
-  { id: 'rushB', side: 'T', name: 'Rush B', affinity: ['entry'] },
-  { id: 'default', side: 'T', name: 'Default', affinity: ['support'] },
-  { id: 'splitA', side: 'T', name: 'Split A', affinity: ['lurk'] },
-  { id: 'splitB', side: 'T', name: 'Split B', affinity: ['lurk'] },
-  { id: 'fake', side: 'T', name: 'Fake', affinity: ['lurk'] },
-  { id: 'ct212', side: 'CT', name: '2-1-2', affinity: ['awp'] },
-  { id: 'stackA', side: 'CT', name: '疊 A', affinity: ['anchor'] },
-  { id: 'stackB', side: 'CT', name: '疊 B', affinity: ['anchor'] },
-  { id: 'ctPush', side: 'CT', name: '激進探點', affinity: [] },
+  { id: 'rushA', abbr: 'RA', side: 'T', name: 'Rush A', affinity: ['entry'] },
+  { id: 'rushB', abbr: 'RB', side: 'T', name: 'Rush B', affinity: ['entry'] },
+  { id: 'default', abbr: 'DEF', side: 'T', name: 'Default', affinity: ['support'] },
+  { id: 'splitA', abbr: 'SA', side: 'T', name: 'Split A', affinity: ['lurk'] },
+  { id: 'splitB', abbr: 'SB', side: 'T', name: 'Split B', affinity: ['lurk'] },
+  { id: 'fake', abbr: 'FK', side: 'T', name: 'Fake', affinity: ['lurk'] },
+  { id: 'ct212', abbr: '212', side: 'CT', name: '2-1-2', affinity: ['awp'] },
+  { id: 'stackA', abbr: '疊A', side: 'CT', name: '疊 A', affinity: ['anchor'] },
+  { id: 'stackB', abbr: '疊B', side: 'CT', name: '疊 B', affinity: ['anchor'] },
+  { id: 'ctPush', abbr: '探', side: 'CT', name: '激進探點', affinity: [] },
 ];
 
 export const SHOOTER_CONTENT: ContentPack = {

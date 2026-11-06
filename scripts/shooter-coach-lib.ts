@@ -26,7 +26,7 @@ export interface TeamSetup {
   readonly call?: (round: number, side: Team) => string | null;
 }
 
-export type ScenarioId = 'null' | 'plan0' | 'star3' | 'ecoDefault' | 'effSkew' | 'ban' | 'call' | 'strength';
+export type ScenarioId = 'null' | 'plan0' | 'star3' | 'ecoDefault' | 'effSkew' | 'ban' | 'call' | 'strength' | 'strength100';
 
 export interface Scenario {
   readonly id: ScenarioId;
@@ -62,7 +62,25 @@ export const SCENARIOS: readonly Scenario[] = [
   { id: 'ban', title: `禁用 ${BANNED.join('、')}`, ...mirror(setup(each(50), each(-1, BANNED))) },
   { id: 'call', title: '每回合教練命令輪流指定（含禁用的戰術）', ...mirror(setup(each(50), each(-1, BANNED), rotatingCall)) },
   { id: 'strength', title: '整隊熟練度 80 對 20（強度）', a: setup(each(80)), b: setup(each(20)) },
+  { id: 'strength100', title: '整隊熟練度 100 對 0（強度）', a: setup(each(100)), b: setup(each(0)) },
 ];
+
+/** 強度判定（3.10 第 6 條，2026-11-06 使用者改為「無顯著偏差」）：熟練度高的一方回合勝率的 95% 區間含 50%，且點估計 ≥ 48% */
+export const STRENGTH_TARGET = '95% 區間含 50%、點估計 ≥ 48%';
+/** a 方回合勝率與 95% 區間（以比賽為群集：同一場的回合不獨立，用群集比率估計量的變異數） */
+export function roundWinRate(games: readonly GameRow[]): { p: number; lo: number; hi: number; wins: number; rounds: number } {
+  const per = games.map((g) => {
+    const a = g.rows.filter((r) => r.setup === 'a');
+    return { w: a.filter((r) => r.won).length, n: a.length };
+  });
+  const wins = per.reduce((s, x) => s + x.w, 0);
+  const rounds = per.reduce((s, x) => s + x.n, 0);
+  const p = rounds === 0 ? 0 : wins / rounds;
+  const G = per.length;
+  const v = G < 2 || rounds === 0 ? 0 : (G / (G - 1)) * per.reduce((s, x) => s + (x.w - p * x.n) ** 2, 0) / rounds ** 2;
+  const half = 1.96 * Math.sqrt(v);
+  return { p, lo: p - half, hi: p + half, wins, rounds };
+}
 
 export const scenarioById = (id: string): Scenario => {
   const s = SCENARIOS.find((x) => x.id === id);
@@ -251,6 +269,7 @@ export function evaluate(sc: Scenario, games: readonly GameRow[], reads: boolean
   switch (sc.id) {
     case 'null':
     case 'strength':
+    case 'strength100':
       break;
     case 'plan0': {
       const title = '多樣性：任何 T 戰術佔 T 回合';
@@ -327,16 +346,16 @@ export function evaluate(sc: Scenario, games: readonly GameRow[], reads: boolean
       break;
     }
   }
-  if (sc.id === 'strength') {
-    const title = '強度：整隊 eff 80 方的鏡像勝率（平手算半場）';
-    if (games.length === 0) out.push(noData('strength', title, '55～62%', '沒有比賽'));
-    else if (reads === false) out.push(noData('strength', title, '55～62%', NO_READ, games.length));
-    else if (tagged.length === 0) out.push(noData('strength', title, '55～62%', NO_TAG, games.length));
+  if (sc.id === 'strength' || sc.id === 'strength100') {
+    const title = `強度：整隊 eff ${sc.id === 'strength' ? '80 對 20' : '100 對 0'}，高熟練度方的回合勝率`;
+    const id = sc.id;
+    if (games.length === 0) out.push(noData(id, title, STRENGTH_TARGET, '沒有比賽'));
+    else if (reads === false) out.push(noData(id, title, STRENGTH_TARGET, NO_READ, games.length));
+    else if (tagged.length === 0) out.push(noData(id, title, STRENGTH_TARGET, NO_TAG, games.length));
     else {
-      const w = games.reduce((s, g) => s + (g.winner === 'a' ? 1 : g.winner === null ? 0.5 : 0), 0);
-      const p = w / games.length;
-      const half = 1.96 * Math.sqrt((p * (1 - p)) / games.length);
-      out.push(judge('strength', title, '55～62%', p >= 0.55 && p <= 0.62, `${(p * 100).toFixed(1)}%［${((p - half) * 100).toFixed(1)}, ${((p + half) * 100).toFixed(1)}］（${games.length} 場）`, games.length));
+      const r = roundWinRate(games);
+      const f = (x: number): string => (x * 100).toFixed(1);
+      out.push(judge(id, title, STRENGTH_TARGET, r.lo <= 0.5 && r.hi >= 0.5 && r.p >= 0.48, `${f(r.p)}%［${f(r.lo)}, ${f(r.hi)}］（${r.wins}/${r.rounds} 回合、${games.length} 場）`, games.length));
     }
   }
   return out;

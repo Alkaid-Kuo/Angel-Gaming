@@ -1102,6 +1102,10 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .md-result.md-team .strip2 .rc { width: 22px; height: 22px; }
 .md-result.md-team .strip2 .sep { height: 22px; }
 .md-result.md-team .strip2 .sep::after { display: none; }
+/* 我方每回合的戰術短名（M5 3.9）：字小、半透明，格子放寬；金格用深字 */
+.md-result.md-team .strip2 .rc.tg { width: 38px; display: inline-flex; align-items: center; justify-content: center; }
+.md-result.md-team .strip2 .rc em { transform: skewX(12deg); font-style: normal; font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.02em; color: rgba(var(--white-rgb), 0.6); white-space: nowrap; }
+.md-result.md-team .strip2 .rc.on.w em { color: rgba(0, 0, 0, 0.62); }
 .md-result.md-team .lineups { position: absolute; left: 160px; right: 160px; top: 662px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 .md-result.md-team .lineups .side { display: flex; gap: 8px; }
 .md-result.md-team .lineups .vs { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 28px; color: var(--grey2); }

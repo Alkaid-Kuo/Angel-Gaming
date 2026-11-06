@@ -1,4 +1,4 @@
-// M5 第一批驗收（規格 3.10 第 5、6 條）：同一支 Bot 鏡像對打，八個情境量回合戰術標籤與強度。判定與「無資料」規則在 scripts/shooter-coach-lib.ts。
+// M5 第一批驗收（規格 3.10 第 5、6 條）：同一支 Bot 鏡像對打，九個情境量回合戰術標籤與強度。判定與「無資料」規則在 scripts/shooter-coach-lib.ts。
 // 用法：node scripts/shooter-coach-acceptance.ts [--bot bots/shooter-baseline.js] [--scenarios all|null,plan0,…] [--games 200] [--seeds 1,1001]
 //       [--lineup 3]（兩隊都用均衡陣容的該版本，屬性與角色旋鈕同閘道；--lineup none＝全 50、Bot 預設旋鈕）[--format shooter-mr6] [--jobs 10]
 //       [--no-limits]（關掉 decide 牆鐘逾時，結果只由程式與種子決定）[--json out.json]
