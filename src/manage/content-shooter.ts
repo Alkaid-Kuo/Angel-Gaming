@@ -48,6 +48,8 @@ export const SHOOTER_ECONOMY: Economy = {
   sponsorPerFame: 15,
   trainCost: 18,
   rehearseCost: 14,
+  // 助理教練（M5 第四批，平衡）：約一名 N 卡選手的週薪
+  assistantSalary: 20,
   // 真引擎一場數秒（Worker 池約 4 場並行）：練習賽每週可排的場數 ÷20；M5 戰術排練一節佔 1 格（平衡）
   scrimCapacity: [10, 30, 75],
   // 訓練中心（M5 經濟平衡）：升級與維護變便宜，Lv3 第一季季中升得上去、升後還練得動

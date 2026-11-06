@@ -1,6 +1,6 @@
 // 比賽日演出：開場 → 對戰（雙方名單、比分隨回合跳動、逐回合比分條）→ 結果（WIN／LOSE、比分、名單與評分變化、這場的收穫）
 // → 其他賽場 → 週結算 →（賽段結束時）頒獎典禮或破產。結果在推進時就算好了（確定性），這裡只負責怎麼揭曉。
-import type { AdvanceSummary, KnownFixture } from '../../manage/index.ts';
+import type { AdvanceSummary, CoachEvent, KnownFixture } from '../../manage/index.ts';
 import { CATEGORY_NAME, lineageName } from '../manage/format.ts';
 import { lineupOf, rankOf, weekBreakdown } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
@@ -68,6 +68,20 @@ interface MatchView {
   res: 'win' | 'lose' | 'draw';
   /** 逐回合，我方視角：mine＝我方贏這回合；phase：賽段（閘道沒給時用「加時」與否分） */
   rounds: { label: string; phase: string; mine: boolean; my: number; their: number; tactic: string | null }[];
+  /** 雙方的教練指令（M5 第四批，賽後公開）：回合 → 我方／對方的說明文字 */
+  calls: Map<number, { mine: string | null; theirs: string | null }>;
+}
+
+const BUY_NAME = { full: '全買', force: '強起', eco: '存錢' } as const;
+const BY_NAME = { human: '教練', assistant: '助理教練', npc: '教練' } as const;
+
+/** 一則教練指令的說明（結果幕比分條的滑鼠提示） */
+function callText(c: Ctx['c'], e: CoachEvent): string {
+  const parts: string[] = [];
+  if (e.call?.tactic) parts.push(c.tactics.find((t) => t.id === e.call?.tactic)?.name ?? e.call.tactic);
+  if (e.call?.buy) parts.push(BUY_NAME[e.call.buy]);
+  if (e.plan !== null) parts.push('改計畫');
+  return `${BY_NAME[e.by]}${e.kind === 'timeout' ? '暫停' : '換邊'}${parts.length ? `：${parts.join('、')}` : ''}`;
 }
 
 function matchView(ctx: Ctx, f: KnownFixture): MatchView {
@@ -86,7 +100,19 @@ function matchView(ctx: Ctx, f: KnownFixture): MatchView {
     their,
     res: x.winner === null ? 'draw' : x.winner === me ? 'win' : 'lose',
     rounds: x.rounds.map((r) => ({ label: r.label, phase: r.phase ?? (r.label.startsWith('加時') ? '加時' : ''), mine: (r.winner === 'a') === home, my: home ? r.home : r.away, their: home ? r.away : r.home, tactic: r.tactic ?? null })),
+    calls: callMap(ctx, x.calls ?? [], home),
   };
+}
+
+function callMap(ctx: Ctx, calls: readonly CoachEvent[], home: boolean): MatchView['calls'] {
+  const out: MatchView['calls'] = new Map();
+  for (const e of calls) {
+    const row = out.get(e.round) ?? { mine: null, theirs: null };
+    if ((e.side === 'a') === home) row.mine = callText(ctx.c, e);
+    else row.theirs = callText(ctx.c, e);
+    out.set(e.round, row);
+  }
+  return out;
 }
 
 /** Elo 變化字串（推進前後比） */
@@ -121,7 +147,11 @@ function roundStrip(m: MatchView, live: boolean, c?: Ctx['c']): string {
     .map((r, i) => {
       const sep = i > 0 && r.phase !== m.rounds[i - 1].phase ? `<i class="sep" data-ph="${esc(r.phase)}"></i>` : '';
       const t = tac(r.tactic);
-      return `${sep}<span class="rc ${r.mine ? 'w' : 'l'} ${live ? '' : 'on'}${tagged ? ' tg' : ''}" data-r="${i}" title="${esc(r.label)} ${r.my}:${r.their}${t ? ` · ${esc(t.name)}` : ''}">${t ? `<em>${esc(t.abbr)}</em>` : ''}</span>`;
+      // 教練指令（結果幕才標）：我方金、對方紅的小三角，滑鼠提示寫內容
+      const cl = c !== undefined ? m.calls.get(i + 1) : undefined;
+      const mark = cl === undefined ? '' : `${cl.mine !== null ? ' cm' : ''}${cl.theirs !== null ? ' co' : ''}`;
+      const note = cl === undefined ? '' : [cl.mine !== null ? `我方${cl.mine}` : '', cl.theirs !== null ? `對方${cl.theirs}` : ''].filter(Boolean).map((x) => ` · ${x}`).join('');
+      return `${sep}<span class="rc ${r.mine ? 'w' : 'l'} ${live ? '' : 'on'}${tagged ? ' tg' : ''}${mark}" data-r="${i}" title="${esc(r.label)} ${r.my}:${r.their}${t ? ` · ${esc(t.name)}` : ''}${esc(note)}">${t ? `<em>${esc(t.abbr)}</em>` : ''}</span>`;
     })
     .join('');
 }

@@ -15,7 +15,8 @@
 // 觀戰回放（步驟 9）：可玩版的觀戰 Worker 用同一個 gatewayDriverOptions 建 ShooterDriver、逐 tick 推進，
 // 所以重播與經營層當時打的那一場是同一場（成績單與終局雜湊相同，test/manage-shooter.test.ts）。
 // 試玩頁的基準 Bot 座位（src/web/shooter/lineup.ts）也呼叫 seatOf、seatController、seatKnobs，座位邏輯只有這一份。
-import type { MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec, PlayerStat, SideSpec } from '../manage/gateway.ts';
+import type { CoachEvent, MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec, PlayerStat, SideSpec } from '../manage/gateway.ts';
+import { coachRules, coachSchedule } from './coach.ts';
 import type { KnobValues } from '../api/types.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
@@ -228,6 +229,14 @@ export interface GatewayMatch {
  * runGatewayMatch 與觀戰 Worker 都只走這裡建 ShooterDriver，兩邊打的是同一場。
  */
 export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): ShooterRunOptions {
+  return gatewayDriverSetup(request, bot, opts).options;
+}
+
+/**
+ * 同 gatewayDriverOptions，另外回傳教練指令的紀錄（M5 第四批：請求單有 calls 或 coachAi 時，比賽打完後就是雙方所有生效的指令；沒有＝null）。
+ * 每次呼叫建一份新的指令排程（有狀態），所以同一張請求單每次建驅動都從頭算、結果相同。
+ */
+export function gatewayDriverSetup(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): { options: ShooterRunOptions; calls: CoachEvent[] | null } {
   const format = formatOf(request.formatId);
   for (const side of [request.a, request.b]) {
     if (side.players.length !== format.lineupSize) throw new Error(`攻防戰每方 ${format.lineupSize} 人，名單是 ${side.players.length} 人`);
@@ -242,14 +251,19 @@ export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, op
   // 戰術手冊資料（M5）：至少一方有 team 才帶；都沒有時選項與試玩頁、舊請求單逐欄相同
   const orders: [TeamOrders | null, TeamOrders | null] = [sideOrders(request.a), sideOrders(request.b)];
   const playbook = request.a.team !== undefined || request.b.team !== undefined ? { tactics: [...sideTactics(request.a), ...sideTactics(request.b)], orders } : {};
-  return { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), ...playbook, record: opts.record === true, ...fo };
+  // 教練指令（M5 第四批）：有 calls 或 coachAi 才走每回合排程；沒有時選項和第一批逐欄相同
+  const schedule = coachSchedule(request, coachRules(fo));
+  const coach = schedule !== null ? { ordersOf: schedule.ordersOf } : {};
+  return { options: { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), ...playbook, ...coach, record: opts.record === true, ...fo }, calls: schedule?.log ?? null };
 }
 
 /** 打一場：同一張請求單＋同一份 Bot 程式碼 → 同一個結果 */
 export function runGatewayMatch(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): GatewayMatch {
-  const run = runShooterMatch(gatewayDriverOptions(request, bot, opts));
+  const setup = gatewayDriverSetup(request, bot, opts);
+  const run = runShooterMatch(setup.options);
+  const out = outcomeOf(run.result, run.match, run.tacticTags);
   return {
-    outcome: outcomeOf(run.result, run.match, run.tacticTags),
+    outcome: setup.calls !== null ? { ...out, calls: setup.calls } : out,
     ...(run.replay ? { replay: run.replay } : {}),
     finalHash: run.finalHash,
     wallMs: run.wallMs,

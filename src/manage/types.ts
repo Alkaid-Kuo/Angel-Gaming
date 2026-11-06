@@ -1,8 +1,8 @@
 // M4 經營層：狀態與指令型別。
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
-import type { MatchRequest, PlayerStat } from './gateway.ts';
+import type { CoachEvent, MatchRequest, PlayerStat } from './gateway.ts';
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -154,6 +154,8 @@ export interface Team {
   tacticLog: Record<TacticId, TacticRecord>;
   /** 球探對戰隊報告（M5 5.3；每隊只留最新一份）：自己公開、別隊隱藏 */
   teamIntel: TeamIntelReport[];
+  /** 有請助理教練（M5 第四批）：跳過與一般觀戰的比賽由 AI 教練代喊；自己公開、別隊隱藏 */
+  assistant: boolean;
 }
 
 export interface RoundResult {
@@ -180,6 +182,8 @@ export interface FixtureResult {
   rounds: RoundResult[];
   /** 公開：雙方個人統計 [A 名單, B 名單]（各依名單順序；閘道沒給統計、或第 7 版以前打的比賽＝沒有） */
   stats?: [PlayerStat[], PlayerStat[]];
+  /** 公開（賽後）：雙方生效的教練指令（M5 第四批；A＝主隊；沒有任何指令＝沒有） */
+  calls?: CoachEvent[];
   /** 隱藏：當時送出的請求單原樣（雙方 PlayerSpec 快照＋種子＋賽制）；觀戰回放由它重跑，含習慣與預設加成，不進已知層視圖 */
   request: MatchRequest;
 }
@@ -254,6 +258,8 @@ export type Command =
   | { type: 'queueRehearse'; tactic: TacticId; sessions: number }
   | { type: 'setGamePlan'; plan: GamePlan }
   | { type: 'scout'; playerId: PlayerId }
-  | { type: 'scoutTeam'; teamId: TeamId };
+  | { type: 'scoutTeam'; teamId: TeamId }
+  | { type: 'hireAssistant' }
+  | { type: 'fireAssistant' };
 
 export type CommandResult = { ok: true } | { ok: false; reason: string };

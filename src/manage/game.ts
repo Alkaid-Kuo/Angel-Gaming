@@ -7,7 +7,7 @@ import type { BattleGateway, MatchOutcome, MatchRequest, PlayerStat } from './ga
 import { assertFormat, finalScore } from './gateway.ts';
 import { processJobs } from './jobs.ts';
 import { createFinals, createRegularSeason, createSemis, finalRanks } from './league.ts';
-import { npcLineup, npcOffseason, npcPlaybook, npcTraining } from './npc.ts';
+import { npcAssistant, npcLineup, npcOffseason, npcPlaybook, npcTraining } from './npc.ts';
 import { PORTRAITS } from './portraits.ts';
 import { eloDelta } from './rating.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
@@ -208,6 +208,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         gamePlan: defaultGamePlan(content),
         tacticLog: {},
         teamIntel: [],
+        assistant: false,
       });
       for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, portraits, id, rng.range(e.humanVersions[0], e.humanVersions[1]), e.humanStartRarities[k]);
     } else {
@@ -229,6 +230,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         gamePlan: defaultGamePlan(content),
         tacticLog: {},
         teamIntel: [],
+        assistant: false,
       });
       for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, portraits, id, rng.range(spec.versions[0], spec.versions[1]));
       npcIndex++;
@@ -254,6 +256,7 @@ function ensureLineups(state: GameState, content: ContentPack): void {
   for (const team of state.teams) {
     if (team.persona !== null) {
       const rng = rngFor(state.seed, STREAM.npc, state.week, Number(team.id.slice(1)));
+      applyAll(state, content, team.id, npcAssistant(knownView(state, content, team.id), team.persona, content));
       applyAll(state, content, team.id, npcLineup(knownView(state, content, team.id), content.personas[team.persona], content.lineupSize, rng));
       applyAll(state, content, team.id, npcPlaybook(knownView(state, content, team.id), team.persona, content));
       const v = knownView(state, content, team.id);
@@ -280,7 +283,10 @@ async function playMatchDay(state: GameState, content: ContentPack, gateway: Bat
   });
   const reqs: MatchRequest[] = fixtures.map((f, fi) => {
     const [h, a] = lineups[fi];
-    return { formatId: state.formatId, a: buildSide(content, teamOf(state, f.home), h), b: buildSide(content, teamOf(state, f.away), a), seed: rngFor(state.seed, STREAM.match, state.week, fi).nextU32() };
+    const [home, away] = [teamOf(state, f.home), teamOf(state, f.away)];
+    // 助理教練／NPC 教練（M5 第四批）：有請的一方整場由 AI 教練代喊；雙方都沒請就不帶這欄（請求單和第三批以前同形）
+    const coachAi = home.assistant || away.assistant ? { coachAi: { a: home.assistant ? 1 : null, b: away.assistant ? 1 : null } } : {};
+    return { formatId: state.formatId, a: buildSide(content, home, h), b: buildSide(content, away, a), seed: rngFor(state.seed, STREAM.match, state.week, fi).nextU32(), ...coachAi };
   });
   const outs = await gateway.simulateBatch(reqs, opts.onProgress);
   fixtures.forEach((f, fi) => {
@@ -291,7 +297,9 @@ async function playMatchDay(state: GameState, content: ContentPack, gateway: Bat
     const sc = finalScore(out);
     const winner = out.winner === 'a' ? f.home : out.winner === 'b' ? f.away : null;
     const stats = splitStats(out, hp.length);
-    f.result = { lineupA: hp.map((p) => p.id), lineupB: ap.map((p) => p.id), winner, scoreA: sc.a, scoreB: sc.b, rounds: out.rounds.map((r) => ({ ...r })), ...(stats !== null ? { stats } : {}), request: structuredClone(reqs[fi]) };
+    // 指令的「誰喊的」：閘道把 AI 教練標成 npc，玩家方的 AI 是助理教練
+    const calls = out.calls?.map((c) => ({ ...structuredClone(c), by: c.by === 'npc' && (c.side === 'a' ? home : away).human ? ('assistant' as const) : c.by }));
+    f.result = { lineupA: hp.map((p) => p.id), lineupB: ap.map((p) => p.id), winner, scoreA: sc.a, scoreB: sc.b, rounds: out.rounds.map((r) => ({ ...r })), ...(stats !== null ? { stats } : {}), ...(calls !== undefined && calls.length > 0 ? { calls } : {}), request: structuredClone(reqs[fi]) };
     if (stats !== null) {
       hp.forEach((p, i) => addMatch(p.season, stats[0][i]));
       ap.forEach((p, i) => addMatch(p.season, stats[1][i]));
@@ -370,6 +378,7 @@ function weeklyFinance(state: GameState, content: ContentPack): void {
   for (const team of state.teams) {
     post(state, team, 'salary', -weeklySalaries(state, team.id), '週薪資');
     post(state, team, 'facility', -e.facilityMaintenance[team.trainingLevel - 1], `訓練中心 Lv${team.trainingLevel} 維護`);
+    if (team.assistant) post(state, team, 'salary', -e.assistantSalary, '助理教練週薪');
     post(state, team, 'sponsor', weeklySponsor(content, team), `贊助（名氣 ${team.fame}）`);
     const net = team.ledger.filter((x) => x.week === state.week).reduce((s, x) => s + x.amount, 0);
     notify(state, team.id, 'finance', `第 ${state.week} 週結算：本週淨收支 ${net >= 0 ? '+' : ''}${net}，現金 ${team.cash}`);

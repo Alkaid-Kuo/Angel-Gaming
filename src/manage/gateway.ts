@@ -9,6 +9,8 @@
 // 6. 賽制自報能不能觀戰（watchable）；經營層不解讀，只透傳給畫面決定要不要放「觀戰」。
 // 7. 隊伍層資料（M5）：SideSpec.team 是不透明的一包；成績單可回報每回合雙方的戰術代號（MatchRound.tactics），代號由內容包定義。
 // 8. 個人統計（M5 第三批）：成績單可回報每位出賽選手的統計（MatchOutcome.players，A 名單在前）；沒有統計的賽制回 undefined，經營層只存、只累計、只顯示。
+// 9. 教練指令（M5 第四批）：請求單可帶玩家喊的指令（calls）與哪一方由 AI 教練代喊（coachAi）；成績單回報雙方所有生效的指令。
+//    同一張請求單（含 calls、coachAi）永遠得到同一張成績單；指令次數不合規則時閘道丟例外。
 import type { Winner } from './types.ts';
 
 export interface MatchFormat {
@@ -45,6 +47,36 @@ export interface MatchRequest {
   readonly seed: number;
   /** 場地代號，經營層不解讀；沒有＝該賽制的預設場地（舊存檔都是這樣） */
   readonly mapId?: string;
+  /** 玩家在即時比賽喊的指令（M5 第四批；依回合排序）；沒有＝沒喊 */
+  readonly calls?: readonly CoachEvent[];
+  /** 哪一方由 AI 教練代喊、從第幾回合起（1＝整場、null＝不代喊）；沒有＝雙方都不代喊 */
+  readonly coachAi?: { readonly a: number | null; readonly b: number | null };
+}
+
+/** 教練的計畫（星級偏好 -1～3、經濟風格 0～2）；鍵是內容包的戰術代號 */
+export interface CoachPlan {
+  readonly pref: Readonly<Record<string, number>>;
+  readonly economy: 0 | 1 | 2;
+}
+
+/** 一回合的教練命令：戰術（必打）、買法；null＝交給選手 */
+export interface CoachCall {
+  readonly tactic: string | null;
+  readonly buy: 'full' | 'force' | 'eco' | null;
+}
+
+/** 教練指令（M5 第四批）：暫停或中場時下的，從該回合的凍結時間起生效 */
+export interface CoachEvent {
+  readonly round: number;
+  readonly side: 'a' | 'b';
+  /** timeout：暫停（扣次數）；halftime：換邊（不扣次數，只能在半場首回合） */
+  readonly kind: 'timeout' | 'halftime';
+  /** 改過的比賽計畫（從這回合起生效到下次修改）；沒改＝null */
+  readonly plan: CoachPlan | null;
+  /** 這一回合的命令；沒有＝null */
+  readonly call: CoachCall | null;
+  /** 誰喊的（只供顯示） */
+  readonly by: 'human' | 'assistant' | 'npc';
 }
 
 /** 一回合；scoreA／scoreB 是打完這回合後的累計比分 */
@@ -85,6 +117,8 @@ export interface MatchOutcome {
   readonly rounds: readonly MatchRound[];
   /** 個人統計（長度＝雙方名單人數和，A 名單在前、各依名單順序）；賽制沒有統計＝undefined */
   readonly players?: readonly PlayerStat[];
+  /** 雙方所有生效的教練指令（含 AI 教練喊的；M5 第四批）；沒有任何指令的賽制回 undefined */
+  readonly calls?: readonly CoachEvent[];
 }
 
 export interface BattleGateway {

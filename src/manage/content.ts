@@ -92,6 +92,8 @@ export interface Economy {
   readonly trainMaxPerPlayer: number;
   /** 戰術排練每節費用（M5） */
   readonly rehearseCost: number;
+  /** 助理教練週薪（M5 第四批；有請時跳過與一般觀戰的比賽由 AI 教練代喊） */
+  readonly assistantSalary: number;
   /** 開局隊伍默契（M5；每個戰術相同），玩家與各 NPC 個性 */
   readonly playbookStart: Readonly<Record<Persona | 'human', number>>;
   readonly eloK: number;
@@ -219,6 +221,7 @@ export const STUB_CONTENT: ContentPack = {
     trainCost: 15,
     trainMaxPerPlayer: 3,
     rehearseCost: 10,
+    assistantSalary: 15,
     playbookStart: { human: 20, whale: 30, youth: 20, data: 30, miser: 15 },
     eloK: 24,
   },

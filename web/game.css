@@ -539,7 +539,9 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .v-tactics .seg3 button { flex: 1; height: 40px; display: grid; place-items: center; font-size: 16px; font-weight: 700; letter-spacing: 0.12em; color: var(--grey); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); transform: skewX(-14deg); }
 .v-tactics .seg3 button:hover:not(:disabled) { color: #fff; }
 .v-tactics .seg3 button.on { color: var(--ink); background: var(--gold); box-shadow: none; }
-.v-tactics .reh .go { display: flex; justify-content: flex-end; margin-top: 14px; }
+.v-tactics .reh .go { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+.v-tactics .reh .go .asst { margin-right: auto; display: flex; align-items: center; gap: 6px; font-size: max(14px, var(--fmin, 0px)); color: var(--grey); white-space: nowrap; }
+.v-tactics .reh .go .asst b { color: var(--gold2); }
 /* 對手情報（M5 5.3）：選戰隊、兩欄常用戰術 */
 .v-tactics .sct .picks { display: flex; gap: 8px; }
 .v-tactics .sct .pk { width: 46px; height: 46px; display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); transform: skewX(-10deg); }
@@ -1128,6 +1130,13 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .md-result.md-team .strip2 .rc.tg { width: 38px; display: inline-flex; align-items: center; justify-content: center; }
 .md-result.md-team .strip2 .rc em { transform: skewX(12deg); font-style: normal; font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.02em; color: rgba(var(--white-rgb), 0.6); white-space: nowrap; }
 .md-result.md-team .strip2 .rc.on.w em { color: rgba(0, 0, 0, 0.62); }
+/* 教練指令（M5 第四批）：格子上方小三角，我方金、對方紅；兩邊都喊就左金右紅 */
+.md-result.md-team .strip2 .rc { position: relative; }
+.md-result.md-team .strip2 .rc.cm::before, .md-result.md-team .strip2 .rc.co::after { content: ""; position: absolute; top: -9px; border: 4px solid transparent; border-top: 6px solid var(--gold); transform: skewX(12deg); }
+.md-result.md-team .strip2 .rc.cm::before { left: calc(50% - 4px); }
+.md-result.md-team .strip2 .rc.co::after { left: calc(50% - 4px); border-top-color: var(--red); }
+.md-result.md-team .strip2 .rc.cm.co::before { left: calc(50% - 10px); }
+.md-result.md-team .strip2 .rc.cm.co::after { left: calc(50% + 2px); }
 .md-result.md-team .lineups { position: absolute; left: 160px; right: 160px; top: 662px; display: flex; align-items: center; justify-content: center; gap: 18px; }
 .md-result.md-team .lineups .side { display: flex; gap: 8px; }
 .md-result.md-team .lineups .vs { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 28px; color: var(--grey2); }

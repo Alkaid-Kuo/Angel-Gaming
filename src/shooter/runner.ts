@@ -12,7 +12,7 @@ import { roundHalfEven } from '../shared/intmath.ts';
 import { Prng } from '../shared/prng.ts';
 import { BotLoadError, type CompiledBot } from '../sandbox/compile.ts';
 import { jsonClone, validateDeclaration } from '../sandbox/controller.ts';
-import type { Attributes, InitTactics, ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, Team, TeamOrders, WeaponId } from './api.ts';
+import type { Attributes, InitTactics, ShooterBot, ShooterDeclaration, ShooterHelpers, ShooterInitData, ShooterObservation, RoundEndReason, Team, TeamOrders, WeaponId } from './api.ts';
 import { MIN_REACTION_TICKS, SHOOTER_ENGINE_VERSION, TIMING } from './config.ts';
 import { DEFAULT_MAP_ID, MAPS, blocksMove, regionsAt, type ShooterMap } from './map.ts';
 import { reactionEighths, reactionTicksFor } from './players.ts';
@@ -204,10 +204,32 @@ export interface ShooterRunOptions extends ShooterMatchOptions {
   /** 依組別（0＝玩家 0～4、1＝玩家 5～9）的教練指令（API 1.2）：每次決策放進該組觀察資料的 coach；沒給＝null */
   readonly orders?: readonly [TeamOrders | null, TeamOrders | null];
   /**
-   * 量測與測試用（M5 第一批驗收 3.10 第 5 條）：依回合、組別、陣營給教練指令，有給就蓋過 orders。
-   * 每組每回合第一次決策時取一次、深凍結，整回合不變（和 orders 同樣的保證）。閘道與經營層不用它。
+   * 每回合的教練指令：有給就蓋過 orders。每組每回合第一次決策時（凍結時間第一個決策 tick、任何 Bot 決策之前）取一次、深凍結，
+   * 整回合不變（和 orders 同樣的保證）；兩組依組別順序呼叫，所以可以是有狀態的閉包（同一場重跑呼叫順序相同）。
+   * 用途：M5 第一批驗收的命令注入、第四批的教練指令與 AI 教練（閘道 coachOrders）。inputs 只有該組自己知道的公開資訊（CoachInputs）。
    */
-  readonly ordersOf?: (round: number, group: 0 | 1, side: Team) => TeamOrders | null;
+  readonly ordersOf?: (round: number, group: 0 | 1, side: Team, inputs: CoachInputs) => TeamOrders | null;
+}
+
+/**
+ * 教練（玩家、助理教練、NPC 教練）在凍結時間看得到的資訊（M5 規格 6.3）：比分、己方視角的每回合勝負與結束原因、
+ * 己方每回合的戰術標籤、己方平均金錢、半場資訊。沒有對方的金錢、位置、戰術標籤（視野公平）。
+ */
+export interface CoachInputs {
+  readonly round: number;
+  readonly side: Team;
+  /** 半場：正規 1、2；加時每個半場遞增 */
+  readonly half: number;
+  /** 本回合是不是半場首回合（含第 1 回合） */
+  readonly firstOfHalf: boolean;
+  /** 0＝正規；1 起＝第幾段加時 */
+  readonly overtime: number;
+  /** [我方, 對方] */
+  readonly score: readonly [number, number];
+  /** 已打完的回合（己方視角）：贏了沒、結束原因、我方那回合的陣營與戰術標籤 */
+  readonly rounds: readonly { readonly won: boolean; readonly reason: RoundEndReason; readonly side: Team; readonly tactic: string | null }[];
+  /** 我方本回合開始時的平均金錢（凍結時間第一個決策 tick，還沒有人買東西） */
+  readonly money: number;
 }
 
 /** 回合戰術標籤的喊話格式（M5）：指揮每回合喊一次「K:<戰術代號>」；這是閘道與 Bot 的約定，引擎不解讀 */
@@ -255,6 +277,11 @@ export class ShooterDriver {
   private readonly roundOrders: [{ round: number; orders: TeamOrders | null }, { round: number; orders: TeamOrders | null }] = [
     { round: -1, orders: null },
     { round: -1, orders: null },
+  ];
+  /** coachInputs 的半場首回合判定：上一次呼叫時的半場 */
+  private readonly halfSeen: [{ round: number; half: number; first: boolean }, { round: number; half: number; first: boolean }] = [
+    { round: -1, half: 0, first: false },
+    { round: -1, half: 0, first: false },
   ];
   /** 回合戰術標籤：索引＝回合數 − 1，[組 0, 組 1]＝該組本回合第一則 K: 喊話的代號（沒喊＝null） */
   readonly tacticTags: [string | null, string | null][] = [];
@@ -350,9 +377,20 @@ export class ShooterDriver {
     const round = this.match.roundNumber;
     if (c.round !== round) {
       c.round = round;
-      c.orders = frozenCopy(this.ordersOf(round, group, side));
+      c.orders = frozenCopy(this.ordersOf(round, group, side, this.coachInputs(group, side)));
     }
     return c.orders;
+  }
+
+  /** 教練看得到的資訊（只有該組自己知道的公開資訊） */
+  private coachInputs(group: 0 | 1, side: Team): CoachInputs {
+    const m = this.match;
+    const rounds = m.rounds.map((r) => ({ won: r.winnerGroup === group, reason: r.reason, side: (r.tGroup === group ? 'T' : 'CT') as Team, tactic: this.tacticTags[r.number - 1]?.[group] ?? null }));
+    const mine = rounds.filter((r) => r.won).length;
+    const team = m.players.filter((p) => p.group === group);
+    const money = team.length === 0 ? 0 : Math.round(team.reduce((s, p) => s + p.money, 0) / team.length);
+    if (this.halfSeen[group].round !== m.roundNumber) this.halfSeen[group] = { round: m.roundNumber, first: m.roundNumber === 1 || m.half !== this.halfSeen[group].half, half: m.half };
+    return { round: m.roundNumber, side, half: m.half, firstOfHalf: this.halfSeen[group].first, overtime: m.overtime, score: [mine, rounds.length - mine], rounds, money };
   }
 
   /** 這批指令的延遲（tick） */
