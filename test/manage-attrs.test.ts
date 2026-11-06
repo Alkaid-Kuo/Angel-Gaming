@@ -64,11 +64,12 @@ describe('開局屬性與上限', () => {
 });
 
 describe('訓練', () => {
-  it('收益：離上限 6 點以上 60、最後 6 點線性遞減、最低 10、碰上限 0', () => {
-    expect(trainGain(80, 60)).toBe(60);
-    expect(trainGain(80, 74)).toBe(60);
-    expect(trainGain(80, 77)).toBe(30);
-    expect(trainGain(80, 79)).toBe(10);
+  it('收益：離上限 6 點以上 100（每節 1 點）、最後 6 點線性遞減、最低 17、碰上限 0', () => {
+    expect(trainGain(80, 60)).toBe(100);
+    expect(trainGain(80, 74)).toBe(100);
+    expect(trainGain(80, 77)).toBe(50);
+    expect(trainGain(80, 78)).toBe(33);
+    expect(trainGain(80, 79)).toBe(17);
     expect(trainGain(80, 80)).toBe(0);
     expect(trainGain(80, 85)).toBe(0);
   });
@@ -85,7 +86,7 @@ describe('訓練', () => {
     expect(gains[0]).toBe(Math.round((TRAIN_FULL_GAIN * 2) / 6));
   });
 
-  it('每人每週最多 3 節；訓練與排練共用時段；扣費；推進後屬性漲、報告寫收益', async () => {
+  it('每人每週最多 5 節；訓練與排練共用時段；扣費；推進後屬性漲、報告寫收益', async () => {
     const s = newGame(13, shooter);
     const me = humanTeam(s);
     me.cash = 100_000;
@@ -93,19 +94,19 @@ describe('訓練', () => {
     const k = shooter.attributes.trainable[0];
     a.caps[k] = Math.max(a.caps[k], a.attrs[k] + 10);
     const slots0 = slotsLeft(s, shooter, me);
-    expect(applyCommand(s, shooter, me.id, { type: 'queueTrain', playerId: a.id, attr: k, sessions: 3 }).ok).toBe(true);
-    expect(applyCommand(s, shooter, me.id, { type: 'queueTrain', playerId: a.id, attr: shooter.attributes.trainable[1], sessions: 1 })).toEqual({ ok: false, reason: '每名選手每週最多練 3 節' });
+    expect(applyCommand(s, shooter, me.id, { type: 'queueTrain', playerId: a.id, attr: k, sessions: 5 }).ok).toBe(true);
+    expect(applyCommand(s, shooter, me.id, { type: 'queueTrain', playerId: a.id, attr: shooter.attributes.trainable[1], sessions: 1 })).toEqual({ ok: false, reason: '每名選手每週最多練 5 節' });
     expect(applyCommand(s, shooter, me.id, { type: 'queueTrain', playerId: a.id, attr: 'aggression', sessions: 1 })).toEqual({ ok: false, reason: '只能訓練強度屬性' });
-    expect(slotsLeft(s, shooter, me)).toBe(slots0 - 3);
-    expect(applyCommand(s, shooter, me.id, { type: 'queueRehearse', tactic: shooter.tactics[0].id, sessions: slots0 - 3 }).ok).toBe(true);
+    expect(slotsLeft(s, shooter, me)).toBe(slots0 - 5);
+    expect(applyCommand(s, shooter, me.id, { type: 'queueRehearse', tactic: shooter.tactics[0].id, sessions: slots0 - 5 }).ok).toBe(true);
     expect(slotsLeft(s, shooter, me)).toBe(0);
     expect(applyCommand(s, shooter, me.id, { type: 'queueTrain', playerId: b.id, attr: k, sessions: 1 })).toEqual({ ok: false, reason: '超過本週訓練中心的時段' });
-    expect(me.ledger.filter((x) => x.category === 'training').reduce((t, x) => t + x.amount, 0)).toBe(-(3 * shooter.economy.trainCost + (slots0 - 3) * shooter.economy.rehearseCost));
+    expect(me.ledger.filter((x) => x.category === 'training').reduce((t, x) => t + x.amount, 0)).toBe(-(5 * shooter.economy.trainCost + (slots0 - 5) * shooter.economy.rehearseCost));
     const before = a.attrs[k];
     await advance(s, shooter, gw);
-    expect(a.attrs[k]).toBe(before + 1);
-    expect(a.progress[k]).toBe(80);
-    expect(s.inbox.some((m) => m.text.includes(`${a.name} ${shooter.attributes.names[k]} ${before} → ${before + 1}`) && m.text.includes('收益 100%／100%／100%'))).toBe(true);
+    expect(a.attrs[k]).toBe(before + 5);
+    expect(a.progress[k]).toBe(0);
+    expect(s.inbox.some((m) => m.text.includes(`${a.name} ${shooter.attributes.names[k]} ${before} → ${before + 5}`) && m.text.includes('收益 100%／100%／100%／100%／100%'))).toBe(true);
   });
 
   it('解約取消該選手排好的訓練；別人的選手不能練', () => {
