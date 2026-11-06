@@ -46,6 +46,15 @@ describe('教練指令規則', () => {
     expect(() => validateCalls([ev(3, 'a', 'timeout', null, { pref: { rushA: 5 }, economy: 0 })], MR6)).toThrow(/偏好/);
   });
 
+  it('計畫解析同一份：非整數的 economy／pref，有排程（AI 教練、沒喊）與沒排程解出同一個計畫', () => {
+    const odd: SideSpec = { ...teamSide(50), team: { ...teamSide(50).team, economy: 1.4, pref_rushA: 2.6, pref_fake: -0.6 } };
+    const req: MatchRequest = { formatId: 'shooter-mr6', a: odd, b: teamSide(50), seed: 1 };
+    const plain = gatewayDriverOptions(req, bot).orders?.[0];
+    const sch = coachSchedule({ ...req, coachAi: { a: 99, b: null } }, MR6);
+    const inputs: CoachInputs = { round: 1, side: 'T', half: 1, firstOfHalf: true, overtime: 0, score: [0, 0], rounds: [], money: 800 };
+    expect(sch?.ordersOf(1, 0, 'T', inputs)).toEqual(plain);
+  });
+
   it('沒有任何指令：沒有排程，驅動選項沒有 ordersOf（和第一批相同）', () => {
     const req: MatchRequest = { formatId: 'shooter-mr6', a: teamSide(50), b: teamSide(50), seed: 1 };
     expect(coachSchedule(req, MR6)).toBeNull();

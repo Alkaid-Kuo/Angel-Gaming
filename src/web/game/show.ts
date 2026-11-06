@@ -160,7 +160,7 @@ function roundStrip(m: MatchView, live: boolean, c?: Ctx['c']): string {
  * 賽前畫面：按下開戰立刻出現，比賽在背景準備時顯示進場中；準備好後公開對手名單，讓玩家選看比賽或跳過。
  * f 是推進前的賽程（未打完）或推進後的同一場；打完才有對手名單。
  */
-export function preMatchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scene {
+export function preMatchScene(ctx: Ctx, f: KnownFixture, before: Snapshot, choose = false): Scene {
   const { v } = ctx;
   const me = v.me.teamId;
   const opp = f.home === me ? f.away : f.home;
@@ -176,8 +176,14 @@ export function preMatchScene(ctx: Ctx, f: KnownFixture, before: Snapshot): Scen
       <div class="score">${crestRing(ctx, me, 84)}<b class="tn">${esc(teamName(v, me))}</b><div class="sc"><span class="vs2">VS</span></div><b class="tn rd">${esc(teamName(v, opp))}</b>${crestRing(ctx, opp, 84, opp)}</div>
       <section class="col l">${rosterCol(ctx, mine, before, false)}</section>
       <section class="col r">${ready ? rosterCol(ctx, theirs, before, true) : hidden}</section>
-      <section class="mid2"><div class="st"><i></i><span>${ready ? '選手就位，比賽即將開始' : '選手進場中'}</span></div>${ready ? '' : '<div class="meter g" style="--v:0%"><i data-live-bar></i></div>'}</section>
-      ${ready ? `<div class="ctl"><button class="btn ghost" data-act="live-skip"><b>跳過比賽</b><span>SKIP</span></button><button class="btn" data-act="live-watch"><b>看比賽</b><span>WATCH</span></button></div>` : ''}</div>`,
+      <section class="mid2"><div class="st"><i></i><span>${choose ? '選擇怎麼看這場比賽' : ready ? '選手就位，比賽即將開始' : '選手進場中'}</span></div>${ready || choose ? '' : '<div class="meter g" style="--v:0%"><i data-live-bar></i></div>'}</section>
+      ${
+        choose
+          ? `<div class="ctl"><button class="btn ghost" data-act="mode-skip" title="直接看結果（有請助理教練時由他代喊暫停）"><b>跳過</b><span>SKIP</span></button><button class="btn ghost" data-act="mode-watch" title="全知觀戰，不能下指令"><b>一般觀戰</b><span>WATCH</span></button><button class="btn" data-act="mode-coach" title="即時打、可以暫停下指令，只看得到我方視野"><b>教練身分</b><span>COACH</span></button></div>`
+          : ready
+            ? `<div class="ctl"><button class="btn ghost" data-act="live-skip"><b>跳過比賽</b><span>SKIP</span></button><button class="btn" data-act="live-watch"><b>看比賽</b><span>WATCH</span></button></div>`
+            : ''
+      }</div>`,
   };
 }
 

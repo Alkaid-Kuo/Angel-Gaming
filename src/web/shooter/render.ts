@@ -127,6 +127,8 @@ export interface DrawInput {
   readonly camera: CamView | null;
   /** 第一人稱的效果（致盲白幕、受傷暗角、聲音箭頭、傷害數字）；觀戰的全圖與自由鏡頭不畫 */
   readonly pov: boolean;
+  /** 教練模式（M5 第四批 4b）：迷霧是己方活著選手的視野聯集 */
+  readonly teamFog?: boolean;
   /** 觀戰：滑鼠指著的選手 */
   readonly hover: number | null;
   readonly charge: ThrowPreview | null;
@@ -431,7 +433,7 @@ export class ShooterRenderer {
     ctx.imageSmoothingEnabled = true;
     this.blit(ctx, this.baked.floor, cam, dpr);
     // 迷霧在牆之下：邊界被牆蓋住，看不到格子階梯
-    if (!seeAll) this.drawFog(cam, view, meNow, dpr);
+    if (!seeAll) this.drawFog(cam, view, d.teamFog === true ? [meNow, ...view.teammates.filter((t) => t.alive)] : [meNow], dpr);
     // 焦痕與火在牆層之下：火舌比格子大，靠牆那一側被牆蓋住，不用逐格裁切
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     for (const s of this.scorches) {
@@ -584,15 +586,18 @@ export class ShooterRenderer {
     return pts;
   }
 
-  /** 迷霧：視線外貼記憶圖（去飽和、偏冷的同一張地面）。遮罩低解析放大，邊緣自然變柔；視線邊界一條細亮線，像日光切過地面 */
-  private drawFog(cam: Camera, view: ShooterObservation, me: { x: number; y: number; facing: number }, dpr: number): void {
+  /**
+   * 迷霧：視線外貼記憶圖（去飽和、偏冷的同一張地面）。遮罩低解析放大，邊緣自然變柔；視線邊界一條細亮線，像日光切過地面。
+   * eyes：看的人（玩家模式只有所看的選手；教練模式是己方活著選手的聯集，第一個是所看的人）
+   */
+  private drawFog(cam: Camera, view: ShooterObservation, eyes: readonly { x: number; y: number; facing: number }[], dpr: number): void {
     const open = view.me.alive && view.me.blindTicks === 0;
-    const poly = open ? this.visionPolygon(cam, view, me) : null;
+    const polys = eyes.flatMap((e, i) => (i === 0 && !open ? [] : [this.visionPolygon(cam, view, e)]));
     const m = this.mctx;
     m.setTransform(0.5, 0, 0, 0.5, 0, 0);
     m.clearRect(0, 0, cam.w, cam.h);
-    if (poly !== null) {
-      m.fillStyle = '#000';
+    m.fillStyle = '#000';
+    for (const poly of polys) {
       m.beginPath();
       for (const [x, y] of poly) m.lineTo(x, y);
       m.closePath();
@@ -611,7 +616,9 @@ export class ShooterRenderer {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(this.fog, 0, 0);
-    if (poly !== null) {
+    // 邊界亮線只畫所看的人（聯集的每條邊都畫會太花）
+    const poly = open ? polys[0] : undefined;
+    if (poly !== undefined) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.beginPath();
       for (const [x, y] of poly) ctx.lineTo(x, y);

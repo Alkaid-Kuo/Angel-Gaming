@@ -108,6 +108,13 @@ export function migrate9to10(s: GameState): GameState {
   return s;
 }
 
+/** 第 10 版 → 第 11 版（M5 第四批 4b：即時比賽）：沒有進行中的比賽日 */
+export function migrate10to11(s: GameState): GameState {
+  s.matchDay = null;
+  s.version = 11;
+  return s;
+}
+
 export function deserialize(json: string, content: ContentPack): GameState {
   let s = JSON.parse(json) as GameState;
   if (s.contentId !== content.id) throw new Error(`存檔的內容包 ${s.contentId} 與目前 ${content.id} 不符`);
@@ -116,6 +123,7 @@ export function deserialize(json: string, content: ContentPack): GameState {
   if (s.version === 7) s = migrate7to8(s, content);
   if (s.version === 8) s = migrate8to9(s);
   if (s.version === 9) s = migrate9to10(s);
+  if (s.version === 10) s = migrate10to11(s);
   if (s.version !== SAVE_VERSION) throw new Error(`存檔版本 ${s.version} 與目前 ${SAVE_VERSION} 不符`);
   return s;
 }

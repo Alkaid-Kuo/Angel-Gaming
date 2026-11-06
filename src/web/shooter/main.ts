@@ -18,7 +18,11 @@ import type { ShooterReplay } from '../../shooter/runner.ts';
 import { seesAll } from './hudinfo.ts';
 import { BUY_CLOSED_NOTE, buyToggle } from './shop.ts';
 import { SpectateUi } from './spectate.ts';
-import { EMBED, WATCH_HASH, loadLiveSpeed, readTicket, saveLiveSpeed, tellManage, ticketVersionError, type WatchTicket } from './watch.ts';
+import { COACH_HASH, EMBED, WATCH_HASH, loadLiveSpeed, readCoachTicket, readTicket, saveLiveSpeed, tellManage, tellManageCoach, ticketVersionError, type CoachTicket, type WatchTicket } from './watch.ts';
+import { CoachUi } from './coach-ui.ts';
+import type { CoachStop } from '../../shooter/live-coach.ts';
+import type { CoachEvent } from '../../manage/gateway.ts';
+import type { CoachStatus } from './protocol.ts';
 import { DAMAGE_MS, HURT_MS, ShooterRenderer, SOUND_MS, TRACER_MS, type ActiveSound, type Corpse, type DamagePop, type DrawInput, type HurtMark, type OtherTracer, type Tracer } from './render.ts';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -31,6 +35,8 @@ let worker: Worker | null = null;
 let game: Game | null = null;
 /** 經營層觀戰的票（#watch 開啟時才有） */
 let ticket: WatchTicket | null = null;
+/** 教練身分即時看的票（M5 第四批 4b） */
+let coachTicket: CoachTicket | null = null;
 
 /** 下拉的選項（value：版本號；預設 v3，陪練 Bot 已拿掉） */
 const LEVELS: readonly { readonly value: string; readonly name: string; readonly hint: string }[] = [
@@ -116,6 +122,9 @@ class Game {
   private patch: ((f: ShooterFrame) => ShooterFrame) | null = null;
   /** 開過購買選單的回合（凍結時自動開一次） */
   private autoBuyRound = 0;
+  /** 教練模式（M5 第四批 4b）：狀態列與教練面板 */
+  private readonly coachUi: CoachUi | null;
+  private coachStatus: CoachStatus | null = null;
 
   constructor(meta: ShooterMeta, post: (m: ToShooterWorker) => void) {
     this.meta = meta;
@@ -133,6 +142,16 @@ class Game {
     this.root.classList.toggle('spectate', meta.spectate);
     this.hud = new ShooterHud(this.root, meta, ticket);
     this.buy = new BuyMenu(this.root.querySelector('.sg-buy')!, meta, (items: BuyItem[]) => this.send([{ type: 'buy', items }]));
+    this.coachUi =
+      meta.coach !== undefined
+        ? new CoachUi(this.root, meta.coach, SPEEDS, this.speedIdx, {
+            pause: (on) => this.post({ type: 'coachPause', on }),
+            resolve: (plan, call) => this.post({ type: 'coachResolve', plan, call }),
+            leave: () => this.post({ type: 'coachLeave' }),
+            speed: (i) => this.setSpeed(i),
+          })
+        : null;
+    this.root.classList.toggle('coach', meta.coach !== undefined);
     this.spec = meta.spectate ? new SpectateUi(this.root, this.canvas, this.mini, meta, this.hud, { view: (id) => this.post({ type: 'view', id }), seek: (round) => this.seek(round), frame: () => this.cur }) : null;
     this.input = new ShooterInput(this.canvas, {
       meta,
@@ -143,7 +162,7 @@ class Game {
       buyOpen: () => this.buy.isOpen(),
       buyKey: (code) => this.buy.key(code),
       toggleBuy: () => {
-        if (meta.spectate) return;
+        if (meta.spectate || meta.coach !== undefined) return;
         const act = buyToggle(this.buy.isOpen(), this.cur?.self.round.canBuy === true);
         if (act === 'deny') this.hud.cue(BUY_CLOSED_NOTE, performance.now());
         else this.buy.setOpen(act === 'open');
@@ -252,6 +271,11 @@ class Game {
 
   private togglePause(): void {
     if (this.over !== null) return;
+    // 教練模式：暫停鍵是教練暫停（扣次數、停在下一回合前），不是把模擬停住；切走分頁時自動停住的模擬照常用這裡繼續
+    if (this.coachUi !== null && !this.paused) {
+      this.coachUi.togglePause();
+      return;
+    }
     this.paused = !this.paused;
     this.post({ type: 'pause', paused: this.paused });
     // 觀戰有控制列，暫停時不蓋選單（畫面要看得到）；玩家模式照舊開暫停選單
@@ -261,8 +285,9 @@ class Game {
 
   /** 觀戰速度（SPEEDS 的索引） */
   private setSpeed(i: number): void {
-    if (!this.meta.spectate || !Number.isFinite(i)) return;
+    if ((!this.meta.spectate && this.coachUi === null) || !Number.isFinite(i)) return;
     this.speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, i));
+    this.coachUi?.setSpeed(this.speedIdx);
     if (EMBED) saveLiveSpeed(this.speedIdx);
     this.post({ type: 'speed', speed: SPEEDS[this.speedIdx] });
   }
@@ -310,7 +335,7 @@ class Game {
   }
 
   private send(cmds: ShooterCommand[]): void {
-    if (cmds.length > 0 && !this.meta.spectate && this.over === null && !this.paused) this.post({ type: 'cmd', cmds });
+    if (cmds.length > 0 && !this.meta.spectate && this.coachUi === null && this.over === null && !this.paused) this.post({ type: 'cmd', cmds });
   }
 
   onFrame(f: ShooterFrame): void {
@@ -346,8 +371,8 @@ class Game {
     if (old !== null && old.self.round.number === f.self.round.number && f.self.me.loadout.grenades.length < old.self.me.loadout.grenades.length && f.self.round.phase !== 'freeze') {
       this.throwCdUntil = f.tick + this.meta.rules.grenadeRules.throwCooldownTicks;
     }
-    // 購買選單：凍結時自動開一次；不能買了自動關
-    if (!this.meta.spectate) {
+    // 購買選單：凍結時自動開一次；不能買了自動關（教練模式沒有購買）
+    if (!this.meta.spectate && this.coachUi === null) {
       if (f.self.round.canBuy && f.self.round.phase === 'freeze' && this.autoBuyRound !== f.self.round.number && f.self.me.alive) {
         this.autoBuyRound = f.self.round.number;
         this.buy.setOpen(true);
@@ -396,6 +421,23 @@ class Game {
     this.cur = f;
   }
 
+  onCoachStop(stop: CoachStop): void {
+    this.coachUi?.showStop(stop);
+    this.input.releaseAll();
+  }
+
+  onCoachStatus(s: CoachStatus): void {
+    this.coachStatus = s;
+    this.coachUi?.setStatus(s);
+  }
+
+  /** 教練模式中途離開（回經營頁、關框）：先告訴經營頁打到第幾回合（停著等指令＝上一回合），經營頁照離席處理 */
+  coachQuit(): void {
+    if (this.coachUi === null || this.coachStatus?.left === true || this.over !== null) return;
+    const round = this.cur?.view.round.number ?? 1;
+    tellManageCoach({ event: 'left', round: this.coachUi.waiting ? round - 1 : round });
+  }
+
   onOver(summary: ShooterSummary): void {
     this.over = summary;
     this.buy.setOpen(false);
@@ -410,7 +452,7 @@ class Game {
   }
 
   private lastInput(f: ShooterFrame): DrawInput {
-    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.seeAll(), tags: this.spec?.mode === 'overview', camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, allShots: this.allShots, pops: this.pops, corpses: this.corpses };
+    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.seeAll(), teamFog: this.coachUi !== null, tags: this.spec?.mode === 'overview', camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, allShots: this.allShots, pops: this.pops, corpses: this.corpses };
   }
 
   private updateCursor(f: ShooterFrame): void {
@@ -424,7 +466,7 @@ class Game {
     if (f === null) return;
     this.updateCursor(f);
     const start = performance.now();
-    const tickMs = 1000 / this.meta.rules.ticksPerSecond / (this.meta.spectate ? SPEEDS[this.speedIdx] : 1);
+    const tickMs = 1000 / this.meta.rules.ticksPerSecond / (this.meta.spectate || this.coachUi !== null ? SPEEDS[this.speedIdx] : 1);
     const alpha = this.paused ? 1 : Math.min(1, (t - this.recvAt) / tickMs);
     const camera: CamView | null = this.spec?.update(f, this.prev, alpha, t, SPEEDS[this.speedIdx]) ?? null;
     this.input.update(t);
@@ -466,8 +508,8 @@ class Game {
   };
 
   private readonly onUnload = (e: BeforeUnloadEvent): void => {
-    // 觀戰隨時可以離開（重播不會丟東西）
-    if (this.over !== null || this.meta.spectate) return;
+    // 觀戰隨時可以離開（重播不會丟東西）；教練模式離開＝離席，經營頁照離席處理
+    if (this.over !== null || this.meta.spectate || this.coachUi !== null) return;
     e.preventDefault();
     e.returnValue = '';
   };
@@ -532,6 +574,18 @@ function ensureWorker(): Worker {
         break;
       case 'seeking':
         game?.onSeeking(msg.at, msg.target);
+        break;
+      case 'coachStop':
+        game?.onCoachStop(msg.stop);
+        break;
+      case 'coachStatus':
+        game?.onCoachStatus(msg.status);
+        break;
+      case 'coachCall':
+        tellManageCoach({ event: 'call', call: msg.event satisfies CoachEvent });
+        break;
+      case 'coachLeft':
+        tellManageCoach({ event: 'left', round: msg.round });
         break;
       case 'error':
         setLoading(false);
@@ -605,7 +659,8 @@ function backToManage(): void {
 }
 
 function home(): void {
-  if (ticket !== null) {
+  if (ticket !== null || coachTicket !== null) {
+    game?.coachQuit();
     backToManage();
     return;
   }
@@ -618,7 +673,28 @@ function home(): void {
   paintBackdrop();
 }
 
+/** 教練身分即時看（M5 第四批 4b）：Worker 用開打前的請求單即時打，教練可以暫停下指令；畫面只有己方視野 */
+function startCoach(t: CoachTicket): void {
+  void fontsReady.then(() => setTimeout(paintBackdrop, 30));
+  const stale = ticketVersionError({ ...t, outcome: { winner: 'draw', rounds: [] } });
+  if (stale !== null) {
+    if (EMBED) tellManage('skip');
+    else $('setup').innerHTML = `<section class="card sg-loading"><h2>無法開始</h2><p class="muted">${esc(stale)}</p></section>`;
+    return;
+  }
+  $('setup').innerHTML = `<section class="card sg-loading"><h2>比賽即將開始</h2><p class="muted">${esc(t.teams[0])} VS ${esc(t.teams[1])}・${esc(t.title)}・教練身分</p></section>`;
+  ensureWorker().postMessage({ type: 'coach', coach: { request: t.request, names: t.names, tags: t.tags, teams: t.teams, mine: t.mine, portraits: t.portraits, coach: t.coach } } satisfies ToShooterWorker);
+}
+
 function init(): void {
+  if (location.hash === COACH_HASH) {
+    document.title = '天使戰隊 攻防戰 教練';
+    coachTicket = readCoachTicket();
+    if (coachTicket !== null) startCoach(coachTicket);
+    else if (EMBED) tellManage('skip');
+    else $('setup').innerHTML = '<section class="card"><h2>沒有進行中的比賽</h2><p class="muted">從經營頁比賽日選「以教練身分看」會在這裡開打。</p><div class="row"><a class="primary" href="./game.html">回經營頁</a></div></section>';
+    return;
+  }
   if (location.hash === WATCH_HASH) {
     document.title = '天使戰隊 攻防戰 觀戰';
     ticket = readTicket();

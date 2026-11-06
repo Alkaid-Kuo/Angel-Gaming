@@ -1,7 +1,8 @@
 // 經營層 → 可玩版的觀戰票：正式版把一場打完的比賽（存檔裡的請求單＋當時的成績單＋顯示用的隊名、選手名、角色版本）
 // 寫進 localStorage，開 web/shooter.html#watch；觀戰頁讀到就用請求單重跑那一場（src/shooter/gateway.ts 的 gatewayDriverOptions）。
 // 兩頁同源，localStorage 共用；一次只放一張票（後開的蓋掉先開的）。
-import type { MatchOutcome, MatchRequest } from '../../manage/gateway.ts';
+import type { CoachEvent, MatchOutcome, MatchRequest } from '../../manage/gateway.ts';
+import type { CoachInfo } from './protocol.ts';
 import { SHOOTER_ENGINE_VERSION } from '../../shooter/config.ts';
 
 export const WATCH_KEY = 'angel-gaming-watch';
@@ -10,13 +11,52 @@ export const WATCH_HASH = '#watch';
 /** 經營頁把觀戰嵌在全螢幕框裡（賽前按「看比賽」）：沒有賽後卡，看完或跳過就傳訊息回經營頁 */
 export const EMBED = new URLSearchParams(location.search).has('embed');
 export const LIVE_MSG = 'angel-live';
-export interface LiveMessage {
-  type: typeof LIVE_MSG;
-  event: 'over' | 'skip';
+/**
+ * 觀戰框 → 經營頁：over 看完、skip 跳過（教練模式＝離席）；
+ * 教練模式另有 call（一則指令生效，經營頁存檔）、left（離席，打到第 round 回合）。
+ */
+export type LiveMessage =
+  | { type: typeof LIVE_MSG; event: 'over' | 'skip' }
+  | { type: typeof LIVE_MSG; event: 'call'; call: CoachEvent }
+  | { type: typeof LIVE_MSG; event: 'left'; round: number };
+
+export function tellManage(event: 'over' | 'skip'): void {
+  parent.postMessage({ type: LIVE_MSG, event } satisfies LiveMessage, location.origin);
 }
 
-export function tellManage(event: LiveMessage['event']): void {
-  parent.postMessage({ type: LIVE_MSG, event } satisfies LiveMessage, location.origin);
+/** 教練模式的訊息（指令、離席）；不是嵌在經營頁就不送 */
+export function tellManageCoach(msg: { event: 'call'; call: CoachEvent } | { event: 'left'; round: number }): void {
+  if (!EMBED) return;
+  parent.postMessage({ type: LIVE_MSG, ...msg } satisfies LiveMessage, location.origin);
+}
+
+/** 教練身分即時看的票（M5 第四批 4b）：開打前的請求單＋顯示資訊＋教練資訊；一次只放一張 */
+export const COACH_KEY = 'angel-gaming-coach';
+export const COACH_HASH = '#coach';
+
+export interface CoachTicket extends Omit<WatchTicket, 'outcome'> {
+  readonly coach: CoachInfo;
+}
+
+export function writeCoachTicket(t: Omit<CoachTicket, 'engineVersion'>): boolean {
+  try {
+    localStorage.setItem(COACH_KEY, JSON.stringify({ ...t, engineVersion: SHOOTER_ENGINE_VERSION }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function readCoachTicket(): CoachTicket | null {
+  try {
+    const raw = localStorage.getItem(COACH_KEY);
+    if (raw === null) return null;
+    const t = JSON.parse(raw) as Partial<CoachTicket>;
+    if (t.v !== 1 || !t.request || !t.coach || !Array.isArray(t.names) || !Array.isArray(t.teams)) return null;
+    return t as CoachTicket;
+  } catch {
+    return null;
+  }
 }
 
 const SPEED_KEY = 'angel-gaming-live-speed';

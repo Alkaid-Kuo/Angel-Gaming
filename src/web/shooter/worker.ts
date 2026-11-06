@@ -16,7 +16,9 @@ import { gatewayDriverOptions, outcomeOf } from '../../shooter/gateway.ts';
 import { humanSeat, seatLabels, seatNames, trialRunOptions } from './lineup.ts';
 import { seekDriver } from './seek.ts';
 import { recentShots } from './shots.ts';
-import type { BoardRow, FromShooterWorker, FullState, KillFeedItem, ShooterFrame, ShooterSetup, ToShooterWorker, WatchInfo, WatchSetup } from './protocol.ts';
+import type { BoardRow, CoachInfo, CoachSetup, FromShooterWorker, FullState, KillFeedItem, ShooterFrame, ShooterSetup, ToShooterWorker, WatchInfo, WatchSetup } from './protocol.ts';
+import { LiveCoach } from '../../shooter/live-coach.ts';
+import { coachFrame, coachViewId } from '../../shooter/coach-view.ts';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (msg: FromShooterWorker): void => ctx.postMessage(msg);
@@ -50,8 +52,54 @@ let shotTick = -1;
 let rewound = false;
 /** 重建同一場比賽（觀戰才有；玩家模式有人類操作，不能重跑） */
 let rebuild: (() => ShooterDriver) | null = null;
+/** 教練身分即時看（M5 第四批 4b）：教練、我方組別；離席後轉一般觀戰（live 還在，繼續推進） */
+let live: LiveCoach | null = null;
+let coaching: CoachInfo | null = null;
+/** 停下來等教練下指令 */
+let coachWaiting = false;
+let coachRoundSent = -1;
+
+/** 教練模式中（還沒離席）：畫面只送己方視野聯集 */
+const coachMode = (): boolean => live !== null && coaching !== null && !(setup?.spectate ?? false);
+const coachGroup = (): 0 | 1 => (live?.group ?? 0);
+
+function coachStatus(): void {
+  if (live === null) return;
+  post({ type: 'coachStatus', status: { round: live.driver.match.roundNumber, timeoutsLeft: live.timeoutsLeft(), pending: live.pausePending, left: live.leftAt !== null } });
+}
+
+/** 經營層教練身分即時看：請求單 → LiveCoach（與閘道同一條建驅動的路徑）；不能透視、不能往後跳 */
+function beginCoach(c: CoachSetup): void {
+  human = null;
+  const lc = new LiveCoach({ request: c.request, bot: baselineBot(), side: c.coach.side, assistant: c.coach.assistant, record: true });
+  live = lc;
+  coaching = c.coach;
+  coachWaiting = false;
+  coachRoundSent = -1;
+  rebuild = null;
+  const info: WatchInfo = { teams: c.teams, tags: c.tags, mine: c.mine, portraits: c.portraits };
+  launch({ team: 'T', seed: c.request.seed, spectate: false }, lc.driver, lc.group * 5, [...c.names], info, c.coach);
+  coachStatus();
+}
+
+/** 教練離席 → 一般觀戰：之後由助理教練（有請時）接手；畫面換成全知觀戰（重送 meta），已打完的回合補進回合紀錄 */
+function coachLeave(): void {
+  if (live === null || setup === null || live.leftAt !== null) return;
+  const n = live.leave();
+  coachWaiting = false;
+  post({ type: 'coachLeft', round: n });
+  const s: ShooterSetup = { ...setup, spectate: true };
+  const m = live.driver.match;
+  launch(s, live.driver, viewId, [...namesNow], watching, null);
+  if (m.over) sendOver();
+}
+
+/** 目前這場的選手名（離席重送 meta 用） */
+let namesNow: readonly string[] = [];
 
 function begin(s: ShooterSetup): void {
+  live = null;
+  coaching = null;
   human = s.spectate ? null : new ShooterHumanController();
   const build = (): ShooterDriver => new ShooterDriver(trialRunOptions(s, { baseline: baselineBot }, human));
   rebuild = s.spectate ? build : null;
@@ -61,14 +109,17 @@ function begin(s: ShooterSetup): void {
 /** 經營層觀戰：與閘道同一條建驅動的路徑，所以播出來的就是存檔裡那一場 */
 function beginWatch(w: WatchSetup): void {
   human = null;
+  live = null;
+  coaching = null;
   const info: WatchInfo = { teams: w.teams, tags: w.tags, mine: w.mine, portraits: w.portraits };
   const build = (): ShooterDriver => new ShooterDriver(gatewayDriverOptions(w.request, baselineBot(), { record: true }));
   rebuild = build;
   launch({ team: 'T', seed: w.request.seed, spectate: true }, build(), 0, [...w.names], info);
 }
 
-function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string[], info: WatchInfo | null): void {
+function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string[], info: WatchInfo | null, coach: CoachInfo | null = null): void {
   setup = s;
+  namesNow = nameList;
   driver = d;
   watching = info;
   playerId = pid;
@@ -77,9 +128,10 @@ function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string
   speed = 1;
   acc = 0;
   last = performance.now();
-  feedIdx = 0;
+  // 中途接手同一個驅動（教練離席轉一般觀戰）：已打完的回合補進回合紀錄，擊殺訊息不重送
+  feedIdx = d.match.kills.length;
   pendingSounds = [];
-  skipped = [];
+  skipped = d.match.rounds.map((r) => ({ number: r.number, winner: r.winner, winnerGroup: r.winnerGroup, reason: r.reason }));
   rewound = false;
   shotTick = d.match.tick - 1;
   overSent = false;
@@ -100,6 +152,7 @@ function launch(s: ShooterSetup, d: ShooterDriver, pid: number, nameList: string
       grenades: init.grenades,
       scopedSpeeds: Object.fromEntries(WEAPON_IDS.flatMap((id): [WeaponId, number][] => { const v = WEAPONS[id].scopedSpeed; return v !== null ? [[id, v]] : []; })),
       ...(info !== null ? { watch: info } : {}),
+      ...(coach !== null ? { coach } : {}),
       ...(s.lineup !== undefined ? { lineup: s.lineup } : {}),
     },
   });
@@ -145,6 +198,10 @@ function seek(round: number): void {
 
 /** 死後（或觀戰時被跟隨的人死了）自動換到同隊還活著的人 */
 function fixView(m: ShooterMatch): void {
+  if (coachMode()) {
+    viewId = coachViewId(m, coachGroup(), viewId);
+    return;
+  }
   const me = m.players[playerId];
   if (!setup?.spectate && me.alive) {
     viewId = playerId;
@@ -160,6 +217,13 @@ function fixView(m: ShooterMatch): void {
 function cycleView(step: number): void {
   const m = driver?.match;
   if (m === undefined) return;
+  if (coachMode()) {
+    const pool = m.players.filter((p) => p.alive && p.group === coachGroup()).map((p) => p.id);
+    if (pool.length === 0) return;
+    const at = pool.indexOf(viewId);
+    viewId = pool[(((at < 0 ? 0 : at + step) % pool.length) + pool.length) % pool.length];
+    return;
+  }
   const me = m.players[playerId];
   if (!setup?.spectate && me.alive) return;
   const pool = m.players.filter((p) => p.alive && (setup?.spectate || (p.team === me.team && p.id !== playerId))).map((p) => p.id);
@@ -190,6 +254,15 @@ function sendFrame(viewObs?: ShooterObservation): void {
   if (d === null || setup === null) return;
   const m = d.match;
   fixView(m);
+  if (coachMode()) {
+    // 教練視角：只有己方活著選手的觀察資料聯集＋計分板公開欄位（coach-view.ts），沒有全狀態
+    const feed: KillFeedItem[] = m.kills.slice(feedIdx).map((k) => ({ tick: k.tick, killer: k.killer, victim: k.victim, weapon: k.weapon }));
+    feedIdx = m.kills.length;
+    post({ type: 'frame', frame: { ...coachFrame(m, coachGroup(), viewId), sounds: pendingSounds, feed, paused: paused || coachWaiting, ...(skipped.length > 0 ? { skipped } : {}) } });
+    pendingSounds = [];
+    skipped = [];
+    return;
+  }
   const view = viewObs !== undefined && viewObs.me.id === viewId && viewObs.tick === m.tick ? viewObs : m.observe(viewId);
   const self = viewId === playerId ? view : m.observe(playerId);
   const myTeam = m.players[playerId].team;
@@ -227,7 +300,7 @@ function loop(): void {
   const dt = now - last;
   last = now;
   const d = driver;
-  if (d === null || paused || d.match.over) return;
+  if (d === null || paused || coachWaiting || d.match.over) return;
   acc += dt * speed;
   const maxSteps = MAX_CATCH_UP * Math.max(1, speed);
   if (acc > maxSteps * TICK_MS) acc = maxSteps * TICK_MS;
@@ -235,8 +308,24 @@ function loop(): void {
   let lastObs: ShooterObservation | undefined;
   while (acc >= TICK_MS && !d.match.over) {
     acc -= TICK_MS;
-    d.step();
-    stepped += 1;
+    if (live !== null && live.driver === d) {
+      const stop = live.step();
+      stepped += 1;
+      if (d.match.roundNumber !== coachRoundSent) {
+        coachRoundSent = d.match.roundNumber;
+        coachStatus();
+      }
+      if (stop !== null) {
+        // 停在新回合開始、任何 Bot 為這回合做決策之前：等教練下指令
+        coachWaiting = true;
+        acc = 0;
+        post({ type: 'coachStop', stop });
+        break;
+      }
+    } else {
+      d.step();
+      stepped += 1;
+    }
     // 聲音：每個決策 tick 取一次（觀察資料的聲音視窗是上一個決策 tick 到現在），不重複也不漏
     if (d.match.isDecisionTick()) {
       fixView(d.match);
@@ -260,6 +349,30 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
         break;
       case 'watch':
         beginWatch(msg.watch);
+        break;
+      case 'coach':
+        beginCoach(msg.coach);
+        break;
+      case 'coachPause':
+        if (live !== null && coachMode()) {
+          if (msg.on) live.requestPause();
+          else live.cancelPause();
+          coachStatus();
+        }
+        break;
+      case 'coachResolve':
+        if (live !== null && coachWaiting) {
+          const ev = live.resolve(msg.plan, msg.call);
+          if (ev !== null) post({ type: 'coachCall', event: ev });
+          coachWaiting = false;
+          last = performance.now();
+          acc = 0;
+          coachStatus();
+          sendFrame();
+        }
+        break;
+      case 'coachLeave':
+        coachLeave();
         break;
       case 'skipRound':
         skipRound();
@@ -286,9 +399,12 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
         sendFrame();
         break;
       case 'speed':
-        if (setup?.spectate) speed = Math.max(0.25, Math.min(8, msg.speed));
+        if (setup?.spectate || coachMode()) speed = Math.max(0.25, Math.min(8, msg.speed));
         break;
       case 'stop':
+        live = null;
+        coaching = null;
+        coachWaiting = false;
         driver = null;
         human = null;
         setup = null;

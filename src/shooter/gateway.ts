@@ -15,12 +15,13 @@
 // 觀戰回放（步驟 9）：可玩版的觀戰 Worker 用同一個 gatewayDriverOptions 建 ShooterDriver、逐 tick 推進，
 // 所以重播與經營層當時打的那一場是同一場（成績單與終局雜湊相同，test/manage-shooter.test.ts）。
 // 試玩頁的基準 Bot 座位（src/web/shooter/lineup.ts）也呼叫 seatOf、seatController、seatKnobs，座位邏輯只有這一份。
-import type { CoachEvent, MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec, PlayerStat, SideSpec } from '../manage/gateway.ts';
+import type { CoachEvent, MatchFormat, MatchOutcome, MatchRequest, MatchRound, PlayerSpec, PlayerStat } from '../manage/gateway.ts';
 import { coachRules, coachSchedule } from './coach.ts';
+import { sideOrders, sideTactics } from './team-data.ts';
 import type { KnobValues } from '../api/types.ts';
 import { resolveKnobs } from '../sandbox/controller.ts';
 import type { CompiledBot } from '../sandbox/compile.ts';
-import type { Attributes, InitTactics, TeamOrders } from './api.ts';
+import type { Attributes, TeamOrders } from './api.ts';
 import { ATTRIBUTE_KEYS, ROUND, TEAM_SIZE, type AttributeKey } from './config.ts';
 import { MAPS, type ShooterMap } from './map.ts';
 import { derivePlayer, reactionTicksFor, SHOOTER_ROLES, type ShooterRole } from './players.ts';
@@ -69,29 +70,8 @@ export function attributeShift(config: PlayerSpec['config']): number {
   return clamp(Math.round(num(config.habit) / 15), -4, 4) + clamp(Math.round(num(config.presetBonus) / 15), 0, 6);
 }
 
-/** 不透明資料裡某個前綴的數值欄位（例 p_rushA → { rushA }），夾到 lo～hi 的整數 */
-function prefixed(bag: Readonly<Record<string, number | string>> | undefined, prefix: string, lo: number, hi: number): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (bag === undefined) return out;
-  for (const [k, v] of Object.entries(bag)) {
-    if (k.startsWith(prefix) && typeof v === 'number' && Number.isFinite(v)) out[k.slice(prefix.length)] = clamp(Math.round(v), lo, hi);
-  }
-  return out;
-}
-
-/** 一方的戰術熟練度（每座位一份）；隊伍沒有 team 資料＝null（舊請求單、試玩） */
-export function sideTactics(side: SideSpec): (InitTactics | null)[] {
-  if (side.team === undefined) return side.players.map(() => null);
-  const team = prefixed(side.team, 'q_', 0, 100);
-  return side.players.map((p) => ({ team, personal: prefixed(p.config, 'p_', 0, 100) }));
-}
-
-/** 一方的教練指令（比賽計畫，沒有命令）；沒有 team 資料＝null */
-export function sideOrders(side: SideSpec): TeamOrders | null {
-  if (side.team === undefined) return null;
-  const e = num(side.team.economy);
-  return { pref: prefixed(side.team, 'pref_', -1, 3), economy: e === 1 ? 1 : e === 2 ? 2 : 0, call: null };
-}
+// 隊伍層資料的解析（prefixed、sideTactics、sideOrders）在 team-data.ts：閘道與教練指令排程共用同一份，同一張請求單解出同一個計畫
+export { prefixed, sideOrders, sideTactics } from './team-data.ts';
 
 export interface GatewaySeat {
   readonly role: ShooterRole;
@@ -236,7 +216,7 @@ export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, op
  * 同 gatewayDriverOptions，另外回傳教練指令的紀錄（M5 第四批：請求單有 calls 或 coachAi 時，比賽打完後就是雙方所有生效的指令；沒有＝null）。
  * 每次呼叫建一份新的指令排程（有狀態），所以同一張請求單每次建驅動都從頭算、結果相同。
  */
-export function gatewayDriverSetup(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): { options: ShooterRunOptions; calls: CoachEvent[] | null } {
+export function gatewayDriverSetup(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean; live?: boolean } = {}): { options: ShooterRunOptions; calls: CoachEvent[] | null } {
   const format = formatOf(request.formatId);
   for (const side of [request.a, request.b]) {
     if (side.players.length !== format.lineupSize) throw new Error(`攻防戰每方 ${format.lineupSize} 人，名單是 ${side.players.length} 人`);
@@ -252,7 +232,7 @@ export function gatewayDriverSetup(request: MatchRequest, bot: CompiledBot, opts
   const orders: [TeamOrders | null, TeamOrders | null] = [sideOrders(request.a), sideOrders(request.b)];
   const playbook = request.a.team !== undefined || request.b.team !== undefined ? { tactics: [...sideTactics(request.a), ...sideTactics(request.b)], orders } : {};
   // 教練指令（M5 第四批）：有 calls 或 coachAi 才走每回合排程；沒有時選項和第一批逐欄相同
-  const schedule = coachSchedule(request, coachRules(fo));
+  const schedule = coachSchedule(request, coachRules(fo), opts.live === true);
   const coach = schedule !== null ? { ordersOf: schedule.ordersOf } : {};
   return { options: { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), ...playbook, ...coach, record: opts.record === true, ...fo }, calls: schedule?.log ?? null };
 }
