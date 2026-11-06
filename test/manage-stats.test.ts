@@ -241,7 +241,7 @@ describe('經營層：賽季累計、戰術紀錄、已知層', () => {
     for (const t of v6.teams as unknown as Record<string, unknown>[]) delete t.tacticLog;
     for (const f of v6.fixtures) if (f.result !== null) delete f.result.stats;
     const m = deserialize(JSON.stringify(v6), content);
-    expect(m.version).toBe(9);
+    expect(m.version).toBe(10);
     expect(m.players.every((p) => p.season.games === 0 && p.season.kills === 0)).toBe(true);
     for (const t of m.teams) expect(t.tacticLog).toEqual(s.teams.find((x) => x.id === t.id)?.tacticLog);
     expect(m.fixtures.every((f) => f.result === null || f.result.stats === undefined)).toBe(true);

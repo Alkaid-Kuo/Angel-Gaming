@@ -56,6 +56,19 @@ export function npcLineup(view: KnownView, spec: PersonaSpec, size: number, rng:
   return [{ type: 'setLineup', lineup: top }];
 }
 
+/** NPC 請助理教練（M5 規格 6.3）：豪門、數據派一定請；青訓派、守財奴現金夠撐這麼多週固定支出才請，跌破 NPC_ASSISTANT_FIRE 週就辭退 */
+export const NPC_ASSISTANT_WEEKS: Readonly<Record<Persona, number>> = { whale: 0, data: 0, youth: 10, miser: 16 };
+export const NPC_ASSISTANT_FIRE = 4;
+
+export function npcAssistant(view: KnownView, persona: Persona, content: ContentPack): Command[] {
+  if (content.tactics.length === 0) return [];
+  const need = NPC_ASSISTANT_WEEKS[persona];
+  const fixed = Math.max(1, view.me.weeklyFixedCost + (view.me.assistant ? 0 : content.economy.assistantSalary));
+  if (!view.me.assistant && (need === 0 || view.me.cash >= need * fixed)) return [{ type: 'hireAssistant' }];
+  if (view.me.assistant && need > 0 && view.me.cash < NPC_ASSISTANT_FIRE * fixed) return [{ type: 'fireAssistant' }];
+  return [];
+}
+
 /** NPC 現金緩衝（M5 經濟平衡，2026-11-06）：排練、訓練、訓練中心升級後各要留幾週固定支出；青訓派錢少，留得多 */
 export const NPC_BUFFER_WEEKS: Readonly<Record<Persona, { readonly rehearse: number; readonly train: number; readonly upgrade: number }>> = {
   whale: { rehearse: 3, train: 2, upgrade: 6 },

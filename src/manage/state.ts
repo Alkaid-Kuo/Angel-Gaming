@@ -81,7 +81,7 @@ export function weeklySalaries(state: GameState, teamId: TeamId): number {
 }
 
 export function weeklyFixedCost(state: GameState, content: ContentPack, team: Team): number {
-  return weeklySalaries(state, team.id) + content.economy.facilityMaintenance[team.trainingLevel - 1];
+  return weeklySalaries(state, team.id) + content.economy.facilityMaintenance[team.trainingLevel - 1] + (team.assistant ? content.economy.assistantSalary : 0);
 }
 
 export function weeklySponsor(content: ContentPack, team: Team): number {

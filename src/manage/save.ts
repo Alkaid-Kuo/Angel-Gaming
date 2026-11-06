@@ -101,6 +101,13 @@ export function migrate8to9(s: GameState): GameState {
   return s;
 }
 
+/** 第 9 版 → 第 10 版（M5 第四批 4a：教練指令）：沒有助理教練（NPC 下一個比賽日依個性重新決定請不請） */
+export function migrate9to10(s: GameState): GameState {
+  for (const t of s.teams) t.assistant = false;
+  s.version = 10;
+  return s;
+}
+
 export function deserialize(json: string, content: ContentPack): GameState {
   let s = JSON.parse(json) as GameState;
   if (s.contentId !== content.id) throw new Error(`存檔的內容包 ${s.contentId} 與目前 ${content.id} 不符`);
@@ -108,6 +115,7 @@ export function deserialize(json: string, content: ContentPack): GameState {
   if (s.version === 6) s = migrate6to7(s);
   if (s.version === 7) s = migrate7to8(s, content);
   if (s.version === 8) s = migrate8to9(s);
+  if (s.version === 9) s = migrate9to10(s);
   if (s.version !== SAVE_VERSION) throw new Error(`存檔版本 ${s.version} 與目前 ${SAVE_VERSION} 不符`);
   return s;
 }

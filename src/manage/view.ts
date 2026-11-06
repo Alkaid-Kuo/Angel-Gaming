@@ -9,7 +9,7 @@ import { standings } from './league.ts';
 import { capPub, gradeOf, type Grade } from './attrs.ts';
 import { capacityLeft, effectiveLineup, effectiveTactics, playerOf, rosterOf, slotsLeft, stageOfPlayer, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
 import type { Bet, FixtureId, GamePlan, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, RoundResult, ScrimReport, SeasonResult, SeasonStat, Stage, TacticRecord, TeamId, TeamIntelReport, Winner } from './types.ts';
-import type { PlayerStat } from './gateway.ts';
+import type { CoachEvent, PlayerStat } from './gateway.ts';
 import { TOTAL_WEEKS } from './types.ts';
 
 export interface KnownPlayer {
@@ -61,6 +61,8 @@ export interface KnownFixture {
     watchable: boolean;
     /** 雙方個人統計（M5 第三批，公開；各依名單順序）；沒有統計的比賽沒有這欄 */
     stats?: { home: PlayerStat[]; away: PlayerStat[] };
+    /** 雙方生效的教練指令（M5 第四批）：賽後公開（6.7）；side a＝主隊 */
+    calls?: CoachEvent[];
   } | null;
 }
 
@@ -81,6 +83,8 @@ export interface KnownView {
     capacityLeft: number;
     /** 本週訓練時段還剩幾節（屬性訓練與戰術排練共用，M5 第二批） */
     slotsLeft: number;
+    /** 有沒有請助理教練（M5 第四批） */
+    assistant: boolean;
     weeklyFixedCost: number;
     weeklySponsor: number;
     /** 現金還撐得幾週（固定支出 − 贊助 ≤ 0 時為 null＝不燒錢） */
@@ -138,6 +142,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       roster: mine.map((p) => p.id),
       capacityLeft: capacityLeft(state, content, team),
       slotsLeft: slotsLeft(state, content, team),
+      assistant: team.assistant,
       weeklyFixedCost: fixed,
       weeklySponsor: sponsor,
       runwayWeeks: burn <= 0 ? null : Math.max(0, Math.floor(team.cash / burn)),
@@ -183,6 +188,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
             rounds: f.result.rounds.map((r) => ({ label: r.label, winner: r.winner, home: r.scoreA, away: r.scoreB, ...(r.phase !== undefined ? { phase: r.phase } : {}), ...ownTactic(r, f.home === teamId ? 'a' : f.away === teamId ? 'b' : null) })),
             watchable: format?.watchable === true,
             ...(f.result.stats !== undefined ? { stats: { home: f.result.stats[0].map((s) => ({ ...s })), away: f.result.stats[1].map((s) => ({ ...s })) } } : {}),
+            ...(f.result.calls !== undefined ? { calls: structuredClone(f.result.calls) } : {}),
           }
         : null,
     })),

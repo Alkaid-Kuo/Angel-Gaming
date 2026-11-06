@@ -90,7 +90,7 @@ export function tacticsScreen(ctx: Ctx): string {
         <p class="dim">${icon('info', 14)}一節佔 1 個訓練時段、${wan(c.economy.rehearseCost)} 萬；出賽五人和隊伍一起漲，越熟越難漲。新人第一次上場，隊伍默契會掉一些。</p>
         <div class="lbl">經濟風格</div>
         <div class="seg3">${ECON.map((n, i) => `<button class="${plan.economy === i ? 'on' : ''}" data-act="econ" data-e="${i}" title="${ECON_TIP[i]}" ${active ? '' : 'disabled'}>${n}</button>`).join('')}</div>
-        <div class="go">${btn('去訓練基地', 'data-act="go" data-to="training"', 'sm ghost')}</div>
+        <div class="go"><span class="asst" title="有請時，跳過的比賽由助理教練照 AI 教練的規則代喊暫停與命令（連輸三回合、對方賽點時暫停；換邊時依本場勝負調星級）">${icon('users', 14)}助理教練 ${v.me.assistant ? `<b>已請</b> · ${wan(c.economy.assistantSalary)} 萬／週` : '<span class="dim">未請</span>'}</span>${btn(v.me.assistant ? '辭退' : `請助理教練 · ${wan(c.economy.assistantSalary)} 萬／週`, `data-act="assistant" ${active ? '' : 'disabled'}`, 'sm ghost')}${btn('去訓練基地', 'data-act="go" data-to="training"', 'sm ghost')}</div>
       </div>
       ${scoutPanel(ctx, active)}
     </section>`;

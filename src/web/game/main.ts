@@ -609,6 +609,10 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     if (run({ type: 'bet', fixtureId: s.fixtureId, side: s.side, stake: Math.min(s.stake, maxStake()) * 10 }, '下注成功，祝你好運')) ui.slip = null;
     render();
   },
+  assistant: () => {
+    const has = game?.view().me.assistant === true;
+    run({ type: has ? 'fireAssistant' : 'hireAssistant' }, has ? '助理教練辭退了，下週起不付週薪' : '請了助理教練：跳過的比賽由他代喊暫停與命令');
+  },
   steam: (el) => {
     ui.scoutTeam = el.dataset.t ?? null;
     render();

@@ -156,19 +156,19 @@ describe('球探對戰隊：已知層與存檔', () => {
     expect(me.teamIntel[0].top.T.length).toBeGreaterThan(0);
   });
 
-  it('第 9 版存讀一致；第 8 版補空報告', async () => {
+  it('第 10 版存讀一致；第 8 版補空報告（串到第 10 版）', async () => {
     const s = newGame(36, content);
     const g = new TagGateway();
     await advance(s, content, g);
     applyCommand(s, content, humanTeam(s).id, { type: 'scoutTeam', teamId: s.teams.find((t) => !t.human)?.id as string });
     await advance(s, content, g);
-    expect(SAVE_VERSION).toBe(9);
+    expect(SAVE_VERSION).toBe(10);
     expect(JSON.parse(serialize(deserialize(serialize(s), content)))).toEqual(JSON.parse(serialize(s)));
     const v8 = JSON.parse(serialize(s)) as GameState & Record<string, unknown>;
     v8.version = 8;
     for (const t of v8.teams as unknown as Record<string, unknown>[]) delete t.teamIntel;
     const m = deserialize(JSON.stringify(v8), content);
-    expect(m.version).toBe(9);
+    expect(m.version).toBe(10);
     for (const t of m.teams) expect(t.teamIntel).toEqual([]);
   });
 });

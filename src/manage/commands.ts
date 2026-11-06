@@ -129,6 +129,15 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       state.jobs.push({ kind: 'scout', id: state.nextId++, teamId, playerId: p.id });
       return OK;
     }
+    case 'hireAssistant':
+    case 'fireAssistant': {
+      // M5 第四批：助理教練（週薪 assistantSalary，週結算時付）；有請時跳過的比賽由 AI 教練代喊
+      if (content.tactics.length === 0) return fail('這個賽制沒有戰術手冊');
+      const want = cmd.type === 'hireAssistant';
+      if (team.assistant === want) return fail(want ? '已經請了助理教練' : '沒有請助理教練');
+      team.assistant = want;
+      return OK;
+    }
     case 'scoutTeam': {
       // M5 5.3：球探對戰隊，費用同球探；推進一週後回報（含本週那場）
       if (content.tactics.length === 0) return fail('這個賽制沒有戰術手冊');
