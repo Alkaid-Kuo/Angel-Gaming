@@ -267,6 +267,8 @@ export const P = {
   chaseTime: 3,
   /** 閃光：隊友離爆點太近（格）就不丟 */
   flashMateClear: 4,
+  /** 3.0 資源層（道具計畫、claim、重分配）；false＝2.8 的道具行為 */
+  resLayer: true,
   /** 煙霧：放在入口往架點方向幾格 */
   smokeOff: 4.5,
   /** 同回合兩顆煙的落點至少隔幾格（2.2） */

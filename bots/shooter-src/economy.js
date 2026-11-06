@@ -197,10 +197,11 @@ export class Economy {
   /**
    * 照買法買（在規則內）：狙擊手（awper）錢夠買狙擊槍；道具依角色；突破手護甲優先、錨點拆彈器優先；CT 全買帶拆彈器；備彈不到一半補
    * 2.6.2：gift＝要送人的槍（先買）；receive＝這回合有人送槍，不買主武器
+   * 3.0：orders＝資源層購買單指定給自己的道具（槍、甲、拆彈器之後，角色道具之前買）
    * @param {import('./base.js').Observation} obs @param {BuyCall} call @param {number} role @param {boolean} awper
-   * @param {import('./base.js').WeaponId | null} [gift] @param {boolean} [receive] @returns {import('./base.js').BuyItem[]}
+   * @param {import('./base.js').WeaponId | null} [gift] @param {boolean} [receive] @param {import('./base.js').GrenadeId[]} [orders] @returns {import('./base.js').BuyItem[]}
    */
-  items(obs, call, role, awper, gift = null, receive = false) {
+  items(obs, call, role, awper, gift = null, receive = false, orders = []) {
     const me = obs.me;
     const rules = this.data.rules;
     const team = me.team;
@@ -226,8 +227,16 @@ export class Economy {
     const armorLeft = () => me.loadout.armor < rules.maxArmor && !items.includes('armor') ? rules.armorPrice : 0;
     const armor = () => armorLeft() > 0 && take('armor', rules.armorPrice);
     const kit = () => team === 'CT' && !me.loadout.kit && !items.includes('kit') && take('kit', rules.kitPrice);
+    /** 身上已有＋這次要買的道具 @type {import('./base.js').GrenadeId[]} */
+    const owned = [...me.loadout.grenades];
+    const order = () => {
+      for (const g of orders) {
+        const def = this.data.grenades.find((x) => x.id === g);
+        if (def === undefined || owned.length >= rules.grenadeSlots || owned.filter((x) => x === g).length >= def.maxCarry) continue;
+        if (take(g, def.price)) owned.push(g);
+      }
+    };
     const util = (/** @type {number} */ max) => {
-      const owned = [...me.loadout.grenades];
       let n = 0;
       for (const g of UTIL[team][role] ?? UTIL[team][0]) {
         if (n >= max || owned.length >= rules.grenadeSlots) break;
@@ -252,6 +261,7 @@ export class Economy {
       else if (!good && !take(rifle, this.cost(rifle))) take('smg', this.cost('smg'));
       armor();
       kit();
+      order();
       util(4);
     } else if (mode === 'force') {
       if (role === 1) armor();
@@ -260,6 +270,7 @@ export class Economy {
       armor();
       if (!good && primary === null && items.length === 1 && money >= this.cost('deagle')) take('deagle', this.cost('deagle'));
       kit();
+      order();
       util(1);
     } else if (mode === 'half') {
       if (role === 1) armor();
