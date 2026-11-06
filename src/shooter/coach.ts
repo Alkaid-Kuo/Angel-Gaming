@@ -9,6 +9,7 @@ import type { OvertimeRules, Team, TeamOrders } from './api.ts';
 import { ROUND } from './config.ts';
 import type { CoachInputs, ShooterRunOptions } from './runner.ts';
 import type { ShooterMatchOptions } from './sim.ts';
+import { prefixed, sideOrders } from './team-data.ts';
 
 /** 戰術代號 → 陣營（和內容包 SHOOTER_TACTICS 同一份清單；test/shooter-coach-orders.test.ts 對照） */
 export const TACTIC_SIDE: Readonly<Record<string, Team>> = {
@@ -160,22 +161,14 @@ export function aiCoach(x: AiCoachInput, lastTimeoutRound: number): AiCoachDecis
   return { kind: 'timeout', plan: null, call };
 }
 
-const clampInt = (v: unknown, lo: number, hi: number, dflt: number): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : dflt);
-
-/** 一方請求單的計畫（pref_／economy）；沒有 team＝null */
+/** 一方請求單的計畫：和閘道同一個解析（sideOrders）；沒有 team＝null */
 function sidePlan(side: SideSpec): CoachPlan | null {
-  if (side.team === undefined) return null;
-  const pref: Record<string, number> = {};
-  for (const [k, v] of Object.entries(side.team)) if (k.startsWith('pref_')) pref[k.slice(5)] = clampInt(v, -1, 3, 0);
-  const e = clampInt(side.team.economy, 0, 2, 0);
-  return { pref, economy: e as 0 | 1 | 2 };
+  const o = sideOrders(side);
+  return o === null ? null : { pref: { ...o.pref }, economy: o.economy };
 }
 
-function sideEff(side: SideSpec): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(side.team ?? {})) if (k.startsWith('q_')) out[k.slice(2)] = clampInt(v, 0, 100, 50);
-  return out;
-}
+/** 一方的隊伍執行熟練度：和開局資料同一個解析（q_，夾 0～100） */
+const sideEff = (side: SideSpec): Record<string, number> => prefixed(side.team, 'q_', 0, 100);
 
 export interface CoachSchedule {
   readonly ordersOf: NonNullable<ShooterRunOptions['ordersOf']>;
