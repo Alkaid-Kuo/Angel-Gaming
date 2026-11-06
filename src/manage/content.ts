@@ -102,6 +102,8 @@ export interface TacticSpec {
   readonly id: string;
   readonly side: 'T' | 'CT';
   readonly name: string;
+  /** 短名（結果幕逐回合比分條的小字；沒有＝用 name）；只供顯示 */
+  readonly abbr?: string;
   readonly affinity: readonly string[];
 }
 

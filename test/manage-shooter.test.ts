@@ -269,6 +269,23 @@ describe('攻防戰內容包＋真閘道（短賽制）', () => {
     }
     for (const t of whole.teams) expect(t.cash).toBe((start.get(t.id) as number) + t.ledger.reduce((s, e) => s + e.amount, 0));
     expect(whole.players.reduce((s, p) => s + p.elo, 0)).toBe(eloSum);
+    // M5 1b（Bot 2.8 接上）：每回合雙方都有合法的戰術標籤；本季戰術紀錄＝該隊所有回合；玩家（passive 不排練、不簽人）打過的戰術默契高於開局
+    const side = new Map(content.tactics.map((t) => [t.id, t.side]));
+    for (const f of whole.fixtures) {
+      for (const [i, r] of (f.result?.rounds ?? []).entries()) {
+        expect(typeof r.tactics?.a === 'string' && typeof r.tactics?.b === 'string', `第 ${f.week} 週 ${f.home}－${f.away} 第 ${i + 1} 回合`).toBe(true);
+        expect(side.has(r.tactics?.a as string) && side.has(r.tactics?.b as string)).toBe(true);
+        expect(side.get(r.tactics?.a as string)).not.toBe(side.get(r.tactics?.b as string));
+      }
+    }
+    for (const t of whole.teams) {
+      const rounds = whole.fixtures.filter((f) => f.home === t.id || f.away === t.id).reduce((s, f) => s + (f.result?.rounds.length ?? 0), 0);
+      expect(Object.values(t.tacticLog).reduce((s, x) => s + x.played, 0), t.id).toBe(rounds);
+    }
+    const me = whole.teams.find((t) => t.human) as GameState['teams'][number];
+    const used = Object.keys(me.tacticLog);
+    expect(used.length).toBeGreaterThanOrEqual(6);
+    for (const id of used) expect(me.playbook[id], id).toBeGreaterThan(content.economy.playbookStart.human);
     const played = memo.memo.size;
 
     const part = newGame(8, content, { gateway: memo });

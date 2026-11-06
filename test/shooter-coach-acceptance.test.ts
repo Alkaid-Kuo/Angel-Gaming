@@ -11,7 +11,7 @@ import { MAPS } from '../src/shooter/map.ts';
 import { ShooterBatchController, ShooterDriver, type CallOutcome, type ShooterController } from '../src/shooter/runner.ts';
 import { PLAYER_COUNT } from '../src/shooter/sim.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
-import { BANNED, SCENARIOS, evaluate, overall, playGame, readsTactics, scenarioById, type Check, type ControllerFactory, type GameRow, type RoundRow } from '../scripts/shooter-coach-lib.ts';
+import { BANNED, SCENARIOS, evaluate, overall, playGame, readsTactics, roundWinRate, scenarioById, type Check, type ControllerFactory, type GameRow, type RoundRow } from '../scripts/shooter-coach-lib.ts';
 import { stubFactory } from './coach-stub.ts';
 
 const fmt = formatOptions('shooter-short');
@@ -31,7 +31,7 @@ describe('M5 驗收工具：不讀戰術資料的 Bot（陪練）回報無資料
   const bot = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'practice');
   const make: ControllerFactory = (seed) => ({ controllers: Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(bot, 'baseline', seed, pid, MAPS.redrock(), { timeLimits: false })) });
 
-  it('八個情境都跑完；讀戰術資料＝否；每個判定都是無資料（不是 0%、不是未過）；整體結論是無資料', () => {
+  it('九個情境都跑完；讀戰術資料＝否；每個判定都是無資料（不是 0%、不是未過）；整體結論是無資料', () => {
     const reads = readsTactics(make, 3, fmt);
     expect(reads).toBe(false);
     const all: Check[] = [];
@@ -50,7 +50,7 @@ describe('M5 驗收工具：不讀戰術資料的 Bot（陪練）回報無資料
     }
     // 每個情境的專屬判定都在（不是被略過）
     const ids = new Set(all.map((c) => c.id));
-    for (const id of ['coverage', 'diversity', 'star3', 'ecoDefault', 'effSkewT', 'effSkewCT', 'ban', 'call', 'strength']) expect(ids.has(id), id).toBe(true);
+    for (const id of ['coverage', 'diversity', 'star3', 'ecoDefault', 'effSkewT', 'effSkewCT', 'ban', 'call', 'strength', 'strength100']) expect(ids.has(id), id).toBe(true);
     const o = overall(all);
     expect(o.verdict).toBe('noData');
     expect(o.text).toContain('無資料');
@@ -93,13 +93,30 @@ describe('M5 驗收工具：判定規則（合成資料）', () => {
     expect(overall(c).verdict).toBe('noData');
   });
 
-  it('強度：Bot 不讀戰術資料時是無資料，即使勝率剛好落在窗口內', () => {
-    const g = (w: GameRow['winner']): GameRow => game([row({ tag: 'rushA' })], w);
-    const games = [...Array.from({ length: 58 }, () => g('a')), ...Array.from({ length: 42 }, () => g('b'))];
-    expect(byId(evaluate(scenarioById('strength'), games, false), 'strength').verdict).toBe('noData');
-    const ok = byId(evaluate(scenarioById('strength'), games, true), 'strength');
+  it('強度（無顯著偏差）：Bot 不讀戰術資料時是無資料；回合勝率以 a 方回合算，區間含 50% 且 ≥ 48% 才過', () => {
+    // 每場 10 回合，a 方贏 w 回合
+    const g = (w: number): GameRow => game(Array.from({ length: 10 }, (_, i) => row({ round: i + 1, tag: 'rushA', won: i < w })), w > 5 ? 'a' : 'b');
+    const even = Array.from({ length: 100 }, (_, i) => g(i % 2 === 0 ? 6 : 4));
+    expect(byId(evaluate(scenarioById('strength'), even, false), 'strength').verdict).toBe('noData');
+    const ok = byId(evaluate(scenarioById('strength'), even, true), 'strength');
     expect(ok.verdict).toBe('pass');
-    expect(ok.value).toContain('58.0%');
+    expect(ok.value).toContain('50.0%');
+    expect(ok.value).toContain('500/1000 回合');
+    // 高熟練度方顯著贏（58%）：區間不含 50% → 未過
+    const strong = Array.from({ length: 100 }, (_, i) => g(i % 5 === 0 ? 5 : 6));
+    const hi = byId(evaluate(scenarioById('strength100'), strong, true), 'strength100');
+    expect(hi.verdict).toBe('fail');
+    expect(hi.value).toContain('58.0%');
+    // 低熟練度方顯著贏：未過
+    expect(byId(evaluate(scenarioById('strength'), Array.from({ length: 100 }, (_, i) => g(i % 5 === 0 ? 5 : 4)), true), 'strength').verdict).toBe('fail');
+  });
+
+  it('強度的區間以比賽為群集：每場回合全贏或全輸時區間比逐回合獨立寬', () => {
+    const all = (w: boolean): GameRow => game(Array.from({ length: 10 }, (_, i) => row({ round: i + 1, tag: 'rushA', won: w })), w ? 'a' : 'b');
+    const r = roundWinRate([...Array.from({ length: 50 }, () => all(true)), ...Array.from({ length: 50 }, () => all(false))]);
+    expect(r.p).toBe(0.5);
+    // 獨立回合的半寬約 1.96×√(0.25/1000)≈3.1 點；群集後約 9.8 點
+    expect(r.hi - r.p).toBeGreaterThan(0.09);
   });
 
   it('命令回合沒喊標籤算不符；陣營不對的標籤算不合法', () => {
@@ -147,7 +164,7 @@ describe('M5 驗收工具：假 Bot 跑通注入 → 標籤 → 統計', () => {
     expect(byId(run('plan0', make, [1, 2], true).checks, 'diversity').verdict).toBe('fail');
   });
 
-  it('強度：80 對 20 的熟練度依座位送到兩邊（a 方換組也跟著走），勝率照算', () => {
+  it('強度：80 對 20 的熟練度依座位送到兩邊（a 方換組也跟著走），回合勝率照算', () => {
     const seen: number[][] = [];
     const spy: ControllerFactory = (seed) => {
       const made = make();
