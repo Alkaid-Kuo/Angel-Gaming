@@ -3827,7 +3827,8 @@ this.roles.hear(c.from, r);
 continue;
 }
 const first = (this.plan === null || this.roles.of(me.id) === LURK) && c.text.startsWith('P:');
-this.inbox.push({ ready: first || c.text.startsWith('B:') ? t : t + this.eventDelay, from: c.from, text: c.text });
+const now = first || c.text.startsWith('B:') || (P.resLayer && this.res.active && (c.text.startsWith('E:flash ') || c.text.startsWith('E:flashing ')));
+this.inbox.push({ ready: now ? t : t + this.eventDelay, from: c.from, text: c.text });
 }
 const keep = [];
 for (const msg of this.inbox) {
@@ -4673,8 +4674,10 @@ const size = Math.max(1, this.groupSize(obs, p));
 const first = Math.min(1, size - 1);
 const since = this.flashCue >= 0 ? t - this.flashCue : -1;
 let flashTurn;
-const myFlash = act && this.can(me, 'flash', ['entryFlash']);
-if (act) flashTurn = myFlash;
+const planned = act && this.can(me, 'flash', ['entryFlash']);
+const plannedLeft = act && this.res.items.some((it) => it.purpose === 'entryFlash' && it.state === 'plan' && this.isAlive(obs, it.owner) && it.owner !== me.id);
+const myFlash = planned || (act && !plannedLeft && this.can(me, 'flash', ['free']));
+if (planned) flashTurn = true;
 else if (P.flashClaim) {
 const order = (idx - first + size) % size;
 flashTurn = order === 0 || (since >= 0 && since > (P.flashTurn + (order - 1) * P.flashStagger) * this.tps);
@@ -5143,8 +5146,9 @@ this.flashList.push(...def.slice(0, 12));
 }
 const me = obs.me;
 const B = this.util.blindRange;
-const hold = pred === null ? null : this.holdLine(pred);
-const mates = obs.teammates.filter((m) => m.alive).map((m) => (hold !== null && dist(m.x, m.y, pred?.ox ?? 0, pred?.oy ?? 0) < 14 * UNIT && !this.inRectSite(m.x, m.y, s) ? { ...m, x: hold.x, y: hold.y } : m));
+const hard = pred !== null;
+const mates = obs.teammates.filter((m) => m.alive);
+const facing = ( m, c) => Math.abs(adiff(angleTo(m.x, m.y, c.x, c.y), m.facing)) <= this.data.rules.grenadeRules.flashSideDeg;
 this.flashUnsafe = false;
 let best = null;
 let bestS = 0;
@@ -5153,7 +5157,7 @@ for (const c of this.flashList) {
 if (avoid !== null && dist(c.x, c.y, avoid.x, avoid.y) < P.flashSecondGap * UNIT) continue;
 if (++tries > 12) break;
 if (this.util.solve(me.x, me.y, c.x, c.y) === null) continue;
-if (hold !== null && mates.some((m) => dist(m.x, m.y, c.x, c.y) < B && g.los(m.x, m.y, c.x, c.y))) {
+if (hard && mates.some((m) => dist(m.x, m.y, c.x, c.y) < B && g.los(m.x, m.y, c.x, c.y) && facing(m, c) && !this.canHide(m.x, m.y, c, 4))) {
 this.flashUnsafe = true;
 continue;
 }
@@ -5182,19 +5186,14 @@ if (out.goal === null || obs.enemies.length > 0) return;
 const B = this.util.blindRange;
 const d = dist(me.x, me.y, out.goal.x, out.goal.y);
 if (d < UNIT) return;
-const sx = me.x + ((out.goal.x - me.x) / d) * 1.5 * UNIT;
-const sy = me.y + ((out.goal.y - me.y) / d) * 1.5 * UNIT;
+const at = ( k) => ({ x: me.x + ((out.goal?.x ?? me.x) - me.x) / d * k * UNIT, y: me.y + ((out.goal?.y ?? me.y) - me.y) / d * k * UNIT });
 for (const f of this.mateFlash) {
-if (t > f.pop || dist(sx, sy, f.x, f.y) >= B || this.g.los(me.x, me.y, f.x, f.y)) continue;
-if (!this.g.los(sx, sy, f.x, f.y)) continue;
+if (t > f.pop || this.g.los(me.x, me.y, f.x, f.y)) continue;
+if (![1, 2, 3].some((k) => { const q = at(Math.min(k, d / UNIT)); return dist(q.x, q.y, f.x, f.y) < B && this.g.los(q.x, q.y, f.x, f.y); })) continue;
 out.stop = true;
 out.role += '・等閃';
 return;
 }
-}
-holdLine(e) {
-const d = Math.max(1, dist(e.ox, e.oy, e.ix, e.iy));
-return { x: e.ox + ((e.ox - e.ix) / d) * 2 * UNIT, y: e.oy + ((e.oy - e.iy) / d) * 2 * UNIT };
 }
 flashGiveUp(obs, out, none) {
 const it = this.claimed.get('flash');
@@ -5756,7 +5755,8 @@ if (dist(me.x, me.y, sp.x, sp.y) < 10 * UNIT) out.walk = true;
 return null;
 }
 let wish = null;
-if (!inside && this.can(me, 'flash', ['retakeFlash', 'free']) && defuser.id !== me.id && t - this.flashHeard > 3 * this.tps) {
+const ownRF = act && this.res.claim(me.id, 'flash', ['retakeFlash']) !== null;
+if (!inside && this.can(me, 'flash', ['retakeFlash', 'free']) && (defuser.id !== me.id || ownRF) && t - this.flashHeard > 3 * this.tps) {
 const th = this.perc.threats(bx, by, 30).find((k) => dist(k.x, k.y, bx, by) < 12 * UNIT);
 const c = th ?? { x: bx, y: by };
 const dm = obs.teammates.find((m) => m.alive && m.id === defuser.id);

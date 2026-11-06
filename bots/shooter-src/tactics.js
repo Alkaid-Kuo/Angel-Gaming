@@ -732,7 +732,9 @@ export class Tactics {
       }
       // 第一個計畫與買法立刻處理（凍結時間）；之後的變更與事件依警覺延遲；游擊對計畫變更（輪轉）不延遲
       const first = (this.plan === null || this.roles.of(me.id) === LURK) && c.text.startsWith('P:');
-      this.inbox.push({ ready: first || c.text.startsWith('B:') ? t : t + this.eventDelay, from: c.from, text: c.text });
+      // 3.0：資源層有計畫時，閃光的宣告與爆炸時間是事先講好的，不吃警覺延遲（隊友才來得及停步、轉身）
+      const now = first || c.text.startsWith('B:') || (P.resLayer && this.res.active && (c.text.startsWith('E:flash ') || c.text.startsWith('E:flashing ')));
+      this.inbox.push({ ready: now ? t : t + this.eventDelay, from: c.from, text: c.text });
     }
     const keep = [];
     for (const msg of this.inbox) {
@@ -1796,8 +1798,11 @@ export class Tactics {
       const since = this.flashCue >= 0 ? t - this.flashCue : -1;
       let flashTurn;
       // 3.0：擁有這個入口的 entryFlash 項目就是自己的回合（第二顆由 flashNext 控制間隔）
-      const myFlash = act && this.can(me, 'flash', ['entryFlash']);
-      if (act) flashTurn = myFlash;
+      const planned = act && this.can(me, 'flash', ['entryFlash']);
+      // 計畫外的閃：計畫的 entryFlash 都用掉（或沒人拿）之後，才照 2.8 的順序規則丟
+      const plannedLeft = act && this.res.items.some((it) => it.purpose === 'entryFlash' && it.state === 'plan' && this.isAlive(obs, it.owner) && it.owner !== me.id);
+      const myFlash = planned || (act && !plannedLeft && this.can(me, 'flash', ['free']));
+      if (planned) flashTurn = true;
       else if (P.flashClaim) {
         const order = (idx - first + size) % size;
         flashTurn = order === 0 || (since >= 0 && since > (P.flashTurn + (order - 1) * P.flashStagger) * this.tps);
@@ -2416,8 +2421,10 @@ export class Tactics {
     const B = this.util.blindRange;
     // 3.0（pred＝這次執行的入口）：預測炸開那一刻隊友的位置——入口附近、還沒進點的人在入口外的等閃線，其他人在原地；
     // 任一個預測位置看得到爆點（半徑內）就不選這個點（硬條件，不打折）
-    const hold = pred === null ? null : this.holdLine(pred);
-    const mates = obs.teammates.filter((m) => m.alive).map((m) => (hold !== null && dist(m.x, m.y, pred?.ox ?? 0, pred?.oy ?? 0) < 14 * UNIT && !this.inRectSite(m.x, m.y, s) ? { ...m, x: hold.x, y: hold.y } : m));
+    // 炸開前還沒看得到爆點的隊友由 waitFlash 擋在視線外；所以只看「現在就看得到爆點、面向它（正面或側面）、4 步內躲不掉」的隊友
+    const hard = pred !== null;
+    const mates = obs.teammates.filter((m) => m.alive);
+    const facing = (/** @type {typeof mates[number]} */ m, /** @type {{ x: number, y: number }} */ c) => Math.abs(adiff(angleTo(m.x, m.y, c.x, c.y), m.facing)) <= this.data.rules.grenadeRules.flashSideDeg;
     this.flashUnsafe = false;
     let best = null;
     let bestS = 0;
@@ -2426,7 +2433,7 @@ export class Tactics {
       if (avoid !== null && dist(c.x, c.y, avoid.x, avoid.y) < P.flashSecondGap * UNIT) continue;
       if (++tries > 12) break;
       if (this.util.solve(me.x, me.y, c.x, c.y) === null) continue;
-      if (hold !== null && mates.some((m) => dist(m.x, m.y, c.x, c.y) < B && g.los(m.x, m.y, c.x, c.y))) {
+      if (hard && mates.some((m) => dist(m.x, m.y, c.x, c.y) < B && g.los(m.x, m.y, c.x, c.y) && facing(m, c) && !this.canHide(m.x, m.y, c, 4))) {
         this.flashUnsafe = true;
         continue;
       }
@@ -2461,21 +2468,15 @@ export class Tactics {
     const B = this.util.blindRange;
     const d = dist(me.x, me.y, out.goal.x, out.goal.y);
     if (d < UNIT) return;
-    const sx = me.x + ((out.goal.x - me.x) / d) * 1.5 * UNIT;
-    const sy = me.y + ((out.goal.y - me.y) / d) * 1.5 * UNIT;
+    // 停步指令要等反應延遲才生效：看 1～3 格外（含延遲中會多走的距離）
+    const at = (/** @type {number} */ k) => ({ x: me.x + ((out.goal?.x ?? me.x) - me.x) / d * k * UNIT, y: me.y + ((out.goal?.y ?? me.y) - me.y) / d * k * UNIT });
     for (const f of this.mateFlash) {
-      if (t > f.pop || dist(sx, sy, f.x, f.y) >= B || this.g.los(me.x, me.y, f.x, f.y)) continue;
-      if (!this.g.los(sx, sy, f.x, f.y)) continue;
+      if (t > f.pop || this.g.los(me.x, me.y, f.x, f.y)) continue;
+      if (![1, 2, 3].some((k) => { const q = at(Math.min(k, d / UNIT)); return dist(q.x, q.y, f.x, f.y) < B && this.g.los(q.x, q.y, f.x, f.y); })) continue;
       out.stop = true;
       out.role += '・等閃';
       return;
     }
-  }
-
-  /** 3.0：等閃線＝入口外點再往外 2 格（跟進者在這裡等閃光炸開） @param {import('./analysis.js').Entrance} e */
-  holdLine(e) {
-    const d = Math.max(1, dist(e.ox, e.oy, e.ix, e.iy));
-    return { x: e.ox + ((e.ox - e.ix) / d) * 2 * UNIT, y: e.oy + ((e.oy - e.iy) / d) * 2 * UNIT };
   }
 
   /**
@@ -3197,7 +3198,8 @@ export class Tactics {
     // go：第一個到的人（離炸彈最近、還在點外）先閃
     /** @type {import('./utility.js').ThrowWish | null} */
     let wish = null;
-    if (!inside && this.can(me, 'flash', ['retakeFlash', 'free']) && defuser.id !== me.id && t - this.flashHeard > 3 * this.tps) {
+    const ownRF = act && this.res.claim(me.id, 'flash', ['retakeFlash']) !== null;
+    if (!inside && this.can(me, 'flash', ['retakeFlash', 'free']) && (defuser.id !== me.id || ownRF) && t - this.flashHeard > 3 * this.tps) {
       const th = this.perc.threats(bx, by, 30).find((k) => dist(k.x, k.y, bx, by) < 12 * UNIT);
       // 不知道人在哪就閃炸彈：守包的人都在附近。2.6.1：拆包的人正往炸彈走，還沒離炸彈夠遠就不閃炸彈（爆的時候他剛好到）
       const c = th ?? { x: bx, y: by };
