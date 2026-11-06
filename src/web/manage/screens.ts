@@ -280,6 +280,7 @@ function training(ctx: Ctx): string {
     .map((j) => {
       if (j.kind === 'scrim') return `<li>練習賽：對 ${esc(teamName(v, j.opponentTeamId))}，${j.games} 場</li>`;
       if (j.kind === 'rehearse') return `<li>戰術排練：${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}，${j.sessions} 節</li>`;
+      if (j.kind === 'scoutTeam') return `<li>球探看戰隊：${esc(teamName(v, j.targetId))}</li>`;
       const p = pm.get(j.playerId);
       const who = p ? esc(p.name) : j.playerId;
       return `<li>球探：${who}</li>`;

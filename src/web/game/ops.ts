@@ -28,6 +28,7 @@ export function trainingScreen(ctx: Ctx): string {
   const jobs = v.jobs.map((j) => {
     if (j.kind === 'scrim') return `<div class="job"><span class="ic2 w">${icon('swords', 24)}</span><b>練習賽<small>對 ${esc(teamName(v, j.opponentTeamId))}</small></b><span class="num">${j.games}</span><div class="meter" style="--v:${Math.round((j.games / cap) * 100)}%"><i></i></div></div>`;
     if (j.kind === 'rehearse') return `<div class="job"><span class="ic2">${icon('swords', 24)}</span><b>戰術排練<small>${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}</small></b><span class="num">${j.sessions}</span><div class="meter g" style="--v:${Math.round((j.sessions / cap) * 100)}%"><i></i></div></div>`;
+    if (j.kind === 'scoutTeam') return `<div class="job"><span class="ic2 w">${icon('search', 24)}</span><b>球探看戰隊<small>${esc(teamName(v, j.targetId))} · 常用戰術</small></b><span class="num sm">${wan(e.scoutCost)}萬</span><div class="meter" style="--v:100%"><i></i></div></div>`;
     const p = ctx.pm.get(j.playerId);
     const who = esc(p?.name ?? '?');
     if (j.kind === 'train') return `<div class="job"><span class="ic2">${icon('levelup', 24)}</span><b>屬性訓練<small>${who} · ${esc(c.attributes.names[j.attr] ?? j.attr)}</small></b><span class="num">${j.sessions}</span><div class="meter g" style="--v:100%"><i></i></div></div>`;

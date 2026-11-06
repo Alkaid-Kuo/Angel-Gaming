@@ -8,7 +8,7 @@ import type { StandingRow } from './league.ts';
 import { standings } from './league.ts';
 import { capPub, gradeOf, type Grade } from './attrs.ts';
 import { capacityLeft, effectiveLineup, effectiveTactics, playerOf, rosterOf, slotsLeft, stageOfPlayer, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
-import type { Bet, FixtureId, GamePlan, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, RoundResult, ScrimReport, SeasonResult, SeasonStat, Stage, TacticRecord, TeamId, Winner } from './types.ts';
+import type { Bet, FixtureId, GamePlan, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, RoundResult, ScrimReport, SeasonResult, SeasonStat, Stage, TacticRecord, TeamId, TeamIntelReport, Winner } from './types.ts';
 import type { PlayerStat } from './gateway.ts';
 import { TOTAL_WEEKS } from './types.ts';
 
@@ -101,6 +101,8 @@ export interface KnownView {
   odds: { fixtureId: FixtureId; homeX100: number; awayX100: number }[];
   standings: StandingRow[];
   intel: IntelReport[];
+  /** 球探對戰隊報告（M5 5.3；只有自己派的） */
+  teamIntel: TeamIntelReport[];
   scrims: ScrimReport[];
   bets: Bet[];
   jobs: Job[];
@@ -192,6 +194,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       }),
     standings: standings(state),
     intel: team.intel.map((i) => ({ ...i, attrs: { ...i.attrs } })),
+    teamIntel: team.teamIntel.map((r) => ({ ...r, weeks: [...r.weeks], rounds: { ...r.rounds }, top: { T: r.top.T.map((x) => ({ ...x })), CT: r.top.CT.map((x) => ({ ...x })) } })),
     scrims: team.scrims.map((s) => ({ ...s })),
     bets: state.bets.filter((b) => b.teamId === teamId).map((b) => ({ ...b })),
     jobs: state.jobs.filter((j) => j.teamId === teamId).map((j) => ({ ...j })),

@@ -129,6 +129,18 @@ export function applyCommand(state: GameState, content: ContentPack, teamId: Tea
       state.jobs.push({ kind: 'scout', id: state.nextId++, teamId, playerId: p.id });
       return OK;
     }
+    case 'scoutTeam': {
+      // M5 5.3：球探對戰隊，費用同球探；推進一週後回報（含本週那場）
+      if (content.tactics.length === 0) return fail('這個賽制沒有戰術手冊');
+      const target = state.teams.find((t) => t.id === cmd.teamId);
+      if (!target || target.id === teamId) return fail('球探要看的是別隊');
+      if (state.phase !== 'season') return fail('賽季還沒開始，沒有比賽可看');
+      if (state.jobs.some((j) => j.kind === 'scoutTeam' && j.teamId === teamId && j.targetId === target.id)) return fail('已經派球探去看這隊了');
+      if (team.cash < e.scoutCost) return fail('資金不足');
+      post(state, team, 'scout', -e.scoutCost, `球探看 ${target.name}`);
+      state.jobs.push({ kind: 'scoutTeam', id: state.nextId++, teamId, targetId: target.id });
+      return OK;
+    }
     default:
       // 舊介面或舊存檔送來已移除的指令（例如 M5 第二批移除的 upgradeVersion）
       return fail('未知的指令');

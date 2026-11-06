@@ -508,7 +508,8 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 /* ═════ 戰術室（M5） ═════ */
 .v-tactics .tt { left: 0; top: 0; width: 1000px; height: 430px; }
 .v-tactics .tc { left: 0; top: 450px; width: 1000px; height: 316px; }
-.v-tactics .reh { left: 1020px; top: 0; width: 672px; height: 470px; }
+.v-tactics .reh { left: 1020px; top: 0; width: 672px; height: 350px; }
+.v-tactics .sct { left: 1020px; top: 370px; width: 672px; height: 396px; }
 .v-tactics .tr { display: grid; grid-template-columns: 150px 1fr 84px 64px 96px 132px 140px; gap: 0 16px; align-items: center; height: 54px; padding: 0 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
 .v-tactics .tr.hd { height: 30px; font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.12em; color: var(--grey2); border-bottom: 0; white-space: nowrap; }
 .v-tactics .tr > b { font-size: 20px; font-weight: 900; letter-spacing: 0.04em; transform: skewX(-7deg); white-space: nowrap; }
@@ -538,7 +539,28 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .v-tactics .seg3 button { flex: 1; height: 40px; display: grid; place-items: center; font-size: 16px; font-weight: 700; letter-spacing: 0.12em; color: var(--grey); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); transform: skewX(-14deg); }
 .v-tactics .seg3 button:hover:not(:disabled) { color: #fff; }
 .v-tactics .seg3 button.on { color: var(--ink); background: var(--gold); box-shadow: none; }
-.v-tactics .reh .go { display: flex; justify-content: flex-end; margin-top: 24px; }
+.v-tactics .reh .go { display: flex; justify-content: flex-end; margin-top: 14px; }
+/* 對手情報（M5 5.3）：選戰隊、兩欄常用戰術 */
+.v-tactics .sct .picks { display: flex; gap: 8px; }
+.v-tactics .sct .pk { width: 46px; height: 46px; display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); transform: skewX(-10deg); }
+.v-tactics .sct .pk > * { transform: skewX(10deg); }
+.v-tactics .sct .pk:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4); }
+.v-tactics .sct .pk.on { box-shadow: inset 0 0 0 2px var(--gold); background: rgba(var(--gold-rgb), 0.1); }
+.v-tactics .sct .who { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 4px; }
+.v-tactics .sct .who b { font-size: 22px; font-weight: 900; letter-spacing: 0.04em; transform: skewX(-7deg); white-space: nowrap; }
+.v-tactics .sct .who small { font-size: max(13px, var(--fmin, 0px)); color: var(--grey); }
+.v-tactics .sct .who .meta { margin-left: auto; font-size: max(13px, var(--fmin, 0px)); color: var(--grey); white-space: nowrap; }
+.v-tactics .sct .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+.v-tactics .sct .sc h5 { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 4px; font-size: max(14px, var(--fmin, 0px)); letter-spacing: 0.2em; color: var(--grey); font-weight: 700; }
+.v-tactics .sct .sc h5 small { margin-left: auto; font-size: max(12px, var(--fmin, 0px)); letter-spacing: 0.06em; color: var(--grey2); font-weight: 400; }
+.v-tactics .sct .tl2 { display: grid; grid-template-columns: 1fr 34px 54px 44px; align-items: baseline; gap: 0 8px; height: 34px; padding: 0 10px; margin-bottom: 4px; background: rgba(255, 255, 255, 0.03); line-height: 34px; }
+.v-tactics .sct .tl2 b { font-size: 17px; font-weight: 800; white-space: nowrap; }
+.v-tactics .sct .tl2 .num { font-size: 18px; color: var(--white); text-align: right; }
+.v-tactics .sct .tl2 small { font-size: max(12px, var(--fmin, 0px)); color: var(--grey); white-space: nowrap; }
+.v-tactics .sct .tl2 .shr { font-family: var(--mono); font-size: max(12px, var(--fmin, 0px)); color: var(--gold2); text-align: right; }
+.v-tactics .sct .sc p.dim { margin: 6px 0 0; font-size: max(14px, var(--fmin, 0px)); }
+.v-tactics .sct .go { position: absolute; left: 24px; right: 24px; bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.v-tactics .sct .go .dim { font-size: max(13px, var(--fmin, 0px)); }
 .v-player .tac.pro { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; }
 .v-player .tac.pro .t { gap: 2px 8px; }
 .v-player .tac.pro .t span { font-size: max(13px, var(--fmin, 0px)); }

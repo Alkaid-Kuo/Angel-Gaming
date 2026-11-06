@@ -2,7 +2,7 @@
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
 import type { MatchRequest, PlayerStat } from './gateway.ts';
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -94,6 +94,27 @@ export interface TacticRecord {
   won: number;
 }
 
+/** 球探對戰隊（M5 5.3）：一個陣營常用戰術的一列 */
+export interface TacticTally {
+  tactic: TacticId;
+  played: number;
+  won: number;
+}
+
+/**
+ * 球探對戰隊報告（M5 5.3）：該隊近 3 場（含報告當週）各陣營的常用戰術前三名。
+ * 由已打比賽的回合戰術標籤整理（公開事實），不含熟練度、計畫。
+ */
+export interface TeamIntelReport {
+  teamId: TeamId;
+  week: number;
+  /** 看了哪幾場（週次，新到舊） */
+  weeks: number[];
+  /** 各陣營有標籤的回合數 */
+  rounds: { T: number; CT: number };
+  top: { T: TacticTally[]; CT: TacticTally[] };
+}
+
 export interface IntelReport {
   playerId: PlayerId;
   week: number;
@@ -131,6 +152,8 @@ export interface Team {
   gamePlan: GamePlan;
   /** 本季戰術紀錄（M5 第三批）：由我方回合戰術標籤累計；自己公開、別隊隱藏 */
   tacticLog: Record<TacticId, TacticRecord>;
+  /** 球探對戰隊報告（M5 5.3；每隊只留最新一份）：自己公開、別隊隱藏 */
+  teamIntel: TeamIntelReport[];
 }
 
 export interface RoundResult {
@@ -185,7 +208,8 @@ export type Job =
   | { kind: 'scrim'; id: number; teamId: TeamId; opponentTeamId: TeamId; games: number }
   | { kind: 'rehearse'; id: number; teamId: TeamId; tactic: TacticId; sessions: number }
   | { kind: 'train'; id: number; teamId: TeamId; playerId: PlayerId; attr: string; sessions: number }
-  | { kind: 'scout'; id: number; teamId: TeamId; playerId: PlayerId };
+  | { kind: 'scout'; id: number; teamId: TeamId; playerId: PlayerId }
+  | { kind: 'scoutTeam'; id: number; teamId: TeamId; targetId: TeamId };
 
 export interface Message {
   week: number;
@@ -229,6 +253,7 @@ export type Command =
   | { type: 'queueScrim'; opponentTeamId: TeamId; games: number }
   | { type: 'queueRehearse'; tactic: TacticId; sessions: number }
   | { type: 'setGamePlan'; plan: GamePlan }
-  | { type: 'scout'; playerId: PlayerId };
+  | { type: 'scout'; playerId: PlayerId }
+  | { type: 'scoutTeam'; teamId: TeamId };
 
 export type CommandResult = { ok: true } | { ok: false; reason: string };

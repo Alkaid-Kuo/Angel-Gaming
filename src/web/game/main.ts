@@ -609,6 +609,14 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     if (run({ type: 'bet', fixtureId: s.fixtureId, side: s.side, stake: Math.min(s.stake, maxStake()) * 10 }, '下注成功，祝你好運')) ui.slip = null;
     render();
   },
+  steam: (el) => {
+    ui.scoutTeam = el.dataset.t ?? null;
+    render();
+  },
+  scoutTeam: (el) => {
+    const name = game?.view().teams.find((t) => t.id === el.dataset.t)?.name ?? '';
+    run({ type: 'scoutTeam', teamId: el.dataset.t as string }, `球探去看${name}了，推進一週後回報（含本週那場）`);
+  },
   lweek: (el) => {
     ui.leagueWeek = Number(el.dataset.w);
     render();

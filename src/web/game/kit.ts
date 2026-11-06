@@ -22,10 +22,12 @@ export interface GameUi extends ClubUi {
   mailSel: number | null;
   /** 選手詳情看的是誰 */
   player: string | null;
+  /** 戰術室「對手情報」選中的戰隊（null＝本週對手） */
+  scoutTeam: string | null;
 }
 
 export function newGameUi(base: ClubUi): GameUi {
-  return { ...base, marketPick: null, marketTab: 'free', mailSel: null, player: null };
+  return { ...base, marketPick: null, marketTab: 'free', mailSel: null, player: null, scoutTeam: null };
 }
 
 export interface Ctx {

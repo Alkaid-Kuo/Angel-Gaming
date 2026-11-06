@@ -5,6 +5,7 @@ import type { BattleGateway, MatchRequest } from './gateway.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
 import { STAGE_NAMES, trainGain, trainOnce, TRAIN_FULL_GAIN } from './attrs.ts';
 import { buildSide, effectiveLineup, findPlayer, grow, lineageOf, notify, playerOf, stageOfPlayer, teamOf, truePower } from './state.ts';
+import { teamTacticReport } from './stats.ts';
 import type { GameState } from './types.ts';
 
 export async function processJobs(state: GameState, content: ContentPack, gateway: BattleGateway, onProgress?: (done: number, total: number) => void): Promise<void> {
@@ -34,6 +35,15 @@ export async function processJobs(state: GameState, content: ContentPack, gatewa
     }
     if (job.kind === 'train') {
       train(state, content, job.teamId, job.playerId, job.attr, job.sessions);
+      continue;
+    }
+    if (job.kind === 'scoutTeam') {
+      const r = teamTacticReport(state, content, job.targetId);
+      team.teamIntel = [...team.teamIntel.filter((x) => x.teamId !== job.targetId), r];
+      const name = (id: string): string => content.tactics.find((t) => t.id === id)?.name ?? id;
+      const line = (side: 'T' | 'CT'): string => (r.top[side].length === 0 ? '沒有紀錄' : r.top[side].map((x) => `${name(x.tactic)} ${x.played} 回合（贏 ${x.won}）`).join('、'));
+      const target = teamOf(state, job.targetId);
+      notify(state, team.id, 'report', r.weeks.length === 0 ? `球探報告：${target.name} 還沒有比賽紀錄。` : `球探報告：${target.name} 近 ${r.weeks.length} 場的常用戰術。進攻：${line('T')}。防守：${line('CT')}。`);
       continue;
     }
     // 球探
