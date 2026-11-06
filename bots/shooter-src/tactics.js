@@ -204,6 +204,7 @@ export class Tactics {
     /** @type {Set<number>} */
     this.gaveUp = new Set();
     this.flashUnsafe = false;
+    this.lastThrow = '';
     /** 3.0：回防走的 CT 路線（-1＝還沒定）；自己丟出回防道具的 tick */
     this.retakeRoute = -1;
     this.retakeThrown = -1;
@@ -586,6 +587,8 @@ export class Tactics {
         out.cmds.push({ type: 'say', text: `E:flashing ${Math.round(wish.x / 100)} ${Math.round(wish.y / 100)}` });
       }
     }
+    // 最後一次丟出的理由（量測工具讀）
+    if (u.thrown !== null) this.lastThrow = u.thrown.why;
     if (u.thrown !== null && this.res.active) {
       const it = this.claimed.get(u.thrown.kind);
       out.cmds.push({ type: 'say', text: it !== undefined ? this.res.usedText(it) : `U:u ${codeOf(u.thrown.kind)}` });
@@ -1835,8 +1838,10 @@ export class Tactics {
         if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
       } else if ((act ? myFlash : this.util.has(me, 'flash')) && cue && flashTurn && next.ok && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5))) {
         // 第二顆炸開時隊友多半已經往裡衝：不算「隊友躲得掉」
-        const fp = this.flashPoint(obs, exec, ent, smokeFirst && !next.second ? 2 : 5, next.avoid, act ? ent : null);
+        let fp = this.flashPoint(obs, exec, ent, smokeFirst && !next.second ? 2 : 5, next.avoid, act ? ent : null);
         if (act) this.flashGiveUp(obs, out, fp === null);
+        // 3.0：沒有情報（爆點附近沒有記得的敵人、這個點 5 秒內沒人喊接觸）就先不閃：無情報的進點閃幾乎都閃到 0 人；留著到期轉 free，見到人再用
+        if (act && fp !== null && P.flashNeedInfo && !this.flashInfo(obs, fp, exec)) fp = null;
         // 照計畫執行（隊友在待命格等）照例先閃；其他時候（rush）要可能有人看得到爆點才丟
         if (fp !== null && (smokeFirst || this.viewer(fp, exec))) wish = { kind: 'flash', x: fp.x, y: fp.y, why: '閃進點' };
       }
@@ -2477,6 +2482,18 @@ export class Tactics {
       out.role += '・等閃';
       return;
     }
+  }
+
+  /**
+   * 3.0：這顆閃光有沒有情報支撐：爆點半徑內有記得的敵人（信心 ≥ 30），或 5 秒內在爆點附近有人喊接觸
+   * @param {import('./base.js').Observation} obs @param {import('./base.js').Pt} c @param {SiteId} s
+   */
+  flashInfo(obs, c, s) {
+    const R = this.util.blindRange;
+    if (this.perc.threats(c.x, c.y, 30).some((k) => dist(k.x, k.y, c.x, c.y) < R)) return true;
+    // 接觸要在爆點附近（喊話的區域中心在半徑＋5 格內）才算；只說「包點有人」的接觸閃到 0 人的比例太高
+    for (const [key, q] of this.contacts) if (this.contactSite.get(key) === s && obs.tick - q.tick < 5 * this.tps && Number.isFinite(q.x) && dist(q.x, q.y, c.x, c.y) < R + 5 * UNIT) return true;
+    return false;
   }
 
   /**

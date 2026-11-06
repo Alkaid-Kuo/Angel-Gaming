@@ -269,6 +269,8 @@ export const P = {
   flashMateClear: 4,
   /** 3.0 資源層（道具計畫、claim、重分配）；false＝2.8 的道具行為 */
   resLayer: true,
+  /** 3.0：計畫的進點閃要有情報（記得的敵人或 5 秒內接觸）才丟 */
+  flashNeedInfo: true,
   /** 煙霧：放在入口往架點方向幾格 */
   smokeOff: 4.5,
   /** 同回合兩顆煙的落點至少隔幾格（2.2） */

@@ -159,6 +159,7 @@ chaseRange: 15,
 chaseTime: 3,
 flashMateClear: 4,
 resLayer: true,
+flashNeedInfo: true,
 smokeOff: 4.5,
 smokeGap: 6,
 flankNear: 12,
@@ -3406,6 +3407,7 @@ this.boughtAt = -1;
 this.noFlashSince = -1;
 this.gaveUp = new Set();
 this.flashUnsafe = false;
+this.lastThrow = '';
 this.retakeRoute = -1;
 this.retakeThrown = -1;
 this.rotSince = -1;
@@ -3706,6 +3708,7 @@ this.myClaim = { x: wish.x, y: wish.y, until: t + P.flashClaimSec * this.tps };
 out.cmds.push({ type: 'say', text: `E:flashing ${Math.round(wish.x / 100)} ${Math.round(wish.y / 100)}` });
 }
 }
+if (u.thrown !== null) this.lastThrow = u.thrown.why;
 if (u.thrown !== null && this.res.active) {
 const it = this.claimed.get(u.thrown.kind);
 out.cmds.push({ type: 'say', text: it !== undefined ? this.res.usedText(it) : `U:u ${codeOf(u.thrown.kind)}` });
@@ -4703,8 +4706,9 @@ wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
 const sp = supportFirst ? null : this.smokeTarget(obs, p, exec, ent);
 if (sp !== null) wish = { kind: 'smoke', x: sp.x, y: sp.y, why: '封架點' };
 } else if ((act ? myFlash : this.util.has(me, 'flash')) && cue && flashTurn && next.ok && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5))) {
-const fp = this.flashPoint(obs, exec, ent, smokeFirst && !next.second ? 2 : 5, next.avoid, act ? ent : null);
+let fp = this.flashPoint(obs, exec, ent, smokeFirst && !next.second ? 2 : 5, next.avoid, act ? ent : null);
 if (act) this.flashGiveUp(obs, out, fp === null);
+if (act && fp !== null && P.flashNeedInfo && !this.flashInfo(obs, fp, exec)) fp = null;
 if (fp !== null && (smokeFirst || this.viewer(fp, exec))) wish = { kind: 'flash', x: fp.x, y: fp.y, why: '閃進點' };
 }
 const smoker = smokeFirst && (act ? this.can(me, 'smoke', ['entrySmoke', 'holdSmoke']) : this.util.has(me, 'smoke') && idx === this.smokerIndex(obs, me.id, p) && !supportFirst);
@@ -5194,6 +5198,12 @@ out.stop = true;
 out.role += '・等閃';
 return;
 }
+}
+flashInfo(obs, c, s) {
+const R = this.util.blindRange;
+if (this.perc.threats(c.x, c.y, 30).some((k) => dist(k.x, k.y, c.x, c.y) < R)) return true;
+for (const [key, q] of this.contacts) if (this.contactSite.get(key) === s && obs.tick - q.tick < 5 * this.tps && Number.isFinite(q.x) && dist(q.x, q.y, c.x, c.y) < R + 5 * UNIT) return true;
+return false;
 }
 flashGiveUp(obs, out, none) {
 const it = this.claimed.get('flash');
