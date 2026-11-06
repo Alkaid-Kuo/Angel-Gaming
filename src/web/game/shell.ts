@@ -37,7 +37,7 @@ export function topBar(ctx: Ctx, unread: number, demo: boolean): string {
       <div class="funds" data-guide="funds"><div class="lb">FUNDS</div><b class="${v.me.cash < 0 ? 'neg' : ''}"><span id="hud-cash">${wan(v.me.cash)}</span><small>萬</small></b><div class="dl ${net >= 0 ? 'up' : ''}">${net >= 0 ? '▲' : '▼'} ${wan(Math.abs(net))} / WEEK</div></div>
       ${gauge(v.me.fame / 30, '#eef2f6', String(v.me.fame))}<div class="gl"><b>名氣</b>REP</div>
       ${gauge(runway === null ? 1 : runway / 12, low ? '#ff5d5d' : '#f0b54a', runway === null ? '∞' : String(runway), 'runway')}<div class="gl ${low ? 'warn' : ''}"><b>資金跑道</b>WEEKS</div>
-      <button class="icon-btn" data-act="help" aria-label="這一頁怎麼用" title="這一頁怎麼用">${icon('info', 24)}</button>
+      <button class="icon-btn" data-act="help" aria-label="這一頁怎麼用" data-tip="這一頁怎麼用">${icon('info', 24)}</button>
       <button class="icon-btn" data-act="go" data-to="inbox" aria-label="信件">${icon('mail', 24)}${unread ? `<em>${unread}</em>` : ''}</button>
       <button class="icon-btn" data-act="menu" aria-label="選單">${icon('menu', 24)}</button>
     </div>
@@ -57,7 +57,7 @@ export function rail(ctx: Ctx, screen: Screen, unread: number, busy: boolean): s
   const md = busy ? ['進行中', 'WAIT'] : over ? ['已結束', 'OVER'] : v.phase === 'offseason' ? ['開幕', 'START'] : ['比賽日', 'MATCH'];
   const item = (n: (typeof NAV)[number]): string => {
     const w = lockedUntil(n.id, v, ctx.prefs.guide);
-    if (w !== null) return `<button class="locked" data-act="locked" data-to="${n.id}" title="第 ${w} 週開放">${icon('lock', 26)}${n.label}<small>第 ${w} 週</small></button>`;
+    if (w !== null) return `<button class="locked" data-act="locked" data-to="${n.id}" data-tip="第 ${w} 週開放">${icon('lock', 26)}${n.label}<small>第 ${w} 週</small></button>`;
     return `<button class="${n.id === lit ? 'on' : ''}" data-act="go" data-to="${n.id}">${icon(n.ic, 26)}${n.label}${badge(n.id)}</button>`;
   };
   return `<nav class="rail">${NAV.map(item).join('')}

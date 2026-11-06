@@ -30,9 +30,9 @@ export function titleScreen(save: SaveInfo | null, crest: CrestSpec, problem: st
       ${problem ? `<div class="save-bad">${icon('warn', 20)}<span><b>存檔讀不了</b>${esc(problem)}。請創立新戰隊重新開始。</span><button class="lnk" data-act="clear-save">清掉這份存檔</button></div>` : ''}
       ${save ? `<button class="btn" data-act="continue"><b>繼續</b><span class="info">${esc(save.teamName)} · ${esc(save.kind)} · ${status} · ${wan(save.cash)}萬</span></button>` : ''}
       <button class="btn ${save ? 'ghost' : ''}" data-act="to-create"><b>創立新戰隊</b><span class="info">${save ? '會覆蓋目前的存檔' : '從休賽期開始'}</span></button>
-      <div class="row4"><label class="btn ghost"><b>匯入存檔</b><input id="import" type="file" accept=".json,application/json" hidden></label>${STANDALONE ? '' : '<a class="btn ghost" href="./club.html"><b>舊版介面</b></a><a class="btn ghost" href="./index.html"><b>回首頁</b></a>'}</div>
+      <div class="row4"><label class="btn ghost"><b>匯入存檔</b><input id="import" type="file" accept=".json,application/json" hidden></label>${STANDALONE ? '' : '<a class="btn ghost" href="./index.html"><b>回首頁</b></a>'}</div>
     </section>
-    <div class="ver">M4 PROTOTYPE · 攻防戰由基準 Bot 依選手角色、版本、習慣真打；軍團戰（暫代）仍是假比賽 · 數值都還在調整</div>
+    <div class="ver">ANGEL GAMING · 攻防戰 1.2 · SEASON 01</div>
     <div class="press">${save ? 'ENTER 繼續' : ''}</div>
   </div>`;
 }

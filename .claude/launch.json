@@ -59,6 +59,21 @@
         "127.0.0.1"
       ],
       "port": 5214
+    },
+    {
+      "name": "ui-audit",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--config",
+        "vite.worktree.config.ts",
+        "--port",
+        "5216",
+        "--strictPort",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 5216
     }
   ]
 }

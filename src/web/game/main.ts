@@ -22,7 +22,7 @@ import { bettingScreen, scrimWaitText, trainingScreen } from './ops.ts';
 import { nextPref, tacticsScreen } from './tactics.ts';
 import { rail, topBar } from './shell.ts';
 import { buildScenes, preMatchScene, snapshot, stageName, type Scene } from './show.ts';
-import { marketScreen, playerScreen, squadScreen } from './squad.ts';
+import { marketScreen, playerNeighbours, playerScreen, squadScreen } from './squad.ts';
 import { createScreen, titleScreen, type Draft } from './title.ts';
 
 initStage();
@@ -129,7 +129,7 @@ function modalHtml(): string {
       <button data-act="speed">${icon('skip', 22)}<b>演出速度：${prefs.fast ? '快速' : '一般'}</b><small>點一下切換</small></button>
       <button data-act="to-title">${icon('exit', 22)}<b>回到標題畫面</b><small>進度已自動存檔</small></button>
       ${prefs.guide?.on ? `<button data-act="guide-skip">${icon('check', 22)}<b>關閉教學</b><small>全部功能直接開放</small></button>` : ''}
-      ${STANDALONE ? '' : `<a href="./club.html">${icon('chart', 22)}<b>舊版介面</b><small>同一份存檔</small></a>`}</div>
+      </div>
       <div class="foot"><button class="btn ghost sm" data-act="close-modal"><b>關閉</b></button></div>`;
   else if (modal.kind === 'help') {
     const h = HELP[screen] ?? HELP.hub;
@@ -998,7 +998,22 @@ document.addEventListener('keydown', (e) => {
     else (cineEl.querySelector('[data-act="live-watch"], [data-act="mode-watch"], [data-act="cine-next"]') as HTMLElement | null)?.click();
   } else if (!typing && screen === 'title' && e.key === 'Enter' && ManageGame.peek()) {
     actions.continue(document.body);
+  } else if (!typing && !modal && !cine && game && screen === 'player' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    // 選手詳情：← → 切上一位／下一位
+    const ctx = context();
+    const p = ui.player ? ctx.pm.get(ui.player) : undefined;
+    const nb = p ? playerNeighbours(ctx, p) : null;
+    const to = e.key === 'ArrowLeft' ? nb?.prev : nb?.next;
+    if (to) {
+      ui.player = to.id;
+      render();
+    }
   }
+});
+
+// 遊戲畫面不出瀏覽器的右鍵選單（輸入框保留）
+document.addEventListener('contextmenu', (e) => {
+  if (!(e.target instanceof Element && e.target.closest('input, textarea'))) e.preventDefault();
 });
 
 /**

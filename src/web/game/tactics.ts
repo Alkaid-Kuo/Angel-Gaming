@@ -40,7 +40,7 @@ function scoutPanel(ctx: Ctx, active: boolean): string {
   const meta = rep ? `第 ${rep.week} 週報告 · ${rep.weeks.length ? `看了 ${rep.weeks.map((w) => `W${w}`).join('、')}` : '還沒有比賽紀錄'}` : '還沒派過球探';
   const canGo = active && v.phase === 'season' && !pending && v.me.cash >= cost;
   return `<div class="pn sct in">${pt('04', '對手情報', '球探看戰隊', 'SCOUTING')}
-    <div class="picks">${others.map((t) => `<button class="pk ${t.id === sel ? 'on' : ''} ${t.id === foe ? 'foe' : ''}" data-act="steam" data-t="${t.id}" title="${esc(t.name)}${t.id === foe ? '（本週對手）' : ''}">${crest(ctx, t.id, 30)}</button>`).join('')}</div>
+    <div class="picks">${others.map((t) => `<button class="pk ${t.id === sel ? 'on' : ''} ${t.id === foe ? 'foe' : ''}" data-act="steam" data-t="${t.id}" data-tip="${esc(t.name)}${t.id === foe ? '（本週對手）' : ''}">${crest(ctx, t.id, 30)}</button>`).join('')}</div>
     <div class="who"><b class="${sel === foe ? 'rd' : ''}">${esc(teamName(v, sel))}</b>${sel === foe ? '<small>本週對手</small>' : ''}<span class="meta">${meta}</span></div>
     <div class="cols">${col('T', '進攻')}${col('CT', '防守')}</div>
     <div class="go"><span class="dim">近 3 場的回合戰術，推進一週後回報（含本週那場）</span>${btn(pending ? '球探出發中' : `派球探 · ${wan(cost)} 萬`, `data-act="scoutTeam" data-t="${sel}" ${canGo ? '' : 'disabled'}`, 'sm ghost')}</div>
@@ -72,7 +72,7 @@ export function tacticsScreen(ctx: Ctx): string {
       <span class="num pa">${avg(t.id)}</span>
       <span class="num eff">${eff}</span>
       <span class="lg">${log ? `<b class="num">${log.played}</b> 打 <b class="num">${log.won}</b> 贏` : '—'}</span>
-      <button class="pf" data-act="pref" data-t="${t.id}" ${!active || lastOpen ? 'disabled' : ''} title="${lastOpen ? '這一邊至少要留一個戰術' : '點一下切換：不偏好 → 1～3 星 → 禁用'}">${stars(p)}</button>
+      <button class="pf" data-act="pref" data-t="${t.id}" ${!active || lastOpen ? 'disabled' : ''} data-tip="${lastOpen ? '這一邊至少要留一個戰術' : '點一下切換：不偏好 → 1～3 星 → 禁用'}">${stars(p)}</button>
       <button class="rh" data-act="rehearse" data-t="${t.id}" ${!active || left < sessions || v.me.cash < cost ? 'disabled' : ''}>${q ? `已排 ${q} 節 · ` : ''}排練</button>
     </div>`;
   };
@@ -89,8 +89,8 @@ export function tacticsScreen(ctx: Ctx): string {
         <div class="runs"><input type="range" min="1" max="${Math.max(1, left)}" step="1" value="${sessions}" data-field="rehearse.sessions" ${left < 1 ? 'disabled' : ''}><span class="num" data-out="rehearse.sessions">${sessions}</span></div>
         <p class="dim">${icon('info', 14)}一節佔 1 個訓練時段、${wan(c.economy.rehearseCost)} 萬；出賽五人和隊伍一起漲，越熟越難漲。新人第一次上場，隊伍默契會掉一些。</p>
         <div class="lbl">經濟風格</div>
-        <div class="seg3">${ECON.map((n, i) => `<button class="${plan.economy === i ? 'on' : ''}" data-act="econ" data-e="${i}" title="${ECON_TIP[i]}" ${active ? '' : 'disabled'}>${n}</button>`).join('')}</div>
-        <div class="go"><span class="asst" title="有請時，跳過的比賽由助理教練照 AI 教練的規則代喊暫停與命令（連輸三回合、對方賽點時暫停；換邊時依本場勝負調星級）">${icon('users', 14)}助理教練 ${v.me.assistant ? `<b>已請</b> · ${wan(c.economy.assistantSalary)} 萬／週` : '<span class="dim">未請</span>'}</span>${btn(v.me.assistant ? '辭退' : `請助理教練 · ${wan(c.economy.assistantSalary)} 萬／週`, `data-act="assistant" ${active ? '' : 'disabled'}`, 'sm ghost')}${btn('去訓練基地', 'data-act="go" data-to="training"', 'sm ghost')}</div>
+        <div class="seg3">${ECON.map((n, i) => `<button class="${plan.economy === i ? 'on' : ''}" data-act="econ" data-e="${i}" data-tip="${ECON_TIP[i]}" ${active ? '' : 'disabled'}>${n}</button>`).join('')}</div>
+        <div class="go"><span class="asst" data-tip="有請時，跳過的比賽由助理教練代喊暫停與命令（連輸三回合、對方賽點時暫停；換邊時依本場勝負調星級）">${icon('users', 14)}助理教練 ${v.me.assistant ? `<b>已請</b> · ${wan(c.economy.assistantSalary)} 萬／週` : '<span class="dim">未請</span>'}</span>${btn(v.me.assistant ? '辭退' : `請助理教練 · ${wan(c.economy.assistantSalary)} 萬／週`, `data-act="assistant" ${active ? '' : 'disabled'}`, 'sm ghost')}${btn('去訓練基地', 'data-act="go" data-to="training"', 'sm ghost')}</div>
       </div>
       ${scoutPanel(ctx, active)}
     </section>`;

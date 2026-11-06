@@ -3,7 +3,7 @@
 import type { KnownFixture, KnownPlayer, KnownView, PlayerStat } from '../../manage/index.ts';
 import { mvpIndex, ratingOf } from '../../manage/index.ts';
 import type { Ctx } from './kit.ts';
-import { esc } from './kit.ts';
+import { avatar, esc } from './kit.ts';
 
 /** 這場的雙方統計，我方在前；沒有統計＝null */
 export function sidesOf(v: KnownView, f: KnownFixture): { mine: PlayerStat[]; theirs: PlayerStat[] } | null {
@@ -20,11 +20,11 @@ const pct = (a: number, b: number): string => (b > 0 ? `${Math.round((a / b) * 1
 export function statsBoard(ctx: Ctx, ids: { mine: string[]; theirs: string[] }, s: { mine: PlayerStat[]; theirs: PlayerStat[] }): string {
   const mvp = mvpIndex(s.mine);
   const side = (list: string[], stats: PlayerStat[], foe: boolean): string =>
-    `<div class="sb ${foe ? 'foe' : ''}"><div class="sr hd"><span></span><span>K / D</span><span>ADR</span><span>首殺</span><span>存活</span></div>${list
+    `<div class="sb ${foe ? 'foe' : ''}"><div class="sr hd"><span></span><span></span><span>K / D</span><span>ADR</span><span>首殺</span><span>存活</span></div>${list
       .map((id, i) => {
         const x = stats[i];
         const p = ctx.pm.get(id);
-        return x === undefined ? '' : `<div class="sr ${!foe && i === mvp ? 'mvp' : ''}"><b>${!foe && i === mvp ? '<i>★</i>' : ''}${esc(p?.name ?? '?')}</b><span class="num">${x.kills} / ${x.deaths}</span><span class="num">${adr(x)}</span><span class="num">${x.firstKills}</span><span class="num">${x.survived}</span></div>`;
+        return x === undefined ? '' : `<div class="sr ${!foe && i === mvp ? 'mvp' : ''}">${avatar(ctx, p, 28)}<b>${!foe && i === mvp ? '<i>★</i>' : ''}${esc(p?.name ?? '?')}</b><span class="num">${x.kills} / ${x.deaths}</span><span class="num">${adr(x)}</span><span class="num">${x.firstKills}</span><span class="num">${x.survived}</span></div>`;
       })
       .join('')}</div>`;
   return `${side(ids.mine, s.mine, false)}${side(ids.theirs, s.theirs, true)}`;
@@ -64,7 +64,7 @@ function trend(games: readonly PlayedGame[], season: number): string {
     const r = ratingOf(g.stat as PlayerStat);
     const d = r - season;
     const k = d >= 0.1 ? 'up' : d <= -0.1 ? 'dn' : 'eq';
-    return `<i class="${k}" title="W${g.week} ${r.toFixed(2)}">${k === 'up' ? '▲' : k === 'dn' ? '▼' : '—'}</i>`;
+    return `<i class="${k}" data-tip="W${g.week} 評分 ${r.toFixed(2)}">${k === 'up' ? '▲' : k === 'dn' ? '▼' : '—'}</i>`;
   });
   while (cells.length < 3) cells.unshift('<i class="na"></i>');
   return cells.join('');
