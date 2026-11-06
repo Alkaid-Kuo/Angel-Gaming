@@ -1,5 +1,6 @@
 // M5 第一批驗收工具（scripts/shooter-coach-lib.ts）：
-// 1. 現行基準 Bot（不讀 tactics、不喊 K:）跑完全部情境不崩，依賴標籤與戰術資料的判定都是「無資料」，不是 0%、也不是未過；
+// 1. 不讀 tactics、不喊 K: 的 Bot（陪練 Bot；基準 Bot 2.8 起會讀、會喊，見下一項）跑完全部情境不崩，依賴標籤與戰術資料的判定都是「無資料」，不是 0%、也不是未過；
+//    現行基準 Bot（2.8）讀戰術資料、每回合都有標籤；
 // 2. 假 Bot（test/coach-stub.ts）跑通注入 → 標籤 → 統計，判定照實算出過／未過；
 // 3. 驅動層 ordersOf：每回合一份、深凍結、蓋過 orders。
 import { readFileSync } from 'node:fs';
@@ -25,8 +26,9 @@ const run = (id: string, make: ControllerFactory, seeds: readonly number[], read
   return { games, checks: evaluate(sc, games, reads) };
 };
 
-describe('M5 驗收工具：現行基準 Bot 回報無資料', () => {
-  const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'baseline');
+describe('M5 驗收工具：不讀戰術資料的 Bot（陪練）回報無資料', () => {
+  // 測試前提變更：原本用現行基準 Bot，Bot 2.8 起它會讀 tactics、喊 K:，改用同樣不讀不喊的陪練 Bot 測工具的「無資料」路徑
+  const bot = compileBot(readFileSync('bots/shooter-practice.js', 'utf8'), 'practice');
   const make: ControllerFactory = (seed) => ({ controllers: Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(bot, 'baseline', seed, pid, MAPS.redrock(), { timeLimits: false })) });
 
   it('八個情境都跑完；讀戰術資料＝否；每個判定都是無資料（不是 0%、不是未過）；整體結論是無資料', () => {
@@ -53,6 +55,18 @@ describe('M5 驗收工具：現行基準 Bot 回報無資料', () => {
     expect(o.verdict).toBe('noData');
     expect(o.text).toContain('無資料');
   }, 180_000);
+});
+
+describe('M5 驗收工具：現行基準 Bot（2.8）', () => {
+  const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'baseline');
+  const make: ControllerFactory = (seed) => ({ controllers: Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(bot, 'baseline', seed, pid, MAPS.redrock(), { timeLimits: false })) });
+
+  it('讀戰術資料＝是；每回合兩方都有戰術標籤', () => {
+    expect(readsTactics(make, 3, fmt)).toBe(true);
+    const g = playGame(scenarioById('plan0'), 3, 0, make, fmt);
+    expect(g.rows.length).toBe(2 * (g.score[0] + g.score[1]));
+    expect(g.rows.every((r) => r.tag !== null)).toBe(true);
+  }, 120_000);
 });
 
 describe('M5 驗收工具：判定規則（合成資料）', () => {

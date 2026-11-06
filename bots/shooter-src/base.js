@@ -379,6 +379,28 @@ export const P = {
   tradeAngle: 25,
   tradePen: 2,
 
+  // ── 2.8：戰術選擇（M5 規格 3.4，選法 B：T 兩段 logit 抽選、CT 取最高分；對數空間，c ＝ Wp×星級 ＋ Wq×(q−0.5) − Wr×本半場用過次數） ──
+  /** 星級、隊伍執行熟練度、本半場每用過一次的扣分（只在有教練或熟練度資料時作用；沒資料時和 2.7 逐位元相同） */
+  tacWp: 0.9,
+  tacWq: 0.8,
+  tacWr: 0.35,
+  /** CT 每用過一次的扣分：CT 取最高分（不抽），扣分要大過規則的 +1 才會在半場內輪到其他戰術（0.35 時 ct212 連用到第 4 回合、ctPush 幾乎選不到） */
+  tacWrCT: 1.2,
+
+  // ── 2.8：執行品質（M5 規格 3.5；q＝本回合戰術的隊伍執行熟練度、p＝個人熟練度；q、p ≥ 0.5 時和 2.7 相同（2.7 是熟練的上限），低於 0.5 才退化；熟練度不改槍法） ──
+  /** 兩組同步：split 到位判定半徑、兩路進點「第二組到了」的距離 × (1 ＋ qSync×(0.5−q))，等第二組的上限 × (1 ＋ qSyncWait×(0.5−q))；split 離入口遠的那組晚 (0.5−q) × qSyncLag 秒出發 */
+  qSync: 1.2,
+  qSyncWait: 0.8,
+  qSyncLag: 4,
+  /** 道具時序：組裡最前面的人離入口 flashLead × (1 ＋ qFlash×(0.5−q)) 格內就丟閃光（太早）；隊友閃光炸開後慢 (0.5−q) × qFlashLate 秒才跟進
+   *（qFlashLate 維持設計值 3＝慢半拍 1.5 秒：5 量過（8 秒窗口 23.3%），但 3 只達 17.6% 是指標 8 秒回看窗口對低熟練度方截尾，不是槓桿不夠；
+   * 15 秒窗口下 3 已是 26.2%，退回 3。見 PR #27） */
+  qFlash: 1,
+  qFlashLate: 3,
+  /** 個人：收到執行後晚 (0.5−p) × qLag 秒出發；佈置途中每半秒停下的機率 (0.5−p) × qPause */
+  qLag: 0.8,
+  qPause: 0.65,
+
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */
   afterPistol: 'force',
@@ -462,6 +484,27 @@ export function dist(ax, ay, bx, by) {
 /** @param {number} v @param {number} lo @param {number} hi */
 export function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
+}
+
+/**
+ * 確定性的 e^x（Math.exp 在不同 JS 引擎可能有誤差，禁用）：只用四則運算。x ＝ k·ln2 ＋ r（|r| ≤ ln2／2），e^r 用泰勒展開 20 項，再乘 2^k
+ * @param {number} x
+ */
+export function expd(x) {
+  if (!(x > -700)) return 0;
+  if (x > 700) return Infinity;
+  const LN2 = 0.6931471805599453;
+  const k = Math.round(x / LN2);
+  const r = x - k * LN2;
+  let term = 1;
+  let sum = 1;
+  for (let i = 1; i <= 20; i++) {
+    term *= r / i;
+    sum += term;
+  }
+  const b = k >= 0 ? 2 : 0.5;
+  for (let i = Math.abs(k); i > 0; i--) sum *= b;
+  return sum;
 }
 
 /** 屬性線性插值：t = 屬性 / 100 @param {number} a @param {number} b @param {number} t */
