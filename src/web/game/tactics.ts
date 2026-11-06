@@ -1,9 +1,9 @@
 // 戰術室（M5 第一批）：十個戰術的隊伍默契、出賽名單個人平均、執行熟練度，比賽計畫（偏好星級、禁用、經濟風格），排練。
-// 資料只讀已知層：自己的默契、計畫、自己人的個人熟練度。排練佔訓練中心的每週時段，推進一週後才漲。
+// 資料只讀已知層：自己的默契、計畫、自己人的個人熟練度、自己派的球探對戰隊報告。排練佔訓練中心的每週時段，推進一週後才漲。
 import type { TacticSpec } from '../../manage/index.ts';
 import { lineupOf } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
-import { btn, canAct, esc, head, icon, pt, wan } from './kit.ts';
+import { btn, canAct, crest, esc, foeOf, head, icon, pt, teamName, wan } from './kit.ts';
 
 /** 偏好的循環：0 → 1 → 2 → 3 → 禁用 → 0 */
 export function nextPref(p: number): number {
@@ -17,6 +17,35 @@ function stars(p: number): string {
 
 const ECON = ['標準', '保守', '積極'] as const;
 const ECON_TIP = ['照隊內預設的買法', '存錢門檻高，少強起', '強起門檻低，常常硬買'] as const;
+
+/**
+ * 對手情報（M5 5.3 球探對戰隊）：選一隊、派球探（費用同球探），推進一週後看到該隊近 3 場各陣營的常用戰術前三名。
+ * 只顯示自己派過的報告（已知層 teamIntel）；對手的熟練度與計畫看不到。
+ */
+function scoutPanel(ctx: Ctx, active: boolean): string {
+  const { v, c, ui } = ctx;
+  const others = v.teams.filter((t) => t.id !== v.me.teamId);
+  const foe = foeOf(v);
+  const sel = others.find((t) => t.id === ui.scoutTeam)?.id ?? foe ?? others[0]?.id ?? null;
+  if (sel === null) return '';
+  const rep = v.teamIntel.find((r) => r.teamId === sel);
+  const pending = v.jobs.some((j) => j.kind === 'scoutTeam' && j.targetId === sel);
+  const cost = c.economy.scoutCost;
+  const name = (id: string): string => c.tactics.find((t) => t.id === id)?.name ?? id;
+  const col = (side: 'T' | 'CT', label: string): string => {
+    const list = rep?.top[side] ?? [];
+    const n = rep?.rounds[side] ?? 0;
+    return `<div class="sc"><h5>${label}<small>${n ? `${n} 回合` : ''}</small></h5>${list.length ? list.map((x) => `<div class="tl2"><b>${esc(name(x.tactic))}</b><span class="num">${x.played}</span><small>贏 ${x.won}</small><span class="pc">${Math.round((x.played * 100) / Math.max(1, n))}%</span></div>`).join('') : `<p class="dim">${rep ? '沒有紀錄' : '—'}</p>`}</div>`;
+  };
+  const meta = rep ? `第 ${rep.week} 週報告 · ${rep.weeks.length ? `看了 ${rep.weeks.map((w) => `W${w}`).join('、')}` : '還沒有比賽紀錄'}` : '還沒派過球探';
+  const canGo = active && v.phase === 'season' && !pending && v.me.cash >= cost;
+  return `<div class="pn sct in">${pt('04', '對手情報', '球探看戰隊', 'SCOUTING')}
+    <div class="picks">${others.map((t) => `<button class="pk ${t.id === sel ? 'on' : ''} ${t.id === foe ? 'foe' : ''}" data-act="steam" data-t="${t.id}" title="${esc(t.name)}${t.id === foe ? '（本週對手）' : ''}">${crest(ctx, t.id, 30)}</button>`).join('')}</div>
+    <div class="who"><b class="${sel === foe ? 'rd' : ''}">${esc(teamName(v, sel))}</b>${sel === foe ? '<small>本週對手</small>' : ''}<span class="meta">${meta}</span></div>
+    <div class="cols">${col('T', '進攻')}${col('CT', '防守')}</div>
+    <div class="go"><span class="dim">近 3 場的回合戰術，推進一週後回報（含本週那場）</span>${btn(pending ? '球探出發中' : `派球探 · ${wan(cost)} 萬`, `data-act="scoutTeam" data-t="${sel}" ${canGo ? '' : 'disabled'}`, 'sm ghost')}</div>
+  </div>`;
+}
 
 export function tacticsScreen(ctx: Ctx): string {
   const { v, c, ui } = ctx;
@@ -63,5 +92,6 @@ export function tacticsScreen(ctx: Ctx): string {
         <div class="seg3">${ECON.map((n, i) => `<button class="${plan.economy === i ? 'on' : ''}" data-act="econ" data-e="${i}" title="${ECON_TIP[i]}" ${active ? '' : 'disabled'}>${n}</button>`).join('')}</div>
         <div class="go">${btn('去訓練基地', 'data-act="go" data-to="training"', 'sm ghost')}</div>
       </div>
+      ${scoutPanel(ctx, active)}
     </section>`;
 }

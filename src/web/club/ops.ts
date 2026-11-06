@@ -55,6 +55,7 @@ export function trainingScreen(ctx: Ctx): string {
   const queue = v.jobs.map((j) => {
     if (j.kind === 'scrim') return `<li>${icon('swords', 16)}<span>練習賽：對 <b>${esc(teamName(ctx, j.opponentTeamId))}</b></span><em>${j.games} 場</em></li>`;
     if (j.kind === 'rehearse') return `<li>${icon('swords', 16)}<span>戰術排練：<b>${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}</b></span><em>${j.sessions} 節</em></li>`;
+    if (j.kind === 'scoutTeam') return `<li>${icon('search', 16)}<span>球探看戰隊：<b>${esc(teamName(ctx, j.targetId))}</b></span></li>`;
     const p = ctx.pm.get(j.playerId);
     const who = esc(p?.name ?? '?');
     return `<li>${icon('search', 16)}<span>球探出發：<b>${who}</b>（${esc(teamName(ctx, p?.teamId ?? null))}）</span></li>`;

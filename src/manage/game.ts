@@ -207,6 +207,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         playbook: startPlaybook(content, 'human'),
         gamePlan: defaultGamePlan(content),
         tacticLog: {},
+        teamIntel: [],
       });
       for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, portraits, id, rng.range(e.humanVersions[0], e.humanVersions[1]), e.humanStartRarities[k]);
     } else {
@@ -227,6 +228,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
         playbook: startPlaybook(content, persona),
         gamePlan: defaultGamePlan(content),
         tacticLog: {},
+        teamIntel: [],
       });
       for (let k = 0; k < content.lineupSize; k++) makePlayer(state, content, rng, handles, portraits, id, rng.range(spec.versions[0], spec.versions[1]));
       npcIndex++;

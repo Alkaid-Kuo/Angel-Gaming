@@ -94,12 +94,20 @@ export function migrate7to8(s: GameState, content: ContentPack): GameState {
   return s;
 }
 
+/** 第 8 版 → 第 9 版（M5 球探對戰隊）：每隊補空的球探對戰隊報告 */
+export function migrate8to9(s: GameState): GameState {
+  for (const t of s.teams) t.teamIntel = [];
+  s.version = 9;
+  return s;
+}
+
 export function deserialize(json: string, content: ContentPack): GameState {
   let s = JSON.parse(json) as GameState;
   if (s.contentId !== content.id) throw new Error(`存檔的內容包 ${s.contentId} 與目前 ${content.id} 不符`);
   if (s.version === 5) s = migrate5to6(s, content);
   if (s.version === 6) s = migrate6to7(s);
   if (s.version === 7) s = migrate7to8(s, content);
+  if (s.version === 8) s = migrate8to9(s);
   if (s.version !== SAVE_VERSION) throw new Error(`存檔版本 ${s.version} 與目前 ${SAVE_VERSION} 不符`);
   return s;
 }
