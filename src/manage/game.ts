@@ -7,7 +7,7 @@ import type { BattleGateway, MatchOutcome, MatchRequest, PlayerStat } from './ga
 import { assertFormat, finalScore } from './gateway.ts';
 import { processJobs } from './jobs.ts';
 import { createFinals, createRegularSeason, createSemis, finalRanks } from './league.ts';
-import { npcLineup, npcOffseason, npcPlaybook } from './npc.ts';
+import { npcLineup, npcOffseason, npcPlaybook, npcTraining } from './npc.ts';
 import { PORTRAITS } from './portraits.ts';
 import { eloDelta } from './rating.ts';
 import { gauss, rngFor, STREAM } from './rng.ts';
@@ -19,7 +19,6 @@ import {
   humanTeam,
   lineupValid,
   notify,
-  playerMaxVersion,
   playerOf,
   post,
   publicPrior,
@@ -32,6 +31,7 @@ import {
 } from './state.ts';
 import type { Command, Fixture, GameState, Persona, Player, PlayerId, Rarity, RoundResult, TacticRecord, Team, TeamId } from './types.ts';
 import { addMatch, emptySeason } from './stats.ts';
+import { attrsAt, stageOf, startCaps } from './attrs.ts';
 import { REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from './types.ts';
 import { knownView } from './view.ts';
 import type { Prng } from '../shared/prng.ts';
@@ -61,7 +61,7 @@ function assertContent(content: ContentPack): void {
   const e = content.economy;
   if (e.humanStartRarities.length !== content.lineupSize) throw new Error(`內容包 ${content.id} 的玩家起手品階數與名單人數不符`);
   for (const r of e.humanStartRarities) {
-    if (raritySpec(content, r).maxVersion < e.humanVersions[1]) throw new Error(`內容包 ${content.id} 的玩家起手版本可能超過 ${r} 階上限`);
+    if (raritySpec(content, r).capVersion < e.humanVersions[1]) throw new Error(`內容包 ${content.id} 的玩家起手版本可能超過 ${r} 階上限`);
   }
   const dup = content.handles.find((h, i) => content.handles.indexOf(h) !== i);
   if (dup !== undefined) throw new Error(`內容包 ${content.id} 的名字庫有重複：${dup}`);
@@ -74,7 +74,7 @@ function assertContent(content: ContentPack): void {
  * 池都還有剩時抽法與沒有立繪前完全相同（同種子同結果）；只有某階快發完的那一局才會把它排除。
  */
 function pickRarity(content: ContentPack, rng: Prng, version: number, portraits: PortraitDeck): Rarity {
-  const pool = content.rarities.filter((r) => r.maxVersion >= version && portraitsLeft(portraits, r.id) > 0);
+  const pool = content.rarities.filter((r) => r.capVersion >= version && portraitsLeft(portraits, r.id) > 0);
   const total = pool.reduce((s, r) => s + r.weight, 0);
   if (total === 0) throw new Error(`沒有品階的上限到得了 v${version}，或那些品階的立繪已經發完`);
   let roll = rng.nextInt(total);
@@ -122,20 +122,23 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, handles: 
   const salary = Math.max(1, Math.round((salaryForVersion(content, version) * (90 + rng.nextInt(21))) / 100));
   const n = state.nextId++;
   const id = `p${n}`;
+  const attrs = attrsAt(content, lineage.id, version);
   state.players.push({
     id,
     name,
     lineageId: lineage.id,
     rarity: picked,
     portraitId,
-    version,
+    // 版本只當開局生成參數（M5 第二批）：屬性＝該版本的流派屬性，上限由品階與習慣定
+    attrs,
+    progress: Object.fromEntries(content.attributes.trainable.map((k) => [k, 0])),
+    caps: startCaps(content, lineage.id, picked, habit, attrs),
     habit,
-    elo: publicPrior(version),
+    elo: publicPrior(stageOf(content, lineage.id, attrs)),
     games: 0,
     weeklySalary: salary,
     teamId,
     contractSeasons: 1,
-    upgradeUntilWeek: null,
     tactics: startTactics(content, state.seed, n, lineage.id),
     newFace: false,
     season: emptySeason(),
@@ -251,6 +254,8 @@ function ensureLineups(state: GameState, content: ContentPack): void {
       const rng = rngFor(state.seed, STREAM.npc, state.week, Number(team.id.slice(1)));
       applyAll(state, content, team.id, npcLineup(knownView(state, content, team.id), content.personas[team.persona], content.lineupSize, rng));
       applyAll(state, content, team.id, npcPlaybook(knownView(state, content, team.id), team.persona, content));
+      const v = knownView(state, content, team.id);
+      applyAll(state, content, team.id, npcTraining(v, team.persona, content, v.me.slotsLeft));
     } else if (!lineupValid(state, content, team)) {
       team.lineup = rosterOf(state, team.id)
         .sort((a, b) => b.elo - a.elo || (a.id < b.id ? -1 : 1))
@@ -369,19 +374,6 @@ function weeklyFinance(state: GameState, content: ContentPack): void {
   }
 }
 
-function completeUpgrades(state: GameState, content: ContentPack): void {
-  const e = content.economy;
-  for (const p of state.players) {
-    if (p.teamId === null || p.upgradeUntilWeek === null || state.week < p.upgradeUntilWeek) continue;
-    if (p.version < playerMaxVersion(content, p)) {
-      p.version++;
-      p.weeklySalary = Math.round((p.weeklySalary * e.salaryGrowthPct) / 100);
-      notify(state, p.teamId, 'report', `${p.name} 升到 v${p.version}，週薪調整為 ${p.weeklySalary}`);
-    }
-    p.upgradeUntilWeek = null;
-  }
-}
-
 /** NPC 不會破產：赤字由金主補到 0（M4 暫代） */
 function bailoutNpcs(state: GameState): void {
   for (const team of state.teams) {
@@ -429,7 +421,6 @@ export async function advance(state: GameState, content: ContentPack, gateway: B
   settleBets(state);
   await processJobs(state, content, gateway, opts.onProgress);
   weeklyFinance(state, content);
-  completeUpgrades(state, content);
   bailoutNpcs(state);
 
   const w = state.week;

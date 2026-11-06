@@ -17,6 +17,9 @@ export function trainingScreen(ctx: Ctx): string {
   const cap = e.scrimCapacity[lvl - 1];
   const left = Math.max(0, v.me.capacityLeft);
   const used = cap - left;
+  // 訓練時段（M5 第二批）：屬性訓練與戰術排練共用，和練習賽場數分開
+  const slotCap = e.trainingSlots[lvl - 1];
+  const slots = Math.max(0, v.me.slotsLeft);
   const maxLvl = e.facilityMaintenance.length;
   const active = canAct(v);
   const L = 830;
@@ -27,6 +30,7 @@ export function trainingScreen(ctx: Ctx): string {
     if (j.kind === 'rehearse') return `<div class="job"><span class="ic2">${icon('swords', 24)}</span><b>戰術排練<small>${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}</small></b><span class="num">${j.sessions}</span><div class="meter g" style="--v:${Math.round((j.sessions / cap) * 100)}%"><i></i></div></div>`;
     const p = ctx.pm.get(j.playerId);
     const who = esc(p?.name ?? '?');
+    if (j.kind === 'train') return `<div class="job"><span class="ic2">${icon('levelup', 24)}</span><b>屬性訓練<small>${who} · ${esc(c.attributes.names[j.attr] ?? j.attr)}</small></b><span class="num">${j.sessions}</span><div class="meter g" style="--v:100%"><i></i></div></div>`;
     return `<div class="job"><span class="ic2 w">${icon('search', 24)}</span><b>球探<small>${who} · ${esc(teamName(v, p?.teamId ?? null))}</small></b><span class="num sm">${wan(e.scoutCost)}萬</span><div class="meter" style="--v:100%"><i></i></div></div>`;
   });
   const step = runStep(cap);
@@ -55,12 +59,14 @@ export function trainingScreen(ctx: Ctx): string {
           <circle cx="150" cy="150" r="132" fill="none" stroke="#f0b54a" stroke-width="16" stroke-dasharray="0 ${usedLen.toFixed(1)} ${(L - usedLen).toFixed(1)} ${L}" transform="rotate(-90 150 150)"/>
           <circle cx="150" cy="150" r="132" fill="none" stroke="#0b0e14" stroke-width="18" stroke-dasharray="2 39.4"/>
           <g class="spin"><circle cx="150" cy="150" r="148" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="1.5" stroke-dasharray="3 9"/></g></svg>
-          <div class="v"><span class="num">${left}</span><small>RUNS LEFT</small><span>本週剩餘場數 ／ ${cap}</span></div></div>
+          <div class="v"><span class="num">${left}</span><small>RUNS LEFT</small><span>練習賽 ／ ${cap} 場</span></div></div>
         <div class="lv"><div class="fl3">${[1, 2, 3].map((i) => `<i class="${i <= lvl ? 'on' : ''}"></i>`).join('')}</div><div class="t"><b>Lv${lvl}</b><span>維護 ${wan(e.facilityMaintenance[lvl - 1])} 萬／週</span></div>
-          ${lvl < maxLvl ? btn(`升 Lv${lvl + 1} · ${wan(upCost)}萬`, `data-act="upfac" ${!active || v.me.cash < upCost ? 'disabled' : ''} title="每週 ${e.scrimCapacity[lvl]} 場，維護 ${wan(e.facilityMaintenance[lvl])} 萬"`, 'sm ghost') : '<span class="chip g">最高等級</span>'}</div></div>
+          ${lvl < maxLvl ? btn(`升 Lv${lvl + 1} · ${wan(upCost)}萬`, `data-act="upfac" ${!active || v.me.cash < upCost ? 'disabled' : ''} title="每週練習賽 ${e.scrimCapacity[lvl]} 場、訓練時段 ${e.trainingSlots[lvl]} 節，維護 ${wan(e.facilityMaintenance[lvl])} 萬"`, 'sm ghost') : '<span class="chip g">最高等級</span>'}</div>
+        <div class="slots"><div class="t"><small>本週訓練時段</small><span><b class="num">${slots}</b>／${slotCap} 節</span></div><div class="meter g" style="--v:${Math.round(((slotCap - slots) / Math.max(1, slotCap)) * 100)}%"><i></i></div>
+          <div class="to">${btn('訓練 →', 'data-act="go" data-to="squad" title="屬性訓練在選手詳情排"', 'sm ghost')}${c.tactics.length ? btn('排練 →', 'data-act="go" data-to="tactics"', 'sm ghost') : ''}</div></div></div>
       <div class="pn sch in">${pt('02', '本週排程', `已排 <b>${used}</b>／${cap} 場${queuedScrims > 0 ? ` · 練習賽推進時多等${waitText(queuedScrims)}` : ''}`)}
         <div class="jobs scroll">${jobs.join('') || '<p class="dim">還沒有排任何工作。右邊選選手與項目排進來。</p>'}</div>
-        <div class="sum"><span>練習賽一場佔 1 格，戰術排練一節佔 1 格</span><span>排練在<b>戰術室</b></span></div></div>
+        <div class="sum"><span>練習賽用上面的場數；屬性訓練與戰術排練共用訓練時段</span><span>訓練在<b>選手詳情</b>、排練在<b>戰術室</b></span></div></div>
       <div class="pn new in">${pt('03', '新增排程', '', 'SCHEDULE')}
         <div class="lbl">項目</div><div class="seg2"><button class="on">練習賽（隊對隊）</button><button data-act="go" data-to="tactics">戰術排練 →</button></div>
         ${form}

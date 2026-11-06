@@ -10,7 +10,7 @@ import { FakeGateway } from '../src/manage/gateway-fake.ts';
 import { REHEARSE_PERSONAL_GAIN, REHEARSE_TEAM_GAIN } from '../src/manage/jobs.ts';
 import { npcPlaybook } from '../src/manage/npc.ts';
 import { deserialize, serialize } from '../src/manage/save.ts';
-import { buildSide, effectiveLineup, effectiveTactics, grow, humanTeam, playerOf, rosterOf } from '../src/manage/state.ts';
+import { buildSide, effectiveLineup, effectiveTactics, grow, humanTeam, playerOf, rosterOf, stageOfPlayer } from '../src/manage/state.ts';
 import type { GameState } from '../src/manage/types.ts';
 import { SAVE_VERSION } from '../src/manage/types.ts';
 import { knownView } from '../src/manage/view.ts';
@@ -51,7 +51,7 @@ describe('戰術手冊：開局', () => {
     }
     // 名單、品階、流派、立繪與沒有戰術手冊的內容包同種子相同（熟練度用獨立串流）
     const plain = newGame(3, STUB_CONTENT);
-    expect(s.players.map((p) => [p.name, p.rarity, p.lineageId, p.portraitId, p.version, p.habit])).toEqual(plain.players.map((p) => [p.name, p.rarity, p.lineageId, p.portraitId, p.version, p.habit]));
+    expect(s.players.map((p) => [p.name, p.rarity, p.lineageId, p.portraitId, p.habit])).toEqual(plain.players.map((p) => [p.name, p.rarity, p.lineageId, p.portraitId, p.habit]));
   });
 
   it('角色傾向 +10：攻防戰突破手的 rush 起點較高', () => {
@@ -75,7 +75,8 @@ describe('戰術手冊：排練', () => {
     const cash = me.cash;
     expect(applyCommand(s, content, me.id, { type: 'queueRehearse', tactic: 'rushB', sessions: 3 })).toEqual({ ok: true });
     expect(me.cash).toBe(cash - 3 * content.economy.rehearseCost);
-    expect(knownView(s, content, me.id).me.capacityLeft).toBe(content.economy.scrimCapacity[0] - 3);
+    expect(knownView(s, content, me.id).me.slotsLeft).toBe(content.economy.trainingSlots[0] - 3);
+    expect(knownView(s, content, me.id).me.capacityLeft).toBe(content.economy.scrimCapacity[0]);
     await advance(s, content, fake);
     let t = team0;
     for (let i = 0; i < 3; i++) t = grow(t, REHEARSE_TEAM_GAIN);
@@ -145,12 +146,12 @@ describe('比賽計畫', () => {
     expect(ok({ pref: { ct212: -1, stackA: -1, stackB: -1 }, economy: 0 })).toBe(true);
   });
 
-  it('沒有戰術手冊的內容包：請求單沒有 team、個人資料只有習慣', () => {
+  it('沒有戰術手冊的內容包：請求單沒有 team、個人資料只有習慣與表定屬性', () => {
     const s = newGame(9, STUB_CONTENT);
     const me = humanTeam(s);
     const side = buildSide(STUB_CONTENT, me, rosterOf(s, me.id).slice(0, 3));
     expect(side.team).toBeUndefined();
-    expect(Object.keys(side.players[0].config)).toEqual(['habit']);
+    expect(Object.keys(side.players[0].config)).toEqual(['habit', ...STUB_CONTENT.attributes.keys]);
   });
 });
 
@@ -250,17 +251,17 @@ describe('NPC 戰術手冊', () => {
 });
 
 describe('存檔', () => {
-  it('第 7 版存讀一致', async () => {
+  it('第 8 版存讀一致', async () => {
     const s = newGame(16, content);
     applyCommand(s, content, humanTeam(s).id, { type: 'setGamePlan', plan: { pref: { rushA: 2 }, economy: 1 } });
     await advance(s, content, fake);
     const back = deserialize(serialize(s), content);
     expect(back).toEqual(s);
     expect(back.version).toBe(SAVE_VERSION);
-    expect(SAVE_VERSION).toBe(7);
+    expect(SAVE_VERSION).toBe(8);
   });
 
-  it('第 5 版 → 第 6 版 → 第 7 版：刪預設與研發、補熟練度與計畫、收件匣說明，再補統計；第 4 版照舊拒絕', () => {
+  it('第 5 版 → 第 8 版：刪預設與研發、補熟練度與計畫、收件匣說明，再補統計、版本換成屬性；第 4 版照舊拒絕', () => {
     const s = newGame(17, content);
     const v5 = JSON.parse(serialize(s)) as Record<string, unknown> & GameState;
     v5.version = 5;
@@ -268,6 +269,12 @@ describe('存檔', () => {
       delete p.tactics;
       delete p.newFace;
       delete p.season;
+      // 第 5 版是版本制：版本＝開局的成長階段（開局屬性就是該版本的屬性）
+      p.version = stageOfPlayer(content, s.players.find((x) => x.id === p.id) as GameState['players'][number]);
+      p.upgradeUntilWeek = null;
+      delete p.attrs;
+      delete p.caps;
+      delete p.progress;
       p.presets = [{ id: 'r1', target: 'generic', version: 1, bonus: 10, reportedBonus: 12 }];
     }
     for (const t of v5.teams as unknown as Record<string, unknown>[]) {
@@ -277,7 +284,7 @@ describe('存檔', () => {
     }
     (v5.jobs as unknown[]).push({ kind: 'research', id: 999, teamId: s.humanTeamId, playerId: s.players[0].id, target: 'generic', games: 5 });
     const m = deserialize(JSON.stringify(v5), content);
-    expect(m.version).toBe(7);
+    expect(m.version).toBe(8);
     for (const p of m.players) expect(p.season.games).toBe(0);
     for (const t of m.teams) expect(t.tacticLog).toEqual({});
     expect(m.jobs.some((j) => (j.kind as string) === 'research')).toBe(false);
@@ -287,8 +294,12 @@ describe('存檔', () => {
       expect(p.newFace).toBe(false);
     }
     for (const t of m.teams) expect(t.playbook).toEqual(startPlaybook(content, t.persona ?? 'human'));
-    expect(m.inbox[m.inbox.length - 1].text).toContain('戰術手冊');
-    expect(m.inbox[m.inbox.length - 1].text).toContain('研發已取消');
+    const notes = m.inbox.slice(-2).map((x) => x.text);
+    expect(notes[0]).toContain('戰術手冊');
+    expect(notes[0]).toContain('研發已取消');
+    expect(notes[1]).toContain('屬性制');
+    // 版本 → 屬性：和同種子新開局相同（同一套生成規則）；真實上限、進度也一樣
+    expect(m.players.map((p) => [p.attrs, p.caps, p.progress])).toEqual(s.players.map((p) => [p.attrs, p.caps, p.progress]));
     // 遷移後的熟練度等於同種子新開局的值（同一套規則）
     expect(m.players.map((p) => p.tactics)).toEqual(s.players.map((p) => p.tactics));
     expect(() => deserialize(JSON.stringify({ ...v5, version: 4 }), content)).toThrow(/存檔版本 4/);

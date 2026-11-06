@@ -155,6 +155,3 @@ export function weekBreakdown(v: KnownView, week: number): { cat: LedgerCategory
   return [...m.entries()].map(([cat, amount]) => ({ cat, amount })).filter((x) => x.amount !== 0);
 }
 
-export function maxVersionOf(c: ContentPack, lineageId: string): number {
-  return c.lineages.find((l) => l.id === lineageId)?.power.length ?? 1;
-}

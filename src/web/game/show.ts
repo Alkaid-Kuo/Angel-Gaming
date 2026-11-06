@@ -6,6 +6,7 @@ import { lineupOf, rankOf, weekBreakdown } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
 import { avatar, crest, crestRing, esc, glyph, icon, slotName, teamName, wan } from './kit.ts';
 import { sidesOf, statsBoard } from './stats.ts';
+import { STAGE_NAMES } from '../../manage/attrs.ts';
 
 export interface Snapshot {
   cash: number;
@@ -95,12 +96,12 @@ function eloDelta(ctx: Ctx, before: Snapshot, id: string): number {
   return b === undefined || a === undefined ? 0 : a - b;
 }
 
-/** 一方名單（直排）：出賽位、頭像、名字、流派（角色）、版本、賽前評分 */
+/** 一方名單（直排）：出賽位、頭像、名字、流派（角色）、成長階段、賽前評分 */
 function rosterCol(ctx: Ctx, ids: string[], before: Snapshot, foe: boolean): string {
   return ids
     .map((id, i) => {
       const p = ctx.pm.get(id);
-      return `<div class="mp ${foe ? 'foe' : ''}" style="--d:${0.3 + i * 0.12}s">${avatar(ctx, p, 64)}<span class="c"><small>${esc(slotName(ctx, i))}</small><b>${esc(p?.name ?? '?')}</b><span class="inf">${p ? `${glyph(p.lineageId, 15)}${esc(lineageName(ctx.c, p.lineageId))} · v${p.version}` : ''}</span></span><span class="num">${before.elo.get(id) ?? p?.elo ?? ''}</span></div>`;
+      return `<div class="mp ${foe ? 'foe' : ''}" style="--d:${0.3 + i * 0.12}s">${avatar(ctx, p, 64)}<span class="c"><small>${esc(slotName(ctx, i))}</small><b>${esc(p?.name ?? '?')}</b><span class="inf">${p ? `${glyph(p.lineageId, 15)}${esc(lineageName(ctx.c, p.lineageId))} · ${STAGE_NAMES[p.stage - 1] ?? ''}` : ''}</span></span><span class="num">${before.elo.get(id) ?? p?.elo ?? ''}</span></div>`;
     })
     .join('');
 }

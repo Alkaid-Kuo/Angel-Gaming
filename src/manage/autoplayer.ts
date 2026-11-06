@@ -7,8 +7,10 @@ import type { ContentPack } from './content.ts';
 import { advance } from './game.ts';
 import type { BattleGateway } from './gateway.ts';
 import { rngFor, STREAM } from './rng.ts';
+import { gradeMid } from './attrs.ts';
 import { publicPrior } from './state.ts';
 import type { Command, GameState, TeamId } from './types.ts';
+import { REGULAR_WEEKS } from './types.ts';
 import type { KnownFixture, KnownPlayer, KnownView } from './view.ts';
 import { knownView } from './view.ts';
 
@@ -166,7 +168,7 @@ const moneyball: Policy = (view, content) => {
     let count = view.me.roster.length;
     const picks = free
       .filter((p) => view.intel.some((i) => i.playerId === p.id))
-      .map((p) => ({ p, gain: estStrength(view, p) - publicPrior(p.version) }))
+      .map((p) => ({ p, gain: estStrength(view, p) - publicPrior(p.stage) }))
       .filter((x) => x.gain >= 25)
       .sort((a, b) => b.gain / b.p.weeklySalary - a.gain / a.p.weeklySalary);
     for (const { p } of picks) {
@@ -181,7 +183,61 @@ const moneyball: Policy = (view, content) => {
   return cmds;
 };
 
-export const POLICIES: Readonly<Record<string, Policy>> = { passive, steady, splurge, randomBettor, scoutBettor, moneyball };
+/**
+ * 訓練派（M5 平衡量測用的自動玩家）：照整季算帳，不練到破產。
+ * - 保留金＝剩餘週數 ×（固定支出 − 九成贊助）− 剩餘例行賽週數 × 輸球獎金：假設剩下每場都輸、季後賽沒進、名氣往下掉，還付得起薪水與維護。
+ * - 升級：升完扣掉保留金，每週預算還要夠排滿 Lv1 的時段（「升後還練得動」），才往 level 升；賽季中任何一週都可以升。
+ * - 每週預算＝（現金 − 保留金）÷ 剩餘週數；時段一半排練、一半屬性訓練，訓練平均分給出賽名單（每人練離公開上限等級最遠的那項）。
+ */
+export function trainerPolicy(level: number): Policy {
+  return (view, content) => {
+    const e = content.economy;
+    const cmds: Command[] = [];
+    if (view.phase !== 'offseason' && view.phase !== 'season') return cmds;
+    let cash = view.me.cash;
+    let lvl = view.me.trainingLevel;
+    let fixed = view.me.weeklyFixedCost;
+    // 還要付幾次週結算：休賽期（第 0 週）不結算，賽季第 w 週推進時要付
+    const weeksLeft = Math.max(1, view.totalWeeks - view.week + (view.phase === 'season' ? 1 : 0));
+    const regularLeft = Math.max(0, REGULAR_WEEKS - view.week + (view.phase === 'season' ? 1 : 0));
+    const reserve = (f: number): number => Math.max(0, weeksLeft * (f - 0.9 * view.me.weeklySponsor) - regularLeft * e.matchLossPrize);
+    const unit = (e.trainCost + e.rehearseCost) / 2;
+    while (lvl < level && lvl < e.facilityMaintenance.length) {
+      const cost = e.facilityUpgradeCost[lvl - 1];
+      const fixedAfter = fixed + e.facilityMaintenance[lvl] - e.facilityMaintenance[lvl - 1];
+      if ((cash - cost - reserve(fixedAfter)) / weeksLeft < e.trainingSlots[0] * unit) break;
+      cmds.push({ type: 'upgradeTraining' });
+      cash -= cost;
+      fixed = fixedAfter;
+      lvl++;
+    }
+    const budget = Math.max(0, cash - reserve(fixed)) / weeksLeft;
+    let slots = Math.min(e.trainingSlots[lvl - 1] - (e.trainingSlots[view.me.trainingLevel - 1] - view.me.slotsLeft), Math.floor(budget / Math.max(1, unit)));
+    if (slots <= 0) return cmds;
+    const rehearse = content.tactics.length > 0 ? Math.floor(slots / 2) : 0;
+    if (rehearse > 0) {
+      const top = [...content.tactics].sort((a, b) => (view.me.effective[a.id] ?? 0) - (view.me.effective[b.id] ?? 0))[0];
+      cmds.push({ type: 'queueRehearse', tactic: top.id, sessions: rehearse });
+      slots -= rehearse;
+    }
+    const players = playerMap(view);
+    const lineup = (view.me.lineup.length === content.lineupSize ? view.me.lineup : view.me.roster.slice(0, content.lineupSize)).map((id) => players.get(id) as KnownPlayer);
+    const per = Math.min(e.trainMaxPerPlayer, Math.floor(slots / Math.max(1, lineup.length)));
+    let extra = slots - per * lineup.length;
+    for (const p of lineup) {
+      const n = Math.min(e.trainMaxPerPlayer, per + (extra > 0 ? 1 : 0));
+      if (extra > 0 && n > per) extra--;
+      if (n <= 0) continue;
+      const k = content.attributes.trainable
+        .map((key) => ({ key, gap: gradeMid(p.capGrades?.[key] ?? 'D') - (p.attrs?.[key] ?? 100) }))
+        .sort((a, b) => b.gap - a.gap || (a.key < b.key ? -1 : 1))[0].key;
+      cmds.push({ type: 'queueTrain', playerId: p.id, attr: k, sessions: n });
+    }
+    return cmds;
+  };
+}
+
+export const POLICIES: Readonly<Record<string, Policy>> = { passive, steady, splurge, randomBettor, scoutBettor, moneyball, trainer: trainerPolicy(2) };
 
 /** 用指定策略打完整個賽段（policy 為 null＝完全不介入） */
 export async function runSeason(state: GameState, content: ContentPack, gateway: BattleGateway, policy: Policy | null): Promise<GameState> {

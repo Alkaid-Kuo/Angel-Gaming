@@ -2,7 +2,7 @@
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
 import type { MatchRequest, PlayerStat } from './gateway.ts';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -48,8 +48,13 @@ export interface Player {
   rarity: Rarity;
   /** 公開：立繪代號（例 SR_007，清單在 portraits.ts），開局從同品階的池不重複發 */
   portraitId: string;
-  version: number;
-  /** 隱藏：個人習慣，對真實強度的小偏移 */
+  /** 表定屬性（M5 第二批；0～100 整數，鍵＝內容包 attributes.keys）：自己的人與球探報告過的人看得到數字，其他人只看等級 */
+  attrs: Record<string, number>;
+  /** 訓練進度（百分之一點，滿 100 進 1 點；只有可訓練屬性）：自己的人公開、別隊隱藏 */
+  progress: Record<string, number>;
+  /** 隱藏：真實上限（只有可訓練屬性）；畫面只給公開公式的上限等級 */
+  caps: Record<string, number>;
+  /** 隱藏：個人習慣，對真實強度的小偏移，也決定真實上限落在公開上限的哪一側 */
   habit: number;
   /** 公開：戰績 Elo */
   elo: number;
@@ -60,7 +65,6 @@ export interface Player {
   teamId: TeamId | null;
   /** 剩餘賽季（M4 固定 1，留給 M5 的合約續約） */
   contractSeasons: number;
-  upgradeUntilWeek: number | null;
   /** 個人戰術熟練度（M5；0～100，存到小數一位）：跟著選手走，轉會帶走。自己的選手公開，別隊隱藏 */
   tactics: Record<TacticId, number>;
   /** 新面孔（M5）：簽約時設 true，第一次為本隊出賽後清掉；出賽名單有新面孔的那場開打前，隊伍默契打折 */
@@ -95,6 +99,8 @@ export interface IntelReport {
   week: number;
   estPower: number;
   sd: number;
+  /** 報告當下的表定屬性（M5 第二批；之後對方訓練不會更新） */
+  attrs: Record<string, number>;
 }
 
 /** 練習賽報告：雙方當週的出賽名單隊對隊 */
@@ -178,6 +184,7 @@ export interface Bet {
 export type Job =
   | { kind: 'scrim'; id: number; teamId: TeamId; opponentTeamId: TeamId; games: number }
   | { kind: 'rehearse'; id: number; teamId: TeamId; tactic: TacticId; sessions: number }
+  | { kind: 'train'; id: number; teamId: TeamId; playerId: PlayerId; attr: string; sessions: number }
   | { kind: 'scout'; id: number; teamId: TeamId; playerId: PlayerId };
 
 export interface Message {
@@ -217,7 +224,7 @@ export type Command =
   | { type: 'release'; playerId: PlayerId }
   | { type: 'setLineup'; lineup: PlayerId[] }
   | { type: 'upgradeTraining' }
-  | { type: 'upgradeVersion'; playerId: PlayerId }
+  | { type: 'queueTrain'; playerId: PlayerId; attr: string; sessions: number }
   | { type: 'bet'; fixtureId: FixtureId; side: Side; stake: number }
   | { type: 'queueScrim'; opponentTeamId: TeamId; games: number }
   | { type: 'queueRehearse'; tactic: TacticId; sessions: number }

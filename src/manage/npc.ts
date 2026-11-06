@@ -1,4 +1,5 @@
 // NPC 戰隊：與玩家一樣只讀「已知層」視圖、只發同一套指令。個性＝數值組合＋出賽排序風格。
+import { gradeMid } from './attrs.ts';
 import type { ContentPack, PersonaSpec } from './content.ts';
 import type { Prng } from '../shared/prng.ts';
 import { raritySpec } from './state.ts';
@@ -33,7 +34,7 @@ export function npcOffseason(view: KnownView, persona: Persona, spec: PersonaSpe
 
   for (const p of pool) {
     if (count >= Math.min(spec.rosterTarget, e.rosterMax)) break;
-    if (persona === 'youth' && p.version > 2) continue;
+    if (persona === 'youth' && p.stage > 2) continue;
     const fee = p.weeklySalary * e.signingFeeWeeks;
     if (cash - fee < 8 * (fixed + p.weeklySalary)) continue;
     cmds.push({ type: 'sign', playerId: p.id });
@@ -55,10 +56,22 @@ export function npcLineup(view: KnownView, spec: PersonaSpec, size: number, rng:
   return [{ type: 'setLineup', lineup: top }];
 }
 
+/** NPC 現金緩衝（M5 經濟平衡，2026-11-06）：排練、訓練、訓練中心升級後各要留幾週固定支出；青訓派錢少，留得多 */
+export const NPC_BUFFER_WEEKS: Readonly<Record<Persona, { readonly rehearse: number; readonly train: number; readonly upgrade: number }>> = {
+  whale: { rehearse: 3, train: 2, upgrade: 6 },
+  data: { rehearse: 3, train: 2, upgrade: 6 },
+  youth: { rehearse: 5, train: 4, upgrade: 8 },
+  miser: { rehearse: 4, train: 3, upgrade: 8 },
+};
+/** NPC 願意把訓練中心升到幾級（守財奴不升） */
+export const NPC_MAX_FACILITY: Readonly<Record<Persona, number>> = { whale: 3, data: 3, youth: 2, miser: 1 };
+/** 守財奴每週最多練幾節 */
+export const MISER_TRAIN_CAP = 6;
+
 /**
  * 每週戰術手冊（M5）：依個性設比賽計畫，並把本週一半的訓練時段拿去排練兩邊執行熟練度最高的戰術。
  * 計畫：豪門、數據派把每邊最熟的戰術給 2 星、次熟的 1 星；青訓派偏好 rush（1 星）；守財奴不設偏好。
- * 經濟風格：豪門與青訓派積極、守財奴保守、數據派標準。排練費要留 8 週固定支出當緩衝。
+ * 經濟風格：豪門與青訓派積極、守財奴保守、數據派標準。排練費要留 NPC_BUFFER_WEEKS 的週數當緩衝。
  */
 export function npcPlaybook(view: KnownView, persona: Persona, content: ContentPack): Command[] {
   if (content.tactics.length === 0) return [];
@@ -81,14 +94,59 @@ export function npcPlaybook(view: KnownView, persona: Persona, content: ContentP
   const economy = persona === 'whale' || persona === 'youth' ? 2 : persona === 'miser' ? 1 : 0;
   const cmds: Command[] = [{ type: 'setGamePlan', plan: { pref, economy } }];
 
-  const half = Math.floor(view.me.capacityLeft / 2);
-  const afford = Math.floor((view.me.cash - 8 * view.me.weeklyFixedCost) / Math.max(1, content.economy.rehearseCost));
+  const half = Math.floor(view.me.slotsLeft / 2);
+  const afford = Math.floor((view.me.cash - NPC_BUFFER_WEEKS[persona].rehearse * view.me.weeklyFixedCost) / Math.max(1, content.economy.rehearseCost));
   const sessions = Math.min(half, afford);
   if (sessions >= 2) {
     const [t] = bySide('T');
     const [ct] = bySide('CT');
     if (t !== undefined) cmds.push({ type: 'queueRehearse', tactic: t, sessions: Math.ceil(sessions / 2) });
     if (ct !== undefined) cmds.push({ type: 'queueRehearse', tactic: ct, sessions: Math.floor(sessions / 2) });
+  }
+  return cmds;
+}
+
+/**
+ * 每週屬性訓練（M5 第二批；經濟平衡 2026-11-06 調過）：用排練剩下的訓練時段，經同一套指令。只看已知層（自己人的屬性數字與上限等級）。
+ * 先看要不要升訓練中心：個性願意的等級內（NPC_MAX_FACILITY），升完還留得住 NPC_BUFFER_WEEKS 的週數就升一級，新增的時段這週就拿來練。
+ * 豪門：出賽名單先、再練替補；數據派：整隊離上限最遠的屬性優先；青訓派：只練新秀與正選（階段 ≤ 2）；守財奴：每週最多 MISER_TRAIN_CAP 節。
+ * 每人每週最多 trainMaxPerPlayer 節，一次練一項（離上限最遠的那項）；費用要留 NPC_BUFFER_WEEKS 的週數當緩衝。
+ */
+export function npcTraining(view: KnownView, persona: Persona, content: ContentPack, slotsAfterPlaybook: number): Command[] {
+  const e = content.economy;
+  const keys = content.attributes.trainable;
+  const cmds: Command[] = [];
+  let slots = Math.max(0, slotsAfterPlaybook);
+  let cash = view.me.cash;
+  let fixed = view.me.weeklyFixedCost;
+  const lvl = view.me.trainingLevel;
+  if (lvl < Math.min(NPC_MAX_FACILITY[persona], e.facilityMaintenance.length)) {
+    const cost = e.facilityUpgradeCost[lvl - 1];
+    const fixedAfter = fixed + e.facilityMaintenance[lvl] - e.facilityMaintenance[lvl - 1];
+    if (cash - cost >= NPC_BUFFER_WEEKS[persona].upgrade * fixedAfter) {
+      cmds.push({ type: 'upgradeTraining' });
+      cash -= cost;
+      fixed = fixedAfter;
+      slots += e.trainingSlots[lvl] - e.trainingSlots[lvl - 1];
+    }
+  }
+  if (persona === 'miser') slots = Math.min(slots, MISER_TRAIN_CAP);
+  let budget = Math.floor((cash - NPC_BUFFER_WEEKS[persona].train * fixed) / Math.max(1, e.trainCost));
+  const lineup = new Set(view.me.lineup);
+  const gap = (p: KnownPlayer, k: string): number => gradeMid(p.capGrades?.[k] ?? 'D') - (p.attrs?.[k] ?? 100);
+  const best = (p: KnownPlayer): { key: string; gap: number } =>
+    keys.map((k) => ({ key: k, gap: gap(p, k) })).sort((a, b) => b.gap - a.gap || (a.key < b.key ? -1 : 1))[0];
+  let pool = myPlayers(view).filter((p) => p.attrs !== undefined);
+  if (persona === 'youth') pool = pool.filter((p) => p.stage <= 2);
+  pool.sort((a, b) => (persona === 'whale' ? Number(lineup.has(b.id)) - Number(lineup.has(a.id)) : 0) || best(b).gap - best(a).gap || (a.id < b.id ? -1 : 1));
+  for (const p of pool) {
+    if (slots <= 0 || budget <= 0) break;
+    const b = best(p);
+    if (b.gap <= 0) continue;
+    const n = Math.min(e.trainMaxPerPlayer, slots, budget);
+    cmds.push({ type: 'queueTrain', playerId: p.id, attr: b.key, sessions: n });
+    slots -= n;
+    budget -= n;
   }
   return cmds;
 }

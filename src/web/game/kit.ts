@@ -7,6 +7,7 @@ import { myFixture, opponentOf } from '../club/model.ts';
 import { LINEAGE_LOOK, avatarSvg, crestSvg, npcCrest, tierOf, type CrestSpec, type IconName } from '../club/art.ts';
 import { icon } from '../club/art.ts';
 import { portraitBust, portraitSvg } from '../portrait.ts';
+import { STAGE_NAMES } from '../../manage/attrs.ts';
 import type { Prefs } from '../club/prefs.ts';
 import type { Screen } from './guide.ts';
 
@@ -114,9 +115,9 @@ export function rarityBadge(p: KnownPlayer, cls = ''): string {
   return `<span class="rb rb-${p.rarity.toLowerCase()} ${cls}">${p.rarity}</span>`;
 }
 
-/** 「v目前／v上限」；上限是品階與流派取小 */
-export function verCap(p: KnownPlayer): string {
-  return `v${p.version}<small class="cap">／v${p.maxVersion}</small>`;
+/** 成長階段＋強度等級（M5 第二批；取代「v目前／v上限」），例「主力 <small>B／B+／C</small>」 */
+export function verCap(c: ContentPack, p: KnownPlayer): string {
+  return `${STAGE_NAMES[p.stage - 1] ?? ''}<small class="cap"> ${c.attributes.trainable.map((k) => p.grades[k] ?? '—').join('／')}</small>`;
 }
 
 /** 流派徽記：原本的圖形，單色（跟著文字顏色） */
@@ -147,16 +148,15 @@ export interface CardOpts {
   note?: string;
 }
 
-/** 選手收藏卡：版本只用框的明暗與金的多寡區分；有立繪時滿版（art），文字疊在下方漸層上，SR／SSR 多一層金光 */
+/** 選手收藏卡：成長階段只用框的明暗與金的多寡區分；有立繪時滿版（art），文字疊在下方漸層上，SR／SSR 多一層金光 */
 export function pcard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
-  const t = tierName(p.version);
+  const t = tierName(p.stage);
   const foe = p.teamId !== null && p.teamId === foeOf(ctx.v);
   const art = p.portraitId ? `art r-${p.rarity.toLowerCase()}` : '';
   return `<div class="pc t${t.idx + 1} ${art} ${o.sel ? 'sel' : ''} ${foe ? 'foe' : ''}" data-act="${o.act ?? 'player'}" data-pid="${p.id}" ${o.drag ? 'draggable="true"' : ''}>
-    <div class="top2"><span class="ver">${verCap(p)}</span>${rarityBadge(p)}<span>${t.zh} · ${t.en}</span></div>
+    <div class="top2"><span class="ver">${verCap(ctx.c, p)}</span>${rarityBadge(p)}<span>${t.zh} · ${t.en}</span></div>
     ${p.portraitId ? `<div class="por pic r-${p.rarity.toLowerCase()}" data-r="${p.rarity}">${portraitBust(p.portraitId, 338, rimOf(ctx, p), 0.42, 0.27)}</div>` : `<div class="por tinted ${p.teamId === ctx.v.me.teamId ? '' : 'grey'}">${avatarSvg(p.id + p.name, '#3a4458', 176)}</div>`}
     ${o.slot !== undefined && o.slot >= 0 ? `<span class="slot"><i>${esc(slotName(ctx, o.slot))}</i></span>` : ''}
-    ${p.upgrading ? '<span class="flag">升版中</span>' : ''}
     ${o.note ? `<div class="note">${o.note}</div>` : ''}
     <div class="nm"><b>${esc(p.name)}</b>${lineage(ctx, p.lineageId, 15)}</div>
     <div class="st"><span class="num">${p.elo}</span><small>RATING</small><span class="wg">${o.sub ?? `<span class="num">${wan(p.weeklySalary)}</span> <small>萬／週</small>`}</span></div></div>`;

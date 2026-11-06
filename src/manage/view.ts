@@ -6,7 +6,8 @@ import type { ContentPack } from './content.ts';
 import type { MatchFormat } from './gateway.ts';
 import type { StandingRow } from './league.ts';
 import { standings } from './league.ts';
-import { capacityLeft, effectiveLineup, effectiveTactics, playerMaxVersion, playerOf, rosterOf, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
+import { capPub, gradeOf, type Grade } from './attrs.ts';
+import { capacityLeft, effectiveLineup, effectiveTactics, playerOf, rosterOf, slotsLeft, stageOfPlayer, teamOf, weeklyFixedCost, weeklySponsor } from './state.ts';
 import type { Bet, FixtureId, GamePlan, GameState, IntelReport, Job, LedgerEntry, Message, Phase, PlayerId, Rarity, RoundResult, ScrimReport, SeasonResult, SeasonStat, Stage, TacticRecord, TeamId, Winner } from './types.ts';
 import type { PlayerStat } from './gateway.ts';
 import { TOTAL_WEEKS } from './types.ts';
@@ -18,14 +19,22 @@ export interface KnownPlayer {
   rarity: Rarity;
   /** 立繪代號（圖檔在 public/portraits/） */
   portraitId: string;
-  version: number;
-  /** 個人版本上限（品階與流派取小） */
-  maxVersion: number;
+  /** 成長階段（M5 第二批；1～5，公開推導值） */
+  stage: number;
+  /** 目前屬性等級（所有人） */
+  grades: Record<string, Grade>;
+  /** 上限等級（只有自己的人；公開公式 capPub 的等級，不含習慣） */
+  capGrades?: Record<string, Grade>;
+  /** 屬性數字：自己的人是即時值，球探報告過的人是報告當下的值，其他人沒有 */
+  attrs?: Record<string, number>;
+  /** attrs 來自第幾週的球探報告（自己的人沒有這欄） */
+  attrsWeek?: number;
+  /** 訓練進度（只有自己的人） */
+  progress?: Record<string, number>;
   elo: number;
   games: number;
   weeklySalary: number;
   teamId: TeamId | null;
-  upgrading: boolean;
   /** 個人戰術熟練度（M5，整數）：只有自己隊的人有 */
   tactics?: Record<string, number>;
   /** 本季個人統計（M5 第三批，公開：每個人都有） */
@@ -68,7 +77,10 @@ export interface KnownView {
     trainingLevel: number;
     lineup: PlayerId[];
     roster: PlayerId[];
+    /** 本週練習賽還能排幾場 */
     capacityLeft: number;
+    /** 本週訓練時段還剩幾節（屬性訓練與戰術排練共用，M5 第二批） */
+    slotsLeft: number;
     weeklyFixedCost: number;
     weeklySponsor: number;
     /** 現金還撐得幾週（固定支出 − 贊助 ≤ 0 時為 null＝不燒錢） */
@@ -123,6 +135,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       lineup: [...team.lineup],
       roster: mine.map((p) => p.id),
       capacityLeft: capacityLeft(state, content, team),
+      slotsLeft: slotsLeft(state, content, team),
       weeklyFixedCost: fixed,
       weeklySponsor: sponsor,
       runwayWeeks: burn <= 0 ? null : Math.max(0, Math.floor(team.cash / burn)),
@@ -131,22 +144,27 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
       gamePlan: { pref: { ...team.gamePlan.pref }, economy: team.gamePlan.economy },
       tacticLog: Object.fromEntries(Object.entries(team.tacticLog).map(([k, v]) => [k, { ...v }])),
     },
-    players: state.players.map((p) => ({
+    players: state.players.map((p) => {
+      const own = p.teamId === teamId;
+      const intel = own ? undefined : team.intel.find((i) => i.playerId === p.id);
+      return {
       id: p.id,
       name: p.name,
       lineageId: p.lineageId,
       rarity: p.rarity,
       portraitId: p.portraitId,
-      version: p.version,
-      maxVersion: playerMaxVersion(content, p),
+      stage: stageOfPlayer(content, p),
+      grades: Object.fromEntries(content.attributes.keys.map((k) => [k, gradeOf(p.attrs[k] ?? 0)])),
+      ...(own ? { capGrades: Object.fromEntries(Object.entries(capPub(content, p.lineageId, p.rarity)).map(([k, v]) => [k, gradeOf(v)])), attrs: { ...p.attrs }, progress: { ...p.progress } } : {}),
+      ...(intel !== undefined ? { attrs: { ...intel.attrs }, attrsWeek: intel.week } : {}),
       elo: p.elo,
       games: p.games,
       weeklySalary: p.weeklySalary,
       teamId: p.teamId,
-      upgrading: p.upgradeUntilWeek !== null,
       ...(p.teamId === teamId ? { tactics: Object.fromEntries(Object.entries(p.tactics).map(([k, v]) => [k, Math.round(v)])) } : {}),
       season: { ...p.season },
-    })),
+      };
+    }),
     teams: state.teams.map((t) => ({ id: t.id, name: t.name, fame: t.fame, roster: rosterOf(state, t.id).map((p) => p.id) })),
     fixtures: state.fixtures.map((f) => ({
       id: f.id,
@@ -173,7 +191,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
         return { fixtureId: f.id, homeX100: o.homeX100, awayX100: o.awayX100 };
       }),
     standings: standings(state),
-    intel: team.intel.map((i) => ({ ...i })),
+    intel: team.intel.map((i) => ({ ...i, attrs: { ...i.attrs } })),
     scrims: team.scrims.map((s) => ({ ...s })),
     bets: state.bets.filter((b) => b.teamId === teamId).map((b) => ({ ...b })),
     jobs: state.jobs.filter((j) => j.teamId === teamId).map((j) => ({ ...j })),
