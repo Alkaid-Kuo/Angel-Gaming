@@ -1,5 +1,5 @@
-// 訓練基地（場數環、本週排程、新增排程、三欄報告）與賭盤（注單、下注單、已下的注）。
-// 練習賽是隊對隊：我方本週出賽名單對選定戰隊的出賽名單。戰術排練（M5）在戰術室排，這裡只列在本週排程裡、一起佔場數。
+// 訓練基地（設施與兩種額度、排練習賽、本週排程分組、三欄報告）與賭盤（注單、下注單、已下的注）。
+// 練習賽是隊對隊：我方本週出賽名單對選定戰隊的出賽名單，佔「練習賽場數」。屬性訓練（選手詳情）與戰術排練（戰術室）共用「訓練時段」，這裡只列在本週排程裡。
 import { myFixture, publicRating, rankOf } from '../club/model.ts';
 import type { Ctx } from './kit.ts';
 import { btn, canAct, crest, crestRing, esc, foeOf, head, icon, pt, runStep, teamName, waitText, wan } from './kit.ts';
@@ -22,18 +22,17 @@ export function trainingScreen(ctx: Ctx): string {
   const slots = Math.max(0, v.me.slotsLeft);
   const maxLvl = e.facilityMaintenance.length;
   const active = canAct(v);
-  const L = 830;
-  const usedLen = (used / cap) * L;
   const upCost = lvl < maxLvl ? e.facilityUpgradeCost[lvl - 1] : 0;
-  const jobs = v.jobs.map((j) => {
-    if (j.kind === 'scrim') return `<div class="job"><span class="ic2 w">${icon('swords', 24)}</span><b>練習賽<small>對 ${esc(teamName(v, j.opponentTeamId))}</small></b><span class="num">${j.games}</span><div class="meter" style="--v:${Math.round((j.games / cap) * 100)}%"><i></i></div></div>`;
-    if (j.kind === 'rehearse') return `<div class="job"><span class="ic2">${icon('swords', 24)}</span><b>戰術排練<small>${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}</small></b><span class="num">${j.sessions}</span><div class="meter g" style="--v:${Math.round((j.sessions / cap) * 100)}%"><i></i></div></div>`;
-    if (j.kind === 'scoutTeam') return `<div class="job"><span class="ic2 w">${icon('search', 24)}</span><b>球探看戰隊<small>${esc(teamName(v, j.targetId))} · 常用戰術</small></b><span class="num sm">${wan(e.scoutCost)}萬</span><div class="meter" style="--v:100%"><i></i></div></div>`;
-    const p = ctx.pm.get(j.playerId);
-    const who = esc(p?.name ?? '?');
-    if (j.kind === 'train') return `<div class="job"><span class="ic2">${icon('levelup', 24)}</span><b>屬性訓練<small>${who} · ${esc(c.attributes.names[j.attr] ?? j.attr)}</small></b><span class="num">${j.sessions}</span><div class="meter g" style="--v:100%"><i></i></div></div>`;
-    return `<div class="job"><span class="ic2 w">${icon('search', 24)}</span><b>球探<small>${who} · ${esc(teamName(v, p?.teamId ?? null))}</small></b><span class="num sm">${wan(e.scoutCost)}萬</span><div class="meter" style="--v:100%"><i></i></div></div>`;
-  });
+  // 本週排程依類型分組：練習賽（佔場數）、屬性訓練與戰術排練（佔時段）、球探（不佔）；每組標題帶「去排」
+  const who = (id: string): string => esc(ctx.pm.get(id)?.name ?? '?');
+  const scrimJobs = v.jobs.filter((j) => j.kind === 'scrim').map((j) => (j.kind === 'scrim' ? `<div class="job"><span class="ic2 w">${icon('swords', 22)}</span><b>對 ${esc(teamName(v, j.opponentTeamId))}</b><span class="num">${j.games}<small>場</small></span></div>` : ''));
+  const trainJobs = v.jobs.filter((j) => j.kind === 'train').map((j) => (j.kind === 'train' ? `<div class="job"><span class="ic2">${icon('levelup', 22)}</span><b>${who(j.playerId)}<small>${esc(c.attributes.names[j.attr] ?? j.attr)}</small></b><span class="num">${j.sessions}<small>節</small></span></div>` : ''));
+  const rehearseJobs = v.jobs.filter((j) => j.kind === 'rehearse').map((j) => (j.kind === 'rehearse' ? `<div class="job"><span class="ic2">${icon('target', 22)}</span><b>${esc(c.tactics.find((t) => t.id === j.tactic)?.name ?? j.tactic)}</b><span class="num">${j.sessions}<small>節</small></span></div>` : ''));
+  const scoutJobs = v.jobs
+    .filter((j) => j.kind === 'scout' || j.kind === 'scoutTeam')
+    .map((j) => (j.kind === 'scout' ? `<div class="job"><span class="ic2 w">${icon('search', 22)}</span><b>${who(j.playerId)}<small>${esc(teamName(v, ctx.pm.get(j.playerId)?.teamId ?? null))}</small></b><span class="num sm">${wan(e.scoutCost)}<small>萬</small></span></div>` : j.kind === 'scoutTeam' ? `<div class="job"><span class="ic2 w">${icon('search', 22)}</span><b>${esc(teamName(v, j.targetId))}<small>常用戰術</small></b><span class="num sm">${wan(e.scoutCost)}<small>萬</small></span></div>` : ''));
+  const group = (title: string, note: string, items: string[], goTo: string, goLabel: string): string =>
+    `<div class="grp"><h4><b>${title}</b><small>${note}</small>${items.length ? `<em>${items.length}</em>` : ''}<button class="lnk" data-act="go" data-to="${goTo}">${goLabel} →</button></h4>${items.join('') || '<p class="none">還沒排</p>'}</div>`;
   const step = runStep(cap);
   const g = Math.max(step, Math.min(ui.scrim.games, Math.max(step, left)));
   const field = 'scrim.games';
@@ -42,42 +41,40 @@ export function trainingScreen(ctx: Ctx): string {
     .filter((t) => t.id !== v.me.teamId)
     .map((t) => `<option value="${t.id}" ${t.id === oppTeam ? 'selected' : ''}>${esc(t.name)}（評分約 ${publicRating(ctx, t.id)} · 第 ${rankOf(v, t.id) || '—'} 名${t.id === foeOf(v) ? ' · 本週對手' : ''}）</option>`)
     .join('');
-  const form = `<div class="lbl">對手戰隊</div><select class="sel" data-field="scrim.opponentId">${oppOpts}</select>`;
   // 練習賽真打（攻防戰）：推進時要多等的時間；假比賽是 0 不顯示
   const scrimWait = ctx.estMs(g);
   const queuedScrims = v.jobs.filter((j) => j.kind === 'scrim').reduce((s, j) => s + ctx.estMs(j.games), 0);
-  const desc = `我方出賽名單 vs ${esc(teamName(v, oppTeam))} 的出賽名單 · 估真實勝率${scrimWait > 0 ? `<br><small class="wait">${icon('hourglass', 14)}<span data-out="scrim.wait">${scrimWaitText(g, scrimWait)}</span></small>` : ''}`;
   const scrims = [...v.scrims].reverse().slice(0, 3);
   // 戰術手冊摘要：執行熟練度最高的三個（M5）
   const topTactics = [...c.tactics].sort((a, b) => (v.me.effective[b.id] ?? 0) - (v.me.effective[a.id] ?? 0)).slice(0, 3);
   const intel = [...v.intel].reverse().slice(0, 3);
   const ci = (w: number, n: number): number => Math.round(196 * Math.sqrt(((w / n) * (1 - w / n)) / n));
-  return `${head('TRAINING // 訓練基地', '訓練基地', `訓練中心 <b>Lv${lvl}</b> · 本週可跑 <b>${cap}</b> 場 · 已排 <b>${used}</b> · 這週排的工作，推進一週後才出報告`)}
+  const slotUsed = slotCap - slots;
+  return `${head('TRAINING // 訓練基地', '訓練基地', `訓練中心 <b>Lv${lvl}</b> · 每週兩種額度：練習賽 <b>${cap}</b> 場、訓練時段 <b>${slotCap}</b> 節 · 這週排的工作，推進一週後才出報告`)}
     <section class="body s-training">
-      <div class="pn g fac in">${pt('01', '訓練中心', '', 'FACILITY')}
-        <div class="ringbox"><svg viewBox="0 0 300 300"><circle cx="150" cy="150" r="132" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="16"/>
-          <circle cx="150" cy="150" r="132" fill="none" stroke="rgba(238,242,246,.55)" stroke-width="16" stroke-dasharray="${usedLen.toFixed(1)} ${L}" transform="rotate(-90 150 150)"/>
-          <circle cx="150" cy="150" r="132" fill="none" stroke="#f0b54a" stroke-width="16" stroke-dasharray="0 ${usedLen.toFixed(1)} ${(L - usedLen).toFixed(1)} ${L}" transform="rotate(-90 150 150)"/>
-          <circle cx="150" cy="150" r="132" fill="none" stroke="#0b0e14" stroke-width="18" stroke-dasharray="2 39.4"/>
-          <g class="spin"><circle cx="150" cy="150" r="148" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="1.5" stroke-dasharray="3 9"/></g></svg>
-          <div class="v"><span class="num">${left}</span><small>RUNS LEFT</small><span>練習賽 ／ ${cap} 場</span></div></div>
+      <div class="pn g fac in">${pt('01', '設施', '', 'FACILITY')}
         <div class="lv"><div class="fl3">${[1, 2, 3].map((i) => `<i class="${i <= lvl ? 'on' : ''}"></i>`).join('')}</div><div class="t"><b>Lv${lvl}</b><span>維護 ${wan(e.facilityMaintenance[lvl - 1])} 萬／週</span></div>
           ${lvl < maxLvl ? btn(`升 Lv${lvl + 1} · ${wan(upCost)}萬`, `data-act="upfac" ${!active || v.me.cash < upCost ? 'disabled' : ''} data-tip="每週練習賽 ${e.scrimCapacity[lvl]} 場、訓練時段 ${e.trainingSlots[lvl]} 節，維護 ${wan(e.facilityMaintenance[lvl])} 萬"`, 'sm ghost tip-r') : '<span class="chip g">最高等級</span>'}</div>
-        <div class="slots"><div class="t"><small>本週訓練時段</small><span><b class="num">${slots}</b>／${slotCap} 節</span></div><div class="meter g" style="--v:${Math.round(((slotCap - slots) / Math.max(1, slotCap)) * 100)}%"><i></i></div>
-          <div class="to">${btn('訓練 →', 'data-act="go" data-to="squad" data-tip="屬性訓練在選手詳情排"', 'sm ghost')}${c.tactics.length ? btn('排練 →', 'data-act="go" data-to="tactics"', 'sm ghost') : ''}</div></div></div>
-      <div class="pn sch in">${pt('02', '本週排程', `已排 <b>${used}</b>／${cap} 場${queuedScrims > 0 ? ` · 練習賽推進時多等${waitText(queuedScrims)}` : ''}`)}
-        <div class="jobs scroll">${jobs.join('') || '<p class="dim">還沒有排任何工作。右邊選選手與項目排進來。</p>'}</div>
-        <div class="sum"><span>練習賽用上面的場數；屬性訓練與戰術排練共用訓練時段</span><span>訓練在<b>選手詳情</b>、排練在<b>戰術室</b></span></div></div>
-      <div class="pn new in">${pt('03', '新增排程', '', 'SCHEDULE')}
-        <div class="lbl">項目</div><div class="seg2"><button class="on">練習賽（隊對隊）</button><button data-act="go" data-to="tactics">戰術排練 →</button></div>
-        ${form}
+        <div class="quota"><div class="qh"><small>QUOTA A</small><b>練習賽場數</b><span class="num">${left}<i>／${cap} 場</i></span></div><div class="meter" style="--v:${Math.round((used / Math.max(1, cap)) * 100)}%"><i></i></div><p>用在：<b>練習賽</b>（右邊排）。每場真打，推進時要多等幾秒。</p></div>
+        <div class="quota"><div class="qh"><small>QUOTA B</small><b>訓練時段</b><span class="num">${slots}<i>／${slotCap} 節</i></span></div><div class="meter g" style="--v:${Math.round((slotUsed / Math.max(1, slotCap)) * 100)}%"><i></i></div><p>用在：<b>屬性訓練</b>（選手詳情排）與<b>戰術排練</b>（戰術室排），兩邊共用。</p>
+          <div class="to">${btn('去選手詳情練屬性', 'data-act="go" data-to="squad"', 'sm ghost')}${c.tactics.length ? btn('去戰術室排練', 'data-act="go" data-to="tactics"', 'sm ghost') : ''}</div></div></div>
+      <div class="pn sch in">${pt('02', '排練習賽', `這週還能排 <b>${left}</b> 場`, 'SCRIM')}
+        <div class="lbl">對手戰隊</div><select class="sel" data-field="scrim.opponentId">${oppOpts}</select>
         <div class="lbl">場數</div><div class="runs"><input type="range" min="${step}" max="${Math.max(step, left)}" step="${step}" value="${g}" data-field="${field}" ${left < step ? 'disabled' : ''}><span class="num" data-out="${field}">${g}</span></div>
-        <div class="go"><span>${desc}</span>${btn('排入', `data-act="scrim" ${!active || left < step ? 'disabled' : ''}`, 'sm')}</div></div>
-      <div class="pn rep in">${pt('04', '報告', '最近的工作成果')}
+        <p class="desc">我方出賽名單對 ${esc(teamName(v, oppTeam))} 的出賽名單，推進一週後出報告：估計真實勝率，場數越多越準。${scrimWait > 0 ? `<br><small class="wait">${icon('hourglass', 14)}<span data-out="scrim.wait">${scrimWaitText(g, scrimWait)}</span></small>` : ''}</p>
+        <div class="go">${btn(left < step ? '這週場數用完了' : '排入練習賽', `data-act="scrim" ${!active || left < step ? 'disabled' : ''}`, '', left < step ? '' : 'QUEUE')}</div></div>
+      <div class="pn new in">${pt('03', '本週排程', `${v.jobs.length} 項${queuedScrims > 0 ? ` · 推進時多等${waitText(queuedScrims)}` : ''}`, 'THIS WEEK')}
+        <div class="jobs scroll">
+          ${group('練習賽', `佔場數 · 已排 ${used}／${cap}`, scrimJobs, 'training', '左邊排')}
+          ${group('屬性訓練', `佔時段 · ${trainJobs.length ? `${v.jobs.filter((j) => j.kind === 'train').reduce((s, j) => s + (j.kind === 'train' ? j.sessions : 0), 0)} 節` : '0 節'}`, trainJobs, 'squad', '選手詳情')}
+          ${c.tactics.length ? group('戰術排練', `佔時段 · ${v.jobs.filter((j) => j.kind === 'rehearse').reduce((s, j) => s + (j.kind === 'rehearse' ? j.sessions : 0), 0)} 節`, rehearseJobs, 'tactics', '戰術室') : ''}
+          ${group('球探', '不佔額度 · 推進一週後回報', scoutJobs, 'market', '轉會市場')}
+        </div></div>
+      <div class="pn rep in">${pt('04', '報告', '最近的工作成果', 'REPORTS')}
         <div class="cols">
           <div class="col"><h4>${icon('search', 18)}球探報告<small>誤差 ±${e.scoutSd}</small></h4>${intel.length ? intel.map((i) => { const p = ctx.pm.get(i.playerId); const d = p ? i.estPower - p.elo : 0; return `<div class="it" data-act="player" data-pid="${i.playerId}"><b>${esc(p?.name ?? '?')}</b>（${esc(teamName(v, p?.teamId ?? null))}）真實約 <span class="num">${i.estPower}</span>，比評分${d >= 0 ? '高' : '低'} <b>${Math.abs(d)}</b></div>`; }).join('') : '<p class="dim">到轉會市場派球探。</p>'}</div>
           <div class="col"><h4>${icon('swords', 18)}練習賽報告<small>樣本越多越準</small></h4>${scrims.length ? scrims.map((s) => `<div class="it"><b>對 ${esc(teamName(v, s.opponentTeamId))}</b> ${s.games} 場 ${s.wins} 勝：估計勝率 <span class="num">${Math.round((s.wins * 100) / s.games)}%</span> ± ${ci(s.wins, s.games)}%</div>`).join('') : '<p class="dim">還沒有報告。</p>'}</div>
-          <div class="col"><h4>${icon('swords', 18)}戰術手冊<small>執行熟練度</small></h4>${topTactics.length ? topTactics.map((t) => `<div class="it" data-act="go" data-to="tactics"><b>${esc(t.name)}</b>（${t.side}）執行 <span class="num">${v.me.effective[t.id] ?? 0}</span> · 默契 ${v.me.playbook[t.id] ?? 0}</div>`).join('') : '<p class="dim">這個賽制沒有戰術手冊。</p>'}</div>
+          <div class="col"><h4>${icon('target', 18)}戰術手冊<small>執行熟練度</small></h4>${topTactics.length ? topTactics.map((t) => `<div class="it" data-act="go" data-to="tactics"><b>${esc(t.name)}</b>（${t.side}）執行 <span class="num">${v.me.effective[t.id] ?? 0}</span> · 默契 ${v.me.playbook[t.id] ?? 0}</div>`).join('') : '<p class="dim">這個賽制沒有戰術手冊。</p>'}</div>
         </div></div>
     </section>`;
 }

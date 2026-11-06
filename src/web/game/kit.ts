@@ -152,13 +152,13 @@ export interface CardOpts {
   note?: string;
 }
 
-/** 選手收藏卡：成長階段只用框的明暗與金的多寡區分；有立繪時滿版（art），文字疊在下方漸層上，SR／SSR 多一層金光 */
+/** 選手收藏卡：成長階段只用框的明暗與金的多寡區分；有立繪時滿版（art），文字疊在下方漸層上，SR／SSR 多一層金光。卡頂只放階段、品階、英文階級（強度等級另外列，UI 審核 #3） */
 export function pcard(ctx: Ctx, p: KnownPlayer, o: CardOpts = {}): string {
   const t = tierName(p.stage);
   const foe = p.teamId !== null && p.teamId === foeOf(ctx.v);
   const art = p.portraitId ? `art r-${p.rarity.toLowerCase()}` : '';
   return `<div class="pc t${t.idx + 1} ${art} ${o.sel ? 'sel' : ''} ${foe ? 'foe' : ''}" data-act="${o.act ?? 'player'}" data-pid="${p.id}" ${o.drag ? 'draggable="true"' : ''}>
-    <div class="top2"><span class="ver">${verCap(ctx.c, p)}</span>${rarityBadge(p)}<span>${t.zh} · ${t.en}</span></div>
+    <div class="top2"><span class="ver">${STAGE_NAMES[p.stage - 1] ?? ''}</span>${rarityBadge(p)}<span>${t.en}</span></div>
     ${p.portraitId ? `<div class="por pic r-${p.rarity.toLowerCase()}" data-r="${p.rarity}">${portraitBust(p.portraitId, 338, rimOf(ctx, p), 0.42, 0.27)}</div>` : `<div class="por tinted ${p.teamId === ctx.v.me.teamId ? '' : 'grey'}">${avatarSvg(p.id + p.name, '#3a4458', 176)}</div>`}
     ${o.slot !== undefined && o.slot >= 0 ? `<span class="slot"><i>${esc(slotName(ctx, o.slot))}</i></span>` : ''}
     ${o.note ? `<div class="note">${o.note}</div>` : ''}

@@ -537,7 +537,7 @@ function assign(slot: number, pid: string): void {
   if (j >= 0 && j !== slot) ids[j] = ids[slot];
   ids[slot] = pid;
   ui.pickSlot = null;
-  run({ type: 'setLineup', lineup: ids }, `${ctx.pm.get(pid)?.name ?? ''} 擔任${slotName(ctx, slot)}`);
+  run({ type: 'setLineup', lineup: ids }, `${ctx.pm.get(pid)?.name ?? ''} 擔任 ${slotName(ctx, slot)}`);
 }
 
 function confirmThen(title: string, text: string, ok: string, fn: () => void): void {
