@@ -8,7 +8,7 @@ import { GAME_KINDS, ManageGame } from '../manage/store.ts';
 import { EMBLEM_NAMES, type EmblemName } from '../club/art.ts';
 import { lineupOf, myFixture, newClubUi } from '../club/model.ts';
 import { lineageName } from '../manage/format.ts';
-import { LIVE_MSG, WATCH_HASH, writeTicket, type LiveMessage } from '../shooter/watch.ts';
+import { COACH_HASH, LIVE_MSG, WATCH_HASH, writeCoachTicket, writeTicket, type LiveMessage } from '../shooter/watch.ts';
 import { loadPrefs, savePrefs } from '../club/prefs.ts';
 import { landmarkAt, mountCity, type CityView } from '../sketch/city.ts';
 import { dust, initStage, still } from '../sketch/stage.ts';
@@ -54,6 +54,10 @@ let progress: { done: number; total: number; estMs: number } | null = null;
 let lastCash: number | null = null;
 /** 賽前畫面等著播的那一場 */
 let liveFixture: string | null = null;
+/** 選了一般觀戰：比賽算好就自動開觀戰 */
+let autoWatch = false;
+/** 教練身分即時看（M5 第四批 4b）：推進前的快照、離席回合（看完＝null） */
+let coachLive: { before: ReturnType<typeof snapshot>; wasOff: boolean; fixtureId: string; leftAt: number | null } | null = null;
 let cine: { scenes: Scene[]; i: number } | null = null;
 let cineTimer = 0;
 /** 看比賽的全螢幕框（開著時經營畫面停在賽前） */
@@ -247,6 +251,81 @@ function openLive(fixtureId: string): boolean {
   return true;
 }
 
+/** 教練身分：準備比賽日（存檔）、寫即時票、開即時框；之後由框傳回的訊息收尾 */
+function startCoach(before: ReturnType<typeof snapshot>, wasOff: boolean): void {
+  if (!game) return;
+  const t = game.beginMatchDay();
+  if (t === null) {
+    void doAdvance('skip');
+    return;
+  }
+  const ctx = context();
+  const f = ctx.v.fixtures.find((x) => x.id === t.fixtureId);
+  const ids = [...t.lineups[0], ...t.lineups[1]];
+  const specs = [...t.request.a.players, ...t.request.b.players];
+  coachLive = { before, wasOff, fixtureId: t.fixtureId, leftAt: null };
+  const ok = writeCoachTicket({
+    v: 1,
+    request: t.request,
+    names: ids.map((id) => ctx.pm.get(id)?.name ?? id),
+    portraits: ids.map((id) => ctx.pm.get(id)?.portraitId ?? ''),
+    tags: specs.map((s) => `${lineageName(ctx.c, s.lineageId)} ${STAGE_NAMES[s.version - 1] ?? `v${s.version}`}`),
+    teams: [teamName(ctx.v, f?.home ?? ''), teamName(ctx.v, f?.away ?? '')],
+    mine: t.side === 'a' ? 0 : 1,
+    title: f ? stageName(f) : '',
+    coach: { side: t.side, assistant: t.assistant, tactics: ctx.c.tactics.map((x) => ({ id: x.id, name: x.name, side: x.side })) },
+  });
+  if (!ok) {
+    toast('無法寫入即時比賽資料（瀏覽器儲存空間不可用），照跳過處理', true);
+    void finishCoach();
+    return;
+  }
+  cine = null;
+  showScene();
+  const fr = document.createElement('iframe');
+  fr.id = 'live';
+  fr.src = `./shooter.html?embed=1${COACH_HASH}`;
+  fr.allow = 'fullscreen';
+  fr.addEventListener('load', () => fr.contentWindow?.focus());
+  document.body.append(fr);
+  liveFrame = fr;
+  citySec.hidden = true;
+}
+
+/**
+ * 教練身分那場收尾：其他賽場與我方那場（請求單＋已喊的指令；離席的話只到離席回合）一起批次算，演出直接到結果幕。
+ * 沒有 coachLive（重開遊戲時有沒看完的即時比賽）＝照教練離席處理，n＝最後一則指令的回合。
+ */
+async function finishCoach(): Promise<void> {
+  if (!game || busy) return;
+  const live = coachLive;
+  coachLive = null;
+  const before = live?.before ?? snapshot(context());
+  const wasOff = live?.wasOff ?? false;
+  busy = true;
+  progress = { done: 0, total: 0, estMs: game.estimateWeekMs() };
+  render();
+  try {
+    const summary = await game.advance(onProgress, live !== null ? { leftAt: live.leftAt } : undefined);
+    ui.slip = null;
+    ui.leagueWeek = null;
+    ui.pickSlot = null;
+    const ctx = context();
+    lastCash = ctx.v.me.cash;
+    cine = { scenes: buildScenes(ctx, summary, before, wasOff), i: 0 };
+    liveFixture = null;
+    showScene();
+    jumpScene('result');
+  } catch (e) {
+    cine = null;
+    showScene();
+    toast(e instanceof Error ? e.message : '推進失敗', true);
+  }
+  busy = false;
+  progress = null;
+  render();
+}
+
 function closeLive(): void {
   liveFrame?.remove();
   liveFrame = null;
@@ -262,8 +341,28 @@ function jumpScene(key: 'match' | 'result'): void {
 
 window.addEventListener('message', (e: MessageEvent<LiveMessage>) => {
   if (e.origin !== location.origin || e.source !== liveFrame?.contentWindow || e.data?.type !== LIVE_MSG) return;
+  const d = e.data;
+  if (coachLive !== null) {
+    // 教練身分：指令立刻存檔；離席記回合；看完或關掉（離席）就收尾
+    if (d.event === 'call') {
+      try {
+        game?.recordCall(d.call);
+      } catch (err) {
+        toast(err instanceof Error ? err.message : '指令沒存到', true);
+      }
+      return;
+    }
+    if (d.event === 'left') {
+      coachLive.leftAt = d.round;
+      return;
+    }
+    closeLive();
+    void finishCoach();
+    return;
+  }
+  if (d.event !== 'over' && d.event !== 'skip') return;
   closeLive();
-  jumpScene(e.data.event === 'over' ? 'result' : 'match');
+  jumpScene(d.event === 'over' ? 'result' : 'match');
 });
 
 // ───── 模擬進度 ─────
@@ -330,13 +429,29 @@ function skipScenes(): void {
   }
 }
 
-async function doAdvance(): Promise<void> {
+/**
+ * 推進一週。我方有比賽、賽制能播時先問怎麼看（M5 第四批 4b）：教練身分（即時、可暫停下指令、只看己方視野）、一般觀戰（全知、不能下指令）、跳過。
+ * mode 沒給＝先出選擇畫面；一般觀戰與跳過的結果相同（同一張請求單）。
+ */
+async function doAdvance(mode?: 'coach' | 'watch' | 'skip'): Promise<void> {
   if (!game || busy) return;
   const ctx0 = context();
   const before = snapshot(ctx0);
   const wasOff = game.state.phase === 'offseason';
   // 我方有比賽、賽制能播：先進賽前畫面，背景打比賽；其他週（休賽期、輪空、假比賽）照舊顯示進度
   const mine = !wasOff && game.format?.watchable === true ? myFixture(ctx0.v) : undefined;
+  if (mine && mode === undefined && game.content.tactics.length > 0) {
+    modal = null;
+    cine = { scenes: [preMatchScene(ctx0, mine, before, true)], i: 0 };
+    showScene();
+    render();
+    return;
+  }
+  if (mine && mode === 'coach') {
+    startCoach(before, wasOff);
+    return;
+  }
+  autoWatch = mode === 'watch';
   busy = true;
   modal = null;
   if (mine) {
@@ -358,6 +473,8 @@ async function doAdvance(): Promise<void> {
     liveFixture = played?.id ?? null;
     cine = { scenes, i: 0 };
     showScene();
+    if (autoWatch && liveFixture !== null && !openLive(liveFixture)) jumpScene('match');
+    else if (mode === 'skip' && played) jumpScene('match');
   } catch (e) {
     cine = null;
     showScene();
@@ -437,6 +554,13 @@ function confirmThen(title: string, text: string, ok: string, fn: () => void): v
 
 function startGame(g: ManageGame): void {
   game = g;
+  // 上次教練身分看到一半就關掉（M5 規格 6.1）：照教練離席處理，n＝最後一則指令的回合，之後由助理教練接手或照計畫打
+  if (g.pendingLive) {
+    setTimeout(() => {
+      toast('上次的即時比賽沒看完：照教練離席處理，從最後一次指令之後由助理教練接手（沒請就照比賽計畫打）');
+      void finishCoach();
+    }, 0);
+  }
   ui = newGameUi(newClubUi());
   prefs.inboxSeen = 0;
   savePrefs(prefs);
@@ -514,6 +638,18 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
     if (liveFixture === null || !openLive(liveFixture)) jumpScene('match');
   },
   'live-skip': () => jumpScene('match'),
+  'mode-coach': () => {
+    cine = null;
+    void doAdvance('coach');
+  },
+  'mode-watch': () => {
+    cine = null;
+    void doAdvance('watch');
+  },
+  'mode-skip': () => {
+    cine = null;
+    void doAdvance('skip');
+  },
   advance: () => doAdvance(),
   player: (el) => {
     ui.player = el.dataset.pid as string;
@@ -859,7 +995,7 @@ document.addEventListener('keydown', (e) => {
   } else if (cine && (e.key === ' ' || e.key === 'Enter')) {
     e.preventDefault();
     if (cine.scenes[cine.i].auto) nextScene();
-    else (cineEl.querySelector('[data-act="live-watch"], [data-act="cine-next"]') as HTMLElement | null)?.click();
+    else (cineEl.querySelector('[data-act="live-watch"], [data-act="mode-watch"], [data-act="cine-next"]') as HTMLElement | null)?.click();
   } else if (!typing && screen === 'title' && e.key === 'Enter' && ManageGame.peek()) {
     actions.continue(document.body);
   }
@@ -902,7 +1038,7 @@ async function boot(): Promise<void> {
   if (screen === 'title' || screen === 'create') game = null;
   render();
   if (q.has('match')) {
-    await doAdvance();
+    await doAdvance('skip');
     const k = Math.min(Number(q.get('scene') ?? 0), (cine?.scenes.length ?? 1) - 1);
     if (cine && k > 0) {
       cine.i = k;

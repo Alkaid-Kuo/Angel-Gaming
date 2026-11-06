@@ -100,18 +100,18 @@ describe('比賽日：請求單帶 coachAi、指令存進賽程', () => {
 });
 
 describe('存檔', () => {
-  it('第 10 版存讀一致；第 9 版遷移後沒有助理教練', async () => {
+  it('第 11 版存讀一致；第 9 版遷移後沒有助理教練（串到第 11 版）', async () => {
     const s = newGame(44, content);
     applyCommand(s, content, humanTeam(s).id, { type: 'hireAssistant' });
     await advance(s, content, new CoachSpy());
     await advance(s, content, new CoachSpy());
-    expect(SAVE_VERSION).toBe(10);
+    expect(SAVE_VERSION).toBe(11);
     expect(JSON.parse(serialize(deserialize(serialize(s), content)))).toEqual(JSON.parse(serialize(s)));
     const v9 = JSON.parse(serialize(s)) as GameState & Record<string, unknown>;
     v9.version = 9;
     for (const t of v9.teams as unknown as Record<string, unknown>[]) delete t.assistant;
     const m = deserialize(JSON.stringify(v9), content);
-    expect(m.version).toBe(10);
+    expect(m.version).toBe(11);
     expect(m.teams.every((t) => t.assistant === false)).toBe(true);
   });
 });

@@ -180,10 +180,11 @@ export interface CoachSchedule {
  * 請求單的教練指令 → 驅動層的 ordersOf。沒有任何指令（calls 空、coachAi 雙方 null）＝null：閘道照舊用開賽的 orders，
  * 驅動選項和第一批逐欄相同。玩家的指令在 coachAi 接手的回合起不再採用（教練離席：之後由 AI 教練接手或沒人喊）。
  */
-export function coachSchedule(request: MatchRequest, rules: CoachRules): CoachSchedule | null {
+export function coachSchedule(request: MatchRequest, rules: CoachRules, live = false): CoachSchedule | null {
+  // live（即時比賽，4b）：一定建排程；calls、coachAi 照引用讀，教練在凍結前喊的指令、離席時改的 coachAi 當回合就生效
   const calls = request.calls ?? [];
   const ai = request.coachAi ?? { a: null, b: null };
-  if (calls.length === 0 && ai.a === null && ai.b === null) return null;
+  if (!live && calls.length === 0 && ai.a === null && ai.b === null) return null;
   validateCalls(calls, rules);
   const plans: Record<'a' | 'b', CoachPlan | null> = { a: sidePlan(request.a), b: sidePlan(request.b) };
   const eff = { a: sideEff(request.a), b: sideEff(request.b) };

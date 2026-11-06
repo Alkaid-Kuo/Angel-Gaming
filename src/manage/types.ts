@@ -2,7 +2,7 @@
 // 狀態是純 JSON（可直接存檔）：不放函式、Map、Date。標「隱藏」的欄位屬於真實層，不可經 view.ts 以外的路徑給畫面或 NPC。
 import type { CoachEvent, MatchRequest, PlayerStat } from './gateway.ts';
 
-export const SAVE_VERSION = 10;
+export const SAVE_VERSION = 11;
 /** 例行賽週數（8 隊單循環） */
 export const REGULAR_WEEKS = 7;
 /** 賽段總週數＝例行賽 7 週＋季後賽 2 週（第 8 週準決賽、第 9 週決賽與季軍戰） */
@@ -245,6 +245,23 @@ export interface GameState {
   nextId: number;
   humanTeamId: TeamId;
   seasonResult: SeasonResult | null;
+  /** 準備好、還沒打完的比賽日（M5 第四批 4b）：教練身分即時看我方比賽時存著，打完就清掉；平常＝null */
+  matchDay: MatchDay | null;
+}
+
+/**
+ * 比賽日（M5 規格 6.1）：開打前就定下的名單與請求單。隱藏（請求單含習慣），不進已知層。
+ * live：玩家以教練身分看的那一場與已喊的指令（每喊一次就存一次；重開遊戲時照教練離席處理）。
+ */
+export interface MatchDay {
+  week: number;
+  /** 依賽程順序 */
+  fixtureIds: FixtureId[];
+  /** 依 fixtureIds：[主隊名單, 客隊名單] */
+  lineups: [PlayerId[], PlayerId[]][];
+  /** 依 fixtureIds：送出的請求單（教練身分那場另加 calls 與我方 coachAi） */
+  requests: MatchRequest[];
+  live: { fixtureId: FixtureId; side: 'a' | 'b'; calls: CoachEvent[] } | null;
 }
 
 export type Command =

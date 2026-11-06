@@ -359,3 +359,30 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sg-seek { position: absolute; left: 50%; top: 42%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: calc(var(--u) * 16) calc(var(--u) * 40); z-index: 6; white-space: nowrap; }
 .sg-seek b { font-size: max(16px, calc(var(--u) * 26)); font-weight: 900; letter-spacing: 0.12em; }
 .sg-seek span { font-size: max(11px, calc(var(--u) * 14)); color: var(--grey); }
+
+/* ── 教練模式（M5 第四批 4b）：上方狀態列＋停下時的教練面板。照 CS：半透明墨黑、細線、字小，面板放中間 ── */
+.sg-coach { position: absolute; top: calc(118 * var(--u)); left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--glass2); box-shadow: inset 0 0 0 1px var(--hair); font-size: 13px; white-space: nowrap; }
+.sg-coach .en { font-family: var(--mono); font-size: 11px; letter-spacing: 0.3em; color: var(--accent); }
+.sg-coach b { font-weight: 700; letter-spacing: 0.08em; text-shadow: var(--txs); }
+.sg-coach button { height: 28px; padding: 0 12px; font-size: 13px; }
+.sg-coach button.on { background: rgba(var(--gold-rgb), 0.2); box-shadow: inset 0 0 0 1px var(--gold); color: var(--gold2); }
+.sg-coach button:disabled { opacity: 0.45; cursor: default; }
+.sg-coach .sps { display: flex; gap: 2px; }
+.sg-coach .sps button { padding: 0 8px; font-family: var(--en); }
+.sg-coach .lv { color: var(--grey); }
+.sg-coach .tag { color: var(--grey); letter-spacing: 0.1em; }
+.sg-coachp { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; background: rgba(var(--ink-rgb), 0.35); }
+.sg-coachp.hidden { display: none; }
+.sg-coachp .box { width: min(720px, calc(100% - 32px)); box-sizing: border-box; padding: 18px 22px 20px; display: flex; flex-direction: column; gap: 12px; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--hair); }
+.sg-coachp .en { font-family: var(--mono); font-size: 11px; letter-spacing: 0.4em; color: var(--accent); }
+.sg-coachp b { font-size: 22px; font-weight: 900; letter-spacing: 0.14em; }
+.sg-coachp .sec { display: flex; flex-direction: column; gap: 6px; }
+.sg-coachp small { font-size: 12px; letter-spacing: 0.16em; color: var(--grey); }
+.sg-coachp .opts, .sg-coachp .pl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sg-coachp .pl small { width: 40px; }
+.sg-coachp button { height: 32px; padding: 0 12px; font-size: 13px; }
+.sg-coachp button.on { background: var(--accent); color: var(--ink); box-shadow: none; }
+.sg-coachp .pf i { font-style: normal; margin-left: 6px; color: var(--gold2); letter-spacing: 0; }
+.sg-coachp .pf.ban { color: var(--grey); text-decoration: line-through; }
+.sg-coachp .pf.ban i { color: var(--grey); }
+.sg-coachp .go { display: flex; justify-content: flex-end; }

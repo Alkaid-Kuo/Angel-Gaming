@@ -3,7 +3,8 @@
 import { settleBets } from './betting.ts';
 import { applyCommand } from './commands.ts';
 import type { ContentPack, RaritySpec } from './content.ts';
-import type { BattleGateway, MatchOutcome, MatchRequest, PlayerStat } from './gateway.ts';
+import type { BattleGateway, CoachEvent, MatchOutcome, MatchRequest, PlayerStat } from './gateway.ts';
+import { liveRequest } from './live.ts';
 import { assertFormat, finalScore } from './gateway.ts';
 import { processJobs } from './jobs.ts';
 import { createFinals, createRegularSeason, createSemis, finalRanks } from './league.ts';
@@ -29,7 +30,7 @@ import {
   weeklySalaries,
   weeklySponsor,
 } from './state.ts';
-import type { Command, Fixture, GameState, Persona, Player, PlayerId, Rarity, RoundResult, TacticRecord, Team, TeamId } from './types.ts';
+import type { Command, Fixture, FixtureId, GameState, MatchDay, Persona, Player, PlayerId, Rarity, RoundResult, TacticRecord, Team, TeamId } from './types.ts';
 import { addMatch, emptySeason } from './stats.ts';
 import { attrsAt, stageOf, startCaps } from './attrs.ts';
 import { REGULAR_WEEKS, SAVE_VERSION, TOTAL_WEEKS } from './types.ts';
@@ -45,6 +46,8 @@ export interface NewGameOptions {
 export interface AdvanceOptions {
   /** 比賽日與練習賽的模擬進度（已完成場數、總場數），由閘道回報 */
   onProgress?: (done: number, total: number) => void;
+  /** 教練身分看的我方比賽怎麼結束（beginMatchDay 之後才有意義；沒給＝照離席處理） */
+  live?: LiveFinish;
 }
 
 export interface AdvanceSummary {
@@ -181,6 +184,7 @@ export function newGame(seed: number, content: ContentPack, opts: NewGameOptions
     nextId: 1,
     humanTeamId: '',
     seasonResult: null,
+    matchDay: null,
   };
   const npcNames = rng.shuffle([...content.teamNames]);
   const humanSeat = rng.nextInt(NPC_PERSONAS.length + 1);
@@ -272,21 +276,88 @@ function ensureLineups(state: GameState, content: ContentPack): void {
 
 const mean = (ps: readonly Player[]): number => ps.reduce((s, p) => s + p.elo, 0) / ps.length;
 
-async function playMatchDay(state: GameState, content: ContentPack, gateway: BattleGateway, summary: AdvanceSummary, opts: AdvanceOptions): Promise<void> {
-  const e = content.economy;
+/**
+ * 比賽日的準備（M5 第四批）：NPC 與玩家的名單、新面孔折默契、每場的請求單，存進 state.matchDay。
+ * 之後不論玩家選教練身分、一般觀戰或跳過，送出的都是這份請求單（教練身分只多了 calls 與我方的 coachAi），存檔讀檔也一樣。
+ */
+function prepareMatchDay(state: GameState, content: ContentPack): MatchDay {
+  if (state.matchDay !== null && state.matchDay.week === state.week) return state.matchDay;
+  ensureLineups(state, content);
   const fixtures = state.fixtures.filter((f) => f.week === state.week && f.result === null);
-  const lineups = fixtures.map((f) => [teamOf(state, f.home).lineup.map((id) => playerOf(state, id)), teamOf(state, f.away).lineup.map((id) => playerOf(state, id))] as const);
+  const lineups = fixtures.map((f) => [[...teamOf(state, f.home).lineup], [...teamOf(state, f.away).lineup]] as [PlayerId[], PlayerId[]]);
   // 新面孔第一次為本隊出賽：開打前隊伍默契打折（M5 規格 3.3）
   fixtures.forEach((f, fi) => {
-    newFaceDiscount(teamOf(state, f.home), lineups[fi][0]);
-    newFaceDiscount(teamOf(state, f.away), lineups[fi][1]);
+    newFaceDiscount(teamOf(state, f.home), lineups[fi][0].map((id) => playerOf(state, id)));
+    newFaceDiscount(teamOf(state, f.away), lineups[fi][1].map((id) => playerOf(state, id)));
   });
-  const reqs: MatchRequest[] = fixtures.map((f, fi) => {
-    const [h, a] = lineups[fi];
+  const requests: MatchRequest[] = fixtures.map((f, fi) => {
+    const [h, a] = lineups[fi].map((ids) => ids.map((id) => playerOf(state, id)));
     const [home, away] = [teamOf(state, f.home), teamOf(state, f.away)];
     // 助理教練／NPC 教練（M5 第四批）：有請的一方整場由 AI 教練代喊；雙方都沒請就不帶這欄（請求單和第三批以前同形）
     const coachAi = home.assistant || away.assistant ? { coachAi: { a: home.assistant ? 1 : null, b: away.assistant ? 1 : null } } : {};
     return { formatId: state.formatId, a: buildSide(content, home, h), b: buildSide(content, away, a), seed: rngFor(state.seed, STREAM.match, state.week, fi).nextU32(), ...coachAi };
+  });
+  state.matchDay = { week: state.week, fixtureIds: fixtures.map((f) => f.id), lineups, requests, live: null };
+  return state.matchDay;
+}
+
+/** 教練身分看我方比賽的即時票（請求單含隱藏資料，只交給即時頁的 Worker） */
+export interface LiveTicket {
+  readonly fixtureId: FixtureId;
+  /** 我方是請求單的哪一方 */
+  readonly side: 'a' | 'b';
+  readonly request: MatchRequest;
+  /** 有請助理教練：離席後由他接手 */
+  readonly assistant: boolean;
+  /** 已喊的指令（重開遊戲時接續用） */
+  readonly calls: readonly CoachEvent[];
+  /** 雙方出賽名單（主隊、客隊；選手 ID 是公開資訊，畫面顯示名字用） */
+  readonly lineups: readonly [readonly PlayerId[], readonly PlayerId[]];
+}
+
+/**
+ * 比賽日第一段（M5 規格 6.1）：準備比賽日、標記我方比賽由教練身分即時看。回傳即時票；這週沒有我方比賽（輪空、休賽期）＝null。
+ * 呼叫後要存檔：之後每喊一次指令就 recordCall 再存一次，重開時照教練離席處理。
+ */
+export function beginMatchDay(state: GameState, content: ContentPack): LiveTicket | null {
+  if (state.phase !== 'season') return null;
+  const md = prepareMatchDay(state, content);
+  const me = state.humanTeamId;
+  const fi = md.fixtureIds.findIndex((id) => {
+    const f = state.fixtures.find((x) => x.id === id);
+    return f !== undefined && (f.home === me || f.away === me);
+  });
+  if (fi < 0) return null;
+  const f = state.fixtures.find((x) => x.id === md.fixtureIds[fi]) as Fixture;
+  const side = f.home === me ? 'a' : 'b';
+  md.live ??= { fixtureId: f.id, side, calls: [] };
+  return { fixtureId: f.id, side, request: structuredClone(md.requests[fi]), assistant: teamOf(state, me).assistant, calls: structuredClone(md.live.calls), lineups: [[...md.lineups[fi][0]], [...md.lineups[fi][1]]] };
+}
+
+/** 即時比賽中玩家喊了一則指令（存進比賽日，重開時照離席處理用得到） */
+export function recordCall(state: GameState, ev: CoachEvent): void {
+  const live = state.matchDay?.live;
+  if (live === undefined || live === null) throw new Error('沒有進行中的即時比賽');
+  if (ev.side !== live.side || ev.by !== 'human') throw new Error('只能記我方玩家的指令');
+  live.calls.push(structuredClone(ev));
+}
+
+/** 即時比賽怎麼結束：看完（leftAt＝null）或教練離席（打到第 leftAt 回合） */
+export interface LiveFinish {
+  readonly leftAt: number | null;
+}
+
+async function playMatchDay(state: GameState, content: ContentPack, gateway: BattleGateway, summary: AdvanceSummary, opts: AdvanceOptions): Promise<void> {
+  const e = content.economy;
+  const md = prepareMatchDay(state, content);
+  const fixtures = md.fixtureIds.map((id) => state.fixtures.find((f) => f.id === id) as Fixture);
+  const lineups = md.lineups.map(([h, a]) => [h.map((id) => playerOf(state, id)), a.map((id) => playerOf(state, id))] as const);
+  // 教練身分看的那場：請求單＋已喊的指令（離席的話只到離席回合，之後由助理教練接手或沒人喊）。沒說怎麼結束（重開遊戲、自動推進）＝照離席處理，n＝最後一則指令的回合
+  const reqs: MatchRequest[] = md.requests.map((r, fi) => {
+    const live = md.live;
+    if (live === null || live.fixtureId !== md.fixtureIds[fi]) return r;
+    const leftAt = opts.live !== undefined ? opts.live.leftAt : live.calls.reduce((n, c) => Math.max(n, c.round), 0);
+    return liveRequest(r, live.side, live.calls, leftAt, teamOf(state, state.humanTeamId).assistant);
   });
   const outs = await gateway.simulateBatch(reqs, opts.onProgress);
   fixtures.forEach((f, fi) => {
@@ -427,8 +498,8 @@ export async function advance(state: GameState, content: ContentPack, gateway: B
     return summary;
   }
 
-  ensureLineups(state, content);
   await playMatchDay(state, content, gateway, summary, opts);
+  state.matchDay = null;
   settleBets(state);
   await processJobs(state, content, gateway, opts.onProgress);
   weeklyFinance(state, content);

@@ -9,12 +9,17 @@ import {
   STUB_CONTENT,
   advance,
   applyCommand,
+  beginMatchDay,
+  recordCall,
   deserialize,
   knownView,
   newGame,
   serialize,
   type AdvanceSummary,
   type BattleGateway,
+  type CoachEvent,
+  type LiveFinish,
+  type LiveTicket,
   type Command,
   type CommandResult,
   type ContentPack,
@@ -208,6 +213,26 @@ export class ManageGame {
     };
   }
 
+  /**
+   * 教練身分即時看我方比賽（M5 第四批 4b）：準備比賽日、存檔，回傳即時票（請求單含隱藏資料，只交給即時頁的 Worker）。
+   * 這週沒有我方比賽＝null。之後每喊一則指令就 recordCall（立刻存檔），推進時用 advance(…, { leftAt }) 收尾。
+   */
+  beginMatchDay(): LiveTicket | null {
+    const t = beginMatchDay(this.state, this.content);
+    if (t !== null) this.save();
+    return t;
+  }
+
+  recordCall(ev: CoachEvent): void {
+    recordCall(this.state, ev);
+    this.save();
+  }
+
+  /** 有沒看完的即時比賽（重開遊戲時照教練離席處理） */
+  get pendingLive(): boolean {
+    return this.state.matchDay?.live !== null && this.state.matchDay?.live !== undefined;
+  }
+
   command(cmd: Command): CommandResult {
     const r = applyCommand(this.state, this.content, this.state.humanTeamId, cmd);
     if (r.ok) this.save();
@@ -218,10 +243,10 @@ export class ManageGame {
    * 推進一週。真引擎在 Worker 裡跑，失敗（例外）時狀態回到推進前，不會存到半套。
    * onProgress：模擬進度（已完成、總數；比賽日一批、練習賽各一批）
    */
-  async advance(onProgress?: (done: number, total: number) => void): Promise<AdvanceSummary> {
+  async advance(onProgress?: (done: number, total: number) => void, live?: LiveFinish): Promise<AdvanceSummary> {
     const before = serialize(this.state);
     try {
-      const r = await advance(this.state, this.content, this.gateway, { onProgress });
+      const r = await advance(this.state, this.content, this.gateway, { onProgress, ...(live !== undefined ? { live } : {}) });
       this.save();
       return r;
     } catch (e) {

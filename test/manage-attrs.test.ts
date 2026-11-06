@@ -222,7 +222,7 @@ describe('閘道與存檔', () => {
     const salary = up.weeklySalary as number;
     const v = up.version as number;
     const m = deserialize(JSON.stringify(v7), shooter);
-    expect(m.version).toBe(10);
+    expect(m.version).toBe(11);
     const p = m.players.find((x) => x.id === up.id) as Player;
     expect(p.attrs).toEqual(attrsAt(shooter, p.lineageId, v + 1));
     expect(p.weeklySalary).toBe(Math.round((salary * shooter.economy.salaryGrowthPct) / 100));

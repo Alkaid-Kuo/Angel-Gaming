@@ -2,7 +2,8 @@
 // 公平原則：玩家模式下 Worker 只送觀察資料（ShooterObservation）與計分板的公開資訊，主執行緒不持有引擎；
 // 只有開局勾選「觀戰模式」才另送引擎全狀態快照（FullState）。
 // 經營層觀戰（watch）：用存檔的請求單、經 src/shooter/gateway.ts 的 gatewayDriverOptions 建驅動重跑那一場，畫面同觀戰模式。
-import type { MatchOutcome, MatchRequest } from '../../manage/gateway.ts';
+import type { CoachCall, CoachEvent, CoachPlan, MatchOutcome, MatchRequest } from '../../manage/gateway.ts';
+import type { CoachStop } from '../../shooter/live-coach.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
 import type { GrenadeInfo, MapInfo, RoundEndReason, RulesInfo, ShooterCommand, ShooterObservation, SoundEvent, Team, WeaponInfo, WeaponId, GrenadeId } from '../../shooter/api.ts';
 
@@ -47,7 +48,34 @@ export interface WatchSetup extends WatchInfo {
   readonly names: readonly string[];
 }
 
+/** 教練模式（M5 第四批 4b）：戰術清單（面板用）、我方是哪一方、有沒有請助理教練 */
+export interface CoachInfo {
+  readonly side: 'a' | 'b';
+  readonly assistant: boolean;
+  readonly tactics: readonly { readonly id: string; readonly name: string; readonly side: Team }[];
+}
+
+export interface CoachSetup extends WatchSetup {
+  readonly coach: CoachInfo;
+}
+
+/** 教練模式的狀態列（剩幾次暫停、暫停已排定、打到第幾回合、是不是已離席） */
+export interface CoachStatus {
+  readonly round: number;
+  readonly timeoutsLeft: number;
+  readonly pending: boolean;
+  readonly left: boolean;
+}
+
 export type ToShooterWorker =
+  /** 經營層教練身分即時看我方比賽（M5 第四批 4b） */
+  | { readonly type: 'coach'; readonly coach: CoachSetup }
+  /** 教練：按暫停（本回合照打，下一回合開始前停）／取消 */
+  | { readonly type: 'coachPause'; readonly on: boolean }
+  /** 教練：停下時下完指令、繼續 */
+  | { readonly type: 'coachResolve'; readonly plan: CoachPlan | null; readonly call: CoachCall | null }
+  /** 教練：離席（轉一般觀戰），之後不能再下指令 */
+  | { readonly type: 'coachLeave' }
   | { readonly type: 'start'; readonly setup: ShooterSetup }
   /** 經營層觀戰：重跑一場打完的比賽 */
   | { readonly type: 'watch'; readonly watch: WatchSetup }
@@ -80,6 +108,8 @@ export interface ShooterMeta {
   readonly scopedSpeeds?: Readonly<Partial<Record<WeaponId, number>>>;
   /** 經營層觀戰才有 */
   readonly watch?: WatchInfo;
+  /** 教練身分即時看才有（不能透視：沒有全狀態，畫面是己方視野聯集） */
+  readonly coach?: CoachInfo;
   /** 試玩有選等級才有（「再來一場」沿用） */
   readonly lineup?: Lineup;
 }
@@ -198,4 +228,12 @@ export type FromShooterWorker =
   | { readonly type: 'replay'; readonly replay: TrialReplay }
   /** 跳回合進行中（重跑到第 at 回合，目標 target） */
   | { readonly type: 'seeking'; readonly at: number; readonly target: number }
-  | { readonly type: 'error'; readonly message: string };
+  | { readonly type: 'error'; readonly message: string }
+  /** 教練模式：停下來等指令 */
+  | { readonly type: 'coachStop'; readonly stop: CoachStop }
+  /** 教練模式：一則指令生效了（經營頁要存檔） */
+  | { readonly type: 'coachCall'; readonly event: CoachEvent }
+  /** 教練模式：狀態列 */
+  | { readonly type: 'coachStatus'; readonly status: CoachStatus }
+  /** 教練離席（打到第 round 回合），之後是一般觀戰 */
+  | { readonly type: 'coachLeft'; readonly round: number };

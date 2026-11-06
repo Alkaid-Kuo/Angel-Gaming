@@ -216,7 +216,7 @@ export function gatewayDriverOptions(request: MatchRequest, bot: CompiledBot, op
  * 同 gatewayDriverOptions，另外回傳教練指令的紀錄（M5 第四批：請求單有 calls 或 coachAi 時，比賽打完後就是雙方所有生效的指令；沒有＝null）。
  * 每次呼叫建一份新的指令排程（有狀態），所以同一張請求單每次建驅動都從頭算、結果相同。
  */
-export function gatewayDriverSetup(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean } = {}): { options: ShooterRunOptions; calls: CoachEvent[] | null } {
+export function gatewayDriverSetup(request: MatchRequest, bot: CompiledBot, opts: { record?: boolean; live?: boolean } = {}): { options: ShooterRunOptions; calls: CoachEvent[] | null } {
   const format = formatOf(request.formatId);
   for (const side of [request.a, request.b]) {
     if (side.players.length !== format.lineupSize) throw new Error(`攻防戰每方 ${format.lineupSize} 人，名單是 ${side.players.length} 人`);
@@ -232,7 +232,7 @@ export function gatewayDriverSetup(request: MatchRequest, bot: CompiledBot, opts
   const orders: [TeamOrders | null, TeamOrders | null] = [sideOrders(request.a), sideOrders(request.b)];
   const playbook = request.a.team !== undefined || request.b.team !== undefined ? { tactics: [...sideTactics(request.a), ...sideTactics(request.b)], orders } : {};
   // 教練指令（M5 第四批）：有 calls 或 coachAi 才走每回合排程；沒有時選項和第一批逐欄相同
-  const schedule = coachSchedule(request, coachRules(fo));
+  const schedule = coachSchedule(request, coachRules(fo), opts.live === true);
   const coach = schedule !== null ? { ordersOf: schedule.ordersOf } : {};
   return { options: { seed: request.seed, mapId: map.id, controllers, knobs, attributes: seats.map((s) => s.attributes), ...playbook, ...coach, record: opts.record === true, ...fo }, calls: schedule?.log ?? null };
 }
