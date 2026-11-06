@@ -24,10 +24,12 @@ export interface GameUi extends ClubUi {
   player: string | null;
   /** 戰術室「對手情報」選中的戰隊（null＝本週對手） */
   scoutTeam: string | null;
+  /** 檔案室分頁：我方比賽／全部比賽 */
+  archiveTab: 'mine' | 'all';
 }
 
 export function newGameUi(base: ClubUi): GameUi {
-  return { ...base, marketPick: null, marketTab: 'free', mailSel: null, player: null, scoutTeam: null };
+  return { ...base, marketPick: null, marketTab: 'free', mailSel: null, player: null, scoutTeam: null, archiveTab: 'mine' };
 }
 
 export interface Ctx {

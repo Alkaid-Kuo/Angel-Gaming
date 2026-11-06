@@ -15,6 +15,7 @@ import { dust, initStage, still } from '../sketch/stage.ts';
 import { showCoach } from './coach.ts';
 import { HELP, SCREEN_NAME, autoHelpId, currentStep, lockedUntil, type Step } from './guide.ts';
 import { LAND_SCREEN, hubPanels, hubTags } from './hub.ts';
+import { archiveScreen } from './archive.ts';
 import { financeScreen, inboxScreen, leagueScreen } from './info.ts';
 import type { Ctx, GameUi, Screen } from './kit.ts';
 import { STANDALONE, esc, icon, myCrest, newGameUi, runStep, slotName, teamName, wan } from './kit.ts';
@@ -65,7 +66,7 @@ let liveFrame: HTMLIFrameElement | null = null;
 const city: CityView = mountCity(document.getElementById('city-cv') as HTMLCanvasElement, document.getElementById('fx-cv') as HTMLCanvasElement, document.getElementById('rain-cv') as HTMLCanvasElement);
 dust(document.getElementById('dust') as HTMLCanvasElement, ['rgba(255,217,138,.5)', 'rgba(220,235,255,.3)'], 60);
 const bgWord = document.querySelector('.bgx .word') as HTMLElement;
-const WORD: Partial<Record<Screen, string>> = { title: 'ANGEL', create: 'NEW TEAM', squad: 'SQUAD', player: 'PLAYER', market: 'RECRUIT', training: 'TRAINING', tactics: 'TACTICS', league: 'LEAGUE', betting: 'BETTING', finance: 'FINANCE', inbox: 'INBOX' };
+const WORD: Partial<Record<Screen, string>> = { title: 'ANGEL', create: 'NEW TEAM', squad: 'SQUAD', player: 'PLAYER', market: 'RECRUIT', training: 'TRAINING', tactics: 'TACTICS', league: 'LEAGUE', archive: 'ARCHIVE', betting: 'BETTING', finance: 'FINANCE', inbox: 'INBOX' };
 
 const speed = (): number => (prefs.fast ? 0.5 : 1);
 
@@ -109,6 +110,8 @@ function screenHtml(ctx: Ctx, seen: number): string {
       return tacticsScreen(ctx);
     case 'league':
       return leagueScreen(ctx);
+    case 'archive':
+      return archiveScreen(ctx);
     case 'betting':
       return bettingScreen(ctx);
     case 'finance':
@@ -400,8 +403,8 @@ function showScene(): void {
   }
   cineEl.hidden = false;
   const sc = cine.scenes[cine.i];
-  const hasStop = !sc.stop && cine.scenes.slice(cine.i + 1).some((s) => s.stop);
-  cineEl.innerHTML = `<div class="cine" style="--sp:${speed()}">${sc.html}${sc.bare ? '' : `<div class="cine-bar">${hasStop ? `<button class="btn ghost sm" data-act="cine-skip"><b>跳過演出</b><span>SKIP</span></button>` : ''}<button class="btn ghost sm" data-act="speed"><b>${prefs.fast ? '一般速度' : '加速 ×2'}</b></button></div>`}</div>`;
+  // 演出控制列（跳過演出、加速）已拿掉（UI 審核 #8）：演出速度留在選單，一幕一幕點畫面或按空白鍵就過
+  cineEl.innerHTML = `<div class="cine" style="--sp:${speed()}">${sc.html}</div>`;
   sc.enter?.(cineEl, speed());
   if (sc.auto) cineTimer = window.setTimeout(nextScene, sc.auto * speed());
 }
@@ -417,16 +420,6 @@ function nextScene(): void {
     return;
   }
   showScene();
-}
-
-function skipScenes(): void {
-  if (!cine) return;
-  const cur = cine.i;
-  const j = cine.scenes.findIndex((s, k) => k > cur && s.stop);
-  if (j > 0) {
-    cine.i = j;
-    showScene();
-  }
 }
 
 /**
@@ -849,7 +842,10 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
   },
   watch: (el) => openWatch(el.dataset.f as string),
   'cine-next': () => nextScene(),
-  'cine-skip': () => skipScenes(),
+  atab: (el) => {
+    ui.archiveTab = el.dataset.t === 'all' ? 'all' : 'mine';
+    render();
+  },
 };
 
 function dispatch(e: Event): void {
