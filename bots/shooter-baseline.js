@@ -215,11 +215,18 @@ tacWq: 0.2,
 tacWr: 0.35,
 tacEps: 0.1,
 tacAmax: 0.3,
-qSync: 0.6,
+tacSDefault: 0.15,
+tacSSplit: 0.15,
+tacSFake: 0.1,
+tacSRush: -0.15,
+tacSEcoRush: 0.3,
+qSync: 1.2,
 qSyncWait: 0.8,
-qFlash: 0.8,
+qSyncLag: 4,
+qFlash: 1,
+qFlashLate: 3,
 qLag: 0.8,
-qPause: 0.4,
+qPause: 0.65,
 afterPistol: 'force',
 ecoFloor: 1500,
 ecoSave: true,
@@ -3096,6 +3103,8 @@ this.usedTeam = '';
 this.tagSaid = false;
 this.tagPick = null;
 this.tagNow = null;
+this.syncAt = -1;
+this.syncWait = 0;
 const reaction = clamp(data.attributes.reaction, 0, 100);
 const nominal = 5 + Math.max(0, 70 - reaction) / 8;
 const exact = 5 + Math.max(0, 70 - Math.round(reaction)) / 8;
@@ -3653,7 +3662,7 @@ const kindOf = (id) => (id.replace(/[AB]$/, ''));
 const siteOf = (id) => (id.endsWith('A') ? 'A' : id.endsWith('B') ? 'B' : main);
 const id = this.pickTactic(obs, T_TACTICS, (t) => {
 const kind = kindOf(t);
-let s = kind === 'split' ? 0.15 : kind === 'rush' ? -0.1 + 0.2 * ag : kind === 'fake' ? -0.05 : 0;
+let s = kind === 'split' ? P.tacSSplit : kind === 'rush' ? P.tacSRush + 0.2 * ag + (eco ? P.tacSEcoRush : 0) : kind === 'fake' ? P.tacSFake : P.tacSDefault;
 if (enemyEco) s += kind === 'default' ? -0.3 : kind === 'fake' ? -0.2 : 0.1;
 if (kind === 'rush' || kind === 'split') s += 0.15 * sc[siteOf(t)];
 const a = 0.5 * Math.log(learned.plans[kind] ?? 1) + (kind === 'fake' ? 0.25 * (learned.rotation - 0.5) : 0);
@@ -3706,7 +3715,7 @@ if (left <= P.forceExecLeft) return { ...p, exec: this.nearestSite(obs) };
 if (p.kind === 'split') {
 const ready = this.alive(obs).every((m) => {
 const s = this.memberStage(obs, m.id, p);
-return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * (1 + P.qSync * this.qGap()) * UNIT;
+return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * (1 + P.qSync * Math.max(0, this.qGap())) * UNIT;
 });
 if (!ready) this.readyAt = -1;
 else if (this.readyAt < 0) this.readyAt = t;
@@ -4147,6 +4156,23 @@ out.stop = true;
 out.role = '跟上';
 return null;
 }
+const qgs = this.qGap();
+if (p.kind === 'split' && qgs > 0 && this.execTick >= 0 && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
+if (this.syncAt !== this.execTick) {
+this.syncAt = this.execTick;
+this.syncWait = this.splitBehind(obs, p, exec) ? qgs * P.qSyncLag : 0;
+}
+if (t - this.execTick < this.syncWait * this.tps) {
+out.stop = true;
+out.role = '慢了一步';
+return null;
+}
+}
+if (qgs > 0 && p.kind !== 'go' && t >= this.flashPop && t - this.flashPop < qgs * P.qFlashLate * this.tps && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
+out.stop = true;
+out.role = '慢半拍';
+return null;
+}
 if (p.kind !== 'go') {
 out.allowPeek = false;
 out.walk = false;
@@ -4182,7 +4208,7 @@ if (ent !== null && !this.inSite(me.x, me.y, exec, site.cx, site.cy) && dist(me.
 const idx = this.memberIndex(obs, me.id, p);
 const role = this.roles.of(me.id);
 const smokeFirst = p.kind !== 'rush' && p.kind !== 'go';
-const cue = this.leadDist(obs, p, ent) < P.flashLead * UNIT;
+const cue = this.leadDist(obs, p, ent) < P.flashLead * (1 + P.qFlash * Math.max(0, this.qGap())) * UNIT;
 if (!cue) this.flashCue = -1;
 else if (this.flashCue < 0) this.flashCue = t;
 const size = Math.max(1, this.groupSize(obs, p));
@@ -4222,8 +4248,7 @@ out.walk = true;
 out.role = '找丟道具的位置';
 return null;
 }
-const qg = this.qGap();
-const travel = (dist(me.x, me.y, ent.ox, ent.oy) / UNIT / P.routeSpeed) * this.tps * (qg > 0 ? 1 - P.qFlash * qg : 1 - 0.2 * qg);
+const travel = (dist(me.x, me.y, ent.ox, ent.oy) / UNIT / P.routeSpeed) * this.tps;
 const pending = this.mateFlash.some((x) => t <= x.pop - travel);
 const flashHere = st !== null && dist(st.x, st.y, ent.ox, ent.oy) < P.flashLead * UNIT;
 const cover = smokeFirst && near && wish === null && !cue && flashTurn && idx > 0 && sinceExec < P.stageLead + 3 && next.ok && this.util.has(me, 'flash') && this.flashPoint(obs, exec, ent, 2, next.avoid) !== null;
@@ -4410,7 +4435,8 @@ flankHold(obs, p, exec, f) {
 if (this.flankStart < 0) this.flankStart = obs.tick;
 if ((obs.tick - this.flankStart) / this.tps >= f.wait || obs.round.phaseTicksLeft <= P.forceExecLeft * this.tps || this.flankGo) return false;
 const far = obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) !== f.near && !this.lurking(obs, m.id));
-const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.second.oy) < P.flankNear * UNIT || this.inRectSite(m.x, m.y, exec));
+const near = P.flankNear * (1 + P.qSync * Math.max(0, this.qGap()));
+const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.second.oy) < near * UNIT || this.inRectSite(m.x, m.y, exec));
 if (done) this.flankGo = true;
 return !done;
 }
@@ -4466,6 +4492,18 @@ if (role === AWP) return mates.filter((m) => went(m.id)).length < Math.min(2, ma
 const e = mates.find((m) => m.id === this.roles.who(ENTRY));
 const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
 return e !== undefined && ce >= 0 && !went(e.id) && dS[ce] >= dS[c] - 10;
+}
+splitBehind(obs, p, exec) {
+const g = this.groupOf(obs, obs.me.id, p);
+const all = [obs.me, ...obs.teammates.filter((m) => m.alive && !this.lurking(obs, m.id))];
+const eta = (k) => {
+const e = this.entranceOf(exec, k === 0 ? p.r1 : p.r2);
+const ms = all.filter((m) => this.groupOf(obs, m.id, p) === k);
+if (e === null || ms.length === 0) return null;
+return Math.min(...ms.map((m) => dist(m.x, m.y, e.ox, e.oy))) / UNIT / P.routeSpeed;
+};
+const mine = eta(g), theirs = eta(1 - g);
+return mine !== null && theirs !== null && mine >= theirs;
 }
 entranceOf(site, routeIdx) {
 const r = this.tRoute(site, routeIdx);

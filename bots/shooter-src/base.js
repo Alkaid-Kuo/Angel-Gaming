@@ -386,16 +386,24 @@ export const P = {
   tacWr: 0.35,
   tacEps: 0.1,
   tacAmax: 0.3,
+  /** T 狀態分（沒有教練資料時的戰術比例要貼近 2.7：default 22／rush 12＋20×侵略／split 40／fake 18，split、rush 各分兩點）；我方 eco 時 rush 加分（2.7 eco：rush 65／split 35） */
+  tacSDefault: 0.15,
+  tacSSplit: 0.15,
+  tacSFake: 0.1,
+  tacSRush: -0.15,
+  tacSEcoRush: 0.3,
 
-  // ── 2.8：執行品質（M5 規格 3.5；q＝本回合戰術的隊伍執行熟練度、p＝個人熟練度；q、p＝0.5 時和 2.7 相同，熟練度不改槍法） ──
-  /** 兩組同步（split）：到位判定半徑 × (1 ＋ qSync×(0.5−q))；熟練度低時等第二組的上限 × (1 ＋ qSyncWait×(0.5−q)) */
-  qSync: 0.6,
+  // ── 2.8：執行品質（M5 規格 3.5；q＝本回合戰術的隊伍執行熟練度、p＝個人熟練度；q、p ≥ 0.5 時和 2.7 相同（2.7 是熟練的上限），低於 0.5 才退化；熟練度不改槍法） ──
+  /** 兩組同步：split 到位判定半徑、兩路進點「第二組到了」的距離 × (1 ＋ qSync×(0.5−q))，等第二組的上限 × (1 ＋ qSyncWait×(0.5−q))；split 離入口遠的那組晚 (0.5−q) × qSyncLag 秒出發 */
+  qSync: 1.2,
   qSyncWait: 0.8,
-  /** 道具時序：閃光提前出發的路程估計 × (1 − qFlash×(0.5−q))（q 低出發晚）；q 高最多 × 1.1 */
-  qFlash: 0.8,
-  /** 個人：收到執行後晚 max(0, 0.5−p) × qLag 秒出發；佈置途中每半秒停下的機率 max(0, 0.5−p) × qPause */
+  qSyncLag: 4,
+  /** 道具時序：組裡最前面的人離入口 flashLead × (1 ＋ qFlash×(0.5−q)) 格內就丟閃光（太早）；隊友閃光炸開後慢 (0.5−q) × qFlashLate 秒才跟進 */
+  qFlash: 1,
+  qFlashLate: 3,
+  /** 個人：收到執行後晚 (0.5−p) × qLag 秒出發；佈置途中每半秒停下的機率 (0.5−p) × qPause */
   qLag: 0.8,
-  qPause: 0.4,
+  qPause: 0.65,
 
   // ── 經濟（2.2） ──
   /** 輸手槍局後第二回合的買法（eco／force／half 各 200 場實測，force 整場勝率最高，見 2.2 報告） */

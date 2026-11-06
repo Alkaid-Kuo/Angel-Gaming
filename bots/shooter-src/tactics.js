@@ -152,6 +152,9 @@ export class Tactics {
     this.tagPick = null;
     /** 2.8：本回合打的戰術代號（自己喊的或聽到的 K:；執行品質用它的熟練度） @type {string | null} */
     this.tagNow = null;
+    /** 2.8：split 執行時離入口近的那組要晚出發幾秒（syncAt＝算的時候的 execTick） */
+    this.syncAt = -1;
+    this.syncWait = 0;
     // 公開 reactionTicks 是四捨五入值；由公開屬性／公式推得可能區間，不預知本批的隨機進位。
     const reaction = clamp(data.attributes.reaction, 0, 100);
     const nominal = 5 + Math.max(0, 70 - reaction) / 8;
@@ -863,7 +866,7 @@ export class Tactics {
     const id = this.pickTactic(obs, T_TACTICS, (t) => {
       const kind = kindOf(t);
       // 狀態分（2.7 的機率權重換成分數）：split 最常、rush 隨侵略、fake 最少；對方疑似 eco 時不打慢的 default
-      let s = kind === 'split' ? 0.15 : kind === 'rush' ? -0.1 + 0.2 * ag : kind === 'fake' ? -0.05 : 0;
+      let s = kind === 'split' ? P.tacSSplit : kind === 'rush' ? P.tacSRush + 0.2 * ag + (eco ? P.tacSEcoRush : 0) : kind === 'fake' ? P.tacSFake : P.tacSDefault;
       if (enemyEco) s += kind === 'default' ? -0.3 : kind === 'fake' ? -0.2 : 0.1;
       if (kind === 'rush' || kind === 'split') s += 0.15 * sc[siteOf(t)];
       const a = 0.5 * Math.log(learned.plans[kind] ?? 1) + (kind === 'fake' ? 0.25 * (learned.rotation - 0.5) : 0);
@@ -931,8 +934,8 @@ export class Tactics {
     if (p.kind === 'split') {
       const ready = this.alive(obs).every((m) => {
         const s = this.memberStage(obs, m.id, p);
-        // 2.8（P.qSync）：隊伍執行熟練度低，到位判定鬆（兩組常各打各的）；高則嚴（q＝0.5 時 4.5 格，同 2.7）
-        return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * (1 + P.qSync * this.qGap()) * UNIT;
+        // 2.8（P.qSync）：隊伍執行熟練度低，到位判定鬆（兩組常各打各的）；q ≥ 0.5 時 4.5 格同 2.7（收緊會站不到、等到逾時）
+        return s === null || dist(m.x, m.y, s.x, s.y) < 4.5 * (1 + P.qSync * Math.max(0, this.qGap())) * UNIT;
       });
       // 兩組都到了再等 1.5 秒（狙擊手站定開鏡、隊友站好）
       if (!ready) this.readyAt = -1;
@@ -1487,6 +1490,25 @@ export class Tactics {
       out.role = '跟上';
       return null;
     }
+    // 2.8（P.qSyncLag）：split 隊伍執行熟練度低，離入口遠的那組還晚出發（(0.5−q) × qSyncLag 秒，兩組各打各的）；q ≥ 0.5 同 2.7
+    const qgs = this.qGap();
+    if (p.kind === 'split' && qgs > 0 && this.execTick >= 0 && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
+      if (this.syncAt !== this.execTick) {
+        this.syncAt = this.execTick;
+        this.syncWait = this.splitBehind(obs, p, exec) ? qgs * P.qSyncLag : 0;
+      }
+      if (t - this.execTick < this.syncWait * this.tps) {
+        out.stop = true;
+        out.role = '慢了一步';
+        return null;
+      }
+    }
+    // 2.8（P.qFlashLate）：隊伍執行熟練度低，隊友的閃光炸開後慢半拍才跟進（(0.5−q) × qFlashLate 秒）；q ≥ 0.5 同 2.7
+    if (qgs > 0 && p.kind !== 'go' && t >= this.flashPop && t - this.flashPop < qgs * P.qFlashLate * this.tps && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
+      out.stop = true;
+      out.role = '慢半拍';
+      return null;
+    }
     // ── 執行（go 是 6-1 的直接進點：照常探頭）──
     if (p.kind !== 'go') {
       out.allowPeek = false;
@@ -1527,7 +1549,8 @@ export class Tactics {
       const role = this.roles.of(me.id);
       const smokeFirst = p.kind !== 'rush' && p.kind !== 'go';
       // 閃光的時機看組裡最前面的人：快到入口才丟，丟的人排第二（突破手不用停下來）
-      const cue = this.leadDist(obs, p, ent) < P.flashLead * UNIT;
+      // 2.8（P.qFlash）：隊伍執行熟練度低，前面的人還遠就丟（炸開後很久才進點）；q ≥ 0.5 同 2.7
+      const cue = this.leadDist(obs, p, ent) < P.flashLead * (1 + P.qFlash * Math.max(0, this.qGap())) * UNIT;
       if (!cue) this.flashCue = -1;
       else if (this.flashCue < 0) this.flashCue = t;
       // 2.6：時間到了依組內順序每人錯開 P.flashStagger 秒接手（前一個人宣告了後面的人才聽得到）；
@@ -1579,9 +1602,7 @@ export class Tactics {
       }
       // 等閃光：還在待命格附近、閃光還沒丟、執行不到 3 秒
       // 閃光：照到入口的路程提前出發，炸開時人剛好到
-      // 2.8（P.qFlash）：隊伍執行熟練度低，路程估計偏短（出發晚，閃光炸開後才到）；高則略提早（q＝0.5 時同 2.7）
-      const qg = this.qGap();
-      const travel = (dist(me.x, me.y, ent.ox, ent.oy) / UNIT / P.routeSpeed) * this.tps * (qg > 0 ? 1 - P.qFlash * qg : 1 - 0.2 * qg);
+      const travel = (dist(me.x, me.y, ent.ox, ent.oy) / UNIT / P.routeSpeed) * this.tps;
       const pending = this.mateFlash.some((x) => t <= x.pop - travel);
       // 待命位離入口遠就不等閃光（閃光改到入口附近才丟）
       const flashHere = st !== null && dist(st.x, st.y, ent.ox, ent.oy) < P.flashLead * UNIT;
@@ -1826,12 +1847,14 @@ export class Tactics {
     return this.lurkPick;
   }
 
-  /** 待命格那組還要不要等：第二組還有人活著、都還沒到第二入口附近、沒逾時、回合時間還夠 @param {import('./base.js').Observation} obs @param {TPlan} p @param {SiteId} exec @param {{ near: number, second: import('./analysis.js').Entrance, wait: number }} f */
+  /** 待命格那組還要不要等：第二組還有人活著、都還沒到第二入口附近、沒逾時、回合時間還夠 @param {import('./base.js').Observation} obs @param {TPlan} p @param {SiteId} exec @param {{ near: number, main: import('./analysis.js').Entrance, second: import('./analysis.js').Entrance, wait: number }} f */
   flankHold(obs, p, exec, f) {
     if (this.flankStart < 0) this.flankStart = obs.tick;
     if ((obs.tick - this.flankStart) / this.tps >= f.wait || obs.round.phaseTicksLeft <= P.forceExecLeft * this.tps || this.flankGo) return false;
     const far = obs.teammates.filter((m) => m.alive && this.groupOf(obs, m.id, p) !== f.near && !this.lurking(obs, m.id));
-    const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.second.oy) < P.flankNear * UNIT || this.inRectSite(m.x, m.y, exec));
+    // 2.8（P.qSync）：隊伍執行熟練度低，第二組「到了」的判定鬆（待命格那組先衝、各打各的）；q ≥ 0.5 同 2.7
+    const near = P.flankNear * (1 + P.qSync * Math.max(0, this.qGap()));
+    const done = far.length === 0 || far.some((m) => dist(m.x, m.y, f.second.ox, f.second.oy) < near * UNIT || this.inRectSite(m.x, m.y, exec));
     if (done) this.flankGo = true;
     return !done;
   }
@@ -1908,6 +1931,24 @@ export class Tactics {
     const e = mates.find((m) => m.id === this.roles.who(ENTRY));
     const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
     return e !== undefined && ce >= 0 && !went(e.id) && dS[ce] >= dS[c] - 10;
+  }
+
+  /**
+   * 2.8：split 兩組各自離入口（外側）最近的人估計走幾秒，自己這組比較晚到（或一樣）＝ true
+   * @param {import('./base.js').Observation} obs @param {TPlan} p @param {SiteId} exec
+   */
+  splitBehind(obs, p, exec) {
+    const g = this.groupOf(obs, obs.me.id, p);
+    const all = [obs.me, ...obs.teammates.filter((m) => m.alive && !this.lurking(obs, m.id))];
+    /** @param {number} k */
+    const eta = (k) => {
+      const e = this.entranceOf(exec, k === 0 ? p.r1 : p.r2);
+      const ms = all.filter((m) => this.groupOf(obs, m.id, p) === k);
+      if (e === null || ms.length === 0) return null;
+      return Math.min(...ms.map((m) => dist(m.x, m.y, e.ox, e.oy))) / UNIT / P.routeSpeed;
+    };
+    const mine = eta(g), theirs = eta(1 - g);
+    return mine !== null && theirs !== null && mine >= theirs;
   }
 
   /** 路線的包點入口 @param {SiteId} site @param {number} routeIdx */
