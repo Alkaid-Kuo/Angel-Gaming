@@ -99,13 +99,14 @@ describe('攻防戰閘道：戰術手冊（M5 第一批）', () => {
     expect(o.orders?.[1]).toBeNull();
   });
 
-  it('現行 Bot 不讀新欄位：有 team 的請求單與沒有時成績單相同；沒喊 K: 就沒有回合戰術標籤', async () => {
+  // 測試前提變更：原本是「現行 Bot 不讀新欄位、不喊 K:」；Bot 2.8 起會讀 tactics／coach、每回合喊 K:
+  it('現行 Bot（2.8）讀新欄位：沒有 team 時每回合兩方都有戰術標籤；有 team 時 A 方禁用的 fake 不出現', async () => {
     const plain: MatchRequest = { formatId: 'shooter-short', a: side(3), b: side(3), seed: 31337 };
     const rich: MatchRequest = { ...plain, a: teamSide() };
     const [x] = await gateway.simulateBatch([plain]);
     const [y] = await gateway.simulateBatch([rich]);
-    expect(y).toEqual(x);
-    expect(y.rounds.every((r) => r.tactics === undefined)).toBe(true);
+    for (const o of [x, y]) expect(o.rounds.every((r) => typeof r.tactics?.a === 'string' && typeof r.tactics?.b === 'string')).toBe(true);
+    expect(y.rounds.some((r) => r.tactics?.a === 'fake')).toBe(false);
   }, 60_000);
 
   it('回合戰術標籤 → 成績單：至少一方有才給', () => {

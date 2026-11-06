@@ -44,7 +44,9 @@ describe('試玩基準座位與閘道同一條路', () => {
     const gw = runGatewayMatch(req, baselineBot, { record: true });
     expect(trial.finalHash).toBe(gw.finalHash);
     const outcome = outcomeOf(trial.result, trial.match);
-    expect(outcome).toEqual(gw.outcome);
+    // 測試前提變更：Bot 2.8 每回合喊 K:，閘道成績單多了回合戰術標籤（試玩的 outcomeOf 不帶）；比賽本身由上面的終局雜湊保證相同
+    expect(gw.outcome.rounds.every((r) => r.tactics !== undefined)).toBe(true);
+    expect(outcome).toEqual({ ...gw.outcome, rounds: gw.outcome.rounds.map(({ tactics: _t, ...r }) => r) });
     outcome.rounds.forEach((r, i) => expect(r.phase).toBe(i < 6 ? '上半場' : i < 12 ? '下半場' : `加時 ${Math.floor((i - 12) / 6) + 1}`));
     expect([trial.replay?.header.roundsPerHalf, trial.replay?.header.winRounds]).toEqual([6, 7]);
     expect(trial.replay?.header).toEqual(gw.replay?.header);
