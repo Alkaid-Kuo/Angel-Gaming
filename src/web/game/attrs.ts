@@ -66,15 +66,20 @@ export function attrPanel(ctx: Ctx, p: KnownPlayer): string {
         return `<div class="ar"><b>${name}</b><span class="num ${n !== undefined ? '' : 'gr'}">${n !== undefined ? n : grade}</span><span class="dim">${n !== undefined ? grade : ''}</span>${trainable ? '' : `<span class="lock">${icon('lock', 12)}風格</span>`}</div>`;
       }
       const cur = p.attrs?.[k] ?? 0;
-      if (!trainable) return `<div class="ar"><b>${name}</b><span class="num">${cur}</span><span class="dim">${grade}</span><span class="lock">${icon('lock', 12)}風格</span></div>`;
+      if (!trainable) return `<div class="ar"><b>${name}</b><span class="num">${cur}</span><span class="gr">${grade}</span><span class="lock">${icon('lock', 12)}風格</span></div>`;
       const capG = p.capGrades?.[k];
       const prog = p.progress?.[k] ?? 0;
-      // 預估只用公開的上限等級（取級中值），不看真實上限
+      // 預估只用公開的上限等級（取級中值），不看真實上限；預估收益 0 就當作練滿（同一級內還有幾點可練時不算）
       const est = capG !== undefined ? trainGain(gradeMid(capG), cur) : TRAIN_FULL_GAIN;
+      const atCap = capG !== undefined && est <= 0;
       const q = queued(k);
-      const can = active && slots > 0 && weekUsed < e.trainMaxPerPlayer && v.me.cash >= e.trainCost;
-      const why = !active ? '' : weekUsed >= e.trainMaxPerPlayer ? `每人每週最多 ${e.trainMaxPerPlayer} 節` : slots <= 0 ? '本週訓練時段用完了' : v.me.cash < e.trainCost ? '資金不足' : `預估每節 +${(est / 100).toFixed(1)} 點（收益約 ${Math.round((est * 100) / TRAIN_FULL_GAIN)}%）· ${wan(e.trainCost)} 萬`;
-      return `<div class="ar t"><b>${name}</b><span class="num">${cur}</span><span class="cap">${capG !== undefined ? `上限 約 ${capG}` : ''}</span><div class="meter g" style="--v:${prog}%" title="訓練進度 ${prog}%"><i></i></div>${btn(q ? `已排 ${q} · 再練` : '練 1 節', `data-act="train" data-id="${p.id}" data-attr="${k}" ${can ? '' : 'disabled'} title="${why}"`, 'sm ghost')}</div>`;
+      const pts = (n: number): string => `+${(n / 100).toFixed(1)}`;
+      // 「練 1 節」停用時按鈕本身寫原因（#14）：已達上限、賽段結束、這人已排滿、本週時段用完、資金不足
+      const why = !active ? '賽段結束' : atCap ? '已達上限' : weekUsed >= e.trainMaxPerPlayer ? `已排 ${e.trainMaxPerPlayer} 節` : slots <= 0 ? '時段用完' : v.me.cash < e.trainCost ? '資金不足' : '';
+      const tip = !active ? '賽段結束，不能再排訓練' : atCap ? '已到這個角色與品階的上限等級，再練也不會漲' : weekUsed >= e.trainMaxPerPlayer ? `每人每週最多 ${e.trainMaxPerPlayer} 節，這人本週已排滿` : slots <= 0 ? '本週訓練時段用完了，升級訓練中心可以多排' : v.me.cash < e.trainCost ? `一節 ${wan(e.trainCost)} 萬，現金不夠` : `一節 ${wan(e.trainCost)} 萬，推進一週後才漲；離上限越近漲得越慢`;
+      const button = why === '' ? btn(`練 1 節 <em>${pts(est)}</em>`, `data-act="train" data-id="${p.id}" data-attr="${k}" data-tip="${tip}"`, 'sm ghost tr tip-r') : `<span class="btn sm off tr tip-r ${atCap ? 'cap' : ''}" data-tip="${tip}"><b>${why}</b></span>`;
+      const queuedTag = q ? `<span class="qd tip-r" data-tip="這週排的節數，推進後才算進去；預估不含遞減">已排 ${q} 節 ≈ ${pts(est * q)}</span>` : '';
+      return `<div class="ar t"><b>${name}</b><span class="num">${cur}</span><span class="gr">${grade}</span><div class="pg" data-tip="練滿 100% 就漲 1 點"><div class="meter g" style="--v:${prog}%"><i></i></div><small>下一點 ${prog}%</small></div><span class="est">${queuedTag}</span>${button}</div>`;
     })
     .join('');
   const aux = mine

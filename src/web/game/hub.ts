@@ -43,7 +43,7 @@ export function hubTags(ctx: Ctx): string {
     ${tag(ctx, 'finance', 'L', 60, 'FINANCE', '財務', 'CASH FLOW', `<i>${net >= 0 ? '+' : '−'}${wan(Math.abs(net))}</i>萬／週`, v.me.runwayWeeks !== null && v.me.runwayWeeks < 3 ? 'warn' : '')}
     ${tag(ctx, 'market', 'R', 70, 'RECRUIT', '轉會市場', 'MARKET', `${scouting ? '<span class="new"></span>' : ''}<i>${free}</i>名自由球員${scouting ? ` · 球探 ${scouting}` : ''}`)}
     ${tag(ctx, 'training', 'L', 100, `LV${v.me.trainingLevel}`, '訓練基地', 'TRAINING', over ? '賽段已結束' : `<i>${left}</i>／${cap} 場可排`)}
-    ${tag(ctx, 'league', 'L', 60, 'LEAGUE', '聯賽', 'STANDINGS', v.seasonResult ? `最終第 <i>${v.seasonResult.humanRank}</i> 名` : row && row.played > 0 ? `第 <i>${rank}</i> 名 · ${row.points} 分` : '尚未開賽')}
+    ${tag(ctx, 'league', 'L', 150, 'LEAGUE', '聯賽', 'STANDINGS', v.seasonResult ? `最終第 <i>${v.seasonResult.humanRank}</i> 名` : row && row.played > 0 ? `第 <i>${rank}</i> 名 · ${row.points} 分` : '尚未開賽')}
     ${tag(ctx, 'betting', 'R', 100, 'BETTING', '賭盤', 'ODDS', over ? '賽段已結束' : v.phase === 'season' ? `<i>${open}</i>場開盤 · 已押 ${v.bets.length} 注` : '賽季中開盤')}
     ${tag(ctx, 'rival', 'R', 70, foe ? 'TARGET' : 'RIVAL HQ', foe ? esc(teamName(v, foe)) : '對手總部', 'RIVAL HQ', foe ? `評分約 <i>${publicRating(ctx, foe)}</i> · 情報 ${foeIntel}` : over ? '賽段已結束' : '本週沒有對手', foe ? 'op' : 'idle')}`;
 }

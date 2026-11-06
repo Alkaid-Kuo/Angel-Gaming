@@ -89,10 +89,38 @@ function history(ctx: Ctx, p: KnownPlayer): string {
     .join('')}</div>`;
 }
 
+/** 選手詳情的翻頁順序：自己人照戰隊頁陣容順序（出賽位、再評分），自由球員照市場列表，別隊照該隊名單評分 */
+export function playerOrder(ctx: Ctx, p: KnownPlayer): string[] {
+  const { v } = ctx;
+  if (p.teamId === null) return v.players.filter((x) => x.teamId === null).sort((a, b) => b.stage - a.stage || b.elo - a.elo).map((x) => x.id);
+  if (p.teamId === v.me.teamId) {
+    const lu = lineupOf(ctx);
+    return rosterOf(ctx, v.me.teamId)
+      .sort((a, b) => {
+        const sa = lu.ids.indexOf(a.id);
+        const sb = lu.ids.indexOf(b.id);
+        return (sa < 0 ? 9 : sa) - (sb < 0 ? 9 : sb) || b.elo - a.elo;
+      })
+      .map((x) => x.id);
+  }
+  return rosterOf(ctx, p.teamId).sort((a, b) => b.elo - a.elo).map((x) => x.id);
+}
+
+/** 上一位／下一位（循環）；只有一個人時兩邊都是 null */
+export function playerNeighbours(ctx: Ctx, p: KnownPlayer): { prev: KnownPlayer | null; next: KnownPlayer | null } {
+  const ids = playerOrder(ctx, p);
+  const i = ids.indexOf(p.id);
+  if (i < 0 || ids.length < 2) return { prev: null, next: null };
+  return { prev: ctx.pm.get(ids[(i - 1 + ids.length) % ids.length]) ?? null, next: ctx.pm.get(ids[(i + 1) % ids.length]) ?? null };
+}
+
 export function playerScreen(ctx: Ctx): string {
   const { v, c } = ctx;
   const p = ctx.ui.player ? ctx.pm.get(ctx.ui.player) : undefined;
   if (!p) return `${head('PLAYER // 選手詳情', '選手詳情', '找不到這位選手')}`;
+  const nb = playerNeighbours(ctx, p);
+  const navBtn = (q: KnownPlayer | null, dir: 'prev' | 'next'): string =>
+    q ? `<button class="pnav ${dir}" data-act="player" data-pid="${q.id}" data-tip="${dir === 'prev' ? '上一位（←）' : '下一位（→）'}">${dir === 'prev' ? icon('back', 16) : ''}${avatar(ctx, q, 30)}<b>${esc(q.name)}</b>${dir === 'next' ? `<i class="flip">${icon('back', 16)}</i>` : ''}</button>` : '';
   const e = c.economy;
   const mine = p.teamId === v.me.teamId;
   const active = canAct(v);
@@ -106,7 +134,7 @@ export function playerScreen(ctx: Ctx): string {
   const full = v.me.roster.length >= e.rosterMax;
   let actions: string;
   if (mine) {
-    actions = `${btn('排練習賽', `data-act="train-with" data-id="${p.id}" ${active ? '' : 'disabled'}`, 'ghost')}${btn('解約', `data-act="release" data-id="${p.id}" ${!active || v.me.roster.length <= c.lineupSize ? 'disabled' : ''} title="${v.me.roster.length <= c.lineupSize ? `陣容至少要 ${c.lineupSize} 人` : ''}"`, 'danger')}`;
+    actions = `${btn('排練習賽', `data-act="train-with" data-id="${p.id}" ${active ? '' : 'disabled'}`, 'ghost')}${btn('解約', `data-act="release" data-id="${p.id}" ${!active || v.me.roster.length <= c.lineupSize ? 'disabled' : ''} data-tip="${v.me.roster.length <= c.lineupSize ? `陣容至少要 ${c.lineupSize} 人` : '回到自由市場，已付的簽約金不退'}"`, 'danger')}`;
   } else if (p.teamId === null) {
     actions = `${btn(`簽約 · ${wan(fee)} 萬`, `data-act="sign" data-id="${p.id}" ${!active || full || v.me.cash < fee ? 'disabled' : ''}`, '', 'SIGN')}${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${p.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}`;
   } else {
@@ -122,6 +150,7 @@ export function playerScreen(ctx: Ctx): string {
     : `<div class="pn p-tac in">${pt('03', '球探情報', intel ? `W${String(intel.week).padStart(2, '0')}` : '')}
       ${intel ? `<div class="intel"><span class="num gd">${intel.estPower}</span><span>真實強度估計 ±${intel.sd}</span><span>比公開評分${intel.estPower >= p.elo ? '高' : '低'} <b>${Math.abs(intel.estPower - p.elo)}</b></span></div>` : `<p class="dim">${pending ? '球探已出發，推進一週後回報。' : '還沒有情報。派球探可以知道他的真實強度（帶誤差）。'}</p>`}</div>`;
   return `<div class="back in" data-act="go" data-to="${mine ? 'squad' : 'market'}">${icon('back', 18)}${mine ? '戰隊' : '轉會市場'} · <b>選手詳情</b></div>
+    <div class="pnavs in">${navBtn(nb.prev, 'prev')}${navBtn(nb.next, 'next')}</div>
     <section class="hero2"><svg class="rings in" viewBox="0 0 640 640">
         <defs><path id="tp" d="M 320 6 A 314 314 0 1 1 319.99 6"/><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#b9832a"/></linearGradient></defs>
         <g class="rr"><text><textPath href="#tp">${slot >= 0 ? slotEn(ctx, slot) : 'PLAYER'} · ${esc(p.name)} · ${esc(lineageName(c, p.lineageId))} · RATING ${p.elo} · ${t.en} · ${stageName(p.stage)} · ${esc(teamName(v, p.teamId))} · ${esc(p.name)} ·</textPath></text></g>
@@ -210,6 +239,6 @@ export function marketScreen(ctx: Ctx): string {
   }
   return `${head('RECRUIT // 轉會市場', '轉會市場', `自由球員 <b>${free.length}</b> 名 · 先到先簽 · 簽約金＝${e.signingFeeWeeks} 週薪資 · 陣容 <b>${v.me.roster.length}／${e.rosterMax}</b>`)}
     <section class="body s-market"><div class="pn list in">${tabs}${list}
-      <p class="tip">${icon('info', 16)}評分的起點只看成長階段，每個流派都一樣——同階段的人實際強多少、屬性數字多少，只有戰績或球探情報看得出來。</p></div>
+      <p class="tip">${icon('info', 16)}評分只看成長階段；同階段的人實際強多少，要靠戰績或球探情報。</p></div>
       ${side}</section>`;
 }

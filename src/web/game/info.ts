@@ -26,7 +26,7 @@ function fixtureRow(ctx: Ctx, f: KnownFixture): string {
   const s = f.score;
   const won = (id: string): boolean => !!s && (f.home === id ? s.home > s.away : s.away > s.home);
   // 打完、賽制能觀戰（閘道自報）才有「觀戰」
-  const watch = f.match?.watchable ? `<button class="wt" data-act="watch" data-f="${esc(f.id)}" title="用存檔的請求單重播這一場">${icon('play', 14)}<span>觀戰</span></button>` : '';
+  const watch = f.match?.watchable ? `<button class="wt" data-act="watch" data-f="${esc(f.id)}" data-tip="重播這一場">${icon('play', 14)}<span>觀戰</span></button>` : '';
   return `<div class="mt ${f.home === me || f.away === me ? 'me' : ''} ${watch ? 'can-watch' : ''}"><span class="t ${won(f.home) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.home, 28)}${esc(teamName(v, f.home))}</span>
     <span class="vs">${s ? `<b>${s.home}</b>:<b>${s.away}</b>` : 'VS'}</span>
     <span class="t r ${won(f.away) ? 'wn' : s ? 'ls' : ''}">${crest(ctx, f.away, 28)}${esc(teamName(v, f.away))}</span>${watch}</div>`;
@@ -139,7 +139,7 @@ export function financeScreen(ctx: Ctx): string {
   const salaries = rosterOf(ctx, v.me.teamId).sort((a, b) => b.weeklySalary - a.weeklySalary);
   const maint = e.facilityMaintenance[v.me.trainingLevel - 1];
   const maxItem = Math.max(v.me.weeklySponsor, ...salaries.map((p) => p.weeklySalary), maint, 1);
-  const fx = (label: string, k: number, inc: boolean): string => `<div class="fx"><span>${label}</span><span class="bar" style="background:linear-gradient(90deg,${inc ? '#eef2f6' : '#ff5d5d'} 0 ${Math.round((k / maxItem) * 100)}%,transparent 0)"></span><span class="num">${inc ? '+' : '−'}${wan(k)}</span></div>`;
+  const fx = (label: string, k: number, inc: boolean): string => `<div class="fx"><span>${label}</span><span class="bar" style="background:linear-gradient(90deg,${inc ? '#eef2f6' : '#ff5d5d'} 0 ${Math.round((k / maxItem) * 100)}%,transparent 0)"></span><span class="num">${inc ? '+' : '−'}${wan(k)}<small>萬</small></span></div>`;
   const totals = new Map<string, number>();
   for (const x of v.ledger) totals.set(x.category, (totals.get(x.category) ?? 0) + x.amount);
   const sum = [...totals.values()].reduce((s, x) => s + x, 0);
@@ -160,11 +160,11 @@ export function financeScreen(ctx: Ctx): string {
       <div class="pn chartp in">${pt('02', '資金曲線', '<span class="lg"><span><i style="background:#f0b54a"></i>週末現金</span><span><i class="dash"></i>照目前速度推估</span><span><i style="background:#eef2f6"></i>當週淨額＋</span><span><i style="background:#ff5d5d"></i>當週淨額−</span></span>', 'CASH FLOW')}${cashSeries(v).length ? chart(ctx) : '<p class="dim big">打完休賽期後，這裡會畫出每週的現金。</p>'}</div>
       <div class="pn fix in">${pt('03', '每週固定收支', '不含比賽收入與下注')}
         ${fx(`贊助 · 名氣 ${v.me.fame}`, v.me.weeklySponsor, true)}${salaries.map((p) => fx(`${esc(p.name)} 週薪`, p.weeklySalary, false)).join('')}${fx(`訓練中心 Lv${v.me.trainingLevel}`, maint, false)}
-        <div class="fx tot"><span>淨額</span><span></span><span class="num ${net < 0 ? 'rd' : 'gd2'}">${net >= 0 ? '+' : '−'}${wan(Math.abs(net))}</span></div></div>
-      <div class="pn cat in">${pt('04', '本賽段累計', `淨 <b class="num ${sum < 0 ? 'rd' : 'gd2'}">${sum >= 0 ? '+' : '−'}${wan(Math.abs(sum))}</b>`)}
-        ${cats.length ? cats.map(([k, amt]) => `<div class="ct"><span>${CATEGORY_NAME[k as keyof typeof CATEGORY_NAME] ?? k}</span><span class="two"><i class="${amt >= 0 ? 'p' : 'n'}" style="width:${Math.round((Math.abs(amt) / maxCat) * 48)}%"></i></span><span class="num ${amt < 0 ? 'rd' : ''}">${amt >= 0 ? '+' : '−'}${wan(Math.abs(amt))}</span></div>`).join('') : '<p class="dim">還沒有帳。</p>'}</div>
+        <div class="fx tot"><span>淨額</span><span></span><span class="num ${net < 0 ? 'rd' : 'gd2'}">${net >= 0 ? '+' : '−'}${wan(Math.abs(net))}<small>萬</small></span></div></div>
+      <div class="pn cat in">${pt('04', '本賽段累計', `淨 <b class="num ${sum < 0 ? 'rd' : 'gd2'}">${sum >= 0 ? '+' : '−'}${wan(Math.abs(sum))}</b> 萬`)}
+        ${cats.length ? cats.map(([k, amt]) => `<div class="ct"><span>${CATEGORY_NAME[k as keyof typeof CATEGORY_NAME] ?? k}</span><span class="two"><i class="${amt >= 0 ? 'p' : 'n'}" style="width:${Math.round((Math.abs(amt) / maxCat) * 48)}%"></i></span><span class="num ${amt < 0 ? 'rd' : ''}">${amt >= 0 ? '+' : '−'}${wan(Math.abs(amt))}<small>萬</small></span></div>`).join('') : '<p class="dim">還沒有帳。</p>'}</div>
       <div class="pn led in">${pt('05', '帳本', `<button class="lnk" data-act="ledger">${ui.ledgerOpen ? '收起' : `全部 ${v.ledger.length} 筆`}</button>`, 'LEDGER')}
-        <div class="rows scroll">${ledger.map((x) => `<div class="row"><span class="wk">${x.week === 0 ? '休' : `W${String(x.week).padStart(2, '0')}`}</span><span>${esc(x.memo || CATEGORY_NAME[x.category])}</span><span class="num ${x.amount < 0 ? 'rd' : ''}">${x.amount >= 0 ? '+' : '−'}${wan(Math.abs(x.amount))}</span></div>`).join('') || '<p class="dim">還沒有帳。</p>'}</div></div>
+        <div class="rows scroll">${ledger.map((x) => `<div class="row"><span class="wk">${x.week === 0 ? '休' : `W${String(x.week).padStart(2, '0')}`}</span><span>${esc(x.memo || CATEGORY_NAME[x.category])}</span><span class="num ${x.amount < 0 ? 'rd' : ''}">${x.amount >= 0 ? '+' : '−'}${wan(Math.abs(x.amount))}<small>萬</small></span></div>`).join('') || '<p class="dim">還沒有帳。</p>'}</div></div>
     </section>`;
 }
 

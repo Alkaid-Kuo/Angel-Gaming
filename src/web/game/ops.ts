@@ -62,9 +62,9 @@ export function trainingScreen(ctx: Ctx): string {
           <g class="spin"><circle cx="150" cy="150" r="148" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="1.5" stroke-dasharray="3 9"/></g></svg>
           <div class="v"><span class="num">${left}</span><small>RUNS LEFT</small><span>練習賽 ／ ${cap} 場</span></div></div>
         <div class="lv"><div class="fl3">${[1, 2, 3].map((i) => `<i class="${i <= lvl ? 'on' : ''}"></i>`).join('')}</div><div class="t"><b>Lv${lvl}</b><span>維護 ${wan(e.facilityMaintenance[lvl - 1])} 萬／週</span></div>
-          ${lvl < maxLvl ? btn(`升 Lv${lvl + 1} · ${wan(upCost)}萬`, `data-act="upfac" ${!active || v.me.cash < upCost ? 'disabled' : ''} title="每週練習賽 ${e.scrimCapacity[lvl]} 場、訓練時段 ${e.trainingSlots[lvl]} 節，維護 ${wan(e.facilityMaintenance[lvl])} 萬"`, 'sm ghost') : '<span class="chip g">最高等級</span>'}</div>
+          ${lvl < maxLvl ? btn(`升 Lv${lvl + 1} · ${wan(upCost)}萬`, `data-act="upfac" ${!active || v.me.cash < upCost ? 'disabled' : ''} data-tip="每週練習賽 ${e.scrimCapacity[lvl]} 場、訓練時段 ${e.trainingSlots[lvl]} 節，維護 ${wan(e.facilityMaintenance[lvl])} 萬"`, 'sm ghost tip-r') : '<span class="chip g">最高等級</span>'}</div>
         <div class="slots"><div class="t"><small>本週訓練時段</small><span><b class="num">${slots}</b>／${slotCap} 節</span></div><div class="meter g" style="--v:${Math.round(((slotCap - slots) / Math.max(1, slotCap)) * 100)}%"><i></i></div>
-          <div class="to">${btn('訓練 →', 'data-act="go" data-to="squad" title="屬性訓練在選手詳情排"', 'sm ghost')}${c.tactics.length ? btn('排練 →', 'data-act="go" data-to="tactics"', 'sm ghost') : ''}</div></div></div>
+          <div class="to">${btn('訓練 →', 'data-act="go" data-to="squad" data-tip="屬性訓練在選手詳情排"', 'sm ghost')}${c.tactics.length ? btn('排練 →', 'data-act="go" data-to="tactics"', 'sm ghost') : ''}</div></div></div>
       <div class="pn sch in">${pt('02', '本週排程', `已排 <b>${used}</b>／${cap} 場${queuedScrims > 0 ? ` · 練習賽推進時多等${waitText(queuedScrims)}` : ''}`)}
         <div class="jobs scroll">${jobs.join('') || '<p class="dim">還沒有排任何工作。右邊選選手與項目排進來。</p>'}</div>
         <div class="sum"><span>練習賽用上面的場數；屬性訓練與戰術排練共用訓練時段</span><span>訓練在<b>選手詳情</b>、排練在<b>戰術室</b></span></div></div>
@@ -88,7 +88,7 @@ export function bettingScreen(ctx: Ctx): string {
   const e = c.economy;
   const limit = e.betLimitBase + e.betLimitPerFame * v.me.fame;
   const top = head('BETTING // 賭盤', '賭盤', `莊家抽成 ${e.betMarginPermille / 10}% · 單場上限 <b>${wan(limit)}</b> 萬 · 單注至少 ${wan(e.betMin)} 萬 · 賠率在下注時鎖定 · 自己的比賽只能押自己`);
-  if (v.phase !== 'season') return `${top}<section class="body s-betting"><div class="pn board in">${pt('01', '本週注單')}<p class="dim big">${v.phase === 'offseason' ? '賽季開始後才開盤。' : '這個賽段結束了。'}</p></div></section>`;
+  if (v.phase !== 'season') return `${top}<section class="body s-betting"><div class="pn board closed in">${pt('01', '本週注單', '', 'ODDS')}<div class="closed-msg">${icon('ticket', 40, 1.4)}<b>${v.phase === 'offseason' ? '賽季開始後才開盤' : '這個賽段結束了'}</b><p>${v.phase === 'offseason' ? '每週可以押比賽勝負；自己的比賽只能押自己，賠率只看公開評分。' : '名次獎金已結算，下個賽季再來。'}</p></div></div></section>`;
   const foe = foeOf(v);
   const mf = myFixture(v);
   const open = v.fixtures.filter((f) => f.week === v.week && f.score === null);

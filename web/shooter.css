@@ -16,6 +16,13 @@
   color: var(--white); font-family: var(--zh);
 }
 .sg.neutral { --accent: var(--white); }
+/* 去網頁感：開局卡與對局畫面都不可選取文字、圖片不可拖、不出 I 型游標；焦點外框換成金框 */
+.setup { user-select: none; -webkit-user-select: none; cursor: default; }
+.setup input, .setup select { user-select: text; -webkit-user-select: text; cursor: text; }
+.setup select, .setup button, .setup a, .setup label { cursor: pointer; }
+.setup img, .setup svg, .sg img, .sg svg, .sg canvas { -webkit-user-drag: none; user-drag: none; }
+.setup :focus, .sg :focus { outline: none; }
+.setup :focus-visible, .sg :focus-visible { outline: 2px solid var(--gold2); outline-offset: 2px; }
 
 /* ── 共用：按鈕、鍵帽 ── */
 .setup button, .sg button { border-radius: 0; border: 0; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24); color: var(--white); font-family: var(--zh); font-weight: 700; letter-spacing: 0.06em; }

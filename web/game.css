@@ -1220,6 +1220,103 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .v-inbox .open .who-chip .rb { margin-left: 0; }
 .v-inbox .open .who-chip small { font-family: var(--en); font-size: max(14px, var(--fmin, 0px)); color: var(--grey); }
 
+/* ═════ 2026-11-07 UI 審核 PR 1：去網頁感、自製提示、選手翻頁、屬性列、財務單位、數據板頭像、跑版 ═════ */
+/* 去網頁感：文字不可選取（輸入框除外）、圖片與 SVG 不可拖、不出 I 型游標、焦點外框換金框、捲軸細版 */
+body { user-select: none; -webkit-user-select: none; cursor: default; }
+input, textarea, select { user-select: text; -webkit-user-select: text; cursor: text; }
+select, button, a, label.btn, [data-act]:not(.hd):not(.row.hd), .row:not(.hd), .pc, .tag, .msg, .lnk, .tabs button { cursor: pointer; }
+.row.hd, .pc.empty, [data-act="noop"], .v-betting .mybets .row, .v-finance .led .row, .v-league .tbl .row { cursor: default; }
+img, svg { -webkit-user-drag: none; user-drag: none; }
+img, svg { pointer-events: none; }
+button svg, a svg, [data-act] svg, .pc svg, label svg { pointer-events: none; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; box-shadow: 0 0 18px rgba(var(--gold-rgb), 0.35); }
+.btn:focus-visible { outline-offset: 0; }
+button::-moz-focus-inner { border: 0; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); }
+::-webkit-scrollbar-thumb:hover { background: rgba(var(--gold-rgb), 0.6); }
+#stage { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+/* 自製提示（取代原生 title）：滑過一拍後在上方浮出，金邊墨底，和遊戲同一套字 */
+[data-tip] { position: relative; }
+[data-tip]::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 60; max-width: 360px; width: max-content; padding: 8px 14px; font-family: var(--zh); font-size: max(14px, var(--fmin, 0px)); font-weight: 500; font-style: normal; letter-spacing: 0.04em; line-height: 1.5; text-align: left; white-space: normal; color: var(--white); background: var(--ink); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.6), inset 3px 0 0 var(--gold), 0 14px 30px rgba(0, 0, 0, 0.6); transform: translateX(-50%) translateY(4px); opacity: 0; pointer-events: none; transition: opacity 0.15s, transform 0.15s; transition-delay: 0s; }
+[data-tip]:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); transition-delay: 0.35s; }
+.btn[data-tip]::after { transform: skewX(14deg) translateX(-50%) translateY(4px); }
+.btn[data-tip]:hover::after { transform: skewX(14deg) translateX(-50%) translateY(0); }
+.v-tactics .sct .pk[data-tip]::after { transform: skewX(10deg) translateX(-50%) translateY(4px); }
+.v-tactics .sct .pk[data-tip]:hover::after { transform: skewX(10deg) translateX(-50%) translateY(0); }
+.rail button[data-tip]::after { left: calc(100% + 10px); bottom: auto; top: 50%; transform: translateY(-50%); }
+.rail button[data-tip]:hover::after { transform: translateY(-50%); }
+.top .icon-btn[data-tip]::after { left: auto; right: 0; bottom: auto; top: calc(100% + 8px); transform: translateY(-4px); }
+.top .icon-btn[data-tip]:hover::after { transform: none; }
+.scroll [data-tip]::after, .v-market .list [data-tip]::after { bottom: auto; top: calc(100% + 6px); }
+/* 靠面板右緣的元素：提示靠右對齊，才不會被面板的切角裁掉 */
+[data-tip].tip-r::after { left: auto; right: 0; transform: translateY(4px); }
+[data-tip].tip-r:hover::after { transform: translateY(0); }
+.btn[data-tip].tip-r::after { transform: skewX(14deg) translateY(4px); }
+.btn[data-tip].tip-r:hover::after { transform: skewX(14deg) translateY(0); }
+
+/* 選手詳情：上一位／下一位（#1） */
+.v-player .pnavs { position: absolute; left: 172px; top: 158px; z-index: 4; display: flex; gap: 8px; }
+.v-player .pnav { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px 0 8px; font-size: max(14px, var(--fmin, 0px)); letter-spacing: 0.06em; color: var(--grey); background: rgba(var(--ink-rgb), 0.55); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); transform: skewX(-12deg); }
+.v-player .pnav > * { transform: skewX(12deg); }
+.v-player .pnav.next { padding: 0 8px 0 12px; }
+.v-player .pnav b { font-weight: 900; color: var(--white); max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-player .pnav .av { width: 26px !important; height: 26px !important; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4); }
+.v-player .pnav .av svg { width: 100%; height: 100%; }
+.v-player .pnav .flip { display: inline-flex; transform: skewX(12deg) scaleX(-1); }
+.v-player .pnav:hover { color: var(--gold2); box-shadow: inset 0 0 0 1px var(--gold); }
+.v-player .pnav[data-tip]::after { transform: skewX(12deg) translateX(-50%) translateY(4px); }
+.v-player .pnav[data-tip]:hover::after { transform: skewX(12deg) translateX(-50%) translateY(0); }
+
+/* 選手詳情：屬性面板放得下 7 列（原本切掉最後一列）；列改成「名 · 數值 · 等級 · 下一點進度 · 已排 · 練 1 節 ＋0.6」（#11、#14） */
+.v-player .p-ver.p-attr { height: 300px; padding-top: 16px; padding-bottom: 14px; }
+.v-player .p-attr .pt { margin-bottom: 8px; padding-bottom: 8px; }
+.v-player .p-attr .attrs { margin-top: 0; align-items: start; }
+.v-player .radar { width: 230px; height: 216px; }
+.v-player .radar .lb { font-size: 15px; }
+.v-player .ar { height: 28px; gap: 8px; grid-template-columns: 52px 40px 34px 1fr; }
+.v-player .ar.t { grid-template-columns: 52px 40px 34px 150px 1fr 122px; }
+.v-player .ar .num { font-size: 21px; }
+.v-player .ar .gr { font-family: var(--en); font-style: italic; font-weight: 800; font-size: 17px; color: var(--gold2); text-align: left; }
+.v-player .ar .num.gr { color: var(--white); }
+.v-player .ar .pg { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; }
+.v-player .ar .pg .meter { height: 6px; }
+.v-player .ar .pg small { font-family: var(--mono); font-size: max(11px, var(--fmin, 0px)); letter-spacing: 0.04em; color: var(--grey); white-space: nowrap; }
+.v-player .ar .est { justify-self: end; font-size: max(12px, var(--fmin, 0px)); color: var(--grey); white-space: nowrap; }
+.v-player .ar .est .qd { color: var(--gold2); }
+.v-player .ar .btn.sm.tr { height: 26px; padding: 0 8px; justify-self: end; width: 116px; box-sizing: border-box; }
+.v-player .ar .btn.sm.tr b { font-size: max(13px, var(--fmin, 0px)); letter-spacing: 0.04em; display: inline-flex; align-items: baseline; gap: 5px; }
+.v-player .ar .btn.sm.tr b em { font-style: italic; font-family: var(--en); font-weight: 800; font-size: 15px; color: var(--gold2); }
+.v-player .ar .btn.sm.tr.off { color: var(--grey2); }
+.v-player .ar .btn.sm.tr.off.cap { color: var(--gold3); box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.35); }
+.v-player .ar .lock { font-size: max(11px, var(--fmin, 0px)); }
+
+/* 結果幕數據板：每列加頭像（#19） */
+.md-result .board .sr { grid-template-columns: 30px 1fr 84px 60px 56px 56px; height: 32px; }
+.md-result .board .sr .av { width: 26px !important; height: 26px !important; }
+.md-result .board .sr .av svg { width: 100%; height: 100%; }
+.md-result .board .sr.hd { height: 22px; }
+.md-result .ctl label .off, .md-result .rs-tg:checked ~ .ctl label .on { display: none; }
+.md-result .rs-tg:checked ~ .ctl label .off { display: inline; }
+
+/* 財務：數字加單位（#10）；固定收支列高縮一點讓 7 人時淨額不貼底 */
+.v-finance .fx { height: 24px; grid-template-columns: 120px 1fr 86px; }
+.v-finance .fx .num small, .v-finance .ct .num small, .v-finance .led .row .num small { font-family: var(--zh); font-style: normal; font-weight: 500; font-size: max(12px, var(--fmin, 0px)); color: var(--grey); margin-left: 3px; }
+.v-finance .fx.tot { height: 36px; }
+.v-finance .fx.tot .num { font-size: 26px; }
+.v-finance .ct { grid-template-columns: 90px 1fr 86px; }
+.v-finance .led .row { grid-template-columns: 50px 1fr 92px; }
+
+/* 賭盤休賽期：不用一整塊空面板 */
+.v-betting .board.closed { width: 760px; height: auto; }
+.v-betting .closed-msg { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 26px 0 12px; text-align: center; color: var(--grey2); }
+.v-betting .closed-msg b { font-size: 24px; font-weight: 900; letter-spacing: 0.1em; color: var(--white); }
+.v-betting .closed-msg p { margin: 0; max-width: 520px; font-size: max(15px, var(--fmin, 0px)); line-height: 1.7; color: var(--grey); }
+
 @media (prefers-reduced-motion: reduce) {
   #stage *, #stage *::before, #stage *::after { animation: none !important; transition: none !important; }
 }
