@@ -557,7 +557,7 @@ button.next-hint:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 26px rgba(
 .v-tactics .sct .tl2 b { font-size: 17px; font-weight: 800; white-space: nowrap; }
 .v-tactics .sct .tl2 .num { font-size: 18px; color: var(--white); text-align: right; }
 .v-tactics .sct .tl2 small { font-size: max(12px, var(--fmin, 0px)); color: var(--grey); white-space: nowrap; }
-.v-tactics .sct .tl2 .pc { font-family: var(--mono); font-size: max(12px, var(--fmin, 0px)); color: var(--gold2); text-align: right; }
+.v-tactics .sct .tl2 .shr { font-family: var(--mono); font-size: max(12px, var(--fmin, 0px)); color: var(--gold2); text-align: right; }
 .v-tactics .sct .sc p.dim { margin: 6px 0 0; font-size: max(14px, var(--fmin, 0px)); }
 .v-tactics .sct .go { position: absolute; left: 24px; right: 24px; bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .v-tactics .sct .go .dim { font-size: max(13px, var(--fmin, 0px)); }

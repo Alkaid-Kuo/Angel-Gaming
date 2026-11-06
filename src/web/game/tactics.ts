@@ -35,7 +35,7 @@ function scoutPanel(ctx: Ctx, active: boolean): string {
   const col = (side: 'T' | 'CT', label: string): string => {
     const list = rep?.top[side] ?? [];
     const n = rep?.rounds[side] ?? 0;
-    return `<div class="sc"><h5>${label}<small>${n ? `${n} 回合` : ''}</small></h5>${list.length ? list.map((x) => `<div class="tl2"><b>${esc(name(x.tactic))}</b><span class="num">${x.played}</span><small>贏 ${x.won}</small><span class="pc">${Math.round((x.played * 100) / Math.max(1, n))}%</span></div>`).join('') : `<p class="dim">${rep ? '沒有紀錄' : '—'}</p>`}</div>`;
+    return `<div class="sc"><h5>${label}<small>${n ? `${n} 回合` : ''}</small></h5>${list.length ? list.map((x) => `<div class="tl2"><b>${esc(name(x.tactic))}</b><span class="num">${x.played}</span><small>贏 ${x.won}</small><span class="shr">${Math.round((x.played * 100) / Math.max(1, n))}%</span></div>`).join('') : `<p class="dim">${rep ? '沒有紀錄' : '—'}</p>`}</div>`;
   };
   const meta = rep ? `第 ${rep.week} 週報告 · ${rep.weeks.length ? `看了 ${rep.weeks.map((w) => `W${w}`).join('、')}` : '還沒有比賽紀錄'}` : '還沒派過球探';
   const canGo = active && v.phase === 'season' && !pending && v.me.cash >= cost;
