@@ -398,9 +398,10 @@ export const P = {
   qSync: 1.2,
   qSyncWait: 0.8,
   qSyncLag: 4,
-  /** 道具時序：組裡最前面的人離入口 flashLead × (1 ＋ qFlash×(0.5−q)) 格內就丟閃光（太早）；隊友閃光炸開後慢 (0.5−q) × qFlashLate 秒才跟進 */
+  /** 道具時序：組裡最前面的人離入口 flashLead × (1 ＋ qFlash×(0.5−q)) 格內就丟閃光（太早）；隊友閃光炸開後慢 (0.5−q) × qFlashLate 秒才跟進
+   *（qFlashLate 3 → 5：100 對 0 的「閃光炸開 → 第一人進點」改善 17.6% → 23.3%，89% 的第一進點者停滿；見 PR #27） */
   qFlash: 1,
-  qFlashLate: 3,
+  qFlashLate: 5,
   /** 個人：收到執行後晚 (0.5−p) × qLag 秒出發；佈置途中每半秒停下的機率 (0.5−p) × qPause */
   qLag: 0.8,
   qPause: 0.65,
