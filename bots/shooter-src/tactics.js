@@ -12,7 +12,7 @@
 // 角色（2.1，roles.js）：每回合第一次決策喊「R:<代碼>」；分組、突破手與煙霧手、進點順序、CT 守位、錨點、回防先後都先看角色，
 // 角色重複或缺角時退回隊內序號。
 // 經濟「B:full／force／half／eco」見 economy.js；道具的彈道見 utility.js。全部由地圖資料與觀察資料算，不寫死座標或區域代號。
-import { P, UNIT, adiff, angleTo, clamp, cosd, dijkstra, dist, inRect, lerp, segDist, sind } from './base.js';
+import { P, UNIT, adiff, angleTo, clamp, cosd, dijkstra, dist, expd, inRect, lerp, segDist, sind } from './base.js';
 import { Economy, parseBuy, parseGift } from './economy.js';
 import { Utility } from './utility.js';
 import { ANCHOR, AWP, ENTRY, LURK, Roles, SUPPORT, parseRole } from './roles.js';
@@ -819,64 +819,107 @@ export class Tactics {
     return this.tagNow === null ? 0 : Math.max(0, 0.5 - this.pOf(this.tagNow));
   }
 
-  /**
-   * 2.8：戰術選擇的效用分數（M5 規格 3.4）。score ＝ 狀態分 S ＋ Wp×星級 ＋ Wq×(q−0.5) − Wr×本半場用過次數 ＋ 對手適應 A（夾 ±Aₘₐₓ）；
-   * 不可行（例：eco 時 default／fake）與禁用（星級 −1）的不列，教練命令直接採用；取最高分，前兩名差 < ε 才用回合雜湊二選一
-   * @param {import('./base.js').Observation} obs @param {readonly string[]} ids
-   * @param {(id: string) => { s: number, a: number, ok: boolean }} state @param {number} salt @returns {string}
-   */
-  pickTactic(obs, ids, state, salt) {
-    const call = this.coach?.call?.tactic ?? null;
-    if (call !== null && ids.includes(call)) return call;
-    const pref = this.coach?.pref ?? {};
-    const all = ids.map((id) => {
-      const st = state(id);
-      const score = st.s + P.tacWp * Math.max(0, pref[id] ?? 0) + P.tacWq * (this.qOf(id) - 0.5) - P.tacWr * (this.used.get(id) ?? 0) + clamp(st.a, -P.tacAmax, P.tacAmax);
-      return { id, score, ok: st.ok, ban: (pref[id] ?? 0) < 0 };
-    });
-    // 都被排除時（例：eco 回合只留了 default）：先放寬可行性，再放寬禁用
-    let list = all.filter((o) => o.ok && !o.ban);
-    if (list.length === 0) list = all.filter((o) => !o.ban);
-    if (list.length === 0) list = all;
-    list.sort((x, y) => y.score - x.score || ids.indexOf(x.id) - ids.indexOf(y.id));
-    if (list.length > 1 && list[0].score - list[1].score < P.tacEps) return list[rollOf(obs.round.number, salt) % 2].id;
-    return list[0].id;
+  /** 2.8：有沒有教練或熟練度資料（試玩、基準 v1～v5 都沒有；沒有時戰術選擇和 2.7 逐位元相同） */
+  hasData() {
+    return this.coach !== null || this.prof !== null;
   }
 
   /**
-   * T（2.8）：效用分數選戰術（rushA／rushB／default／splitA／splitB／fake）；default／fake 的主力點取兩點最近成敗高的。路線序號照 2.7 抽
+   * 2.8：戰術的教練項 c(id)（M5 規格 3.4，對數空間）＝ Wp×星級 ＋ Wq×(q−0.5) − Wr×本半場用過次數；禁用（星級 −1）回傳 null。
+   * 只在有資料時用（沒資料時不算，2.7 每回合獨立抽選，沒有「用過」這一項）
+   * @param {string} id @param {boolean} [ignoreBan] @returns {number | null}
+   */
+  coachTerm(id, ignoreBan = false) {
+    const pref = this.coach?.pref?.[id] ?? 0;
+    if (pref < 0 && !ignoreBan) return null;
+    const wr = /** @type {readonly string[]} */ (CT_TACTICS).includes(id) ? P.tacWrCT : P.tacWr;
+    return P.tacWp * Math.max(0, pref) + P.tacWq * (this.qOf(id) - 0.5) - wr * (this.used.get(id) ?? 0);
+  }
+
+  /**
+   * T（2.8，選法 B）：兩段 logit 抽選，沿用 2.7 的亂數流。先抽點、再抽打法，權重＝2.7 的狀態權重 × 對手適應（2.7 的乘法）× e^{c}；
+   * 有資料時點的權重乘上 Z(s)＝Σ w·e^{c} ／ Σ w，聯合機率等於 8 個（打法，點）組合一起做 logit。
+   * 沒資料時 c 不乘、Z 不算，和 2.7 是同一個式子、同樣次數的 h.random()（逐位元相同）。教練命令直接採用、不抽。路線序號照 2.7 抽
    * @param {import('./base.js').Observation} obs @returns {TPlan}
    */
   chooseT(obs) {
     const h = this.h;
     const ag = this.attrs.aggression;
+    const data = this.hasData();
     const call = this.coach?.call?.buy ?? this.buyCall ?? this.econ.teamCall(obs);
     const learned = this.adapt.advice('T');
-    const sc = this.siteScore;
-    /** @type {SiteId} */
-    const main = sc.A !== sc.B ? (sc.A > sc.B ? 'A' : 'B') : rollOf(obs.round.number, 31) % 2 === 0 ? 'A' : 'B';
+    const wA = Math.max(0.2, 1 + 0.35 * this.siteScore.A);
+    const wB = Math.max(0.2, 1 + 0.35 * this.siteScore.B);
     const forced = ['', 'default', 'rush', 'split', 'fake'][this.opts.plan] ?? '';
-    // 我方 eco（含贏手槍局後的 half：錢不夠全買，不打慢的 default／fake）
-    const eco = call === 'eco' || call === 'half';
-    const enemyEco = this.enemyEco();
-    /** @param {string} id */
-    const kindOf = (id) => /** @type {'rush' | 'split' | 'default' | 'fake'} */ (id.replace(/[AB]$/, ''));
-    /** @param {string} id @returns {SiteId} */
-    const siteOf = (id) => (id.endsWith('A') ? 'A' : id.endsWith('B') ? 'B' : main);
-    const id = this.pickTactic(obs, T_TACTICS, (t) => {
-      const kind = kindOf(t);
-      // 狀態分（2.7 的機率權重換成分數）：split 最常、rush 隨侵略、fake 最少；對方疑似 eco 時不打慢的 default
-      let s = kind === 'split' ? P.tacSSplit : kind === 'rush' ? P.tacSRush + 0.2 * ag + (eco ? P.tacSEcoRush : 0) : kind === 'fake' ? P.tacSFake : P.tacSDefault;
-      if (enemyEco) s += kind === 'default' ? -0.3 : kind === 'fake' ? -0.2 : 0.1;
-      if (kind === 'rush' || kind === 'split') s += 0.15 * sc[siteOf(t)];
-      const a = 0.5 * Math.log(learned.plans[kind] ?? 1) + (kind === 'fake' ? 0.25 * (learned.rotation - 0.5) : 0);
-      // 我方 eco：火力不夠，只打集中一點的 rush／split
-      const ok = (!eco || kind === 'rush' || kind === 'split') && (forced === '' || kind === forced);
-      return { s, a, ok };
-    }, 37);
-    this.tagPick = id;
-    const kind = kindOf(id);
-    const site = siteOf(id);
+    const KINDS = /** @type {const} */ (['default', 'rush', 'split', 'fake']);
+    /** @param {string} k @param {SiteId} st */
+    const tacId = (k, st) => (k === 'rush' || k === 'split' ? k + st : k);
+    const cmd = this.coach?.call?.tactic ?? null;
+    /** @type {SiteId} */
+    let site;
+    /** @type {string} */
+    let kind;
+    if (cmd !== null && /** @type {readonly string[]} */ (T_TACTICS).includes(cmd)) {
+      // 教練命令：直接採用（default／fake 的主力點取點權重高的）
+      kind = cmd.replace(/[AB]$/, '');
+      site = cmd.endsWith('A') ? 'A' : cmd.endsWith('B') ? 'B' : wA >= wB ? 'A' : 'B';
+    } else {
+      // 狀態權重（2.7）：我方 eco 不打兩點分兵的 default／fake；對方多半在 eco 不打慢的 default。有資料時贏手槍局後的 half 也當 eco（規格 3.4：狀態蓋過星級）
+      const eco = call === 'eco' || (data && call === 'half');
+      /** @type {Record<string, number>} */
+      const w = eco ? { default: 0, rush: 0.65, split: 0.35, fake: 0 } : this.enemyEco() ? { default: 0.1, rush: 0.35 + 0.2 * ag, split: 0.4, fake: 0.1 } : { default: 0.22, rush: 0.12 + 0.2 * ag, split: 0.4, fake: 0.18 };
+      // 對手適應 A（2.7 的乘法；倍率 0.75～1.25、fake 再乘 0.75～1.25，|ln| ≤ 0.575，不需要夾限）
+      for (const k of KINDS) w[k] *= learned.plans[k] ?? 1;
+      w.fake *= 0.75 + learned.rotation * 0.5;
+      /** 有資料時每個（打法，點）的權重 w·e^{c}；禁用的是 0，全部被禁用時放寬禁用 @type {Record<SiteId, Record<string, number>> | null} */
+      let m = null;
+      if (data) {
+        /** @param {boolean} ignoreBan */
+        const build = (ignoreBan) => {
+          /** @type {Record<SiteId, Record<string, number>>} */
+          const o = { A: {}, B: {} };
+          for (const st of /** @type {const} */ (['A', 'B'])) {
+            for (const k of KINDS) {
+              const c = this.coachTerm(tacId(k, st), ignoreBan);
+              // 打法被旋鈕固定時不看狀態權重（2.7 固定時不抽打法）
+              const base = forced !== '' ? (k === forced ? 1 : 0) : w[k];
+              o[st][k] = c === null ? 0 : base * expd(c);
+            }
+          }
+          return o;
+        };
+        m = build(false);
+        const mm = m;
+        if (!(KINDS.reduce((a, k) => a + mm.A[k] + mm.B[k], 0) > 0)) m = build(true);
+      }
+      // 第 1 段：抽點。沒資料時 mA＝wA、mB＝wB（同 2.7）；有資料時乘上 Z(s)
+      let mA = wA;
+      let mB = wB;
+      if (m !== null) {
+        const mm = m;
+        const den = forced !== '' ? 1 : w.default + w.rush + w.split + w.fake;
+        const z = (/** @type {SiteId} */ st) => (mm[st].default + mm[st].rush + mm[st].split + mm[st].fake) / den;
+        mA = wA * z('A');
+        mB = wB * z('B');
+      }
+      site = h.random() * (mA + mB) < mA ? 'A' : 'B';
+      kind = forced;
+      if (kind === '') {
+        // 第 2 段：在抽到的點抽打法（default、rush、split 依序扣減，剩下的是 fake；同 2.7）
+        const v = m === null ? w : m[site];
+        let r = h.random() * (v.default + v.rush + v.split + v.fake);
+        kind = 'fake';
+        for (const k of /** @type {const} */ (['default', 'rush', 'split'])) {
+          if ((r -= v[k]) < 0) {
+            kind = k;
+            break;
+          }
+        }
+        // 有資料時浮點誤差落到權重 0 的 fake：改取最後一個權重 > 0 的（沒資料時照 2.7 不處理）
+        if (m !== null && kind === 'fake' && !(v.fake > 0)) kind = ['split', 'rush', 'default'].find((k) => v[k] > 0) ?? 'split';
+      }
+    }
+    this.tagPick = tacId(kind, site);
     const routes = this.intel.routes.T[site];
     const n = Math.max(1, routes.length);
     if (kind === 'rush') return { kind: 'rush', site, r1: Math.floor(h.random() * Math.min(2, n)), r2: 0, exec: site };
@@ -894,31 +937,56 @@ export class Tactics {
   }
 
   /**
-   * CT（2.8）：效用分數選 ct212／stackA／stackB／ctPush。ct212＝2.7 的預設站位（A＝旋鈕、中路、B＝P.ctB，一人探點）；
-   * 疊點＝對面最近常打的那點 3 人（一直打同一點就 4 人）、另一點留錨點；ctPush＝2-1-2 加第二個探點的人
-   * @param {import('./base.js').Observation | null} obs null＝不是指揮、還沒收到計畫時的暫用站位 @returns {CTPlan}
+   * CT（2.8，選法 B）：效用分數取最高（CT 是確定性規則，不抽亂數）。狀態分＝2.7 規則選中的那個 +1、ctPush −0.1、其他 0，有資料時再加教練項 c。
+   * 2.7 規則：對面一直打同一點（證據 ≥ 5、偏向 > 0.9、快攻 > 0.6）疊 4 人、另一點留 1 人；最近常打同一點（證據 ≥ 3、偏向 > 0.5）中路調 1 人過去；其他 ct212。
+   * 沒資料時取的就是 2.7 規則選的（站位也和 2.7 相同）。ct212＝A＝旋鈕、中路、B＝P.ctB；ctPush＝ct212 加第二個探點的人
+   * @param {import('./base.js').Observation | null} obs null＝不是指揮、還沒收到計畫時的暫用站位（照 2.7 規則） @returns {CTPlan}
    */
   chooseCT(obs = null) {
     const a0 = clamp(this.opts.ctSplitA, 0, 5);
     const b0 = Math.min(P.ctB, 5 - a0);
-    /** @type {CTPlan} */
-    const base = { kind: 'hold', a: a0, m: 5 - a0 - b0, b: b0, rot: null, go: false };
-    if (obs === null) return base;
+    const m0 = 5 - a0 - b0;
     const learned = this.adapt.advice('CT');
     const bias = learned.A - learned.B;
     const strong = learned.evidence >= 5 && Math.abs(bias) > 0.9 && learned.fast > 0.6;
-    const id = this.pickTactic(obs, CT_TACTICS, (t) => {
-      // 對面最近常打同一點才值得疊（2.7 的條件：證據 ≥ 3、偏向 > 0.5；一直打同一點更值得）
-      const lean = t === 'stackA' ? bias : t === 'stackB' ? -bias : 0;
-      const s = t === 'ct212' ? 0.2 : t === 'ctPush' ? -0.1 : learned.evidence >= 3 ? (lean - 0.5) * 0.8 + (strong && lean > 0 ? 0.4 : 0) : -0.3;
-      return { s, a: 0, ok: true };
-    }, 41);
-    this.tagPick = id;
-    if (id === 'stackA' || id === 'stackB') {
-      const n = strong ? 4 : 3;
-      return { ...base, a: id === 'stackA' ? n : 5 - n, m: 0, b: id === 'stackB' ? n : 5 - n };
+    const lean = learned.evidence >= 3 && m0 > 0 && Math.abs(bias) > 0.5;
+    const rule = strong || lean ? (bias > 0 ? 'stackA' : 'stackB') : 'ct212';
+    let id = rule;
+    if (obs !== null && this.hasData()) {
+      const cmd = this.coach?.call?.tactic ?? null;
+      if (cmd !== null && /** @type {readonly string[]} */ (CT_TACTICS).includes(cmd)) id = cmd;
+      else {
+        /** @param {boolean} ignoreBan @returns {string | null} */
+        const best = (ignoreBan) => {
+          let pick = null;
+          let top = -Infinity;
+          for (const t of CT_TACTICS) {
+            const c = this.coachTerm(t, ignoreBan);
+            if (c === null) continue;
+            const score = (t === rule ? 1 : 0) + (t === 'ctPush' ? -0.1 : 0) + c;
+            if (score > top) {
+              top = score;
+              pick = t;
+            }
+          }
+          return pick;
+        };
+        id = best(false) ?? best(true) ?? rule;
+      }
     }
-    return id === 'ctPush' ? { ...base, push: true } : base;
+    if (obs !== null) this.tagPick = id;
+    /** @type {CTPlan} */
+    const base = { kind: 'hold', a: a0, m: m0, b: b0, rot: null, go: false };
+    if (id === 'ctPush') return { ...base, push: true };
+    if (id === 'stackA' || id === 'stackB') {
+      const toA = id === 'stackA';
+      if (strong) return { ...base, a: toA ? 4 : 1, m: 0, b: toA ? 1 : 4 };
+      if (m0 > 0) return toA ? { ...base, a: a0 + 1, m: m0 - 1 } : { ...base, b: b0 + 1, m: m0 - 1 };
+      // 教練指定疊點、中路沒人可調：從另一點調 1 人（另一點至少留 1 人）
+      if (toA && b0 > 1) return { ...base, a: a0 + 1, b: b0 - 1 };
+      if (!toA && a0 > 1) return { ...base, a: a0 - 1, b: b0 + 1 };
+    }
+    return base;
   }
 
   /**

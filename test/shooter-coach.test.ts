@@ -134,10 +134,28 @@ describe('引擎 API 1.2：回合戰術標籤', () => {
 });
 
 describe('引擎 API 1.2：不讀新欄位的 Bot 結果不變', () => {
-  it('基準 Bot：給了 tactics 與 orders 的比賽和沒給時終局雜湊相同', () => {
+  // 基準 Bot 從 2.8 起會讀這兩個欄位，所以把它包成「看不到新欄位」的版本：開局 tactics 與每回合 coach 一律當 null 交給它。
+  // 驗的是引擎注入教練指令與熟練度不會影響其他東西（不讀的 Bot 結果完全相同）
+  class Blind implements ShooterController {
+    readonly label: string;
+    readonly declaration: ShooterDeclaration;
+    private readonly inner: ShooterBatchController;
+    constructor(inner: ShooterBatchController) {
+      this.inner = inner;
+      this.label = inner.label;
+      this.declaration = inner.declaration;
+    }
+    init(data: ShooterInitData): CallOutcome<null> {
+      return this.inner.init({ ...data, tactics: null });
+    }
+    decide(obs: ShooterObservation): CallOutcome<unknown> {
+      return this.inner.decide({ ...obs, coach: null });
+    }
+  }
+  it('基準 Bot（看不到新欄位）：給了 tactics 與 orders 的比賽和沒給時終局雜湊相同', () => {
     const bot = compileBot(readFileSync('bots/shooter-baseline.js', 'utf8'), 'baseline');
     const map = MAPS.redrock();
-    const ctl = (): ShooterBatchController[] => Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(bot, pid < 5 ? 'A' : 'B', short.seed, pid, map, { timeLimits: false }));
+    const ctl = (): ShooterController[] => Array.from({ length: PLAYER_COUNT }, (_, pid) => new Blind(new ShooterBatchController(bot, pid < 5 ? 'A' : 'B', short.seed, pid, map, { timeLimits: false })));
     const plain = runShooterMatch({ ...short, controllers: ctl(), record: false });
     const t: InitTactics = { team: { rushA: 90 }, personal: { rushA: 10 } };
     const rich = runShooterMatch({ ...short, controllers: ctl(), record: false, tactics: Array.from({ length: PLAYER_COUNT }, () => t), orders: [orders('rushA'), orders(null)] });

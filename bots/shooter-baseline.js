@@ -210,16 +210,10 @@ claimById: true,
 flashMulti: true,
 tradeAngle: 25,
 tradePen: 2,
-tacWp: 0.5,
-tacWq: 0.2,
+tacWp: 0.9,
+tacWq: 0.8,
 tacWr: 0.35,
-tacEps: 0.1,
-tacAmax: 0.3,
-tacSDefault: 0.15,
-tacSSplit: 0.15,
-tacSFake: 0.1,
-tacSRush: -0.15,
-tacSEcoRush: 0.3,
+tacWrCT: 1.2,
 qSync: 1.2,
 qSyncWait: 0.8,
 qSyncLag: 4,
@@ -277,6 +271,22 @@ return Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
 }
 function clamp(v, lo, hi) {
 return v < lo ? lo : v > hi ? hi : v;
+}
+function expd(x) {
+if (!(x > -700)) return 0;
+if (x > 700) return Infinity;
+const LN2 = 0.6931471805599453;
+const k = Math.round(x / LN2);
+const r = x - k * LN2;
+let term = 1;
+let sum = 1;
+for (let i = 1; i <= 20; i++) {
+term *= r / i;
+sum += term;
+}
+const b = k >= 0 ? 2 : 0.5;
+for (let i = Math.abs(k); i > 0; i--) sum *= b;
+return sum;
 }
 function lerp(a, b, t) {
 return a + (b - a) * t;
@@ -3632,46 +3642,79 @@ return this.tagNow === null ? 0 : 0.5 - this.qOf(this.tagNow);
 pLow() {
 return this.tagNow === null ? 0 : Math.max(0, 0.5 - this.pOf(this.tagNow));
 }
-pickTactic(obs, ids, state, salt) {
-const call = this.coach?.call?.tactic ?? null;
-if (call !== null && ids.includes(call)) return call;
-const pref = this.coach?.pref ?? {};
-const all = ids.map((id) => {
-const st = state(id);
-const score = st.s + P.tacWp * Math.max(0, pref[id] ?? 0) + P.tacWq * (this.qOf(id) - 0.5) - P.tacWr * (this.used.get(id) ?? 0) + clamp(st.a, -P.tacAmax, P.tacAmax);
-return { id, score, ok: st.ok, ban: (pref[id] ?? 0) < 0 };
-});
-let list = all.filter((o) => o.ok && !o.ban);
-if (list.length === 0) list = all.filter((o) => !o.ban);
-if (list.length === 0) list = all;
-list.sort((x, y) => y.score - x.score || ids.indexOf(x.id) - ids.indexOf(y.id));
-if (list.length > 1 && list[0].score - list[1].score < P.tacEps) return list[rollOf(obs.round.number, salt) % 2].id;
-return list[0].id;
+hasData() {
+return this.coach !== null || this.prof !== null;
+}
+coachTerm(id, ignoreBan = false) {
+const pref = this.coach?.pref?.[id] ?? 0;
+if (pref < 0 && !ignoreBan) return null;
+const wr = (CT_TACTICS).includes(id) ? P.tacWrCT : P.tacWr;
+return P.tacWp * Math.max(0, pref) + P.tacWq * (this.qOf(id) - 0.5) - wr * (this.used.get(id) ?? 0);
 }
 chooseT(obs) {
 const h = this.h;
 const ag = this.attrs.aggression;
+const data = this.hasData();
 const call = this.coach?.call?.buy ?? this.buyCall ?? this.econ.teamCall(obs);
 const learned = this.adapt.advice('T');
-const sc = this.siteScore;
-const main = sc.A !== sc.B ? (sc.A > sc.B ? 'A' : 'B') : rollOf(obs.round.number, 31) % 2 === 0 ? 'A' : 'B';
+const wA = Math.max(0.2, 1 + 0.35 * this.siteScore.A);
+const wB = Math.max(0.2, 1 + 0.35 * this.siteScore.B);
 const forced = ['', 'default', 'rush', 'split', 'fake'][this.opts.plan] ?? '';
-const eco = call === 'eco' || call === 'half';
-const enemyEco = this.enemyEco();
-const kindOf = (id) => (id.replace(/[AB]$/, ''));
-const siteOf = (id) => (id.endsWith('A') ? 'A' : id.endsWith('B') ? 'B' : main);
-const id = this.pickTactic(obs, T_TACTICS, (t) => {
-const kind = kindOf(t);
-let s = kind === 'split' ? P.tacSSplit : kind === 'rush' ? P.tacSRush + 0.2 * ag + (eco ? P.tacSEcoRush : 0) : kind === 'fake' ? P.tacSFake : P.tacSDefault;
-if (enemyEco) s += kind === 'default' ? -0.3 : kind === 'fake' ? -0.2 : 0.1;
-if (kind === 'rush' || kind === 'split') s += 0.15 * sc[siteOf(t)];
-const a = 0.5 * Math.log(learned.plans[kind] ?? 1) + (kind === 'fake' ? 0.25 * (learned.rotation - 0.5) : 0);
-const ok = (!eco || kind === 'rush' || kind === 'split') && (forced === '' || kind === forced);
-return { s, a, ok };
-}, 37);
-this.tagPick = id;
-const kind = kindOf(id);
-const site = siteOf(id);
+const KINDS = (['default', 'rush', 'split', 'fake']);
+const tacId = (k, st) => (k === 'rush' || k === 'split' ? k + st : k);
+const cmd = this.coach?.call?.tactic ?? null;
+let site;
+let kind;
+if (cmd !== null && (T_TACTICS).includes(cmd)) {
+kind = cmd.replace(/[AB]$/, '');
+site = cmd.endsWith('A') ? 'A' : cmd.endsWith('B') ? 'B' : wA >= wB ? 'A' : 'B';
+} else {
+const eco = call === 'eco' || (data && call === 'half');
+const w = eco ? { default: 0, rush: 0.65, split: 0.35, fake: 0 } : this.enemyEco() ? { default: 0.1, rush: 0.35 + 0.2 * ag, split: 0.4, fake: 0.1 } : { default: 0.22, rush: 0.12 + 0.2 * ag, split: 0.4, fake: 0.18 };
+for (const k of KINDS) w[k] *= learned.plans[k] ?? 1;
+w.fake *= 0.75 + learned.rotation * 0.5;
+let m = null;
+if (data) {
+const build = (ignoreBan) => {
+const o = { A: {}, B: {} };
+for (const st of (['A', 'B'])) {
+for (const k of KINDS) {
+const c = this.coachTerm(tacId(k, st), ignoreBan);
+const base = forced !== '' ? (k === forced ? 1 : 0) : w[k];
+o[st][k] = c === null ? 0 : base * expd(c);
+}
+}
+return o;
+};
+m = build(false);
+const mm = m;
+if (!(KINDS.reduce((a, k) => a + mm.A[k] + mm.B[k], 0) > 0)) m = build(true);
+}
+let mA = wA;
+let mB = wB;
+if (m !== null) {
+const mm = m;
+const den = forced !== '' ? 1 : w.default + w.rush + w.split + w.fake;
+const z = ( st) => (mm[st].default + mm[st].rush + mm[st].split + mm[st].fake) / den;
+mA = wA * z('A');
+mB = wB * z('B');
+}
+site = h.random() * (mA + mB) < mA ? 'A' : 'B';
+kind = forced;
+if (kind === '') {
+const v = m === null ? w : m[site];
+let r = h.random() * (v.default + v.rush + v.split + v.fake);
+kind = 'fake';
+for (const k of (['default', 'rush', 'split'])) {
+if ((r -= v[k]) < 0) {
+kind = k;
+break;
+}
+}
+if (m !== null && kind === 'fake' && !(v.fake > 0)) kind = ['split', 'rush', 'default'].find((k) => v[k] > 0) ?? 'split';
+}
+}
+this.tagPick = tacId(kind, site);
 const routes = this.intel.routes.T[site];
 const n = Math.max(1, routes.length);
 if (kind === 'rush') return { kind: 'rush', site, r1: Math.floor(h.random() * Math.min(2, n)), r2: 0, exec: site };
@@ -3689,22 +3732,45 @@ return { kind: 'default', site, r1: Math.floor(h.random() * Math.min(2, n)), r2:
 chooseCT(obs = null) {
 const a0 = clamp(this.opts.ctSplitA, 0, 5);
 const b0 = Math.min(P.ctB, 5 - a0);
-const base = { kind: 'hold', a: a0, m: 5 - a0 - b0, b: b0, rot: null, go: false };
-if (obs === null) return base;
+const m0 = 5 - a0 - b0;
 const learned = this.adapt.advice('CT');
 const bias = learned.A - learned.B;
 const strong = learned.evidence >= 5 && Math.abs(bias) > 0.9 && learned.fast > 0.6;
-const id = this.pickTactic(obs, CT_TACTICS, (t) => {
-const lean = t === 'stackA' ? bias : t === 'stackB' ? -bias : 0;
-const s = t === 'ct212' ? 0.2 : t === 'ctPush' ? -0.1 : learned.evidence >= 3 ? (lean - 0.5) * 0.8 + (strong && lean > 0 ? 0.4 : 0) : -0.3;
-return { s, a: 0, ok: true };
-}, 41);
-this.tagPick = id;
-if (id === 'stackA' || id === 'stackB') {
-const n = strong ? 4 : 3;
-return { ...base, a: id === 'stackA' ? n : 5 - n, m: 0, b: id === 'stackB' ? n : 5 - n };
+const lean = learned.evidence >= 3 && m0 > 0 && Math.abs(bias) > 0.5;
+const rule = strong || lean ? (bias > 0 ? 'stackA' : 'stackB') : 'ct212';
+let id = rule;
+if (obs !== null && this.hasData()) {
+const cmd = this.coach?.call?.tactic ?? null;
+if (cmd !== null && (CT_TACTICS).includes(cmd)) id = cmd;
+else {
+const best = (ignoreBan) => {
+let pick = null;
+let top = -Infinity;
+for (const t of CT_TACTICS) {
+const c = this.coachTerm(t, ignoreBan);
+if (c === null) continue;
+const score = (t === rule ? 1 : 0) + (t === 'ctPush' ? -0.1 : 0) + c;
+if (score > top) {
+top = score;
+pick = t;
 }
-return id === 'ctPush' ? { ...base, push: true } : base;
+}
+return pick;
+};
+id = best(false) ?? best(true) ?? rule;
+}
+}
+if (obs !== null) this.tagPick = id;
+const base = { kind: 'hold', a: a0, m: m0, b: b0, rot: null, go: false };
+if (id === 'ctPush') return { ...base, push: true };
+if (id === 'stackA' || id === 'stackB') {
+const toA = id === 'stackA';
+if (strong) return { ...base, a: toA ? 4 : 1, m: 0, b: toA ? 1 : 4 };
+if (m0 > 0) return toA ? { ...base, a: a0 + 1, m: m0 - 1 } : { ...base, b: b0 + 1, m: m0 - 1 };
+if (toA && b0 > 1) return { ...base, a: a0 + 1, b: b0 - 1 };
+if (!toA && a0 > 1) return { ...base, a: a0 - 1, b: b0 + 1 };
+}
+return base;
 }
 leadT(obs, p) {
 if (obs.round.phase !== 'live' || p.exec !== null) return p;

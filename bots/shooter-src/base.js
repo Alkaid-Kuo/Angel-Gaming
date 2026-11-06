@@ -379,19 +379,13 @@ export const P = {
   tradeAngle: 25,
   tradePen: 2,
 
-  // ── 2.8：戰術選擇的效用分數（M5 規格 3.4；score ＝ S ＋ Wp×星級 ＋ Wq×(q−0.5) − Wr×本半場用過次數 ＋ A） ──
-  /** 星級、隊伍執行熟練度、本半場每用過一次的扣分；前兩名差這麼多以內用回合雜湊二選一；對手適應項的上限 */
-  tacWp: 0.5,
-  tacWq: 0.2,
+  // ── 2.8：戰術選擇（M5 規格 3.4，選法 B：T 兩段 logit 抽選、CT 取最高分；對數空間，c ＝ Wp×星級 ＋ Wq×(q−0.5) − Wr×本半場用過次數） ──
+  /** 星級、隊伍執行熟練度、本半場每用過一次的扣分（只在有教練或熟練度資料時作用；沒資料時和 2.7 逐位元相同） */
+  tacWp: 0.9,
+  tacWq: 0.8,
   tacWr: 0.35,
-  tacEps: 0.1,
-  tacAmax: 0.3,
-  /** T 狀態分（沒有教練資料時的戰術比例要貼近 2.7：default 22／rush 12＋20×侵略／split 40／fake 18，split、rush 各分兩點）；我方 eco 時 rush 加分（2.7 eco：rush 65／split 35） */
-  tacSDefault: 0.15,
-  tacSSplit: 0.15,
-  tacSFake: 0.1,
-  tacSRush: -0.15,
-  tacSEcoRush: 0.3,
+  /** CT 每用過一次的扣分：CT 取最高分（不抽），扣分要大過規則的 +1 才會在半場內輪到其他戰術（0.35 時 ct212 連用到第 4 回合、ctPush 幾乎選不到） */
+  tacWrCT: 1.2,
 
   // ── 2.8：執行品質（M5 規格 3.5；q＝本回合戰術的隊伍執行熟練度、p＝個人熟練度；q、p ≥ 0.5 時和 2.7 相同（2.7 是熟練的上限），低於 0.5 才退化；熟練度不改槍法） ──
   /** 兩組同步：split 到位判定半徑、兩路進點「第二組到了」的距離 × (1 ＋ qSync×(0.5−q))，等第二組的上限 × (1 ＋ qSyncWait×(0.5−q))；split 離入口遠的那組晚 (0.5−q) × qSyncLag 秒出發 */
@@ -490,6 +484,27 @@ export function dist(ax, ay, bx, by) {
 /** @param {number} v @param {number} lo @param {number} hi */
 export function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
+}
+
+/**
+ * 確定性的 e^x（Math.exp 在不同 JS 引擎可能有誤差，禁用）：只用四則運算。x ＝ k·ln2 ＋ r（|r| ≤ ln2／2），e^r 用泰勒展開 20 項，再乘 2^k
+ * @param {number} x
+ */
+export function expd(x) {
+  if (!(x > -700)) return 0;
+  if (x > 700) return Infinity;
+  const LN2 = 0.6931471805599453;
+  const k = Math.round(x / LN2);
+  const r = x - k * LN2;
+  let term = 1;
+  let sum = 1;
+  for (let i = 1; i <= 20; i++) {
+    term *= r / i;
+    sum += term;
+  }
+  const b = k >= 0 ? 2 : 0.5;
+  for (let i = Math.abs(k); i > 0; i--) sum *= b;
+  return sum;
 }
 
 /** 屬性線性插值：t = 屬性 / 100 @param {number} a @param {number} b @param {number} t */

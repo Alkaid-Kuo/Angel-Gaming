@@ -74,3 +74,73 @@ describe('Bot 2.8 第 3 步：隊友閃光炸開後慢半拍（qFlashLate）', (
     expect(roleAt(0, 0.3)).not.toBe('慢半拍');
   });
 });
+
+describe('Bot 2.8 第 2 步：戰術選擇（選法 B）', () => {
+  /** 固定序列的亂數（記錄被呼叫幾次） */
+  const seq = (vals: number[]): { random: () => number; n: number } => {
+    const o = { n: 0, random: (): number => vals[o.n++ % vals.length] };
+    return o;
+  };
+  const orders = (pref: Record<string, number>, tactic: string | null = null): NonNullable<ShooterObservation['coach']> => ({ pref, economy: 1, call: tactic === null ? null : { tactic, buy: null } });
+
+  it('沒資料：不看「本半場用過」，同一串亂數抽出同一個計畫、用同樣次數的亂數（和 2.7 同一個式子）', () => {
+    const { match, bot } = live(2);
+    const obs = match.observe(2);
+    const t = bot.tactics;
+    expect(t.hasData()).toBe(false);
+    const vals = [0.13, 0.71, 0.42, 0.88, 0.05, 0.6];
+    const runs = [new Map<string, number>(), new Map([['splitA', 9], ['splitB', 9], ['rushA', 9]])].map((used) => {
+      t.used = used;
+      const h = seq(vals);
+      t.h = h as unknown as typeof t.h;
+      return { plan: t.chooseT(obs), n: h.n };
+    });
+    expect(runs[1]).toEqual(runs[0]);
+  });
+
+  it('有資料：Rush B 3 星多數回合打 Rush B；禁用的不出現', () => {
+    const { match, bot } = live(2);
+    const obs = match.observe(2);
+    const t = bot.tactics;
+    t.coach = orders({ rushB: 3, default: -1, fake: -1 });
+    const tags: string[] = [];
+    for (let i = 0; i < 400; i++) {
+      t.used = new Map();
+      t.chooseT(obs);
+      tags.push(String(t.tagPick));
+    }
+    expect(tags.filter((x) => x === 'rushB').length / tags.length).toBeGreaterThan(0.5);
+    expect(tags.some((x) => x === 'default' || x === 'fake')).toBe(false);
+  });
+
+  it('有資料：half 也當 eco（不打 default、fake）；教練命令直接採用、不抽打法', () => {
+    const { match, bot } = live(2);
+    const obs = match.observe(2);
+    const t = bot.tactics;
+    t.coach = orders({ default: 3 });
+    t.buyCall = 'half';
+    const kinds = new Set(Array.from({ length: 200 }, () => t.chooseT(obs).kind));
+    expect([...kinds].sort()).toEqual(['rush', 'split']);
+    t.coach = orders({}, 'fake');
+    const h = seq([0.5]);
+    t.h = h as unknown as typeof t.h;
+    expect(t.chooseT(obs).kind).toBe('fake');
+    expect(t.tagPick).toBe('fake');
+    expect(h.n).toBe(1); // 只有路線序號
+  });
+
+  it('CT：沒資料照 2.7 規則（沒證據 ct212）；有資料時 3 星蓋過規則、禁用規則選的就換下一個', () => {
+    const { match, bot } = live(5);
+    const obs = match.observe(5);
+    const t = bot.tactics;
+    const plain = t.chooseCT(obs);
+    expect(t.tagPick).toBe('ct212');
+    expect(plain.push).toBeUndefined();
+    t.coach = orders({ ctPush: 3 });
+    expect(t.chooseCT(obs).push).toBe(true);
+    expect(t.tagPick).toBe('ctPush');
+    t.coach = orders({ ct212: -1 });
+    t.chooseCT(obs);
+    expect(t.tagPick).not.toBe('ct212');
+  });
+});
