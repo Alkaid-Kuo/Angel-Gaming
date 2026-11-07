@@ -63,6 +63,20 @@ describe('戰術手冊：開局', () => {
   });
 });
 
+describe('戰術手冊：說明', () => {
+  it('十個戰術都有說明與相剋提示；相剋提示只提到手冊裡的戰術名稱', () => {
+    expect(SHOOTER_TACTICS).toHaveLength(10);
+    for (const t of SHOOTER_TACTICS) {
+      expect(t.desc.length, t.id).toBeGreaterThan(30);
+      expect(t.tips.length, t.id).toBeGreaterThan(10);
+      expect(t.desc + t.tips, t.id).not.toMatch(/TODO/);
+    }
+    // 提示裡出現的英文戰術名都要是手冊裡有的（防止改名後提示沒跟著改）
+    const names = new Set(SHOOTER_TACTICS.map((t) => t.name));
+    for (const t of SHOOTER_TACTICS) for (const m of t.tips.match(/(Rush|Split) [AB]|Default|Fake/g) ?? []) expect(names.has(m), `${t.id}：${m}`).toBe(true);
+  });
+});
+
 describe('戰術手冊：排練', () => {
   it('扣費、佔時段、推進後遞減成長（隊伍 +6、出賽名單個人 +8，乘 1 − cur/100）', async () => {
     const s = newGame(5, content);
