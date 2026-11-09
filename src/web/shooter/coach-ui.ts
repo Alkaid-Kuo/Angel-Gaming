@@ -100,10 +100,10 @@ export class CoachUi {
     const plan = this.plan;
     if (s === null || plan === null) return;
     const mine = this.info.tactics.filter((t) => t.side === s.side);
-    const tac = [{ id: null as string | null, name: '交給選手' }, ...mine.map((t) => ({ id: t.id as string | null, name: t.name }))];
+    const tac = [{ id: null as string | null, name: '交給選手', tips: '' }, ...mine.map((t) => ({ id: t.id as string | null, name: t.name, tips: t.tips ?? '' }))];
     const call =
       s.kind === 'timeout'
-        ? `<div class="sec"><small>第 ${s.round} 回合戰術</small><div class="opts">${tac.map((t) => `<button data-act="ctac" data-id="${t.id ?? ''}" class="${t.id === this.tactic ? 'on' : ''}">${esc(t.name)}</button>`).join('')}</div></div>
+        ? `<div class="sec"><small>第 ${s.round} 回合戰術</small><div class="opts">${tac.map((t) => `<button data-act="ctac" data-id="${t.id ?? ''}" class="${t.id === this.tactic ? 'on' : ''}" ${t.tips ? `data-tip="${esc(t.tips)}"` : ''}>${esc(t.name)}</button>`).join('')}</div></div>
            <div class="sec"><small>經濟</small><div class="opts">${BUYS.map((b) => `<button data-act="cbuy" data-id="${b.id ?? ''}" class="${b.id === this.buy ? 'on' : ''}">${b.name}</button>`).join('')}</div></div>`
         : '';
     const prefs = (['T', 'CT'] as const)

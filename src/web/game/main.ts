@@ -276,7 +276,7 @@ function startCoach(before: ReturnType<typeof snapshot>, wasOff: boolean): void 
     teams: [teamName(ctx.v, f?.home ?? ''), teamName(ctx.v, f?.away ?? '')],
     mine: t.side === 'a' ? 0 : 1,
     title: f ? stageName(f) : '',
-    coach: { side: t.side, assistant: t.assistant, tactics: ctx.c.tactics.map((x) => ({ id: x.id, name: x.name, side: x.side })) },
+    coach: { side: t.side, assistant: t.assistant, tactics: ctx.c.tactics.map((x) => ({ id: x.id, name: x.name, side: x.side, tips: x.tips })) },
   });
   if (!ok) {
     toast('無法寫入即時比賽資料（瀏覽器儲存空間不可用），照跳過處理', true);

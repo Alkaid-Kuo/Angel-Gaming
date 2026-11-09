@@ -1,4 +1,5 @@
 // 戰術室（M5 第一批）：十個戰術的隊伍默契、出賽名單個人平均、執行熟練度，比賽計畫（偏好星級、禁用、經濟風格），排練。
+// 每個戰術名滑過顯示內容包的說明（desc）與相剋提示（tips）（UI 審核 #15）；文字只供顯示。
 // 資料只讀已知層：自己的默契、計畫、自己人的個人熟練度、自己派的球探對戰隊報告。排練佔訓練中心的每週時段，推進一週後才漲。
 import type { TacticSpec } from '../../manage/index.ts';
 import { lineupOf } from '../club/model.ts';
@@ -67,7 +68,7 @@ export function tacticsScreen(ctx: Ctx): string {
     // 每邊至少留一個戰術：最後一個不能再按成禁用
     const lastOpen = p === 3 && sideOpen(t.side) <= 1;
     return `<div class="tr ${p === -1 ? 'off' : ''}">
-      <b>${esc(t.name)}</b>
+      <b class="tn">${esc(t.name)}<i class="hint"><span>${esc(t.desc)}</span><small>相剋：${esc(t.tips)}</small></i></b>
       <div class="bar"><div class="meter g" style="--v:${team}%"><i></i></div><span class="num">${team}</span></div>
       <span class="num pa">${avg(t.id)}</span>
       <span class="num eff">${eff}</span>
