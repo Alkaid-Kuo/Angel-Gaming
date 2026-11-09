@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { POLICIES, runSeason } from '../src/manage/autoplayer.ts';
 import { applyCommand } from '../src/manage/commands.ts';
 import { STUB_CONTENT } from '../src/manage/content.ts';
+import { SHOOTER_CONTENT } from '../src/manage/content-shooter.ts';
 import { advance, newGame } from '../src/manage/game.ts';
 import type { BattleGateway, MatchRequest, SideSpec } from '../src/manage/gateway.ts';
 import { FakeGateway } from '../src/manage/gateway-fake.ts';
-import { roundRobin, standings } from '../src/manage/league.ts';
+import { rookieFriendlyOrder, roundRobin, standings } from '../src/manage/league.ts';
 import { expectedPermille, updateElo } from '../src/manage/rating.ts';
 import { deserialize, serialize } from '../src/manage/save.ts';
 import { humanTeam, rosterOf, truePower } from '../src/manage/state.ts';
@@ -89,6 +90,37 @@ describe('賽程', () => {
       }
     }
     expect(seen.size).toBe(28);
+  });
+
+  it('新手保護（方案甲）：種子 1～20 玩家第 1、2 週都遇青訓派；只調週序，每輪配對、每隊整季的對手與主客都不變', () => {
+    for (const pack of [STUB_CONTENT, SHOOTER_CONTENT]) {
+      for (let seed = 1; seed <= 20; seed++) {
+        const s = newGame(seed, pack);
+        const me = s.humanTeamId;
+        const persona = (id: string): string | null => s.teams.find((t) => t.id === id)?.persona ?? null;
+        const regular = s.fixtures.filter((f) => f.stage === 'regular');
+        const oppAt = (w: number): string => {
+          const f = regular.find((x) => x.week === w && (x.home === me || x.away === me));
+          if (f === undefined) throw new Error(`種子 ${seed} 第 ${w} 週沒有玩家的比賽`);
+          return f.home === me ? f.away : f.home;
+        };
+        expect([persona(oppAt(1)), persona(oppAt(2))], `${pack.id} 種子 ${seed}`).toEqual(['youth', 'youth']);
+        // 和不調週序的圓桌法相比：每一輪的配對（含主客）原封不動，只是換了週
+        const base = roundRobin(s.teams.map((t) => t.id));
+        const key = (pairs: readonly (readonly [string, string])[]): string => pairs.map(([h, a]) => `${h}>${a}`).sort().join(',');
+        const weeks = Array.from({ length: REGULAR_WEEKS }, (_, i) => key(regular.filter((f) => f.week === i + 1).map((f) => [f.home, f.away] as const)));
+        expect([...weeks].sort()).toEqual(base.map(key).sort());
+        // 每隊整季的對手（含主客）集合不變
+        for (const t of s.teams) {
+          const games = (list: readonly (readonly [string, string])[]): string[] => list.filter(([h, a]) => h === t.id || a === t.id).map(([h, a]) => `${h}>${a}`).sort();
+          expect(games(regular.map((f) => [f.home, f.away] as const)), t.id).toEqual(games(base.flat()));
+        }
+        // 兩支青訓派之間照原本的先後；其餘各輪也照原順序
+        expect(weeks).toEqual(rookieFriendlyOrder(base, me, (id) => persona(id) === 'youth').map(key));
+        const vsYouth = base.map(key).filter((k) => weeks.indexOf(k) < 2);
+        expect(vsYouth).toEqual(weeks.slice(0, 2));
+      }
+    }
   });
 });
 

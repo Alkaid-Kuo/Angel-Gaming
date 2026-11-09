@@ -151,9 +151,11 @@ describe('球探對戰隊：已知層與存檔', () => {
     for (const x of [...mine.teamIntel[0].top.T, ...mine.teamIntel[0].top.CT]) expect(Object.keys(x).sort()).toEqual(['played', 'tactic', 'won']);
     // 被看的那隊與其他 NPC 看不到我方派的報告
     for (const t of s.teams.filter((x) => !x.human)) expect(knownView(s, content, t.id).teamIntel).toEqual([]);
-    // 視圖是複本
-    mine.teamIntel[0].top.T.length = 0;
-    expect(me.teamIntel[0].top.T.length).toBeGreaterThan(0);
+    // 視圖是複本（暫代賽制一場只有一回合，看的那隊在那場是 T 還是 CT 由賽程決定，挑有資料的那邊改）
+    const side = me.teamIntel[0].top.T.length > 0 ? 'T' : 'CT';
+    expect(me.teamIntel[0].top[side].length).toBeGreaterThan(0);
+    mine.teamIntel[0].top[side].length = 0;
+    expect(me.teamIntel[0].top[side].length).toBeGreaterThan(0);
   });
 
   it('第 11 版存讀一致；第 8 版補空報告（串到第 11 版）', async () => {
