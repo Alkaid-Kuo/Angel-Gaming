@@ -565,7 +565,7 @@ export class Tactics {
       out.walk = true;
       out.role += '・讓突破手先走';
     }
-    if (me.team === 'T' && P.resLayer && this.res.active) this.waitFlash(obs, out);
+    if (P.resLayer && this.res.active) this.waitFlash(obs, out);
     if (this.settle(obs, out)) wish = null;
     if (wish === null && !out.commit) wish = this.anyNade(obs);
     this.overlay(obs, out);
@@ -1801,10 +1801,19 @@ export class Tactics {
       const since = this.flashCue >= 0 ? t - this.flashCue : -1;
       let flashTurn;
       // 3.0：擁有這個入口的 entryFlash 項目就是自己的回合（第二顆由 flashNext 控制間隔）
+      // （審查 (a)）跟進者到觸發距離時，擁有者離入口超過 2N：這筆提早轉自由使用（各副本看公開位置，同條件）
+      if (act && cue) {
+        const pos = (/** @type {number} */ id) => (id === me.id ? me : obs.teammates.find((m) => m.id === id && m.alive));
+        for (const it of this.res.items) {
+          const o = it.purpose === 'entryFlash' && it.state === 'plan' ? pos(it.owner) : undefined;
+          if (o !== undefined && dist(o.x, o.y, ent.ox, ent.oy) > 2 * leadN * UNIT) it.state = 'free';
+        }
+      }
       const planned = act && this.can(me, 'flash', ['entryFlash']);
-      // 計畫外的閃：計畫的 entryFlash 都用掉（或沒人拿）之後，才照 2.8 的順序規則丟
+      // 計畫外的閃（審查 (a)）：計畫的 entryFlash 用完或沒人拿時照 2.8 的順序規則丟；這個入口已經有閃丟出時當第二顆（間隔由 flashNext 控）
       const plannedLeft = act && this.res.items.some((it) => it.purpose === 'entryFlash' && it.state === 'plan' && this.isAlive(obs, it.owner) && it.owner !== me.id);
-      const myFlash = planned || (act && !plannedLeft && this.can(me, 'flash', ['free']));
+      const thrownHere = this.flashSpots.some((f) => this.flashOf(ent, f));
+      const myFlash = planned || (act && (!plannedLeft || thrownHere) && this.can(me, 'flash', ['free']));
       if (planned) flashTurn = true;
       else if (P.flashClaim) {
         const order = (idx - first + size) % size;
@@ -2463,7 +2472,7 @@ export class Tactics {
   }
 
   /**
-   * 3.0：等閃（跟進者觸發的另一半）：隊友的閃光還沒炸開、自己現在看不到爆點，但往目標再走 1.5 格就看得到（半徑內）——站住等它炸開
+   * 3.0：等閃（跟進者觸發的另一半）：隊友（或自己）的閃光還沒炸開、自己現在看不到爆點，但往目標再走 1～3 格就看得到（半徑內）——站住等它炸開
    * @param {import('./base.js').Observation} obs @param {TacOut} out
    */
   waitFlash(obs, out) {
@@ -2475,7 +2484,10 @@ export class Tactics {
     if (d < UNIT) return;
     // 停步指令要等反應延遲才生效：看 1～3 格外（含延遲中會多走的距離）
     const at = (/** @type {number} */ k) => ({ x: me.x + ((out.goal?.x ?? me.x) - me.x) / d * k * UNIT, y: me.y + ((out.goal?.y ?? me.y) - me.y) / d * k * UNIT });
-    for (const f of this.mateFlash) {
+    // （審查 (b)）自己丟的閃也算：炸開前不走進爆點視線（自閃占隊友致盲一半以上）；隊友的閃只有 T 等
+    const own = this.util.away;
+    const list = [...(own !== null ? [{ x: own.x, y: own.y, pop: own.until - 3 }] : []), ...(me.team === 'T' ? this.mateFlash : [])];
+    for (const f of list) {
       if (t > f.pop || this.g.los(me.x, me.y, f.x, f.y)) continue;
       if (![1, 2, 3].some((k) => { const q = at(Math.min(k, d / UNIT)); return dist(q.x, q.y, f.x, f.y) < B && this.g.los(q.x, q.y, f.x, f.y); })) continue;
       out.stop = true;

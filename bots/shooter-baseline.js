@@ -3689,7 +3689,7 @@ if (this.slow) {
 out.walk = true;
 out.role += '・讓突破手先走';
 }
-if (me.team === 'T' && P.resLayer && this.res.active) this.waitFlash(obs, out);
+if (P.resLayer && this.res.active) this.waitFlash(obs, out);
 if (this.settle(obs, out)) wish = null;
 if (wish === null && !out.commit) wish = this.anyNade(obs);
 this.overlay(obs, out);
@@ -4677,9 +4677,17 @@ const size = Math.max(1, this.groupSize(obs, p));
 const first = Math.min(1, size - 1);
 const since = this.flashCue >= 0 ? t - this.flashCue : -1;
 let flashTurn;
+if (act && cue) {
+const pos = ( id) => (id === me.id ? me : obs.teammates.find((m) => m.id === id && m.alive));
+for (const it of this.res.items) {
+const o = it.purpose === 'entryFlash' && it.state === 'plan' ? pos(it.owner) : undefined;
+if (o !== undefined && dist(o.x, o.y, ent.ox, ent.oy) > 2 * leadN * UNIT) it.state = 'free';
+}
+}
 const planned = act && this.can(me, 'flash', ['entryFlash']);
 const plannedLeft = act && this.res.items.some((it) => it.purpose === 'entryFlash' && it.state === 'plan' && this.isAlive(obs, it.owner) && it.owner !== me.id);
-const myFlash = planned || (act && !plannedLeft && this.can(me, 'flash', ['free']));
+const thrownHere = this.flashSpots.some((f) => this.flashOf(ent, f));
+const myFlash = planned || (act && (!plannedLeft || thrownHere) && this.can(me, 'flash', ['free']));
 if (planned) flashTurn = true;
 else if (P.flashClaim) {
 const order = (idx - first + size) % size;
@@ -5191,7 +5199,9 @@ const B = this.util.blindRange;
 const d = dist(me.x, me.y, out.goal.x, out.goal.y);
 if (d < UNIT) return;
 const at = ( k) => ({ x: me.x + ((out.goal?.x ?? me.x) - me.x) / d * k * UNIT, y: me.y + ((out.goal?.y ?? me.y) - me.y) / d * k * UNIT });
-for (const f of this.mateFlash) {
+const own = this.util.away;
+const list = [...(own !== null ? [{ x: own.x, y: own.y, pop: own.until - 3 }] : []), ...(me.team === 'T' ? this.mateFlash : [])];
+for (const f of list) {
 if (t > f.pop || this.g.los(me.x, me.y, f.x, f.y)) continue;
 if (![1, 2, 3].some((k) => { const q = at(Math.min(k, d / UNIT)); return dist(q.x, q.y, f.x, f.y) < B && this.g.los(q.x, q.y, f.x, f.y); })) continue;
 out.stop = true;
