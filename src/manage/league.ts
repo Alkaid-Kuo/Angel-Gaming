@@ -66,8 +66,20 @@ function newFixture(state: GameState, week: number, stage: Stage, home: TeamId, 
   return f;
 }
 
+/**
+ * 新手保護（2026-11-09 使用者決定方案甲）：單循環的每一輪配對不變，只調換週序，把玩家對青訓派的那幾輪排到最前面
+ * （彼此照原本的先後），其餘各輪照原順序往後排。所以每隊整季的對手集合不變，只有遇到的週不同。
+ * 只在開局排賽程時生效，舊存檔的賽程不動；第一季限定，有多季時再議（規格 4.13）。
+ */
+export function rookieFriendlyOrder(rounds: readonly [string, string][][], humanId: TeamId, isYouth: (id: TeamId) => boolean): [string, string][][] {
+  const vsYouth = (pairs: readonly [string, string][]): boolean =>
+    pairs.some(([h, a]) => (h === humanId && isYouth(a)) || (a === humanId && isYouth(h)));
+  return [...rounds.filter(vsYouth), ...rounds.filter((p) => !vsYouth(p))];
+}
+
 export function createRegularSeason(state: GameState): void {
-  const rounds = roundRobin(state.teams.map((t) => t.id));
+  const youth = new Set(state.teams.filter((t) => t.persona === 'youth').map((t) => t.id));
+  const rounds = rookieFriendlyOrder(roundRobin(state.teams.map((t) => t.id)), state.humanTeamId, (id) => youth.has(id));
   rounds.forEach((pairs, r) => {
     for (const [h, a] of pairs) newFixture(state, r + 1, 'regular', h, a);
   });
