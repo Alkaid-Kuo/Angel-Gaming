@@ -208,6 +208,8 @@ describe('完整賽段', () => {
   it('9 週打完：32 場全有結果、名次完整、帳本與資金一致、Elo 總分守恆', async () => {
     const s = newGame(11, content);
     const start = startCashes(s);
+    // 季中補進來的自由選手（規格 4.14）沒打過比賽，Elo 守恆只看開局就在的人
+    const opening = new Set(s.players.map((p) => p.id));
     const eloSum = s.players.reduce((x, p) => x + p.elo, 0);
     await runSeason(s, content, gateway, null);
     expect(['ended', 'bankrupt']).toContain(s.phase);
@@ -222,7 +224,7 @@ describe('完整賽段', () => {
     expect(s.seasonResult?.ranks).toHaveLength(8);
     expect(new Set(s.seasonResult?.ranks).size).toBe(8);
     for (const t of s.teams) expect(t.cash).toBe((start.get(t.id) as number) + t.ledger.reduce((x, e) => x + e.amount, 0));
-    expect(s.players.reduce((x, p) => x + p.elo, 0)).toBe(eloSum);
+    expect(s.players.filter((p) => opening.has(p.id)).reduce((x, p) => x + p.elo, 0)).toBe(eloSum);
   });
 
   it('季後賽：前 4 名打準決賽，冠亞軍是決賽雙方', async () => {

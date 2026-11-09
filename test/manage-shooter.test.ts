@@ -256,6 +256,8 @@ describe('攻防戰內容包＋真閘道（短賽制）', () => {
     expect(whole.players.filter((p) => p.teamId === whole.humanTeamId)).toHaveLength(5);
     for (const t of whole.teams) expect(whole.players.filter((p) => p.teamId === t.id).length).toBeGreaterThanOrEqual(5);
     const start = new Map(whole.teams.map((t) => [t.id, t.persona === null ? content.economy.humanStartCash : content.personas[t.persona].startCash]));
+    // 季中補進來的自由選手（規格 4.14）沒打過比賽，Elo 守恆只看開局就在的人
+    const opening = new Set(whole.players.map((p) => p.id));
     const eloSum = whole.players.reduce((s, p) => s + p.elo, 0);
     await runSeason(whole, content, memo, null);
     expect(['ended', 'bankrupt']).toContain(whole.phase);
@@ -268,7 +270,7 @@ describe('攻防戰內容包＋真閘道（短賽制）', () => {
       expect(r.winner).toBe(r.scoreA > r.scoreB ? f.home : r.scoreB > r.scoreA ? f.away : null);
     }
     for (const t of whole.teams) expect(t.cash).toBe((start.get(t.id) as number) + t.ledger.reduce((s, e) => s + e.amount, 0));
-    expect(whole.players.reduce((s, p) => s + p.elo, 0)).toBe(eloSum);
+    expect(whole.players.filter((p) => opening.has(p.id)).reduce((s, p) => s + p.elo, 0)).toBe(eloSum);
     // M5 1b（Bot 2.8 接上）：每回合雙方都有合法的戰術標籤；本季戰術紀錄＝該隊所有回合；玩家（passive 不排練、不簽人）打過的戰術默契高於開局
     const side = new Map(content.tactics.map((t) => [t.id, t.side]));
     for (const f of whole.fixtures) {

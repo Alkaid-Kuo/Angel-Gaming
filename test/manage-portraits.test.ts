@@ -96,7 +96,9 @@ describe('開局分配', () => {
     const fresh = stub.players.map((p) => [p.id, p.portraitId]);
     await runSeason(stub, STUB_CONTENT, new FakeGateway(STUB_CONTENT), null);
     expect(['ended', 'bankrupt']).toContain(stub.phase);
-    expect(stub.players.map((p) => [p.id, p.portraitId])).toEqual(fresh);
+    // 季中補人（規格 4.14）只往後加新選手：開局那些人的立繪不變，全部人的立繪仍不重複
+    expect(stub.players.slice(0, fresh.length).map((p) => [p.id, p.portraitId])).toEqual(fresh);
+    expect(new Set(stub.players.map((p) => p.portraitId)).size).toBe(stub.players.length);
   });
 
   it('池不夠發時明確報錯，不重複也不卡住', () => {

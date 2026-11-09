@@ -119,6 +119,11 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, handles: 
   const name = handles[state.players.length];
   const picked = rarity ?? pickRarity(content, rng, version, portraits);
   const portraitId = dealPortrait(portraits, picked, rarity !== undefined);
+  return addPlayer(state, content, rng, name, picked, portraitId, teamId, version);
+}
+
+/** 名字、品階、立繪定好之後的選手生成（流派、習慣、薪資、屬性與上限）；開局與季中補人共用，亂數取用順序與原本相同 */
+function addPlayer(state: GameState, content: ContentPack, rng: Prng, name: string, picked: Rarity, portraitId: string, teamId: TeamId | null, version: number): PlayerId {
   const candidates = content.lineages.filter((l) => l.power.length >= version);
   const lineage = candidates[rng.nextInt(candidates.length)];
   const habit = Math.max(-60, Math.min(60, Math.round(gauss(rng) * 25)));
@@ -147,6 +152,49 @@ function makePlayer(state: GameState, content: ContentPack, rng: Prng, handles: 
     season: emptySeason(),
   });
   return id;
+}
+
+/** 季中補人（2026-11-09 使用者決定）：這幾週結算後補自由選手 */
+export const MARKET_REFRESH_WEEKS: readonly number[] = [3, 6];
+/** 每次補幾名 */
+export const MARKET_REFRESH_COUNT = 2;
+/** 補進來的品階上限：不出 SSR（SSR 取得管道留到之後） */
+const MARKET_EXCLUDED: readonly Rarity[] = ['SSR'];
+
+/**
+ * 季中補自由選手（規格 4.14）：版本 1～3、品階依權重抽（只抽 N～SR、立繪池還有剩的），名字取還沒用過的。
+ * 用獨立串流（STREAM.market, 週數），不吃其他亂數，既有種子的開局與賽程不變。名字或立繪用完時少補，不報錯。
+ * 只在 advance 結算那週呼叫一次，所以用週數就知道補過沒，存檔不加欄位。回傳新選手的 id。
+ */
+export function refreshMarket(state: GameState, content: ContentPack, week: number): PlayerId[] {
+  const rng = rngFor(state.seed, STREAM.market, week);
+  const names = new Set(state.players.map((p) => p.name));
+  const faces = new Set(state.players.map((p) => p.portraitId));
+  const added: PlayerId[] = [];
+  for (let i = 0; i < MARKET_REFRESH_COUNT; i++) {
+    const version = rng.range(1, 3);
+    const freeFaces = (r: Rarity): string[] => PORTRAITS.filter((x) => x.rarity === r && !faces.has(x.id)).map((x) => x.id);
+    const pool = content.rarities.filter((r) => !MARKET_EXCLUDED.includes(r.id) && r.capVersion >= version && freeFaces(r.id).length > 0);
+    const freeNames = content.handles.filter((h) => !names.has(h));
+    const total = pool.reduce((t, r) => t + r.weight, 0);
+    if (total === 0 || freeNames.length === 0) break;
+    let roll = rng.nextInt(total);
+    const rarity = (pool.find((r) => (roll -= r.weight) < 0) as RaritySpec).id;
+    const list = freeFaces(rarity);
+    const portraitId = list[rng.nextInt(list.length)];
+    const name = freeNames[rng.nextInt(freeNames.length)];
+    added.push(addPlayer(state, content, rng, name, rarity, portraitId, null, version));
+    names.add(name);
+    faces.add(portraitId);
+  }
+  if (added.length > 0) {
+    const desc = added.map((id) => {
+      const p = state.players.find((x) => x.id === id) as Player;
+      return `${p.name}（${p.rarity}・${content.lineages.find((l) => l.id === p.lineageId)?.name ?? p.lineageId}）`;
+    });
+    state.inbox.push({ week: state.week, kind: 'report', text: `轉會市場新增 ${added.length} 名自由選手：${desc.join('、')}。`, playerIds: [...added] });
+  }
+  return added;
 }
 
 /**
@@ -506,6 +554,7 @@ export async function advance(state: GameState, content: ContentPack, gateway: B
   bailoutNpcs(state);
 
   const w = state.week;
+  if (MARKET_REFRESH_WEEKS.includes(w)) refreshMarket(state, content, w);
   if (w === TOTAL_WEEKS) {
     finishSeason(state, content);
     return summary;
