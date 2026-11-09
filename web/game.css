@@ -1422,3 +1422,11 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .v-tactics .tr .tn .hint span { display: block; font-size: max(14px, var(--fmin, 0px)); line-height: 1.6; color: var(--white); }
 .v-tactics .tr .tn .hint small { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.1); font-size: max(13px, var(--fmin, 0px)); line-height: 1.5; color: var(--gold2); }
 .v-tactics .tr.off .tn .hint { opacity: 1; }
+
+/* 市場：季中新進的自由選手標「新」（金色小標，PR #42 的補人通知）；週結算多一行市場新增 */
+.v-market .row .who b .nw { display: inline-block; margin-left: 6px; padding: 0 5px; font-style: normal; font-size: max(11px, var(--fmin, 0px)); font-weight: 900; line-height: 16px; letter-spacing: 0.1em; color: var(--ink); background: var(--gold); transform: skewX(-10deg); vertical-align: 2px; }
+.md-week .env.mk { color: var(--white); box-shadow: inset 3px 0 0 var(--gold), inset 0 0 0 1px rgba(var(--gold-rgb), 0.35); background: rgba(var(--gold-rgb), 0.08); }
+.md-week .env.mk b { color: var(--gold2); }
+/* 戰術室說明面板：改成在名字右側、從該列往下（靠底的列往上）展開，不蓋到表頭 */
+.v-tactics .tr .tn .hint { top: 0; bottom: auto; transform: skewX(7deg); }
+.v-tactics .tr:nth-child(n+6) .tn .hint { top: auto; bottom: 0; }

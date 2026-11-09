@@ -174,11 +174,17 @@ export function playerScreen(ctx: Ctx): string {
 }
 
 // ───── 轉會市場 ─────
-function faRow(ctx: Ctx, p: KnownPlayer, sel: boolean): string {
+/** 最近一次季中補人通知（M5 市場刷新，PR #42）裡的新進選手 id；沒有＝空集合 */
+export function newArrivals(ctx: Ctx): Set<string> {
+  const m = [...ctx.v.inbox].reverse().find((x) => x.playerIds !== undefined && x.playerIds.length > 0);
+  return new Set(m?.playerIds ?? []);
+}
+
+function faRow(ctx: Ctx, p: KnownPlayer, sel: boolean, fresh = false): string {
   const intel = ctx.v.intel.find((i) => i.playerId === p.id);
   const pending = ctx.v.jobs.some((j) => j.kind === 'scout' && j.playerId === p.id);
   const d = intel ? intel.estPower - p.elo : 0;
-  return `<div class="row ${sel ? 'me' : ''}" data-act="pick-fa" data-pid="${p.id}">${avatar(ctx, p, 44)}<span class="who"><b>${esc(p.name)}${rarityBadge(p)}</b>${lineage(ctx, p.lineageId, 13)}</span>
+  return `<div class="row ${sel ? 'me' : ''}" data-act="pick-fa" data-pid="${p.id}">${avatar(ctx, p, 44)}<span class="who"><b>${esc(p.name)}${rarityBadge(p)}${fresh ? '<i class="nw" data-tip="季中新進的自由選手">新</i>' : ''}</b>${lineage(ctx, p.lineageId, 13)}</span>
     <span class="stg"><span class="${p.stage >= 3 ? 'gd' : ''}">${stageName(p.stage)}</span><small class="dim">${strengthGrades(ctx.c, p)}</small></span><span class="num">${p.elo}</span>
     <span class="intel">${intel ? `<b class="${d >= 0 ? 'gd2' : 'rd'}">${d >= 0 ? '+' : ''}${d}</b><small>真實 ${intel.estPower}</small>` : pending ? '<small>球探中</small>' : '<small class="dim2">—</small>'}</span>
     <span><span class="num">${wan(p.weeklySalary)}</span> <small class="dim">萬</small></span></div>`;
@@ -189,10 +195,11 @@ export function marketScreen(ctx: Ctx): string {
   const e = c.economy;
   const active = canAct(v);
   const free = v.players.filter((p) => p.teamId === null).sort((a, b) => b.stage - a.stage || b.elo - a.elo);
+  const fresh = newArrivals(ctx);
   const tabs = `<div class="tabs"><button class="${ui.marketTab === 'free' ? 'on' : ''}" data-act="mtab" data-t="free">自由球員<i>${free.length}</i></button><button class="${ui.marketTab === 'teams' ? 'on' : ''}" data-act="mtab" data-t="teams">各隊名單<i>${v.players.filter((p) => p.teamId !== null && p.teamId !== v.me.teamId).length}</i></button><button class="${ui.marketTab === 'intel' ? 'on' : ''}" data-act="mtab" data-t="intel">球探報告<i>${v.intel.length}</i></button></div>`;
   let list: string;
   if (ui.marketTab === 'free') {
-    list = `<div class="rows scroll"><div class="row hd"><span></span><span>選手</span><span>階段</span><span>評分</span><span>情報</span><span>週薪</span></div>${free.map((p) => faRow(ctx, p, p.id === ui.marketPick)).join('') || '<p class="dim">市場上沒有自由球員了。</p>'}</div>`;
+    list = `<div class="rows scroll"><div class="row hd"><span></span><span>選手</span><span>階段</span><span>評分</span><span>情報</span><span>週薪</span></div>${free.map((p) => faRow(ctx, p, p.id === ui.marketPick, fresh.has(p.id))).join('') || '<p class="dim">市場上沒有自由球員了。</p>'}</div>`;
   } else if (ui.marketTab === 'teams') {
     list = `<div class="rows scroll">${v.teams
       .filter((t) => t.id !== v.me.teamId)
@@ -237,7 +244,8 @@ export function marketScreen(ctx: Ctx): string {
       : `<div class="pn sim">${pt('ACTION', '別隊選手', 'M5 才開放轉會')}<p class="dim">別隊選手不能簽，但可以派球探摸清真實強度，或跟他的戰隊打練習賽估勝率。</p>
         <div class="go">${btn(pending ? '球探出發中' : `派球探 · ${wan(e.scoutCost)} 萬`, `data-act="scout" data-id="${pick.id}" ${!active || pending || v.me.cash < e.scoutCost ? 'disabled' : ''}`, 'ghost')}${btn('跟他的戰隊打練習賽', `data-act="scrim-vs" data-id="${pick.id}" ${active ? '' : 'disabled'}`, 'ghost')}</div></div>`}</div>`;
   }
-  return `${head('RECRUIT // 轉會市場', '轉會市場', `自由球員 <b>${free.length}</b> 名 · 先到先簽 · 簽約金＝${e.signingFeeWeeks} 週薪資 · 陣容 <b>${v.me.roster.length}／${e.rosterMax}</b>`)}
+  const freshN = free.filter((p) => fresh.has(p.id)).length;
+  return `${head('RECRUIT // 轉會市場', '轉會市場', `自由球員 <b>${free.length}</b> 名${freshN ? ` · <b class="gd2">新進 ${freshN} 名</b>` : ''} · 先到先簽 · 簽約金＝${e.signingFeeWeeks} 週薪資 · 陣容 <b>${v.me.roster.length}／${e.rosterMax}</b>`)}
     <section class="body s-market"><div class="pn list in">${tabs}${list}
       <p class="tip">${icon('info', 16)}評分只看成長階段；同階段的人實際強多少，要靠戰績或球探情報。</p></div>
       ${side}</section>`;
