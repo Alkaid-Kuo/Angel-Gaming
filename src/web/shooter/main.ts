@@ -12,7 +12,7 @@ import { hidesCursor } from './cursor.ts';
 import { BuyMenu } from './buy.ts';
 import { SPEEDS, ShooterHud, roundBanner } from './hud.ts';
 import { ShooterInput } from './input.ts';
-import type { BotLevel, FromShooterWorker, Lineup, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
+import type { BotLevel, FromShooterWorker, FullPlayer, Lineup, ShooterFrame, ShooterMeta, ShooterSetup, ShooterSummary, ToShooterWorker } from './protocol.ts';
 import { DEFAULT_LEVEL } from './lineup.ts';
 import type { ShooterReplay } from '../../shooter/runner.ts';
 import { seesAll } from './hudinfo.ts';
@@ -136,10 +136,12 @@ class Game {
     $('setup').classList.add('hidden');
     this.canvas = this.root.querySelector('.sg-canvas')!;
     this.mini = this.root.querySelector('.sg-mini')!;
-    this.renderer = new ShooterRenderer(this.canvas, meta);
+    // 教練模式的渲染當觀戰：鏡頭不跟滑鼠偏、不畫準星與開鏡（視野仍由 teamFog 決定）
+    const specLike = meta.spectate || meta.coach !== undefined;
+    this.renderer = new ShooterRenderer(this.canvas, specLike ? { ...meta, spectate: true } : meta);
     // 別隊的比賽：外框不用金（金只給我方）
     this.root.classList.toggle('neutral', meta.watch !== undefined && meta.watch.mine === null);
-    this.root.classList.toggle('spectate', meta.spectate);
+    this.root.classList.toggle('spectate', specLike);
     this.hud = new ShooterHud(this.root, meta, ticket);
     this.buy = new BuyMenu(this.root.querySelector('.sg-buy')!, meta, (items: BuyItem[]) => this.send([{ type: 'buy', items }]));
     this.coachUi =
@@ -152,9 +154,19 @@ class Game {
           })
         : null;
     this.root.classList.toggle('coach', meta.coach !== undefined);
-    this.spec = meta.spectate ? new SpectateUi(this.root, this.canvas, this.mini, meta, this.hud, { view: (id) => this.post({ type: 'view', id }), seek: (round) => this.seek(round), frame: () => this.cur }) : null;
+    // 教練模式：同一套觀戰介面，選手資料從教練 frame 拼（己方＝觀察資料、對手＝計分板），只能跟隨己方
+    const ownGroup: 0 | 1 = meta.groups[meta.playerId];
+    this.spec = specLike
+      ? new SpectateUi(this.root, this.canvas, this.mini, meta, this.hud, {
+          view: (id) => this.post({ type: 'view', id }),
+          seek: (round) => this.seek(round),
+          frame: () => this.cur,
+          ...(meta.coach !== undefined ? { players: () => this.coachPlayers(), followOnly: ownGroup } : {}),
+        })
+      : null;
     this.input = new ShooterInput(this.canvas, {
-      meta,
+      // 教練模式的輸入當觀戰：不瞄準、不開火，空白鍵是教練暫停、← → 換跟隨的隊友
+      meta: specLike ? { ...meta, spectate: true } : meta,
       self: () => this.cur?.self ?? null,
       camera: () => this.renderer.camera,
       send: (cmds) => this.send(cmds),
@@ -255,14 +267,29 @@ class Game {
     return { frameMs: (performance.now() - t0) / n, n };
   }
 
-  /** 觀戰的全圖與透視開關；全圖一律看全部，透視在全圖時不作用 */
+  /** 觀戰的全圖與透視開關；全圖一律看全部，透視在全圖時不作用。教練模式沒有透視（視野只有己方） */
   private toggleMap(which: 'xray' | 'overview'): void {
     const cam = this.spec?.cam;
     if (cam === undefined) return;
     if (which === 'overview') {
       if (cam.mode === 'overview') cam.follow();
       else cam.overview();
-    } else if (cam.mode !== 'overview') this.xray = !this.xray;
+    } else if (cam.mode !== 'overview' && this.coachUi === null) this.xray = !this.xray;
+  }
+
+  /**
+   * 教練模式的選手列表資料（UI 審核 #6）：只用教練 frame 已經有的東西，不另外向引擎要。
+   * 己方：所看隊友（view.me）與其他隊友（view.teammates）的血量、金錢、武器、炸彈、下包／拆包；對手：計分板的存活、擊殺、死亡，位置不給（NaN，點不到）。
+   */
+  private coachPlayers(): readonly FullPlayer[] | null {
+    const f = this.cur;
+    if (f === null) return null;
+    const own = this.meta.groups[this.meta.playerId];
+    const me = f.view.me;
+    const mine = new Map<number, FullPlayer>();
+    mine.set(me.id, { id: me.id, team: me.team, alive: me.alive, x: me.x, y: me.y, facing: me.facing, hp: me.hp, weapon: me.weapon, hasBomb: me.hasBomb, blind: me.blindTicks > 0, scoped: me.scoped, firing: false, crouching: me.crouching, armor: me.loadout.armor, kit: me.loadout.kit, money: me.money, primary: me.loadout.primary, secondary: me.loadout.secondary, grenades: me.loadout.grenades, ammoMag: me.ammoMag, ammoReserve: me.ammoReserve, reloading: me.reloadTicksLeft > 0, plantTicks: me.plantTicks, defuseTicks: me.defuseTicks });
+    for (const t of f.view.teammates) mine.set(t.id, { id: t.id, team: me.team, alive: t.alive, x: t.x, y: t.y, facing: t.facing, hp: t.hp, weapon: t.weapon, hasBomb: t.hasBomb, blind: t.blind, scoped: false, firing: t.firing, money: t.money, plantTicks: t.planting ? Infinity : 0, defuseTicks: t.defusing ? Infinity : 0 });
+    return f.board.map((b) => (this.meta.groups[b.id] === own ? (mine.get(b.id) ?? { id: b.id, team: b.team, alive: b.alive, x: NaN, y: NaN, facing: 0, hp: 0, weapon: 'knife', hasBomb: false, blind: false, scoped: false, firing: false, money: b.money ?? 0 }) : { id: b.id, team: b.team, alive: b.alive, x: NaN, y: NaN, facing: 0, hp: 0, weapon: 'knife', hasBomb: false, blind: false, scoped: false, firing: false }));
   }
 
   private seeAll(): boolean {
@@ -298,10 +325,10 @@ class Game {
     this.post({ type: 'skipRound' });
   }
 
-  /** 觀戰：回到第 round 回合開始（Worker 重跑，等它回 frame） */
+  /** 觀戰：回到第 round 回合開始（Worker 重跑，等它回 frame）；教練模式是即時打的，不能倒帶 */
   private seek(round: number): void {
     const spec = this.spec;
-    if (spec === null || spec.busy || this.cur === null) return;
+    if (spec === null || spec.busy || this.cur === null || this.coachUi !== null) return;
     spec.seeking(this.cur.view.round.number, round);
     this.post({ type: 'seek', round });
   }
@@ -452,11 +479,12 @@ class Game {
   }
 
   private lastInput(f: ShooterFrame): DrawInput {
-    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.seeAll(), teamFog: this.coachUi !== null, tags: this.spec?.mode === 'overview', camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, allShots: this.allShots, pops: this.pops, corpses: this.corpses };
+    // 教練模式：透視永遠關（seeAll 在沒有全狀態時本來就不會成立，這裡再擋一層）
+    return { cur: f, prev: this.prev, alpha: 1, mouse: this.input.mouse, zoom: ZOOMS[this.zoomIdx], xray: this.coachUi === null && this.seeAll(), teamFog: this.coachUi !== null, tags: this.spec?.mode === 'overview', camera: this.spec?.cam.view ?? null, pov: this.spec === null || this.spec.mode === 'follow', hover: this.spec?.hover ?? null, charge: null, sounds: this.sounds, now: 0, throwCd: 0, tracers: this.tracers, hurts: this.hurts, others: this.others, allShots: this.allShots, pops: this.pops, corpses: this.corpses };
   }
 
   private updateCursor(f: ShooterFrame): void {
-    const aiming = hidesCursor({ spectate: this.meta.spectate, over: this.over !== null, paused: this.paused, buyOpen: this.buy.isOpen(), alive: f.self.me.alive, focused: document.hasFocus() });
+    const aiming = hidesCursor({ spectate: this.meta.spectate || this.coachUi !== null, over: this.over !== null, paused: this.paused, buyOpen: this.buy.isOpen(), alive: f.self.me.alive, focused: document.hasFocus() });
     this.canvas.classList.toggle('aiming', aiming);
   }
 

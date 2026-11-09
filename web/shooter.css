@@ -368,7 +368,9 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sg-seek span { font-size: max(11px, calc(var(--u) * 14)); color: var(--grey); }
 
 /* ── 教練模式（M5 第四批 4b）：上方狀態列＋停下時的教練面板。照 CS：半透明墨黑、細線、字小，面板放中間 ── */
-.sg-coach { position: absolute; top: calc(118 * var(--u)); left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--glass2); box-shadow: inset 0 0 0 1px var(--hair); font-size: 13px; white-space: nowrap; }
+/* 教練列放在回合橫幅（top 84u）下方，不互相壓；速度鈕在下方控制列（UI 審核 #6） */
+.sg-coach { position: absolute; top: calc(140 * var(--u)); left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--glass2); box-shadow: inset 0 0 0 1px var(--hair); font-size: 13px; white-space: nowrap; }
+.sg.coach .sg-roster .ro.dim { opacity: 0.8; }
 .sg-coach .en { font-family: var(--mono); font-size: 11px; letter-spacing: 0.3em; color: var(--accent); }
 .sg-coach b { font-weight: 700; letter-spacing: 0.08em; text-shadow: var(--txs); }
 .sg-coach button { height: 28px; padding: 0 12px; font-size: 13px; }

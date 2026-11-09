@@ -387,7 +387,7 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
         if (human !== null && driver !== null && !paused) human.enqueue(msg.cmds);
         break;
       case 'view':
-        if (msg.id !== undefined && setup?.spectate) viewId = msg.id;
+        if (msg.id !== undefined && (setup?.spectate || (coachMode() && driver?.match.players[msg.id]?.group === coachGroup()))) viewId = msg.id;
         else if (msg.step !== undefined) cycleView(msg.step);
         sendFrame();
         break;
