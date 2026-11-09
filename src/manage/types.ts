@@ -219,6 +219,8 @@ export interface Message {
   week: number;
   kind: 'result' | 'finance' | 'report' | 'system';
   text: string;
+  /** 這則通知提到的選手（季中補人：新進的自由選手；給市場頁標「新」用）；沒有＝不帶這欄 */
+  playerIds?: PlayerId[];
 }
 
 export interface SeasonResult {

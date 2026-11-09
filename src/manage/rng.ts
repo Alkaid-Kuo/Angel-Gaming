@@ -13,6 +13,8 @@ export const STREAM = {
   auto: 7,
   /** M5：開局個人戰術熟練度 */
   tactics: 8,
+  /** M5：季中補自由選手（週數） */
+  market: 9,
 } as const;
 
 export function rngFor(seed: number, stream: number, ...keys: number[]): Prng {

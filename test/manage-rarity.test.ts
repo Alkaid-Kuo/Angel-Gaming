@@ -125,7 +125,8 @@ describe('開局抽品階', () => {
     expect(back.players.map((p) => p.rarity)).toEqual(s.players.map((p) => p.rarity));
     const before = s.players.map((p) => p.rarity);
     await runSeason(s, content, gateway, null);
-    expect(s.players.map((p) => p.rarity)).toEqual(before);
+    // 季中補人（規格 4.14）只往後加新選手：開局那些人的品階不變
+    expect(s.players.slice(0, before.length).map((p) => p.rarity)).toEqual(before);
     expect(s.players.every((p) => content.attributes.trainable.every((k) => p.attrs[k] <= p.caps[k]))).toBe(true);
   });
 });

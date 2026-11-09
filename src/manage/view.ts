@@ -205,7 +205,7 @@ export function knownView(state: GameState, content: ContentPack, teamId: TeamId
     bets: state.bets.filter((b) => b.teamId === teamId).map((b) => ({ ...b })),
     jobs: state.jobs.filter((j) => j.teamId === teamId).map((j) => ({ ...j })),
     ledger: team.ledger.map((e) => ({ ...e })),
-    inbox: teamId === state.humanTeamId ? state.inbox.map((m) => ({ ...m })) : [],
+    inbox: teamId === state.humanTeamId ? state.inbox.map((m) => ({ ...m, ...(m.playerIds !== undefined ? { playerIds: [...m.playerIds] } : {}) })) : [],
     seasonResult: state.seasonResult ? { ranks: [...state.seasonResult.ranks], humanRank: state.seasonResult.humanRank } : null,
   };
 }
