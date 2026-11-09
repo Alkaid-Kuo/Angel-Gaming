@@ -107,6 +107,10 @@ export interface TacticSpec {
   /** 短名（結果幕逐回合比分條的小字；沒有＝用 name）；只供顯示 */
   readonly abbr?: string;
   readonly affinity: readonly string[];
+  /** 說明（兩三句：怎麼打、適合什麼情況、風險）；只供顯示 */
+  readonly desc: string;
+  /** 相剋提示（一句，依 docs 的戰術相剋矩陣寫）；只供顯示 */
+  readonly tips: string;
 }
 
 export interface ContentPack {
