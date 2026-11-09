@@ -1,5 +1,6 @@
 // 觀戰介面：滑鼠操作（點人跟隨、拖曳自由鏡頭、滾輪縮放、雙擊回跟隨）、兩隊選手列表、按鍵表、跳回合提示。
 // 試玩觀戰與經營層觀戰（#watch）共用同一套。資料來自 FullState（觀戰本來就有全狀態）與計分板。
+// 教練模式（M5 6.5、UI 審核 #6）也用這一套：沒有全狀態，選手資料由 host.players() 給（己方＝觀察資料聯集、對手＝計分板公開欄位），只能跟隨己方。
 // 面板是 DOM，30 Hz 更新，只有內容變了才寫（hud.ts 的 setHtml）。列表的內容會一直換，所以吃 pointerdown 不吃 click：按下到放開之間子元素被換掉就不會有 click。
 import type { GrenadeId, WeaponId } from '../../shooter/api.ts';
 import { DRAG_PX, SpectateCamera, pickPlayer, type CamEnv, type CamMode, type CamView } from './camera.ts';
@@ -53,6 +54,10 @@ export interface SpectateHost {
   seek(round: number): void;
   /** 目前的鏡頭、最新畫面 */
   frame(): ShooterFrame | null;
+  /** 沒有全狀態時（教練模式）的選手列表：己方有血量、金錢、武器，對手只有存活與擊殺／死亡 */
+  players?(): readonly FullPlayer[] | null;
+  /** 只能跟隨這一組（教練模式＝己方） */
+  followOnly?: 0 | 1;
 }
 
 export class SpectateUi {
@@ -139,6 +144,16 @@ export class SpectateUi {
     return this.host.frame()?.full ?? null;
   }
 
+  /** 畫面上的選手：全狀態有就用全狀態，沒有（教練模式）就用 host 給的 */
+  private players(): readonly FullPlayer[] | null {
+    return this.full()?.players ?? this.host.players?.() ?? null;
+  }
+
+  /** 這個人能不能被跟隨（教練模式只能跟己方） */
+  private canFollow(id: number): boolean {
+    return this.host.followOnly === undefined || this.meta.groups[id] === this.host.followOnly;
+  }
+
   private canvasPos(e: MouseEvent): { x: number; y: number } {
     const r = this.canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -151,14 +166,16 @@ export class SpectateUi {
   }
 
   private pick(p: { x: number; y: number }): number | null {
-    const full = this.full();
-    if (full === null) return null;
+    const list = this.players();
+    if (list === null) return null;
     const [wx, wy] = this.worldAt(p);
-    return pickPlayer(full.players, wx, wy, this.cam.scale);
+    const id = pickPlayer(list, wx, wy, this.cam.scale);
+    return id !== null && this.canFollow(id) ? id : null;
   }
 
   /** 跟隨這個人（從任何鏡頭模式回來，平移過去） */
   follow(id: number): void {
+    if (!this.canFollow(id)) return;
     this.cam.follow();
     this.host.view(id);
   }
@@ -216,9 +233,9 @@ export class SpectateUi {
       const k = r.width / (this.meta.map.width * UNIT);
       const wx = (e.clientX - r.left) / k;
       const wy = (e.clientY - r.top) / k;
-      const full = this.full();
-      const id = full === null ? null : pickPlayer(full.players, wx, wy, k, 9);
-      if (id !== null) this.follow(id);
+      const list = this.players();
+      const id = list === null ? null : pickPlayer(list, wx, wy, k, 9);
+      if (id !== null && this.canFollow(id)) this.follow(id);
       else this.cam.jumpTo(wx, wy);
     });
     for (const r of this.rosters) {
@@ -272,7 +289,7 @@ export class SpectateUi {
     this.cam.setEnv(this.env());
     const dt = this.lastT === 0 ? 0 : Math.min(100, t - this.lastT);
     this.lastT = t;
-    const me = f.full?.players.find((p) => p.id === f.viewId);
+    const me = this.players()?.find((p) => p.id === f.viewId);
     const view = this.cam.update(dt, me !== undefined ? interp(me, prev?.full?.players, alpha) : null, speed);
     this.canvas.classList.toggle('drag', this.press?.drag === true);
     this.canvas.classList.toggle('pick', this.hover !== null);
@@ -284,15 +301,17 @@ export class SpectateUi {
   }
 
   private panels(f: ShooterFrame): void {
-    const full = f.full;
-    if (full === null) return;
+    const players = this.players();
+    if (players === null) return;
     if (this.sides !== this.hud.sides) this.paintRows();
     this.hud.leftRight(f.board).forEach((team, side) => {
-      const list = full.players.filter((p) => p.team === team);
+      const list = players.filter((p) => p.team === team);
+      // 金錢只有看得到的才加總（教練模式對手的是 null，不顯示）
+      const known = list.every((p) => p.money !== undefined);
       const money = list.reduce((a, p) => a + (p.money ?? 0), 0);
-      setHtml(this.heads[side], `<b style="color:${this.hud.groupColor(this.hud.groupOf(team, f.board))}">${this.hud.groupLabel(this.hud.groupOf(team, f.board))}</b><small>${team}</small><span>存活 ${list.filter((p) => p.alive).length}</span><span class="mo">$${money}</span>`);
+      setHtml(this.heads[side], `<b style="color:${this.hud.groupColor(this.hud.groupOf(team, f.board))}">${this.hud.groupLabel(this.hud.groupOf(team, f.board))}</b><small>${team}</small><span>存活 ${list.filter((p) => p.alive).length}</span><span class="mo">${known ? `$${money}` : ''}</span>`);
     });
-    for (const p of full.players) {
+    for (const p of players) {
       const row = this.rows.get(p.id) as HTMLElement;
       const b = f.board[p.id];
       row.classList.toggle('dead', !p.alive);
@@ -308,20 +327,26 @@ export class SpectateUi {
   private rowHtml(p: FullPlayer, b: BoardRow): string {
     const name = this.meta.names[p.id] ?? `#${p.id}`;
     const tag = this.meta.watch?.tags[p.id];
+    // 教練模式的對手列：只有計分板的公開欄位（存活、擊殺、死亡），沒有血量、金錢、武器
+    if (this.host.followOnly !== undefined && this.meta.groups[p.id] !== this.host.followOnly) {
+      return `<i class="hpf" style="width:0"></i><div class="l1"><b class="hp">${p.alive ? '●' : '—'}</b><span class="nm">${esc(name)}${tag !== undefined ? `<small>${esc(tag)}</small>` : ''}</span><span class="kd">${b.kills}／${b.deaths}</span></div><div class="l2"><span class="wn">${p.alive ? '存活' : '陣亡'}</span></div>`;
+    }
     const head = `<div class="l1"><b class="hp">${p.alive ? p.hp : '—'}</b><span class="nm">${esc(name)}${tag !== undefined ? `<small>${esc(tag)}</small>` : ''}</span><span class="kd">${b.kills}／${b.deaths}</span><span class="mo">$${p.money ?? b.money ?? 0}</span></div>`;
     if (!p.alive) return `<i class="hpf" style="width:0"></i>${head}<div class="l2"><span class="wn">陣亡</span></div>`;
     const counts = new Map<GrenadeId, number>();
     for (const g of p.grenades ?? []) counts.set(g, (counts.get(g) ?? 0) + 1);
     const nades = [...counts].map(([g, n]) => `<em>${GRENADE_TAG[g]}${n > 1 ? n : ''}</em>`).join('');
-    const ammo = p.weapon === 'knife' ? '' : p.reloading === true ? '換彈' : `${p.ammoMag ?? 0}／${p.ammoReserve ?? 0}`;
-    const armor = (p.armor ?? 0) > 0 ? `<span class="ar">甲 ${p.armor}</span>` : '<span class="ar none">無甲</span>';
+    // 不知道的欄位不顯示（教練模式只有所看那位隊友有彈藥與護甲）
+    const ammo = p.weapon === 'knife' || p.ammoMag === undefined ? '' : p.reloading === true ? '換彈' : `${p.ammoMag}／${p.ammoReserve ?? 0}`;
+    const armor = p.armor === undefined ? '' : p.armor > 0 ? `<span class="ar">甲 ${p.armor}</span>` : '<span class="ar none">無甲</span>';
     const chips = `${p.kit === true ? '<em class="eq">拆</em>' : ''}${p.hasBomb ? '<em class="eq">包</em>' : ''}`;
     // 下包、拆包：整列下緣一條進度
     const rules = this.meta.rules;
     const plant = p.plantTicks ?? 0;
     const defuse = p.defuseTicks ?? 0;
     const need = p.kit === true ? rules.defuseKitTicks : rules.defuseTicks;
-    const work = plant > 0 ? ['下包中', plant / rules.plantTicks] : defuse > 0 ? ['拆包中', defuse / need] : null;
+    // 教練模式只知道隊友「在下包／拆包」（沒有進度），進度條畫滿
+    const work = plant > 0 ? ['下包中', plant === Infinity ? 1 : plant / rules.plantTicks] : defuse > 0 ? ['拆包中', defuse === Infinity ? 1 : defuse / need] : null;
     const tail = work !== null ? `<span class="st">${work[0]}</span>` : `${chips}${armor}`;
     const prog = work !== null ? `<i class="pg" style="width:${Math.min(100, Math.round(Number(work[1]) * 100))}%"></i>` : '';
     return `<i class="hpf${p.hp <= 30 ? ' low' : ''}" style="width:${Math.max(0, p.hp)}%"></i>${head}<div class="l2"><span class="wn">${this.weaponName(p.weapon)}</span><span class="am">${ammo}</span>${nades}<span class="sp"></span>${tail}</div>${prog}`;

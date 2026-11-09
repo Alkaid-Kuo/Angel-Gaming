@@ -4,3 +4,4 @@ out/
 replays/
 *.log
 dist-web/
+output/

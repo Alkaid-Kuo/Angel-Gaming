@@ -1,5 +1,6 @@
 // 教練模式的介面（M5 規格 6.5）：上方狀態列（暫停鍵、速度、轉一般觀戰）與停下時的教練面板。
 // 暫停：本回合照打，停在下一回合凍結前，跳出面板（下一回合戰術、經濟、修改比賽計畫）；換邊自動停一次，面板只有修改計畫。
+// 其餘 HUD（選手列表、控制列、鏡頭、小地圖）和一般觀戰同一套（spectate.ts、hud.ts），只看得到己方（UI 審核 #6）。
 // 沒有倒數（單人遊戲，模擬已停）。照攻防戰對局介面偏好：半透明、重要的放中間、字小、不放說明文字。
 import type { CoachCall, CoachPlan } from '../../manage/gateway.ts';
 import type { CoachStop } from '../../shooter/live-coach.ts';
@@ -90,8 +91,8 @@ export class CoachUi {
       : s.pending
         ? `<button data-act="cpause" class="on">暫停已排定（剩 ${s.timeoutsLeft}）· 取消</button>`
         : `<button data-act="cpause" ${s.timeoutsLeft <= 0 || this.stop !== null ? 'disabled' : ''}>暫停（剩 ${s.timeoutsLeft}）</button>`;
-    const speeds = this.speeds.map((v, i) => `<button data-act="cspeed" data-i="${i}" class="sp ${i === this.speedIdx ? 'on' : ''}">${v}×</button>`).join('');
-    this.bar.innerHTML = `<span class="en">COACH</span><b>第 ${s.round} 回合</b>${pause}<span class="sps">${speeds}</span>${s.left ? '' : '<button data-act="cleave" class="lv">轉一般觀戰</button>'}`;
+    // 速度鈕在下方控制列（和一般觀戰一樣），這裡只放教練的事：回合、暫停、轉一般觀戰
+    this.bar.innerHTML = `<span class="en">COACH</span><b>第 ${s.round} 回合</b>${pause}${s.left ? '' : '<button data-act="cleave" class="lv">轉一般觀戰</button>'}`;
   }
 
   private drawPanel(): void {
@@ -99,10 +100,10 @@ export class CoachUi {
     const plan = this.plan;
     if (s === null || plan === null) return;
     const mine = this.info.tactics.filter((t) => t.side === s.side);
-    const tac = [{ id: null as string | null, name: '交給選手' }, ...mine.map((t) => ({ id: t.id as string | null, name: t.name }))];
+    const tac = [{ id: null as string | null, name: '交給選手', tips: '' }, ...mine.map((t) => ({ id: t.id as string | null, name: t.name, tips: t.tips ?? '' }))];
     const call =
       s.kind === 'timeout'
-        ? `<div class="sec"><small>第 ${s.round} 回合戰術</small><div class="opts">${tac.map((t) => `<button data-act="ctac" data-id="${t.id ?? ''}" class="${t.id === this.tactic ? 'on' : ''}">${esc(t.name)}</button>`).join('')}</div></div>
+        ? `<div class="sec"><small>第 ${s.round} 回合戰術</small><div class="opts">${tac.map((t) => `<button data-act="ctac" data-id="${t.id ?? ''}" class="${t.id === this.tactic ? 'on' : ''}" ${t.tips ? `data-tip="${esc(t.tips)}"` : ''}>${esc(t.name)}</button>`).join('')}</div></div>
            <div class="sec"><small>經濟</small><div class="opts">${BUYS.map((b) => `<button data-act="cbuy" data-id="${b.id ?? ''}" class="${b.id === this.buy ? 'on' : ''}">${b.name}</button>`).join('')}</div></div>`
         : '';
     const prefs = (['T', 'CT'] as const)

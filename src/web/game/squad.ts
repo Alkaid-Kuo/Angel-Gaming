@@ -29,10 +29,10 @@ export function squadScreen(ctx: Ctx): string {
       const p = ctx.pm.get(id);
       const r = recs.get(id) ?? { w: 0, l: 0 };
       const card = p
-        ? pcard(ctx, p, { act: 'pick-slot', sel: ui.pickSlot === i || !lu.auto, sub: `<span class="num">${r.w}-${r.l}</span> <small>W-L</small>` }).replace('data-act="pick-slot"', `data-act="pick-slot" data-slot="${i}"`)
+        ? pcard(ctx, p, { act: 'pick-slot', sel: ui.pickSlot === i || !lu.auto, drag: active, sub: `<span class="num">${r.w}-${r.l}</span> <small>W-L</small>` }).replace('data-act="pick-slot"', `data-act="pick-slot" data-slot="${i}"`)
         : `<div class="pc empty" data-act="pick-slot" data-slot="${i}">空位</div>`;
       return `<div class="ls s${i + 1} ${ui.pickSlot === i ? 'picking' : ''}" data-drop-slot="${i}"><div class="lb"><span class="num">0${i + 1}</span><b>${esc(slotName(ctx, i))}</b><span>${slotEn(ctx, i)}</span></div>${card}
-        <div class="vsr"><span>${p ? esc(lineageName(c, p.lineageId)) : '流派'}</span><b>${p ? stageName(p.stage) : '—'}</b></div></div>`;
+        <div class="vsr"><span>${p ? esc(lineageName(c, p.lineageId)) : '流派'}</span><b class="gr" data-tip="強度等級：${esc(c.attributes.trainable.map((k) => c.attributes.names[k] ?? k).join('／'))}">${p ? strengthGrades(c, p) : '—'}</b></div></div>`;
     })
     .join('');
   const hint =
@@ -40,7 +40,7 @@ export function squadScreen(ctx: Ctx): string {
       ? '賽段已結束，名單不能再改。'
       : ui.pickSlot !== null
         ? `<b class="gd2">點右邊陣容的一位選手，放到「${esc(slotName(ctx, ui.pickSlot))}」</b>　<button class="lnk" data-act="pick-slot" data-slot="-1">取消</button>`
-        : `${lu.auto ? `<b class="gd2">目前是自動名單（評分最高的 ${n} 人）。</b>` : ''}點出賽位再點人，或把右邊的人拖到出賽位；選到已上場的人會互換位置。`;
+        : `${lu.auto ? `<b class="gd2">目前是自動名單（評分最高的 ${n} 人）。</b>` : ''}卡片之間直接拖曳就互換位置；也可以點出賽位再點右邊的人，或把右邊的人拖到出賽位。`;
   const rows = mine
     .map((p) => {
       const slot = lu.ids.indexOf(p.id);

@@ -2,7 +2,7 @@
 // 開放只擋介面入口，遊戲規則與存檔不變；進度存在介面偏好（prefs.guide），舊存檔沒有這欄＝全部開放。
 import type { ContentPack, KnownView } from '../../manage/index.ts';
 
-export type Screen = 'title' | 'create' | 'hub' | 'squad' | 'player' | 'market' | 'training' | 'tactics' | 'league' | 'betting' | 'finance' | 'inbox';
+export type Screen = 'title' | 'create' | 'hub' | 'squad' | 'player' | 'market' | 'training' | 'tactics' | 'league' | 'archive' | 'betting' | 'finance' | 'inbox';
 
 export interface GuideState {
   /** false＝關閉教學、全部開放 */
@@ -12,9 +12,9 @@ export interface GuideState {
 }
 
 /** 第幾週開放（v.week：0＝休賽期、1＝第 1 週）；沒列的一開始就有 */
-export const UNLOCK_WEEK: Partial<Record<Screen, number>> = { league: 1, finance: 1, training: 2, tactics: 2, betting: 3 };
+export const UNLOCK_WEEK: Partial<Record<Screen, number>> = { league: 1, archive: 1, finance: 1, training: 2, tactics: 2, betting: 3 };
 
-export const SCREEN_NAME: Partial<Record<Screen, string>> = { league: '聯賽', finance: '財務', training: '訓練基地', tactics: '戰術室', betting: '賭盤' };
+export const SCREEN_NAME: Partial<Record<Screen, string>> = { league: '聯賽', archive: '檔案室', finance: '財務', training: '訓練基地', tactics: '戰術室', betting: '賭盤' };
 
 /** 這個畫面還要等到第幾週才開放；已開放回傳 null */
 export function lockedUntil(screen: Screen, v: Pick<KnownView, 'week' | 'phase'>, guide: GuideState | undefined): number | null {
@@ -150,8 +150,8 @@ const LESSONS: readonly Lesson[] = [
         id: 'w1.unlock',
         screen: 'hub',
         tag: 'NEW // 新功能開放',
-        title: '聯賽、財務',
-        body: () => '<b>聯賽</b>：排名、賽程、季後賽。前 4 名進季後賽，勝 3 分、平 1 分。<br><b>財務</b>：現金曲線和每週收支，錢去哪裡了都看得到。<br>左邊的選單和城市裡的建築都能點進去。',
+        title: '聯賽、檔案室、財務',
+        body: () => '<b>聯賽</b>：排名、賽程、季後賽。前 4 名進季後賽，勝 3 分、平 1 分。<br><b>檔案室</b>：打完的比賽都在這裡，可以回放整場。<br><b>財務</b>：現金曲線和每週收支，錢去哪裡了都看得到。<br>左邊的選單和城市裡的建築都能點進去。',
       },
       {
         id: 'w1.match',
@@ -288,7 +288,11 @@ export const HELP: Partial<Record<Screen, { title: string; auto?: boolean; items
   league: {
     title: '聯賽',
     auto: true,
-    items: ['上方時間軸可以點，切換看哪一週的賽程。', '打完的比賽有「觀戰」，可以回看任何一場。', '虛線以上進季後賽；同分比比分差。', '名次獎金差距很大，排名值得拚。'],
+    items: ['上方時間軸可以點，切換看哪一週的賽程。', '打完的比賽到「檔案室」回放。', '虛線以上進季後賽；同分比比分差。', '名次獎金差距很大，排名值得拚。'],
+  },
+  archive: {
+    title: '檔案室',
+    items: ['打完的比賽都存在這裡：週次、對手、比分、我方那場常打的戰術。', '「回放」用當時的名單與設定重跑整場，結果和成績單一樣；看的時候可以暫停、調速、切鏡頭。', '別隊之間的比賽只有比分與名單。'],
   },
   betting: {
     title: '賭盤',

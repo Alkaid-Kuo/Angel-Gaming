@@ -52,7 +52,8 @@ export interface WatchSetup extends WatchInfo {
 export interface CoachInfo {
   readonly side: 'a' | 'b';
   readonly assistant: boolean;
-  readonly tactics: readonly { readonly id: string; readonly name: string; readonly side: Team }[];
+  /** tips：相剋提示（內容包的 TacticSpec.tips，只供暫停面板顯示；舊票沒有） */
+  readonly tactics: readonly { readonly id: string; readonly name: string; readonly side: Team; readonly tips?: string }[];
 }
 
 export interface CoachSetup extends WatchSetup {

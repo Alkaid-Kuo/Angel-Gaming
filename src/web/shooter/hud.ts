@@ -129,7 +129,8 @@ export class ShooterHud {
     this.zone = root.querySelector('.sg-radar .rz b');
     this.end = el('div', 'sg-end hidden', root);
     this.pause = el('div', 'sg-pause hidden', root);
-    this.ctl = meta.spectate ? el('div', 'sg-ctl', root) : null;
+    // 觀戰與教練模式都有控制列（教練：暫停鈕是教練暫停、沒有下一回合與透視）
+    this.ctl = meta.spectate || meta.coach !== undefined ? el('div', 'sg-ctl', root) : null;
     const resume = meta.spectate ? '繼續（空白鍵）' : '繼續（Esc）';
     const quit = EMBED ? '跳過比賽' : meta.watch ? '回經營' : meta.spectate ? '離開觀戰' : '離開比賽';
     this.pause.innerHTML =
@@ -288,17 +289,18 @@ export class ShooterHud {
       `<span class="mn"><button type="button" data-act="menu" data-m="${m}" title="${title}">${label}<small>▾</small></button>${this.menu === m ? `<span class="pop">${items}</span>` : ''}</span>`;
     const speeds = SPEEDS.map((s, i) => item('speed', s === speed, `${s}×`, `data-i="${i}"`)).reverse().join('');
     const cams = item('cam-follow', map.cam === 'follow', CAM_NAME.follow) + item('cam-free', map.cam === 'free', CAM_NAME.free) + item('cam-map', map.cam === 'overview', CAM_NAME.overview);
+    const coach = this.meta.coach !== undefined;
     setHtml(
       this.ctl,
-      `<button type="button" data-act="pause" title="暫停（空白鍵）" ${over ? 'disabled' : ''}>${paused ? '▶' : 'Ⅱ'}</button>` +
-        `<button type="button" data-act="skip" title="下一回合（N）" ${over ? 'disabled' : ''}>▶▶</button><i></i>` +
+      (coach ? '' : `<button type="button" data-act="pause" title="暫停（空白鍵）" ${over ? 'disabled' : ''}>${paused ? '▶' : 'Ⅱ'}</button>`) +
+        (coach ? '' : `<button type="button" data-act="skip" title="下一回合（N）" ${over ? 'disabled' : ''}>▶▶</button><i></i>`) +
         menu('speed', `${speed}×`, '速度（[ ]）', speeds) +
         menu('cam', CAM_NAME[map.cam], '鏡頭（M 全圖）', cams) +
-        item('xray', map.xray, '透視', `title="X" ${map.cam === 'overview' ? 'disabled' : ''}`) +
+        (coach ? '' : item('xray', map.xray, '透視', `title="X" ${map.cam === 'overview' ? 'disabled' : ''}`)) +
         `<i></i>` +
         item('fullscreen', document.fullscreenElement !== null, '⛶', 'title="全螢幕（F11）"') +
         `<button type="button" data-act="help" title="? 或 H">?</button>` +
-        `<button type="button" class="${EMBED ? 'skipm' : ''}" data-act="quit">${EMBED ? '跳過比賽' : this.meta.watch ? '回經營' : '離開'}</button>`,
+        `<button type="button" class="${EMBED && !coach ? 'skipm' : ''}" data-act="quit">${coach ? '離席回經營' : EMBED ? '跳過比賽' : this.meta.watch ? '回經營' : '離開'}</button>`,
     );
   }
 
@@ -323,6 +325,22 @@ export class ShooterHud {
       if (d === undefined) return `${site}${bar((b.ticksLeft ?? 0) / rules.bombTicks)}${left}`;
       return `${site}<span>${who(d.id)} 拆包中${d.kit === true ? '（拆彈器）' : ''}</span>${bar((d.defuseTicks ?? 0) / (d.kit === true ? rules.defuseKitTicks : rules.defuseTicks))}${left}`;
     }
+    return b.state === 'defused' ? '<span>炸彈已拆除</span>' : b.state === 'exploded' ? '<span>炸彈已引爆</span>' : '';
+  }
+
+  /** 沒有全狀態時的炸彈條（教練模式）：己方觀察資料聯集裡的炸彈狀態 */
+  private viewBomb(view: ShooterObservation, tps: number): string {
+    const vm = view.me;
+    if (vm.plantTicks > 0) return `<span>${this.name(vm.id)} 下包中</span>`;
+    if (vm.defuseTicks > 0) return `<span>${this.name(vm.id)} 拆包中</span>`;
+    const b = view.bomb;
+    if (b.state === 'planting') return '<span>隊友下包中</span>';
+    if (b.state === 'planted' || b.state === 'defusing') return `<span>炸彈在 ${b.site ?? '?'} 點${b.state === 'defusing' ? '・拆包中' : ''}</span><b>${b.ticksLeft !== null ? (b.ticksLeft / tps).toFixed(1) : ''}</b>`;
+    if (b.state === 'carried') {
+      const c = vm.hasBomb ? vm.id : (view.teammates.find((t) => t.hasBomb)?.id ?? null);
+      return c === null ? '' : `<span>炸彈在 ${this.name(c)} 身上</span>`;
+    }
+    if (b.state === 'dropped') return '<span>炸彈掉在地上</span>';
     return b.state === 'defused' ? '<span>炸彈已拆除</span>' : b.state === 'exploded' ? '<span>炸彈已引爆</span>' : '';
   }
 
@@ -366,7 +384,8 @@ export class ShooterHud {
 
     // 提示列：只放當下要知道的短句，操作說明在開局畫面
     const hints: string[] = [];
-    if (this.meta.spectate) {
+    const specLike = this.meta.spectate || this.meta.coach !== undefined;
+    if (specLike) {
       if (extra.cam === 'follow') hints.push(`跟隨 ${this.name(f.viewId)}${this.meta.watch ? `<small class="tg">${esc(this.meta.watch.tags[f.viewId] ?? '')}</small>` : ''}`);
     } else if (!self.me.alive) {
       const d = this.myDeath;
@@ -380,9 +399,9 @@ export class ShooterHud {
     }
     setHtml(this.hint, hints.join('<span class="sep"></span>'));
 
-    if (this.meta.spectate) {
-      // 觀戰：血甲錢與武器都在選手列表，這裡只剩炸彈條
-      const bomb = f.full !== null ? this.spectateBomb(f.full) : '';
+    if (specLike) {
+      // 觀戰：血甲錢與武器都在選手列表，這裡只剩炸彈條（教練模式沒有全狀態，用己方觀察資料的炸彈狀態）
+      const bomb = f.full !== null ? this.spectateBomb(f.full) : this.viewBomb(view, tps);
       setHtml(this.bombBar, bomb);
       this.bombBar.classList.toggle('hidden', bomb === '');
       if (this.boardShown) this.renderBoard(this.board, f.board, null, boardHead);
@@ -523,7 +542,7 @@ export function halfLabel(half: number, overtime: number): string {
 export function roundBanner(prev: ShooterObservation | null, cur: ShooterObservation, meta: ShooterMeta): string | null {
   if (prev === null || prev.round.number !== cur.round.number) {
     const team = cur.me.team;
-    const sub = meta.spectate ? '' : `<small>你是 <b>${team}</b>${team === 'T' ? '：帶炸彈攻 A／B 點' : '：守住 A／B 點'}</small>`;
+    const sub = meta.spectate ? '' : `<small>${meta.coach !== undefined ? '我方' : '你是'} <b>${team}</b>${team === 'T' ? '：帶炸彈攻 A／B 點' : '：守住 A／B 點'}</small>`;
     const n = cur.round.number;
     const rs = meta.rules;
     // 半場首回合：正規下半場換邊；加時每段開始不換邊、段內換邊
