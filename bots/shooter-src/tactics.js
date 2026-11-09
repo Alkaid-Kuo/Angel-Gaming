@@ -3395,6 +3395,11 @@ export class Tactics {
       // 半徑外不會致盲：停在半徑外等炸開，不用躲
       if (d >= R && d < R + edge && mf !== undefined && g.los(me.x, me.y, f.x, f.y)) {
         out.stop = true;
+        // 3.0（r7i）：停步指令要等反應延遲，這段時間會滑進半徑（default 剩下的正對隊友致盲幾乎都是這種）：沒看到敵人就也轉開，只改朝向
+        if (P.flashEdgeTurn && obs.enemies.length === 0) {
+          out.look = { x: me.x + (me.x - f.x) * 2, y: me.y + (me.y - f.y) * 2 };
+          out.urgent = true;
+        }
         return;
       }
       // CT 在守位：閃光是對著外面丟的，離開崗位比被閃一下更虧
@@ -3421,6 +3426,18 @@ export class Tactics {
         return;
       }
     }
+    // 3.0（r7i）：只轉朝向、不改位置路線：上面沒躲到的隊友閃光（下包拆包中；或爆點偏了一點、自己算的視線說看不到但其實看得到）
+    // 沒看到敵人、在半徑＋邊緣內、爆點附近（±1 格）有視線就背對它；轉向不會打斷下包拆包
+    let turned = false;
+    if (P.flashEdgeTurn && me.team === 'T' && obs.enemies.length === 0 && own === null) {
+      const near = (/** @type {{ x: number, y: number }} */ x) => [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => this.g.los(me.x, me.y, x.x + a * UNIT, x.y + b * UNIT));
+      const tf = this.mateFlash.find((x) => threat(x) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && near(x));
+      if (tf !== undefined) {
+        out.look = { x: me.x + (me.x - tf.x) * 2, y: me.y + (me.y - tf.y) * 2 };
+        out.urgent = true;
+        turned = true;
+      }
+    }
     // 自己或隊友的閃光還沒爆、自己看不到爆點：再走會進視線才停在轉角，否則繼續走（炸開時人才在入口）
     const ownPending = this.util.away !== null && t < this.util.away.until - 3 ? this.util.away : null;
     const pending = ownPending ?? this.mateFlash.find((x) => t < x.pop - Math.max(0, release) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + ((x.pop - t) / this.tps) * P.routeSpeed * UNIT);
@@ -3428,6 +3445,7 @@ export class Tactics {
       out.stop = true;
       return;
     }
+    if (turned) return;
     // 2.7：拆包、下包途中不停（P.tradeSkipTask；defuseTeam 的 eta 沒算這些停頓）
     const busy = P.tradeSkipTask && (out.task === 'defuse' || out.task === 'plant');
     if (this.trade !== null) {

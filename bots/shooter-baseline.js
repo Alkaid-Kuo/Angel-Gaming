@@ -160,6 +160,7 @@ chaseTime: 3,
 flashMateClear: 4,
 resLayer: true,
 flashNeedInfo: true,
+flashEdgeTurn: true,
 smokeOff: 4.5,
 smokeGap: 6,
 flankNear: 12,
@@ -5906,6 +5907,10 @@ const g = this.g;
 const d = dist(me.x, me.y, f.x, f.y);
 if (d >= R && d < R + edge && mf !== undefined && g.los(me.x, me.y, f.x, f.y)) {
 out.stop = true;
+if (P.flashEdgeTurn && obs.enemies.length === 0) {
+out.look = { x: me.x + (me.x - f.x) * 2, y: me.y + (me.y - f.y) * 2 };
+out.urgent = true;
+}
 return;
 }
 if (d < R && g.los(me.x, me.y, f.x, f.y) && me.team === 'T') {
@@ -5930,12 +5935,23 @@ out.hard = f.until - t <= this.data.rules.reactionTicks + 12;
 return;
 }
 }
+let turned = false;
+if (P.flashEdgeTurn && me.team === 'T' && obs.enemies.length === 0 && own === null) {
+const near = ( x) => [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => this.g.los(me.x, me.y, x.x + a * UNIT, x.y + b * UNIT));
+const tf = this.mateFlash.find((x) => threat(x) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + edge && near(x));
+if (tf !== undefined) {
+out.look = { x: me.x + (me.x - tf.x) * 2, y: me.y + (me.y - tf.y) * 2 };
+out.urgent = true;
+turned = true;
+}
+}
 const ownPending = this.util.away !== null && t < this.util.away.until - 3 ? this.util.away : null;
 const pending = ownPending ?? this.mateFlash.find((x) => t < x.pop - Math.max(0, release) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + ((x.pop - t) / this.tps) * P.routeSpeed * UNIT);
 if (!out.objective && pending !== undefined && this.entersView(obs, pending)) {
 out.stop = true;
 return;
 }
+if (turned) return;
 const busy = P.tradeSkipTask && (out.task === 'defuse' || out.task === 'plant');
 if (this.trade !== null) {
 if (t > this.trade.until) this.trade = null;
