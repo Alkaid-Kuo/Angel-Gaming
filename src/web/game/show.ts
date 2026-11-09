@@ -282,6 +282,8 @@ function settleScene(ctx: Ctx, summary: AdvanceSummary, before: Snapshot, last: 
   const rankD = before.rank > 0 && summary.week <= 7 ? before.rank - rankNow : 0;
   const fameD = v.me.fame - before.fame;
   const reports = v.inbox.filter((m) => m.week === summary.week && m.kind === 'report').slice(0, 4);
+  // 季中補自由選手（PR #42）：這週結算有補人通知就在週報上提一行
+  const added = v.inbox.filter((m) => m.week === summary.week && m.playerIds !== undefined).reduce((s, m) => s + (m.playerIds?.length ?? 0), 0);
   const runway = v.me.runwayWeeks;
   return {
     html: `<div class="md md-week"><div class="hd2"><span class="en">WEEKLY REPORT // ${summary.week === 0 ? '開幕前結算' : '週結算'}</span><h1><span class="num">${summary.week === 0 ? 'PRE' : `W${String(summary.week).padStart(2, '0')}`}</span>${summary.week === 0 ? '開幕前結算' : '週結算'}</h1></div>
@@ -292,7 +294,7 @@ function settleScene(ctx: Ctx, summary: AdvanceSummary, before: Snapshot, last: 
       <section class="rank">${summary.week >= 1 && summary.week <= 7 && rankNow > 0 ? `<span class="lb">積分榜名次</span><div class="rk2"><svg viewBox="0 0 340 340"><circle cx="170" cy="170" r="160" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="2"/><g class="sp"><circle cx="170" cy="170" r="160" fill="none" stroke="#f0b54a" stroke-width="3" stroke-dasharray="40 30 4 30"/></g><circle cx="170" cy="170" r="140" fill="none" stroke="rgba(240,181,74,.25)" stroke-width="10"/></svg>
           <div class="v">${before.rank && before.rank !== rankNow ? `<span class="from">#${before.rank}</span>` : ''}${rankD ? `<span class="arrow ${rankD > 0 ? '' : 'dn'}">${icon(rankD > 0 ? 'up' : 'down', 34)}</span>` : ''}<span class="to">${rankNow}</span><small>第 ${rankNow} 名${rankD > 0 ? ` · ▲${rankD}` : rankD < 0 ? ` · ▼${-rankD}` : ''}</small></div></div>` : `<span class="lb">${summary.week === 0 ? '賽季開幕' : '季後賽'}</span>`}
         <div class="row3"><div><small>名氣</small><span class="num">${before.fame} → <span class="${fameD >= 0 ? 'gd2' : 'rd'}">${v.me.fame}</span></span></div><div><small>資金跑道</small><span class="num ${runway !== null && runway < 3 ? 'rd' : ''}">${runway === null ? '∞' : `${runway} 週`}</span></div></div></section>
-      <section class="pn mail">${'<div class="pt"><span class="no">02</span><b>新報告</b><span class="aux">已寄到信件</span></div>'}${reports.length ? reports.map((m, i) => `<div class="env" style="--d:${0.6 + i * 0.12}s"><span class="ic2">${icon('flask', 22)}</span><span>${esc(m.text)}</span></div>`).join('') : '<p class="dim">這週沒有新報告。</p>'}</section>
+      <section class="pn mail">${'<div class="pt"><span class="no">02</span><b>新報告</b><span class="aux">已寄到信件</span></div>'}${added ? `<div class="env mk" style="--d:0.5s"><span class="ic2">${icon('contract', 22)}</span><span>市場新增 <b>${added}</b> 名自由選手，到轉會市場看看</span></div>` : ''}${reports.length ? reports.map((m, i) => `<div class="env" style="--d:${0.6 + i * 0.12}s"><span class="ic2">${icon('flask', 22)}</span><span>${esc(m.text)}</span></div>`).join('') : added ? '' : '<p class="dim">這週沒有新報告。</p>'}</section>
       <div class="ctl"><button class="btn" data-act="cine-next"><b>${last ? '繼續' : '回到基地'}</b><span>${last ? 'NEXT' : 'BASE'}</span></button></div></div>`,
     auto: 0,
     stop: true,
