@@ -61,6 +61,8 @@ export class Navigator {
     this.prevPt = null;
     /** @type {Peek | null} */
     this.peek = null;
+    /** 3.0 切換：效用層給的探頭（同一個物件只執行一次） @type {Peek | null} */
+    this.peekSrc = null;
     /** @type {Map<number, number>} */
     this.peeked = new Map();
     this.replans = 0;
@@ -93,6 +95,8 @@ export class Navigator {
     this.prevPt = null;
     /** @type {Peek | null} */
     this.peek = null;
+    /** 3.0 切換：效用層給的探頭（同一個物件只執行一次） @type {Peek | null} */
+    this.peekSrc = null;
     /** @type {Map<number, number>} */
     this.peeked = new Map();
     this.replans = 0;
@@ -268,7 +272,7 @@ export class Navigator {
   /**
    * 每次決策：沿路徑走（含探頭）
    * @param {import('./base.js').Observation} obs
-   * @param {{ allowPeek: boolean, speed: number, evading: boolean, priority?: boolean }} opts
+   * @param {{ allowPeek: boolean, speed: number, evading: boolean, priority?: boolean, peek?: Peek | null }} opts peek：3.0 切換後由效用層選的探頭（給了就不自己找）
    * @returns {NavOut}
    */
   step(obs, opts) {
@@ -329,9 +333,17 @@ export class Navigator {
     }
     let target = this.wps[this.wpIdx];
     // ── 探頭 ──
+    // 3.0 切換：效用層選的探頭（新的物件才從頭執行；同一個執行完或被打斷就不重來）
+    if (opts.peek !== undefined && !freeze) {
+      if (opts.peek === null) this.peek = null;
+      else if (opts.peek !== this.peekSrc) {
+        this.peekSrc = opts.peek;
+        this.peek = { ...opts.peek };
+      }
+    }
     if (!opts.allowPeek || freeze) this.peek = null;
     else {
-      if (this.peek === null) this.peek = this.findPeek(obs);
+      if (this.peek === null && opts.peek === undefined) this.peek = this.findPeek(obs);
       if (this.peek !== null) {
         const pk = this.peek;
         const dHold = dist(me.x, me.y, pk.hold.x, pk.hold.y);

@@ -32,8 +32,9 @@ const SMOKE_PREF = [SUPPORT, ANCHOR, LURK, 0, ENTRY, AWP];
 /** @typedef {{ kind: 'contact', region: string, n: number } | { kind: 'dead', region: string } | { kind: 'planted', site: SiteId } | { kind: 'flash', x: number, y: number, pop: number } | { kind: 'claim', x: number, y: number } | { kind: 'smoke', x: number, y: number } | { kind: 'burn', x: number, y: number, until: number } | { kind: 'awp', x: number, y: number } | { kind: 'kit' | 'smoker' | 'lurk' }} TeamEvent */
 /**
  * 戰術輸出：goal 目標點、route 偏好路線、hold 守位（到了要看哪裡）、objective 正在下包／拆包、allowPeek 可以探頭、cmds 購買／喊話／丟雷／下包／拆包；
- * look 沒交戰時看哪裡（urgent：躲閃光，連「目標剛消失的架槍」也蓋過；hard：閃光快爆了，交戰中也轉身、停火）、stop 站住、walk 靜步（null = 導航決定）、noise 佯攻開槍
- * @typedef {{ goal: import('./base.js').Pt | null, route: import('./analysis.js').Route | null, hold: import('./analysis.js').Spot | null, objective: boolean, allowPeek: boolean, cmds: import('./base.js').Command[], role: string, look: import('./base.js').Pt | null, urgent: boolean, hard: boolean, stop: boolean, walk: boolean | null, noise: boolean, escape: boolean, task?: 'hold' | 'execute' | 'retrieve' | 'plant' | 'defuse' | 'retake' | 'cover' | 'save', commit?: boolean }} TacOut
+ * look 沒交戰時看哪裡（urgent：躲閃光，連「目標剛消失的架槍」也蓋過；hard：閃光快爆了，交戰中也轉身、停火）、stop 站住、walk 靜步（null = 導航決定）、noise 佯攻開槍；
+ * halt 3.0 切換後仍由指揮層／硬反射決定的站住（等閃、閃光邊緣、換血架槍、丟道具瞄準；效用層接管的等待不在這裡）
+ * @typedef {{ goal: import('./base.js').Pt | null, route: import('./analysis.js').Route | null, hold: import('./analysis.js').Spot | null, objective: boolean, allowPeek: boolean, cmds: import('./base.js').Command[], role: string, look: import('./base.js').Pt | null, urgent: boolean, hard: boolean, stop: boolean, walk: boolean | null, noise: boolean, escape: boolean, task?: 'hold' | 'execute' | 'retrieve' | 'plant' | 'defuse' | 'retake' | 'cover' | 'save', commit?: boolean, halt?: boolean }} TacOut
  */
 
 const SITES = /** @type {const} */ (['A', 'B']);
@@ -162,7 +163,7 @@ export class Tactics {
     this.utilLook = false;
     /**
      * 3.0 效用層影子模式讀（第 5 步）：這一步指揮層／資源層的丟道具觸發條件（鍵 → 種類與可用的用途）。
-     * 只是紀錄，不影響行為；落點與要不要丟由效用層自己算 @type {Map<string, { kind: string, purposes: string[] }>}
+     * 只是紀錄，不影響行為；落點與要不要丟由效用層自己算；ent＝時機指的入口（受壓的入口、回防要封的另一個入口；指揮層的分工） @type {Map<string, { kind: string, purposes: string[], ent?: import('./analysis.js').Entrance }>}
      */
     this.trig = new Map();
     /** 3.0 PlanIntent 的入口（效用層讀）：這次執行我這組走的入口（execute 每步更新，其他時候 null） @type {import('./analysis.js').Entrance | null} */
@@ -604,19 +605,33 @@ export class Tactics {
     if (wish === null && !out.commit) wish = this.anyNade(obs);
     this.overlay(obs, out);
     if (wish === null) {
-      this.coop.apply(obs, out);
+      // 3.0 切換：跟進與互補守角由效用層接管（表 13-1 第 6、7 條）
+      if (!P.choiceDrive) this.coop.apply(obs, out);
       if (!this.coop.acted) wish = this.lineCheck(obs, out);
     }
-    /** @type {Set<number>} */
-    const busy = new Set();
-    for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
     // 正在躲隊友的閃光、或隊友的閃光還沒爆：不轉頭去丟自己的道具
     if (out.commit || out.urgent || this.mateFlash.some((x) => t <= x.pop)) {
       wish = null;
       this.trig.clear();
     }
-    // 3.0 效用層影子模式讀：這一步實際要丟的道具（資源層／指揮層的觸發條件成立）
+    // r7l 這一步要丟的道具（切換前的行為；切換後只剩指揮層的時機紀錄 trig，落點與丟不丟由效用層選）
     this.lastWish = wish;
+    return out;
+  }
+
+  /**
+   * 丟道具的執行與紀錄（3.0 從 update 拆出：切換後 wish 由效用層選、item 是它選的資源層項目）
+   * @param {import('./base.js').Observation} obs @param {TacOut} out @param {import('./utility.js').ThrowWish | null} wish
+   * @param {import('./resources.js').UtilItem | null} [item] 效用層選的資源層項目（切換後；丟出時喊 U:u 用）
+   * @returns {TacOut}
+   */
+  finish(obs, out, wish, item = null) {
+    const me = obs.me;
+    const t = obs.tick;
+    if (item !== null && wish !== null) this.claimed.set(wish.kind, item);
+    /** @type {Set<number>} */
+    const busy = new Set();
+    for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
     const u = this.util.step(obs, wish, busy);
     // 宣告再丟（2.6）：開始轉向瞄準閃光就先喊，丟出要再等一次以上的決策；隊友聽到就把爆點當成已認領
     if (P.flashClaim && wish !== null && wish.kind === 'flash' && u.look !== null && u.thrown === null && this.util.away === null) {
@@ -650,7 +665,10 @@ export class Tactics {
       out.look = u.look;
       if (this.util.away !== null) out.urgent = true;
     }
-    if (u.stop) out.stop = true;
+    if (u.stop) {
+      out.stop = true;
+      out.halt = true;
+    }
     if (this.plan !== null) {
       this.lastKind = this.plan.kind === 'hold' ? '' : this.plan.kind;
       if (this.plan.kind !== 'hold') this.lastSite = this.plan.exec ?? this.plan.site;
@@ -1716,7 +1734,7 @@ export class Tactics {
     const setup = this.setupOf(obs, me.id, p);
     // 出生區裡先讓突破手走到前面（慢走讓他超過；出生區空間大，進了路線就是一列，突破手自然在最前）
     this.slow = obs.round.phase === 'live' && p.kind !== 'go' && this.spawnWait(obs, p, exec ?? setup.site);
-    if (this.slow && this.spawnHeld <= P.spawnStop * this.tps) {
+    if (this.slow && !P.choiceDrive && this.spawnHeld <= P.spawnStop * this.tps) {
       out.stop = true;
       this.waitTag = 'spawn';
       out.role = '讓突破手先走';
@@ -1952,7 +1970,7 @@ export class Tactics {
       // 等突破手先走（狙擊手等兩個人進點）：執行後最多 P.stageLead 秒
       // 3.0（r7k，T4 死結）：持有這個入口還沒丟的計畫進點閃的人不等突破手先走，先到投擲位（突破手等的是閃光出手）
       this.flashOwner = planned && !thrownHere;
-      const lead = smokeFirst && near && wish === null && sinceExec < P.stageLead && !this.flashOwner && this.waitEntry(obs, exec);
+      const lead = !P.choiceDrive && smokeFirst && near && wish === null && sinceExec < P.stageLead && !this.flashOwner && this.waitEntry(obs, exec);
       // 正在準備丟煙／閃的人也留在待命格（最多到執行後 4 秒，丟不出去就照樣進）
       if ((waiting || lead || (smokeFirst && near && wish !== null && sinceExec < 4)) && st !== null) {
         out.goal = { x: st.x, y: st.y };
@@ -1966,7 +1984,7 @@ export class Tactics {
     // 閃光剛炸開：直接衝，不讓位也不拉間距（對面最多瞎 2 秒）
     const flashed = t >= this.flashPop && t < this.flashPop + 2 * this.tps;
     // 狙擊手不跟著衝（2.6.1：閃光一炸開就先進點，R2 的反例）
-    if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && !this.flashOwner && this.yieldTo(obs, exec)) {
+    if (!P.choiceDrive && p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && !this.flashOwner && this.yieldTo(obs, exec)) {
       out.stop = true;
       this.waitTag = 'yield';
       out.look = { x: site.cx, y: site.cy };
@@ -2254,7 +2272,7 @@ export class Tactics {
   /** 拿狙擊槍的狙擊手到了待命格 4 格內就站定（守位改成站的地方），讓戰鬥層開鏡架入口 @param {import('./base.js').Observation} obs @param {TacOut} out @param {import('./analysis.js').Spot} st */
   awpSettle(obs, out, st) {
     const me = obs.me;
-    if (this.roles.of(me.id) !== AWP || me.loadout.primary !== 'awp' || dist(me.x, me.y, st.x, st.y) >= 4 * UNIT) return;
+    if (P.choiceDrive || this.roles.of(me.id) !== AWP || me.loadout.primary !== 'awp' || dist(me.x, me.y, st.x, st.y) >= 4 * UNIT) return;
     out.stop = true;
     this.waitTag = 'awp';
     out.hold = { ...st, x: me.x, y: me.y };
@@ -2407,9 +2425,9 @@ export class Tactics {
     return entries[smokers.indexOf(me.id)] ?? null;
   }
 
-  /** 3.0 影子模式：記一筆丟道具觸發（只是紀錄） @param {string} key @param {string} kind @param {string[]} purposes */
-  hint(key, kind, purposes) {
-    if (purposes.length > 0) this.trig.set(key, { kind, purposes });
+  /** 3.0：記一筆丟道具時機（只是紀錄；ent＝時機指的入口） @param {string} key @param {string} kind @param {string[]} purposes @param {import('./analysis.js').Entrance} [ent] */
+  hint(key, kind, purposes, ent) {
+    if (purposes.length > 0) this.trig.set(key, ent === undefined ? { kind, purposes } : { kind, purposes, ent });
   }
 
   /**
@@ -2620,6 +2638,7 @@ export class Tactics {
       if (t > f.pop || this.g.los(me.x, me.y, f.x, f.y)) continue;
       if (![1, 2, 3].some((k) => { const q = at(Math.min(k, d / UNIT)); return dist(q.x, q.y, f.x, f.y) < B && this.g.los(q.x, q.y, f.x, f.y); })) continue;
       out.stop = true;
+      out.halt = true;
       out.role += '・等閃';
       return;
     }
@@ -3281,8 +3300,8 @@ export class Tactics {
     const burn = this.chokeBurn(me, s, e);
     const fading = fire !== undefined && fire.until - t < 3 * this.tps;
     // 3.0 觸發時機（落點由效用層算）
-    if (burn !== null && fire === undefined && !smoked) this.hint('chokeTime', burn, ['chokeMolotov', 'free']);
-    if (!smoked && (top.n >= 2 || top.fl || fading) && this.may(me, 'smoke', ['free'])) this.hint('holdTime', 'smoke', ['holdSmoke', 'free']);
+    if (burn !== null && fire === undefined && !smoked) this.hint('chokeTime', burn, ['chokeMolotov', 'free'], e);
+    if (!smoked && (top.n >= 2 || top.fl || fading) && this.may(me, 'smoke', ['free'])) this.hint('holdTime', 'smoke', ['holdSmoke', 'free'], e);
     if (burn !== null && fire === undefined && !smoked && !this.burnsMate(obs, outer.x, outer.y) && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return { kind: burn, ...outer, why: '燒入口' };
     if (this.can(me, 'smoke', ['free']) && !smoked && (top.n >= 2 || top.fl || fading) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' };
     if (top.n >= 1 && this.can(me, 'flash', ['free']) && !this.flashDone(obs, e)) {
@@ -3393,7 +3412,7 @@ export class Tactics {
     if (wish === null && act && go && !inside && obs.enemies.length === 0 && this.can(me, 'smoke', ['retakeSmoke'])) {
       const mine = this.ctEntrance(s, Math.max(0, this.retakeRoute));
       const e2 = this.intel.sites[s].entrances.filter((e) => e !== mine).sort((a, b) => dist(a.ix, a.iy, bx, by) - dist(b.ix, b.iy, bx, by))[0];
-      if (e2 !== undefined) this.hint('retakeSmokeTime', 'smoke', ['retakeSmoke']);
+      if (e2 !== undefined) this.hint('retakeSmokeTime', 'smoke', ['retakeSmoke'], e2);
       if (e2 !== undefined && this.smokes.every((m) => dist(m.x, m.y, e2.ix, e2.iy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, e2.ix, e2.iy) !== null) wish = { kind: 'smoke', x: e2.ix, y: e2.iy, why: '回防煙封另一入口' };
     }
     if (wish === null && go && !inside && this.can(me, 'smoke', ['retakeSmoke', 'free']) && obs.enemies.length === 0) {
@@ -3550,6 +3569,7 @@ export class Tactics {
       // 半徑外不會致盲：停在半徑外等炸開，不用躲
       if (d >= R && d < R + edge && mf !== undefined && g.los(me.x, me.y, f.x, f.y)) {
         out.stop = true;
+        out.halt = true;
         // 3.0（r7i）：停步指令要等反應延遲，這段時間會滑進半徑（default 剩下的正對隊友致盲幾乎都是這種）：沒看到敵人就也轉開，只改朝向
         if (P.flashEdgeTurn && obs.enemies.length === 0) {
           out.look = { x: me.x + (me.x - f.x) * 2, y: me.y + (me.y - f.y) * 2 };
@@ -3598,6 +3618,7 @@ export class Tactics {
     const pending = ownPending ?? this.mateFlash.find((x) => t < x.pop - Math.max(0, release) && dist(me.x, me.y, x.x, x.y) < this.util.blindRange + ((x.pop - t) / this.tps) * P.routeSpeed * UNIT);
     if (!out.objective && pending !== undefined && this.entersView(obs, pending)) {
       out.stop = true;
+      out.halt = true;
       return;
     }
     if (turned) return;
@@ -3608,6 +3629,7 @@ export class Tactics {
       else if (!busy && !out.objective && !out.commit && out.task !== 'execute' && out.task !== 'retake') {
         out.look = { x: this.trade.x, y: this.trade.y };
         out.stop = true;
+        out.halt = true;
         return;
       }
     }

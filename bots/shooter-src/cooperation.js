@@ -26,6 +26,40 @@ export class Cooperation {
     }
     for (const [id, c] of this.cues) if (obs.tick - c.tick > (c.dead ? 2 : 0.9) * this.tps) this.cues.delete(id);
   }
+  /**
+   * 跟進的站位與看向（3.0 切換後也是效用層「補槍」動作的執行）：補槍方向來自真實接敵或隊友公開開火方向（沒有就不跟，不盲射）；
+   * 站位在線索 3 格內、走得到、看得到補槍方向、不在火裡，偏好掩體、近、離線索約 2.5 格
+   * @param {import('./base.js').Observation} obs @param {{ x: number, y: number, dead: boolean }} cue
+   * @returns {{ goal: import('./base.js').Pt, look: import('./base.js').Pt } | null}
+   */
+  spotFor(obs, cue) {
+    const me = obs.me;
+    const target = this.perc.threats(cue.x, cue.y, 45).find((p) => dist(p.x, p.y, cue.x, cue.y) < 18 * UNIT);
+    const trace = obs.tracers.find((p) => p.friendly && dist(p.x0, p.y0, cue.x, cue.y) < 1500);
+    const look = target ?? (trace === undefined ? null : { x: trace.x1, y: trace.y1 });
+    if (look === null || !this.g.los(me.x, me.y, cue.x, cue.y)) return null;
+    /** @type {import('./base.js').Pt | null} */
+    let best = null;
+    let score = -Infinity;
+    const center = this.g.cellOf(cue.x, cue.y);
+    const cx = center % this.g.W;
+    const cy = Math.floor(center / this.g.W);
+    for (let y = cy - 3; y <= cy + 3; y++) for (let x = cx - 3; x <= cx + 3; x++) {
+      const i = y * this.g.W + x;
+      if (x < 0 || x >= this.g.W || y < 0 || y >= this.g.H || !this.g.walkable(i)) continue;
+      const p = this.g.center(i);
+      const gap = dist(p.x, p.y, cue.x, cue.y);
+      if ((!cue.dead && gap < 1600) || gap > 4000 || !this.g.walkLine(me.x, me.y, p.x, p.y) || !this.g.los(p.x, p.y, look.x, look.y)) continue;
+      if (!cue.dead && segDist(p.x, p.y, cue.x, cue.y, look.x, look.y).d < 1100) continue;
+      if (obs.effects.some((e) => e.kind === 'fire' && dist(p.x, p.y, e.x, e.y) < e.radius + 500)) continue;
+      let s = (this.intel.cover[i] > 0 ? 2 : 0) - dist(me.x, me.y, p.x, p.y) / UNIT - Math.abs(gap / UNIT - 2.5) - this.perc.danger[i] / 40;
+      // 2.7 批 2b（P.tradePen）：補陣亡的隊友偏好換一個角度看殺手（和死者同角度扣分）；只是偏好，沒有別的角照樣補
+      if (cue.dead && P.tradePen > 0) s -= P.tradePen * Math.max(0, 1 - Math.abs(adiff(angleTo(p.x, p.y, look.x, look.y), angleTo(cue.x, cue.y, look.x, look.y))) / P.tradeAngle);
+      if (s > score) { score = s; best = p; }
+    }
+    return best === null ? null : { goal: best, look };
+  }
+
   /** @param {import('./base.js').Observation} obs @param {import('./tactics.js').TacOut} out */
   apply(obs, out) {
     const me = obs.me;
@@ -40,35 +74,12 @@ export class Cooperation {
         const able = (/** @type {{ id: number, x: number, y: number }} */ m) => !P.coopEligible || (this.g.los(m.x, m.y, cue.x, cue.y) && (m.id !== me.id || me.reloadTicksLeft === 0));
         const helpers = [{ id: me.id, x: me.x, y: me.y, hasBomb: me.hasBomb, blind: me.blindTicks > 0 }, ...obs.teammates.filter((m) => m.alive && !m.planting && !m.defusing)].filter((m) => m.id !== id && !m.hasBomb && !m.blind && dist(m.x, m.y, cue.x, cue.y) <= 9 * UNIT && able(m)).sort((a, b) => dist(a.x, a.y, cue.x, cue.y) - dist(b.x, b.y, cue.x, cue.y) || a.id - b.id);
         if (helpers[0]?.id !== me.id) continue;
-        // 補槍方向來自真實接敵或隊友公開開火方向；沒有接敵時只預瞄，不盲射。
-        const target = this.perc.threats(cue.x, cue.y, 45).find((p) => dist(p.x, p.y, cue.x, cue.y) < 18 * UNIT);
-        const trace = obs.tracers.find((p) => p.friendly && dist(p.x0, p.y0, cue.x, cue.y) < 1500);
-        const look = target ?? (trace === undefined ? null : { x: trace.x1, y: trace.y1 });
-        if (look === null || !this.g.los(me.x, me.y, cue.x, cue.y)) continue;
-        /** @type {import('./base.js').Pt | null} */
-        let best = null;
-        let score = -Infinity;
-        const center = this.g.cellOf(cue.x, cue.y);
-        const cx = center % this.g.W;
-        const cy = Math.floor(center / this.g.W);
-        for (let y = cy - 3; y <= cy + 3; y++) for (let x = cx - 3; x <= cx + 3; x++) {
-          const i = y * this.g.W + x;
-          if (x < 0 || x >= this.g.W || y < 0 || y >= this.g.H || !this.g.walkable(i)) continue;
-          const p = this.g.center(i);
-          const gap = dist(p.x, p.y, cue.x, cue.y);
-          if ((!cue.dead && gap < 1600) || gap > 4000 || !this.g.walkLine(me.x, me.y, p.x, p.y) || !this.g.los(p.x, p.y, look.x, look.y)) continue;
-          if (!cue.dead && segDist(p.x, p.y, cue.x, cue.y, look.x, look.y).d < 1100) continue;
-          if (obs.effects.some((e) => e.kind === 'fire' && dist(p.x, p.y, e.x, e.y) < e.radius + 500)) continue;
-          let s = (this.intel.cover[i] > 0 ? 2 : 0) - dist(me.x, me.y, p.x, p.y) / UNIT - Math.abs(gap / UNIT - 2.5) - this.perc.danger[i] / 40;
-          // 2.7 批 2b（P.tradePen）：補陣亡的隊友偏好換一個角度看殺手（和死者同角度扣分）；只是偏好，沒有別的角照樣補
-          if (cue.dead && P.tradePen > 0) s -= P.tradePen * Math.max(0, 1 - Math.abs(adiff(angleTo(p.x, p.y, look.x, look.y), angleTo(cue.x, cue.y, look.x, look.y))) / P.tradeAngle);
-          if (s > score) { score = s; best = p; }
-        }
-        if (best !== null) {
-          out.goal = best;
+        const sp = this.spotFor(obs, cue);
+        if (sp !== null) {
+          out.goal = sp.goal;
           out.route = null;
           out.hold = null;
-          out.look = look;
+          out.look = sp.look;
           out.walk = false;
           out.allowPeek = false;
           out.role += cue.dead ? '・補槍接替' : '・跟進掩護';

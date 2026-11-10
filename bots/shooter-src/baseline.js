@@ -20,7 +20,7 @@ import { Tactics } from './tactics.js';
 import { AWP, ENTRY, ROLE_NAME, autoRole } from './roles.js';
 import { Judgment } from './judgment.js';
 import { Mission } from './mission.js';
-import { Choice } from './choice.js';
+import { Choice, HERE } from './choice.js';
 
 /** 包點代號 */
 const SITE_IDS = /** @type {const} */ (['A', 'B']);
@@ -133,21 +133,76 @@ export default class ShooterBaseline {
     }
     this.combat.track(obs);
     const ev = this.combat.evade(obs);
-    const tac = this.tactics.update(obs);
+    const T = this.tactics;
+    const tac = T.update(obs);
+    // 3.0 第 6 步切換：效用層選動作與視線（choiceDrive）；否則照 r7l（效用層只在影子模式記錄）
+    const drive = P.choiceDrive && this.choice !== null;
+    if (!drive) T.finish(obs, tac, T.lastWish);
+    const holding = tac.hold !== null && dist(me.x, me.y, tac.hold.x, tac.hold.y) < 900;
+    const fight = this.combat.engage(obs, { holding, objective: tac.objective });
+    const C = this.choice;
+    /** 效用層選定的動作（切換後才有；指揮層／硬反射接管移動時不執行） @type {import('./choice.js').Cand | null} */
+    let act = null;
+    /** 補槍動作的看向 @type {import('./base.js').Pt | null} */
+    let tlook = null;
+    if (drive) {
+      C.step(obs, this.intent(obs, tac, fight.engaged, ev !== null, false));
+      act = obs.round.phase === 'freeze' ? null : C.cur;
+      // 丟道具：效用層選的道具筆與落點（下拆包進行中不丟；丟出後到下一次決策前不再丟）
+      const it = act !== null && act.type === 'g' && !C.gDone && !tac.objective && !tac.commit && !tac.urgent && !tac.escape ? C.nitems[Math.floor(act.ref / 4)] : undefined;
+      T.finish(obs, tac, it === undefined || act === null || act.kind === undefined ? null : { kind: /** @type {import('./base.js').GrenadeId} */ (act.kind), x: act.x, y: act.y, why: `效用・${act.why ?? it.pur}` }, it?.it ?? null);
+      if (T.thrownNow !== null) C.gDone = true;
+    }
     /** @type {import('./base.js').Command[]} */
     const out = [];
     /** 下包、拆包這類要最後送（移動會取消它們） @type {import('./base.js').Command[]} */
     const late = [];
-    for (const c of tac.cmds) (c.type === 'plant' || c.type === 'defuse' ? late : out).push(c);
-    if (tac.goal !== null) this.nav.setGoal(tac.goal.x, tac.goal.y, tac.route);
+    // 移動目標：指揮層／硬反射接管（撤離、期限承諾、躲閃光、交戰中）時照 PlanIntent；否則執行效用層的動作
+    const own = !drive || act === null || tac.escape || tac.commit === true || tac.urgent || fight.engaged;
+    // 切換後下包、拆包也是效用層的動作 o（指揮層要下拆包時才是候選）；指揮層或硬反射接管移動時（期限承諾等），指揮層的下拆包指令照送
+    for (const c of tac.cmds) {
+      if (c.type === 'plant' || c.type === 'defuse') {
+        if (own || (act !== null && act.type === 'o')) late.push(c);
+      } else out.push(c);
+    }
+    let goal = tac.goal;
+    let route = tac.route;
+    let stop = tac.stop;
+    /** @type {import('./nav.js').Peek | null | undefined} */
+    let peek = drive ? null : undefined;
+    if (!own && act !== null) {
+      stop = tac.halt === true;
+      const near = (/** @type {import('./base.js').Pt} */ p) => tac.goal !== null && dist(p.x, p.y, tac.goal.x, tac.goal.y) < UNIT;
+      if (act.type === 'h' && act.ref === HERE) stop = true;
+      // 來自 PlanIntent 的目標或守點：跟著指揮層這一步的最新值走（決策之間目標會更新）
+      else if (act.src === 'goal' && tac.goal !== null) {
+        goal = tac.goal;
+        route = tac.route;
+      } else if (act.src === 'hold' && tac.hold !== null) {
+        goal = { x: tac.hold.x, y: tac.hold.y };
+        route = near(tac.hold) ? tac.route : null;
+      } else if (act.type === 'h' || act.type === 'a' || act.type === 'f' || act.type === 'r') {
+        goal = { x: act.x, y: act.y };
+        route = near(act) ? tac.route : null;
+      } else if (act.type === 'p') peek = C.pk?.nav ?? null;
+      else if (act.type === 't') {
+        const q = C.cues.get(act.ref);
+        const sp = q === undefined ? null : T.coop.spotFor(obs, q);
+        if (sp !== null) {
+          goal = sp.goal;
+          route = null;
+          tlook = sp.look;
+        }
+      } else if (act.type === 'o') stop = true;
+    }
+    if (goal !== null) this.nav.setGoal(goal.x, goal.y, route);
     else this.nav.clearGoal();
-    const holding = tac.hold !== null && dist(me.x, me.y, tac.hold.x, tac.hold.y) < 900;
-    const fight = this.combat.engage(obs, { holding, objective: tac.objective });
     const w = this.combat.weapon(me.weapon);
     const speed = (w?.speed ?? 130) * (me.walking ? 0.52 : 1) * (me.crouching ? 0.34 : 1);
-    const nav = this.nav.step(obs, { allowPeek: tac.allowPeek && !tac.commit && !fight.engaged && ev === null, speed, evading: ev !== null, priority: tac.commit });
-    const ahead = this.nav.wps[this.nav.wpIdx] ?? tac.goal;
-    const check = ahead !== null && !fight.engaged && ev === null && !tac.objective && !tac.urgent && !tac.stop && !tac.escape && !tac.commit && dist(me.x, me.y, ahead.x, ahead.y) > 900 ? this.judge?.approach(obs, ahead) : null;
+    const free = !tac.commit && !fight.engaged && ev === null;
+    const nav = this.nav.step(obs, { allowPeek: (peek === undefined ? tac.allowPeek : peek !== null) && free, speed, evading: ev !== null, priority: tac.commit, peek });
+    const ahead = this.nav.wps[this.nav.wpIdx] ?? goal;
+    const check = ahead !== null && !fight.engaged && ev === null && !tac.objective && !tac.urgent && !stop && !tac.escape && !tac.commit && dist(me.x, me.y, ahead.x, ahead.y) > 900 ? this.judge?.approach(obs, ahead) : null;
     // ── 移動：自保 → 交戰 → 架槍 → 導航 ──
     let moving = false;
     let navUsed = false;
@@ -168,7 +223,7 @@ export default class ShooterBaseline {
       else if (fight.move !== null) {
         out.push({ type: 'move', x: Math.round(fight.move.x), y: Math.round(fight.move.y) });
         moving = true;
-      } else if (check?.stop || fight.holdNav || (tac.stop && !fight.engaged)) out.push({ type: 'stop' });
+      } else if (check?.stop || fight.holdNav || (stop && !fight.engaged)) out.push({ type: 'stop' });
       else {
         out.push(...nav.cmds);
         moving = nav.moving;
@@ -178,7 +233,14 @@ export default class ShooterBaseline {
     if (!navUsed) this.nav.idle();
     // ── 瞄準 ──
     const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
-    const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : this.combat.alert(obs, holding) ?? check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
+    const mv = { holding: holding && !moving, moving, ahead: next };
+    /** 視線頭的看向（切換後；不歸視線頭管的拍是 null） @type {import('./base.js').Pt | null} */
+    let head = null;
+    if (drive) {
+      C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, own ? tac.look : (tlook ?? tac.look)), obs.round.phase === 'freeze');
+      if (C.lstat?.active === true && C.lk !== null) head = { x: C.lk.x, y: C.lk.y };
+    }
+    const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : head ?? this.combat.alert(obs, holding) ?? check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
     if (aim !== null && (Math.abs(aim.x - me.x) > 50 || Math.abs(aim.y - me.y) > 50)) out.push({ type: 'aim', x: Math.round(aim.x), y: Math.round(aim.y) });
     // ── 開火與武器 ──
     // 所有開火分支（交戰、佯攻）都過同一道友軍檢查
@@ -193,9 +255,13 @@ export default class ShooterBaseline {
     const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
     if (walk !== me.walking) out.push({ type: 'walk', on: walk });
     out.push(...late);
-    if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null, { holding: holding && !moving, moving, ahead: next });
+    if (!drive && P.choiceShadow && C !== null) {
+      C.step(obs, this.intent(obs, tac, fight.engaged, ev !== null, true, nav));
+      C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, tac.look), obs.round.phase === 'freeze');
+    }
     const reason = this.mission?.reason ?? '';
-    this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
+    const tag = act === null ? '' : `・${act.type}`;
+    this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${tag}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
     return out;
   }
 
@@ -213,12 +279,37 @@ export default class ShooterBaseline {
   }
 
   /**
-   * 3.0 影子模式：把 r7l 這一步的情境與實際動作交給效用層記錄（不影響指令）
+   * 視線頭的輸入（每個 decide tick）。不接管的看向＝躲閃光與守包撤離（urgent／hard）、丟道具的瞄準、下拆包、交戰中與自保
    * @param {import('./base.js').Observation} obs @param {import('./tactics.js').TacOut} tac @param {import('./nav.js').NavOut} nav
    * @param {boolean} engaged @param {boolean} evading
-   * @param {{ holding: boolean, moving: boolean, ahead: import('./base.js').Pt | null }} mv 視線頭用：r7l 這一步的守位、移動與行進方向
+   * @param {{ holding: boolean, moving: boolean, ahead: import('./base.js').Pt | null }} mv 這一步的守位、移動與行進方向
+   * @param {import('./base.js').Pt | null} actLook 動作附帶的看向（等槍線、補槍、佯攻）
+   * @returns {import('./choice.js').LookIn}
    */
-  shadow(obs, tac, nav, engaged, evading, mv) {
+  lookIn(obs, tac, nav, engaged, evading, mv, actLook) {
+    const me = obs.me;
+    const T = this.tactics;
+    const near = (/** @type {import('./base.js').Pt} */ p) => dist(me.x, me.y, p.x, p.y);
+    const pk = nav.peeking ? this.nav.peek : null;
+    const own = tac.urgent || tac.hard || T.utilLook;
+    return {
+      active: obs.round.phase !== 'freeze' && obs.round.phase !== 'over' && obs.enemies.length === 0 && !engaged && !evading && !own && !tac.objective,
+      peek: pk === null ? null : { x: pk.far.x, y: pk.far.y, lock: pk.phase === 'hold' || pk.phase === 'shoulder' },
+      hold: tac.hold !== null && near(tac.hold) < 3 * UNIT ? { x: tac.hold.x, y: tac.hold.y, fx: tac.hold.fx, fy: tac.hold.fy } : null,
+      holding: mv.holding, moving: mv.moving,
+      act: actLook !== null && !own ? { x: actLook.x, y: actLook.y } : null,
+      ahead: mv.ahead, soundReact: this.combat.soundReact,
+    };
+  }
+
+  /**
+   * 效用層的輸入：PlanIntent（指揮層這一步的目標、守點、階段、計畫）、資源層與觸發紀錄、個人狀態。
+   * shadow＝影子模式（切換前的量測）：另外把 r7l 這一步的實際動作分類記下（一致率用）
+   * @param {import('./base.js').Observation} obs @param {import('./tactics.js').TacOut} tac
+   * @param {boolean} engaged @param {boolean} evading @param {boolean} shadow @param {import('./nav.js').NavOut} [nav]
+   * @returns {import('./choice.js').ShadowIn}
+   */
+  intent(obs, tac, engaged, evading, shadow, nav) {
     const me = obs.me;
     const T = this.tactics;
     const b = obs.bomb.state;
@@ -232,10 +323,9 @@ export default class ShooterBaseline {
     const peek = this.nav.peek === null ? null : this.nav.peek.hold;
     // 硬反射（不算分母）：火區與手雷自保、避火、閃光躲避與等閃（設計第二節第 2、3 項）
     const reflex = evading || (tac.escape && tac.task !== 'save') || T.util.away !== null || T.mateFlash.some((x) => obs.tick <= x.pop + 2);
-    // 丟道具（第 5 步）：候選由效用層從資源層與指揮層的觸發紀錄自己產生（不看 lastWish）；lastWish 只用來分類 r7l 的實際動作
-    const wish = T.lastWish;
+    // 丟道具（第 5 步）：候選由效用層從資源層與指揮層的觸發紀錄自己產生（不看 lastWish）
     const g = this.g;
-    // 丟出那一步：用丟出前的煙、火、閃光紀錄與資源層狀態（影子量測的假象，切換後不存在）
+    // 丟出那一步：用丟出前的煙、火、閃光紀錄與資源層狀態（影子量測的假象；切換後丟出在效用層決策之後，不會發生）
     const tn = T.thrownNow;
     const fs = T.flashSpots;
     const lastFs = tn?.kind === 'flash' && fs.length > 0 && fs[fs.length - 1].tick === obs.tick;
@@ -270,24 +360,28 @@ export default class ShooterBaseline {
     const w0 = this.nav.wps[this.nav.wpIdx];
     const k0 = w0 === undefined ? 0 : Math.min(1, (3 * UNIT) / Math.max(dist(me.x, me.y, w0.x, w0.y), 1));
     const soon = w0 === undefined ? null : { x: me.x + (w0.x - me.x) * k0, y: me.y + (w0.y - me.y) * k0 };
-    const cues = [...T.coop.cues].map(([id, q]) => ({ id, x: q.x, y: q.y, dead: q.dead }));
-    /** @type {{ type: import('./choice.js').Act, x: number, y: number, ref?: number, kind?: string } | null} */
-    let actual;
     const near = (/** @type {import('./base.js').Pt} */ p) => dist(me.x, me.y, p.x, p.y);
-    if (tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse')) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
-    else if (wish !== null) actual = { type: 'g', x: wish.x, y: wish.y, kind: wish.kind };
-    else if (nav.peeking && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
-    else if (T.coop.acted) {
-      // 跟進的是哪個隊友：離 r7l 選的站位最近的線索
-      const gx = tac.goal?.x ?? me.x;
-      const gy = tac.goal?.y ?? me.y;
-      const cue = cues.reduce((b, q) => (b === null || dist(q.x, q.y, gx, gy) < dist(b.x, b.y, gx, gy) ? q : b), /** @type {typeof cues[number] | null} */ (null));
-      actual = { type: 't', x: gx, y: gy, ref: cue?.id ?? -1 };
+    const objOk = tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse');
+    /** 影子模式：r7l 這一步實際做的動作 @type {{ type: import('./choice.js').Act, x: number, y: number, ref?: number, kind?: string } | null} */
+    let actual = null;
+    if (shadow) {
+      const wish = T.lastWish;
+      const cues = [...T.coop.cues].map(([id, q]) => ({ id, x: q.x, y: q.y, dead: q.dead }));
+      if (objOk) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
+      else if (wish !== null) actual = { type: 'g', x: wish.x, y: wish.y, kind: wish.kind };
+      else if (nav?.peeking === true && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
+      else if (T.coop.acted) {
+        // 跟進的是哪個隊友：離 r7l 選的站位最近的線索
+        const gx = tac.goal?.x ?? me.x;
+        const gy = tac.goal?.y ?? me.y;
+        const cue = cues.reduce((q0, q) => (q0 === null || dist(q.x, q.y, gx, gy) < dist(q0.x, q0.y, gx, gy) ? q : q0), /** @type {typeof cues[number] | null} */ (null));
+        actual = { type: 't', x: gx, y: gy, ref: cue?.id ?? -1 };
+      }
+      else if (hold !== null && near(hold) < 3 * UNIT) actual = near(hold) > UNIT ? { type: 'h', x: hold.x, y: hold.y } : { type: 'h', x: me.x, y: me.y };
+      else if (tac.stop || tac.goal === null) actual = { type: 'h', x: me.x, y: me.y };
+      else if (near(tac.goal) < P.U.holdZone * UNIT) actual = near(tac.goal) > UNIT ? { type: 'h', x: tac.goal.x, y: tac.goal.y } : { type: 'h', x: me.x, y: me.y };
+      else actual = { type: 'a', x: tac.goal.x, y: tac.goal.y };
     }
-    else if (hold !== null && near(hold) < 3 * UNIT) actual = near(hold) > UNIT ? { type: 'h', x: hold.x, y: hold.y } : { type: 'h', x: me.x, y: me.y };
-    else if (tac.stop || tac.goal === null) actual = { type: 'h', x: me.x, y: me.y };
-    else if (near(tac.goal) < P.U.holdZone * UNIT) actual = near(tac.goal) > UNIT ? { type: 'h', x: tac.goal.x, y: tac.goal.y } : { type: 'h', x: me.x, y: me.y };
-    else actual = { type: 'a', x: tac.goal.x, y: tac.goal.y };
     const p = T.prof === null || T.tagNow === null ? 0.5 : T.pOf(T.tagNow);
     const inSite = SITE_IDS.some((k) => { const r = this.intel.sites[k].rect; const cx = me.x / UNIT, cy = me.y / UNIT; return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1; });
     const pathless = tac.goal !== null && this.nav.path.length === 0 && near(tac.goal) > UNIT;
@@ -303,31 +397,22 @@ export default class ShooterBaseline {
     if (me.team === 'T' && site0 !== null && plan !== null && plan.kind !== 'go' && ent !== undefined && c0 >= 0 && this.intel.distSpawn.T[c0] <= P.spawnLead * 10 && (T.groups?.get(ent.id) ?? 0) === (T.groups?.get(me.id) ?? 0)) {
       const ce = this.g.cellOf(ent.x, ent.y);
       const dS = this.intel.distSite[site0];
-      if (ce >= 0 && dS[ce] >= dS[c0] - 10) spawnF = 1;
+      // r7l 的時間上限：先停 P.spawnStop 秒（之後慢走，靜步由指揮層的 walk 給），每回合最多 P.spawnLeadMax 秒（計時在 tactics.spawnWait）
+      if (ce >= 0 && dS[ce] >= dS[c0] - 10 && T.spawnHeld <= P.spawnStop * T.tps && T.spawnHeld < P.spawnLeadMax * T.tps) spawnF = 1;
     }
     const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && hold !== null && near(hold) < 4 * UNIT ? 1 : 0;
-    // 視線頭（第 4 步）：不接管的看向＝躲閃光與守包撤離（urgent／hard）、丟道具的瞄準、下拆包、交戰中與自保
-    const pk = nav.peeking ? this.nav.peek : null;
-    const own = tac.urgent || tac.hard || T.utilLook;
-    /** @type {import('./choice.js').LookIn} */
-    const li = {
-      active: obs.round.phase !== 'freeze' && obs.round.phase !== 'over' && obs.enemies.length === 0 && !engaged && !evading && !own && !tac.objective,
-      peek: pk === null ? null : { x: pk.far.x, y: pk.far.y, lock: pk.phase === 'hold' || pk.phase === 'shoulder' },
-      hold: tac.hold !== null && near(tac.hold) < 3 * UNIT ? { x: tac.hold.x, y: tac.hold.y, fx: tac.hold.fx, fy: tac.hold.fy } : null,
-      holding: mv.holding, moving: mv.moving,
-      act: tac.look !== null && !own ? { x: tac.look.x, y: tac.look.y } : null,
-      ahead: mv.ahead, soundReact: this.combat.soundReact,
-    };
-    this.choice.shadow(obs, {
+    return {
       stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nade, pathless, planWait, order: { spawnF, awpF },
       exec, planGo: plan === null || plan.kind === 'go', entryId: T.roles.who(ENTRY),
-      path: this.nav.path, allowPeek: tac.allowPeek && !tac.commit, follow: tac.task === 'execute' || tac.task === 'retake',
+      path: this.nav.path, allowPeek: tac.allowPeek && !tac.commit, follow: tac.task === 'execute' || tac.task === 'retake', objOk,
+      rush: plan !== null && plan.kind === 'rush', flashed: obs.tick >= T.flashPop && obs.tick < T.flashPop + 2 * T.tps, flashOwner: T.flashOwner,
       // 探一次停幾個決策：停 peekHold，低積極、高走位的人再側身出去 3、退回 3
       peekLen: this.nav.peekHold + (this.nav.attrs.aggression * 100 < P.shoulderBelow && this.nav.attrs.movement * 100 >= P.shoulderMove ? 6 : 0),
       // 計畫包點（T：這次執行的包點或計畫包點；CT：守點所在包點）：落點找不到所在包點時用
       site: site0 !== null ? SITE_IDS.indexOf(site0) : this.choice.siteOf(hold ?? tac.goal), soon,
       cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
+      trade: (q) => T.coop.spotFor(obs, q) !== null,
       group: (id) => T.groups?.get(id) ?? 0,
-    }, li);
+    };
   }
 }

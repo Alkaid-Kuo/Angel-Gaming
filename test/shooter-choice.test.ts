@@ -48,7 +48,7 @@ function run(seed: number, rounds: number): Row[] {
   return rows;
 }
 
-describe('Bot 3.0 效用層：影子模式', () => {
+describe('Bot 3.0 效用層：決策與視線頭（第 6 步起驅動行為）', () => {
   let rows: Row[] = [];
   beforeAll(() => {
     P.choiceTrace = true;
@@ -113,7 +113,7 @@ describe('Bot 3.0 效用層：影子模式', () => {
     expect(new Set(act.map((l) => l.lk?.t)).size).toBeGreaterThanOrEqual(4);
   });
 
-  it('視線頭硬優先：探頭 hold／shoulder 鎖窄口；沒在探、沒挨打時，新鮮的記得敵位（信心 ≥ 60、3 秒內）優先', () => {
+  it('視線頭硬優先：探頭 hold／shoulder 鎖窄口；沒在探、沒挨打、沒有指揮層的看向（i2）時，新鮮的記得敵位（信心 ≥ 60、3 秒內）優先', () => {
     let peeks = 0;
     let fresh = 0;
     for (const l of looks) {
@@ -122,7 +122,8 @@ describe('Bot 3.0 效用層：影子模式', () => {
         peeks++;
         expect(l.st.hard).toBe('p');
         expect(l.lk?.t === 'i' && l.lk.ref === 0).toBe(true);
-      } else if (l.st.hard !== 'd' && l.st.thr !== null && l.st.thr[2]) {
+      } else if (l.st.hard === 'i') expect(l.lk?.t === 'i' && l.lk.ref === 2).toBe(true);
+      else if (l.st.hard !== 'd' && l.st.thr !== null && l.st.thr[2]) {
         fresh++;
         expect(l.st.hard).toBe('e');
         expect(l.lk?.t).toBe('e');
@@ -130,4 +131,54 @@ describe('Bot 3.0 效用層：影子模式', () => {
     }
     expect(peeks + fresh).toBeGreaterThan(0);
   });
+});
+
+describe('Bot 3.0 視線頭：i2（指揮層這一步的看向）硬優先與失效（第 6 步切換裁定）', () => {
+  /** 跑到 live 的第一個 decide tick，回傳 0 號的效用層與一份可改的觀察 */
+  function setup(): { ch: Choice; obs: Record<string, unknown> & { tick: number; me: { x: number; y: number; facing: number } } } {
+    const ctrl = Array.from({ length: PLAYER_COUNT }, (_, pid) => new ShooterBatchController(base, 'a', 7, pid, MAPS.redrock(), { timeLimits: false }));
+    const knobs = ctrl.map((c) => resolveKnobs(c.declaration, {}, c.label));
+    const d = new ShooterDriver({ seed: 7, mapId: 'redrock', controllers: ctrl, knobs, record: false } as ConstructorParameters<typeof ShooterDriver>[0]);
+    const m = (d as unknown as { match: { phase: string; tick: number; players: { x: number; y: number; facing: number }[] } }).match;
+    while (m.phase !== 'live') d.step();
+    const ch = (ctrl[0] as unknown as { bot: { choice: Choice } }).bot.choice;
+    const p = m.players[0];
+    const obs = { tick: m.tick + 1000, me: { x: p.x, y: p.y, facing: p.facing / 100, alive: true }, radar: [], teammates: [], enemies: [], round: { phase: 'live' } };
+    return { ch, obs };
+  }
+  type Li = Parameters<Choice['look']>[1];
+  const li = (act: { x: number; y: number } | null): Li => ({ active: true, peek: null, hold: null, holding: false, moving: false, act, ahead: null, soundReact: 0 });
+
+  it('有 i2 時壓過新鮮敵位；指令消失的下一拍回到敵位；換目標就照新的；i2Hard 關掉時敵位優先', () => {
+    const { ch, obs } = setup();
+    const me = obs.me;
+    const perc = (ch as unknown as { perc: { known: Map<number, unknown>; lastHurt: unknown; sectors: unknown[] } }).perc;
+    perc.lastHurt = null;
+    perc.sectors = [];
+    const enemy = { id: 99, x: me.x + 8000, y: me.y, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: obs.tick, seenTick: obs.tick, conf: 90, src: 'see' };
+    perc.known.set(99, enemy);
+    const look = (a: { x: number; y: number } | null): { t: string; ref: number; x: number; y: number; hard: string } => {
+      obs.tick += 3;
+      enemy.tick = obs.tick;
+      ch.look(obs as never, li(a), false);
+      const lk = ch.lk;
+      expect(lk).not.toBeNull();
+      return { t: lk?.t ?? '', ref: lk?.ref ?? -1, x: lk?.x ?? 0, y: lk?.y ?? 0, hard: ch.lstat?.hard ?? '' };
+    };
+    const a1 = { x: me.x, y: me.y + 6000 };
+    expect(look(a1)).toMatchObject({ t: 'i', ref: 2, x: a1.x, y: a1.y, hard: 'i' });
+    // 指令消失：不殘留，回到新鮮敵位
+    expect(look(null)).toMatchObject({ t: 'e', hard: 'e' });
+    // 換目標：照這一拍的新指令
+    const a2 = { x: me.x - 6000, y: me.y };
+    expect(look(a1)).toMatchObject({ t: 'i', x: a1.x, y: a1.y });
+    expect(look(a2)).toMatchObject({ t: 'i', ref: 2, x: a2.x, y: a2.y, hard: 'i' });
+    // 軟性版：i2 只是計分候選，新鮮敵位照舊硬優先
+    P.U.L.i2Hard = false;
+    try {
+      expect(look(a2)).toMatchObject({ t: 'e', hard: 'e' });
+    } finally {
+      P.U.L.i2Hard = true;
+    }
+  }, 120000);
 });
