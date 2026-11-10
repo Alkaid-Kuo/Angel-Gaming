@@ -3148,7 +3148,9 @@ if (q !== null) m.set(Number(q[1]), (q[2].split('')));
 }
 return m;
 }
-function allocate(needs, holds, roleOf) {
+const anyone = () => true;
+const fitsFor = (purpose, fits, id, target) => purpose !== 'entryFlash' || fits(id, target);
+function allocate(needs, holds, roleOf, fits = anyone) {
 const left = new Map([...holds].map(([id, ks]) => [id, [...ks]]));
 const items = [];
 for (const n of needs) {
@@ -3156,6 +3158,7 @@ if (items.length >= 19) break;
 let best = null;
 let bk = Infinity;
 for (const [id, ks] of [...left].sort((a, b) => a[0] - b[0])) {
+if (!fitsFor(n.purpose, fits, id, n.target)) continue;
 for (let j = 0; j < n.kinds.length; j++) {
 if (!ks.includes(n.kinds[j])) continue;
 const key = j * 1000 + items.filter((it) => it.owner === id).length * 10 + prefRank(n.roles, roleOf(id));
@@ -3216,9 +3219,16 @@ const k = it !== undefined ? it.kind : (w);
 if (it !== undefined) it.state = 'used';
 const hs = this.holds.get(c.from);
 if (hs !== undefined && hs.includes(k)) hs.splice(hs.indexOf(k), 1);
+} else if (t.startsWith('U:f ')) {
+const it = this.items[Number(t.slice(4))];
+if (it !== undefined && it.state === 'plan') it.state = 'free';
 } else if (t.startsWith('U:x ')) {
 const it = this.items[Number(t.slice(4).split(' ')[0])];
-if (it !== undefined && it.owner === c.from && it.state === 'plan') it.backup = true;
+if (it !== undefined && it.owner === c.from && it.state === 'plan') {
+it.backup = true;
+if (it.refused === undefined) it.refused = [];
+it.refused.push(c.from);
+}
 } else if (t.startsWith('U:r ')) {
 const q = /^U:r (\d+) (\d|-)(?: ([AB])([0-9S-]))?$/.exec(t);
 const it = q === null ? undefined : this.items[Number(q[1])];
@@ -3234,20 +3244,20 @@ if (q[3] !== undefined) it.target = { site: (q[3]), ent: q[4] === 'S' ? -1 : q[4
 }
 }
 }
-spare(id, k, except = null) {
-const have = (this.holds.get(id) ?? []).filter((x) => x === k).length;
+spare(id, k, except = null, own = -1) {
+const have = own >= 0 ? own : (this.holds.get(id) ?? []).filter((x) => x === k).length;
 const taken = this.items.filter((it) => it !== except && it.owner === id && it.kind === k && it.state === 'plan').length;
 return have - taken;
 }
-claim(id, kind, purposes) {
+claim(id, kind, purposes, own = -1, fits = anyone) {
 const k = codeOf(kind);
 const virt = () => ({ idx: -1, owner: id, kind: k, purpose: 'entryFlash', target: { site: null, ent: -2 }, state: 'free', backup: false });
 if (!this.active) return virt();
-for (const it of this.items) if (it.owner === id && it.kind === k && it.state === 'plan' && purposes.includes(it.purpose)) return it;
+for (const it of this.items) if (it.owner === id && it.kind === k && it.state === 'plan' && purposes.includes(it.purpose) && fitsFor(it.purpose, fits, id, it.target)) return it;
 if (!purposes.includes('free')) return null;
 const fr = this.items.find((it) => it.owner === id && it.kind === k && it.state === 'free');
 if (fr !== undefined) return fr;
-return this.spare(id, k) > 0 ? virt() : null;
+return this.spare(id, k, null, own) > 0 ? virt() : null;
 }
 release(purposes) {
 for (const it of this.items) if (it.state === 'plan' && purposes.includes(it.purpose)) it.state = 'free';
@@ -3255,7 +3265,7 @@ for (const it of this.items) if (it.state === 'plan' && purposes.includes(it.pur
 usedText(it) {
 return it.idx >= 0 ? `U:u ${it.idx}` : `U:u ${it.kind}`;
 }
-upkeep(people, pointOf, planted) {
+upkeep(people, pointOf, planted, fits = anyone) {
 if (!this.active) return [];
 const say = [];
 const alive = new Map(people.filter((p) => p.alive).map((p) => [p.id, p]));
@@ -3269,7 +3279,7 @@ const at = pointOf(target, it);
 let best = -1;
 let bd = Infinity;
 for (const p of [...alive.values()].sort((a, b) => a.id - b.id)) {
-if (it.backup && p.id === it.owner) continue;
+if ((it.backup && p.id === it.owner) || (it.refused ?? []).includes(p.id) || !fitsFor(it.purpose, fits, p.id, it.target)) continue;
 if (this.spare(p.id, it.kind, it) <= 0) continue;
 const d = at === null ? 0 : Math.round(dist(p.x, p.y, at.x, at.y) / UNIT);
 if (d < bd) {
@@ -3411,6 +3421,8 @@ this.flashUnsafe = false;
 this.lastThrow = '';
 this.retakeRoute = -1;
 this.retakeThrown = -1;
+this.curObs = null;
+this.flashOwner = false;
 this.rotSince = -1;
 this.defuseStarted = new Map();
 this.defuseIssued = -1;
@@ -3653,9 +3665,11 @@ return null;
 update(obs) {
 const me = obs.me;
 const t = obs.tick;
+this.flashOwner = false;
 const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
 if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
 this.util.now = t;
+this.curObs = obs;
 this.claimed.clear();
 this.enemiesAlive = obs.enemiesAlive;
 if (obs.enemiesAlive === 0) {
@@ -4269,6 +4283,15 @@ if (items.length > 0) out.cmds.push({ type: 'buy', items });
 this.bought = true;
 this.boughtAt = obs.tick;
 }
+fits(obs) {
+const p = this.plan;
+return (id, tg) => {
+if (p === null || p.kind === 'hold' || tg.site === null || tg.ent < 0) return true;
+const st = this.setupOf(obs, id, p);
+const e = this.entranceOf(st.site, st.route);
+return st.site === tg.site && e !== null && this.intel.sites[st.site].entrances.indexOf(e) === tg.ent;
+};
+}
 needs(obs) {
 const p = (this.plan);
 const ent = ( site, route) => {
@@ -4301,7 +4324,7 @@ if (!res.active && !res.saidPlan && freeze) {
 const alive = this.alive(obs);
 if (alive.every((q) => res.holds.has(q.id)) || obs.round.phaseTicksLeft <= this.tps) {
 res.saidPlan = true;
-out.cmds.push({ type: 'say', text: itemsText(allocate(this.needs(obs), res.holds, (id) => this.roles.of(id))) });
+out.cmds.push({ type: 'say', text: itemsText(allocate(this.needs(obs), res.holds, (id) => this.roles.of(id), this.fits(obs))) });
 }
 }
 if (res.active) {
@@ -4313,7 +4336,18 @@ const site = this.intel.sites[tg.site];
 const e = tg.ent >= 0 ? site.entrances[tg.ent] : undefined;
 return e !== undefined ? { x: e.ox, y: e.oy } : { x: site.cx, y: site.cy };
 };
-for (const text of res.upkeep(people, pointOf, planted)) out.cmds.push({ type: 'say', text });
+for (const text of res.upkeep(people, pointOf, planted, this.fits(obs))) out.cmds.push({ type: 'say', text });
+if (me.team === 'T' && this.execTick >= 0 && obs.bomb.state !== 'planted') {
+const leadN = P.routeSpeed * ((this.util.fuse.get('flash') ?? 45) + this.data.rules.reactionTicks) / this.tps + 1;
+for (const it of res.items) {
+if (it.purpose !== 'entryFlash' || it.state !== 'plan' || it.target.site === null || it.target.ent < 0) continue;
+const e = this.intel.sites[it.target.site].entrances[it.target.ent];
+const o = people.find((q) => q.id === it.owner);
+if (e === undefined || o === undefined) continue;
+const ents = this.intel.sites[it.target.site].entrances;
+if (dist(o.x, o.y, e.ox, e.oy) > 2 * leadN * UNIT && people.some((q) => q.id !== it.owner && ents.some((x) => dist(q.x, q.y, x.ox, x.oy) < leadN * UNIT))) out.cmds.push({ type: 'say', text: `U:f ${it.idx}` });
+}
+}
 }
 this.resRelease(obs);
 }
@@ -4343,7 +4377,7 @@ if (since > 20 || inSite) res.release(['fireBackup']);
 can(me, kind, purposes) {
 if (!this.util.has(me, kind)) return false;
 if (!P.resLayer) return true;
-const it = this.res.claim(me.id, kind, purposes);
+const it = this.res.claim(me.id, kind, purposes, me.loadout.grenades.filter((g) => g === kind).length, this.curObs === null ? undefined : this.fits(this.curObs));
 if (it === null) return false;
 this.claimed.set(kind, it);
 return true;
@@ -4678,15 +4712,9 @@ const size = Math.max(1, this.groupSize(obs, p));
 const first = Math.min(1, size - 1);
 const since = this.flashCue >= 0 ? t - this.flashCue : -1;
 let flashTurn;
-if (act && cue) {
-const pos = ( id) => (id === me.id ? me : obs.teammates.find((m) => m.id === id && m.alive));
-for (const it of this.res.items) {
-const o = it.purpose === 'entryFlash' && it.state === 'plan' ? pos(it.owner) : undefined;
-if (o !== undefined && dist(o.x, o.y, ent.ox, ent.oy) > 2 * leadN * UNIT) it.state = 'free';
-}
-}
 const planned = act && this.can(me, 'flash', ['entryFlash']);
-const plannedLeft = act && this.res.items.some((it) => it.purpose === 'entryFlash' && it.state === 'plan' && this.isAlive(obs, it.owner) && it.owner !== me.id);
+const entIdx = this.intel.sites[exec].entrances.indexOf(ent);
+const plannedLeft = act && this.res.items.some((it) => it.purpose === 'entryFlash' && it.state === 'plan' && this.isAlive(obs, it.owner) && it.owner !== me.id && (it.target.site !== exec || it.target.ent < 0 || it.target.ent === entIdx));
 const thrownHere = this.flashSpots.some((f) => this.flashOf(ent, f));
 const myFlash = planned || (act && (!plannedLeft || thrownHere) && this.can(me, 'flash', ['free']));
 if (planned) flashTurn = true;
@@ -4732,7 +4760,8 @@ const pending = this.mateFlash.some((x) => t <= x.pop - travel);
 const flashHere = st !== null && dist(st.x, st.y, ent.ox, ent.oy) < P.flashLead * UNIT;
 const cover = smokeFirst && near && wish === null && !cue && flashTurn && idx > 0 && sinceExec < P.stageLead + 3 && next.ok && (act ? myFlash : this.util.has(me, 'flash')) && this.flashPoint(obs, exec, ent, 2, next.avoid, act ? ent : null) !== null;
 const waiting = cover || (smokeFirst && near && wish === null && (pending || (flashHere && sinceExec < 3 && this.flashHeard < 0 && !this.util.used.has('flash'))));
-const lead = smokeFirst && near && wish === null && sinceExec < P.stageLead && this.waitEntry(obs, exec);
+this.flashOwner = planned && !thrownHere;
+const lead = smokeFirst && near && wish === null && sinceExec < P.stageLead && !this.flashOwner && this.waitEntry(obs, exec);
 if ((waiting || lead || (smokeFirst && near && wish !== null && sinceExec < 4)) && st !== null) {
 out.goal = { x: st.x, y: st.y };
 out.hold = st;
@@ -4743,7 +4772,7 @@ return wish;
 }
 out.role = `執行 ${exec}`;
 const flashed = t >= this.flashPop && t < this.flashPop + 2 * this.tps;
-if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && this.yieldTo(obs, exec)) {
+if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && !this.flashOwner && this.yieldTo(obs, exec)) {
 out.stop = true;
 out.look = { x: site.cx, y: site.cy };
 out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
@@ -5161,7 +5190,10 @@ const me = obs.me;
 const B = this.util.blindRange;
 const hard = pred !== null;
 const mates = obs.teammates.filter((m) => m.alive);
+const t = obs.tick;
+const fighting = ( m) => t - (this.mateFired.get(m.id) ?? -1e9) < 1.5 * this.tps || this.perc.threats(m.x, m.y, 30).some((k) => dist(k.x, k.y, m.x, m.y) < 30 * UNIT && g.los(k.x, k.y, m.x, m.y));
 const facing = ( m, c) => Math.abs(adiff(angleTo(m.x, m.y, c.x, c.y), m.facing)) <= this.data.rules.grenadeRules.flashSideDeg;
+const pick = ( strict) => {
 this.flashUnsafe = false;
 let best = null;
 let bestS = 0;
@@ -5170,7 +5202,7 @@ for (const c of this.flashList) {
 if (avoid !== null && dist(c.x, c.y, avoid.x, avoid.y) < P.flashSecondGap * UNIT) continue;
 if (++tries > 12) break;
 if (this.util.solve(me.x, me.y, c.x, c.y) === null) continue;
-if (hard && mates.some((m) => dist(m.x, m.y, c.x, c.y) < B && g.los(m.x, m.y, c.x, c.y) && facing(m, c) && !this.canHide(m.x, m.y, c, 4))) {
+if (hard && mates.some((m) => dist(m.x, m.y, c.x, c.y) < B && g.los(m.x, m.y, c.x, c.y) && (fighting(m) || (strict && facing(m, c))) && !this.canHide(m.x, m.y, c, 4))) {
 this.flashUnsafe = true;
 continue;
 }
@@ -5191,6 +5223,9 @@ best = c;
 }
 }
 return best;
+};
+const best = pick(true);
+return best !== null || !hard || !this.flashUnsafe ? best : pick(false);
 }
 waitFlash(obs, out) {
 const me = obs.me;
@@ -5213,6 +5248,15 @@ return;
 flashInfo(obs, c, s) {
 const R = this.util.blindRange;
 if (this.perc.threats(c.x, c.y, 30).some((k) => dist(k.x, k.y, c.x, c.y) < R)) return true;
+const rc = this.intel.sites[s].rect;
+if (this.perc.sectors.some((q) => {
+if (q.conf <= 0 || q.kind === 'hurt') return false;
+for (let r = q.r0; r <= q.r1; r += 2) {
+const x = Math.floor((q.ox + cosd(q.dir) * r * UNIT) / UNIT), y = Math.floor((q.oy + sind(q.dir) * r * UNIT) / UNIT);
+if (x >= rc.x0 - 8 && x <= rc.x1 + 8 && y >= rc.y0 - 8 && y <= rc.y1 + 8) return true;
+}
+return false;
+})) return true;
 for (const [key, q] of this.contacts) if (this.contactSite.get(key) === s && obs.tick - q.tick < 5 * this.tps && Number.isFinite(q.x) && dist(q.x, q.y, c.x, c.y) < R + 5 * UNIT) return true;
 return false;
 }

@@ -1239,7 +1239,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'T4',
     name: 'T 執行前先煙再閃再進',
-    expect: 'T 全買、計畫 split（指揮自己選點與兩條路線、兩組都到待命點才執行）；兩個包點各有一個 CT 躲在外面最看不到的角落、每秒朝牆開一槍（T 只聽得到）：先丟煙、再丟閃、然後才有人進包點',
+    expect: 'T 全買、計畫 split（指揮自己選點與兩條路線、兩組都到待命點才執行）；兩個包點各有一個 CT 躲在外面最看不到的角落、每秒朝牆開一槍（T 只聽得到）：先丟煙、然後才有人進包點；進點前 T 對執行的那個點有情報（看到那裡的 CT，或聽到的槍聲方向指向那裡的 CT）時一定要在煙之後、進點之前丟閃；沒有情報時不要求丟閃，丟了也要在煙之後、進點之前（Bot 3.0：無情報不丟進點閃）',
     run: (bot, seed) =>
       onBoth((mapId) => {
         const map = MAPS[mapId]();
@@ -1250,7 +1250,21 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
           const wall = nearestWall(map, hide[pid]);
           return () => [{ type: 'aim', x: wall[0], y: wall[1] }, { type: 'fire', on: ++k % 10 === 0 }];
         };
-        const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0, CT1], scripts: { [CT0]: noisy(CT0), [CT1]: noisy(CT1) }, knobs: { plan: 3 }, opts: { roundMoney: [16000, null] } });
+        // 情報（Bot 3.0）：T 看到哪個 CT、或聽到的敵方槍聲方向（±20°）指向哪個 CT 的藏身點，就算對那個點有情報
+        const info = { A: false, B: false };
+        let entered = false;
+        const onCommands = (_pid: number, obs: ShooterObservation): void => {
+          if (entered) return;
+          for (const e of obs.enemies) info[e.id === CT0 ? 'A' : 'B'] = true;
+          for (const q of obs.sounds) {
+            if (q.friendly || q.kind !== 'shot') continue;
+            for (const [pid, site] of [[CT0, 'A'], [CT1, 'B']] as const) {
+              const want = ang([obs.me.x, obs.me.y], hide[pid]);
+              if (Math.abs(((q.dirDeg - want + 540) % 360) - 180) <= 20) info[site] = true;
+            }
+          }
+        };
+        const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0, CT1], scripts: { [CT0]: noisy(CT0), [CT1]: noisy(CT1) }, knobs: { plan: 3 }, opts: { roundMoney: [16000, null] }, onCommands });
         toLive(d);
         const m = d.match;
         for (const pid of [CT0, CT1]) {
@@ -1260,6 +1274,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
         let smoke = -1;
         let flash = -1;
         let enter = -1;
+        let site: 'A' | 'B' | null = null;
         const seen = new Set<object>();
         run(d, 70 * TPS, (mm) => {
           for (const g of mm.projectiles) {
@@ -1268,11 +1283,17 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
             if (g.kind === 'smoke' && smoke < 0) smoke = mm.tick;
             if (g.kind === 'flash' && flash < 0) flash = mm.tick;
           }
-          if (enter < 0 && tInSite(mm, TS)) enter = mm.tick;
+          if (enter < 0 && tInSite(mm, TS)) {
+            enter = mm.tick;
+            entered = true;
+            site = TS.map((pid) => mm.players[pid]).find((p) => p.alive && inAnySite(mm.map, p.x, p.y) && inSiteRect(mm.map, 'A', p.x, p.y)) !== undefined ? 'A' : 'B';
+          }
           return enter >= 0;
         });
         // CT 打不死：T 在包點外看到他會一直對槍進不了點（enter −1），這裡要驗的是順序，不是進得去
-        return { pass: smoke >= 0 && flash > smoke && (enter > flash || enter < 0), detail: `煙 ${smoke}、閃 ${flash}、進點 ${enter}` };
+        const known = site !== null && info[site];
+        const ordered = flash > smoke && (enter > flash || enter < 0);
+        return { pass: smoke >= 0 && (known ? ordered : flash < 0 || ordered), detail: `煙 ${smoke}、閃 ${flash}、進點 ${enter}${site === null ? '' : ` ${site}`}、情報 ${known ? '有' : '無'}` };
       }),
   },
   {
@@ -1653,7 +1674,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
   {
     id: 'T19',
     name: '煙霧分配',
-    expect: 'T 全買、計畫 split、兩個煙霧手（兩組各一）：同回合至少兩顆煙，落點彼此 ≥ 6 格；兩張圖',
+    expect: 'T 全買、計畫 split：至少 1 顆進點煙；有兩顆以上時落點彼此 ≥ 6 格（Bot 3.0：split 需求表是進點煙一顆＋滅火備援一顆，備援要第一人進點或執行 20 秒後才轉自由）；兩張圖',
     run: (bot, seed) =>
       onBoth((mapId) => {
         const d = driver(bot, { seed, map: mapId, seats: TS, alive: [...TS, CT0], knobs: { plan: 3 }, opts: { roundMoney: [16000, null] } });
@@ -1672,7 +1693,7 @@ const TEAM_SCENARIOS: readonly AiScenario[] = [
         });
         let gap = Infinity;
         for (let i = 0; i < pts.length; i++) for (let k = i + 1; k < pts.length; k++) gap = Math.min(gap, d2(pts[i], pts[k]) / UNIT);
-        return { pass: pts.length >= 2 && gap >= 6, detail: `煙 ${pts.length} 顆、最近 ${pts.length >= 2 ? gap.toFixed(1) : '—'} 格` };
+        return { pass: pts.length >= 1 && (pts.length < 2 || gap >= 6), detail: `煙 ${pts.length} 顆、最近 ${pts.length >= 2 ? gap.toFixed(1) : '—'} 格` };
       }),
   },
 ];

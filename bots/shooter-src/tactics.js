@@ -208,6 +208,10 @@ export class Tactics {
     /** 3.0：回防走的 CT 路線（-1＝還沒定）；自己丟出回防道具的 tick */
     this.retakeRoute = -1;
     this.retakeThrown = -1;
+    /** 3.0（r7k）：這次決策自己持有入口還沒丟的計畫進點閃（不讓位給突破手） */
+    /** @type {import('./base.js').Observation | null} */
+    this.curObs = null;
+    this.flashOwner = false;
     this.rotSince = -1;
     /** @type {Map<number, number>} */
     this.defuseStarted = new Map();
@@ -527,9 +531,12 @@ export class Tactics {
     const me = obs.me;
     const t = obs.tick;
     /** @type {TacOut} */
+    this.flashOwner = false;
     const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
     this.util.now = t;
+    /** 這次決策的觀察（can() 判斷 entryFlash 入口分組用） */
+    this.curObs = obs;
     this.claimed.clear();
     this.enemiesAlive = obs.enemiesAlive;
     if (obs.enemiesAlive === 0) {
@@ -1289,6 +1296,20 @@ export class Tactics {
   }
 
   /** 3.0：這回合計畫的需求表 @param {import('./base.js').Observation} obs */
+  /**
+   * 3.0（r7k）：這個隊員走不走這個目標入口（T 照計畫分組：主組 r1、第二組 r2；rush／go 全隊同一路）；CT、守點、沒指定入口都算符合
+   * @param {import('./base.js').Observation} obs @returns {import('./resources.js').Fits}
+   */
+  fits(obs) {
+    const p = this.plan;
+    return (id, tg) => {
+      if (p === null || p.kind === 'hold' || tg.site === null || tg.ent < 0) return true;
+      const st = this.setupOf(obs, id, p);
+      const e = this.entranceOf(st.site, st.route);
+      return st.site === tg.site && e !== null && this.intel.sites[st.site].entrances.indexOf(e) === tg.ent;
+    };
+  }
+
   needs(obs) {
     const p = /** @type {Plan} */ (this.plan);
     const ent = (/** @type {SiteId} */ site, /** @type {number} */ route) => {
@@ -1328,7 +1349,7 @@ export class Tactics {
       const alive = this.alive(obs);
       if (alive.every((q) => res.holds.has(q.id)) || obs.round.phaseTicksLeft <= this.tps) {
         res.saidPlan = true;
-        out.cmds.push({ type: 'say', text: itemsText(allocate(this.needs(obs), res.holds, (id) => this.roles.of(id))) });
+        out.cmds.push({ type: 'say', text: itemsText(allocate(this.needs(obs), res.holds, (id) => this.roles.of(id), this.fits(obs))) });
       }
     }
     if (res.active) {
@@ -1340,7 +1361,19 @@ export class Tactics {
         const e = tg.ent >= 0 ? site.entrances[tg.ent] : undefined;
         return e !== undefined ? { x: e.ox, y: e.oy } : { x: site.cx, y: site.cy };
       };
-      for (const text of res.upkeep(people, pointOf, planted)) out.cmds.push({ type: 'say', text });
+      for (const text of res.upkeep(people, pointOf, planted, this.fits(obs))) out.cmds.push({ type: 'say', text });
+      // （審查 (a)，r7k）執行中：有隊友走到那個包點任一入口的觸發距離內（split 兩組走不同入口）、擁有者離自己那筆的入口超過 2N，指揮者喊 U:f 讓它轉自由
+      if (me.team === 'T' && this.execTick >= 0 && obs.bomb.state !== 'planted') {
+        const leadN = P.routeSpeed * ((this.util.fuse.get('flash') ?? 45) + this.data.rules.reactionTicks) / this.tps + 1;
+        for (const it of res.items) {
+          if (it.purpose !== 'entryFlash' || it.state !== 'plan' || it.target.site === null || it.target.ent < 0) continue;
+          const e = this.intel.sites[it.target.site].entrances[it.target.ent];
+          const o = people.find((q) => q.id === it.owner);
+          if (e === undefined || o === undefined) continue;
+          const ents = this.intel.sites[it.target.site].entrances;
+          if (dist(o.x, o.y, e.ox, e.oy) > 2 * leadN * UNIT && people.some((q) => q.id !== it.owner && ents.some((x) => dist(q.x, q.y, x.ox, x.oy) < leadN * UNIT))) out.cmds.push({ type: 'say', text: `U:f ${it.idx}` });
+        }
+      }
     }
     this.resRelease(obs);
   }
@@ -1377,7 +1410,8 @@ export class Tactics {
   can(me, kind, purposes) {
     if (!this.util.has(me, kind)) return false;
     if (!P.resLayer) return true;
-    const it = this.res.claim(me.id, kind, purposes);
+    // 3.0（r7k，T22）：自己問時用實際持有數算計畫外的餘量（U:h 之後撿到、被換掉的道具副本不知道）
+    const it = this.res.claim(me.id, kind, purposes, me.loadout.grenades.filter((g) => g === kind).length, this.curObs === null ? undefined : this.fits(this.curObs));
     if (it === null) return false;
     this.claimed.set(kind, it);
     return true;
@@ -1802,16 +1836,12 @@ export class Tactics {
       let flashTurn;
       // 3.0：擁有這個入口的 entryFlash 項目就是自己的回合（第二顆由 flashNext 控制間隔）
       // （審查 (a)）跟進者到觸發距離時，擁有者離入口超過 2N：這筆提早轉自由使用（各副本看公開位置，同條件）
-      if (act && cue) {
-        const pos = (/** @type {number} */ id) => (id === me.id ? me : obs.teammates.find((m) => m.id === id && m.alive));
-        for (const it of this.res.items) {
-          const o = it.purpose === 'entryFlash' && it.state === 'plan' ? pos(it.owner) : undefined;
-          if (o !== undefined && dist(o.x, o.y, ent.ox, ent.oy) > 2 * leadN * UNIT) it.state = 'free';
-        }
-      }
+      // （審查 (a)）擁有者離入口太遠時提早轉自由：r7k 起由指揮者在 resStep 判定、喊 U:f，各副本只讀（協定原則：指揮者寫、所有副本讀）
       const planned = act && this.can(me, 'flash', ['entryFlash']);
       // 計畫外的閃（審查 (a)）：計畫的 entryFlash 用完或沒人拿時照 2.8 的順序規則丟；這個入口已經有閃丟出時當第二顆（間隔由 flashNext 控）
-      const plannedLeft = act && this.res.items.some((it) => it.purpose === 'entryFlash' && it.state === 'plan' && this.isAlive(obs, it.owner) && it.owner !== me.id);
+      // （r7k）只看同一個入口的計畫閃：split 另一組入口的計畫閃不擋這組的自由閃
+      const entIdx = this.intel.sites[exec].entrances.indexOf(ent);
+      const plannedLeft = act && this.res.items.some((it) => it.purpose === 'entryFlash' && it.state === 'plan' && this.isAlive(obs, it.owner) && it.owner !== me.id && (it.target.site !== exec || it.target.ent < 0 || it.target.ent === entIdx));
       const thrownHere = this.flashSpots.some((f) => this.flashOf(ent, f));
       const myFlash = planned || (act && (!plannedLeft || thrownHere) && this.can(me, 'flash', ['free']));
       if (planned) flashTurn = true;
@@ -1872,7 +1902,9 @@ export class Tactics {
       const cover = smokeFirst && near && wish === null && !cue && flashTurn && idx > 0 && sinceExec < P.stageLead + 3 && next.ok && (act ? myFlash : this.util.has(me, 'flash')) && this.flashPoint(obs, exec, ent, 2, next.avoid, act ? ent : null) !== null;
       const waiting = cover || (smokeFirst && near && wish === null && (pending || (flashHere && sinceExec < 3 && this.flashHeard < 0 && !this.util.used.has('flash'))));
       // 等突破手先走（狙擊手等兩個人進點）：執行後最多 P.stageLead 秒
-      const lead = smokeFirst && near && wish === null && sinceExec < P.stageLead && this.waitEntry(obs, exec);
+      // 3.0（r7k，T4 死結）：持有這個入口還沒丟的計畫進點閃的人不等突破手先走，先到投擲位（突破手等的是閃光出手）
+      this.flashOwner = planned && !thrownHere;
+      const lead = smokeFirst && near && wish === null && sinceExec < P.stageLead && !this.flashOwner && this.waitEntry(obs, exec);
       // 正在準備丟煙／閃的人也留在待命格（最多到執行後 4 秒，丟不出去就照樣進）
       if ((waiting || lead || (smokeFirst && near && wish !== null && sinceExec < 4)) && st !== null) {
         out.goal = { x: st.x, y: st.y };
@@ -1886,7 +1918,7 @@ export class Tactics {
     // 閃光剛炸開：直接衝，不讓位也不拉間距（對面最多瞎 2 秒）
     const flashed = t >= this.flashPop && t < this.flashPop + 2 * this.tps;
     // 狙擊手不跟著衝（2.6.1：閃光一炸開就先進點，R2 的反例）
-    if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && this.yieldTo(obs, exec)) {
+    if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && !this.flashOwner && this.yieldTo(obs, exec)) {
       out.stop = true;
       out.look = { x: site.cx, y: site.cy };
       out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
@@ -2435,10 +2467,17 @@ export class Tactics {
     const B = this.util.blindRange;
     // 3.0（pred＝這次執行的入口）：預測炸開那一刻隊友的位置——入口附近、還沒進點的人在入口外的等閃線，其他人在原地；
     // 任一個預測位置看得到爆點（半徑內）就不選這個點（硬條件，不打折）
-    // 炸開前還沒看得到爆點的隊友由 waitFlash 擋在視線外；所以只看「現在就看得到爆點、面向它（正面或側面）、4 步內躲不掉」的隊友
+    // 炸開前還沒看得到爆點的隊友由 waitFlash 擋在視線外。
+    // r7k（審查決定，和 r7i 的轉開同一套假設）：沒看到敵人、沒在交火的隊友出手時會轉開（只剩背對殘餘），不排除；
+    // 硬性排除只留「交火中（1.5 秒內開過槍，或記得的敵人看得到他）、在爆點半徑內有視線、4 步內躲不掉」的隊友（他不會轉開）
     const hard = pred !== null;
     const mates = obs.teammates.filter((m) => m.alive);
+    const t = obs.tick;
+    const fighting = (/** @type {typeof mates[number]} */ m) => t - (this.mateFired.get(m.id) ?? -1e9) < 1.5 * this.tps || this.perc.threats(m.x, m.y, 30).some((k) => dist(k.x, k.y, m.x, m.y) < 30 * UNIT && g.los(k.x, k.y, m.x, m.y));
+    // r7l（T9）：先用 r7i 的嚴格版（面向爆點或交火中都排除）；嚴格版把候選全排除了才退到只排除交火中的（乙），兩輪都沒有才放棄
+    // （只用乙時，面向爆點、會轉開的隊友吃的背對殘餘讓 T9 的含背對總量超過 20%）
     const facing = (/** @type {typeof mates[number]} */ m, /** @type {{ x: number, y: number }} */ c) => Math.abs(adiff(angleTo(m.x, m.y, c.x, c.y), m.facing)) <= this.data.rules.grenadeRules.flashSideDeg;
+    const pick = (/** @type {boolean} */ strict) => {
     this.flashUnsafe = false;
     let best = null;
     let bestS = 0;
@@ -2447,7 +2486,7 @@ export class Tactics {
       if (avoid !== null && dist(c.x, c.y, avoid.x, avoid.y) < P.flashSecondGap * UNIT) continue;
       if (++tries > 12) break;
       if (this.util.solve(me.x, me.y, c.x, c.y) === null) continue;
-      if (hard && mates.some((m) => dist(m.x, m.y, c.x, c.y) < B && g.los(m.x, m.y, c.x, c.y) && facing(m, c) && !this.canHide(m.x, m.y, c, 4))) {
+      if (hard && mates.some((m) => dist(m.x, m.y, c.x, c.y) < B && g.los(m.x, m.y, c.x, c.y) && (fighting(m) || (strict && facing(m, c))) && !this.canHide(m.x, m.y, c, 4))) {
         this.flashUnsafe = true;
         continue;
       }
@@ -2469,6 +2508,9 @@ export class Tactics {
       }
     }
     return best;
+    };
+    const best = pick(true);
+    return best !== null || !hard || !this.flashUnsafe ? best : pick(false);
   }
 
   /**
@@ -2503,6 +2545,18 @@ export class Tactics {
   flashInfo(obs, c, s) {
     const R = this.util.blindRange;
     if (this.perc.threats(c.x, c.y, 30).some((k) => dist(k.x, k.y, c.x, c.y) < R)) return true;
+    // 3.0（r7k，T4）：聲音也是情報：還記得的敵方聲音扇形（時效＝聽覺記憶：扇形信心衰減到 0 才忘）經過目標包點附近（矩形外擴 8 格）
+    // 聲音只有方向和距離帶，落不到爆點上；守點的人多半在包點矩形外的角落，所以用包點附近而不是爆點半徑
+    // （viewer 用信心 ≥ 25；這裡不設門檻：槍聲每秒一次時信心在 19～34 間擺盪，門檻 25 會讓同一段聲音時有時無）
+    const rc = this.intel.sites[s].rect;
+    if (this.perc.sectors.some((q) => {
+      if (q.conf <= 0 || q.kind === 'hurt') return false;
+      for (let r = q.r0; r <= q.r1; r += 2) {
+        const x = Math.floor((q.ox + cosd(q.dir) * r * UNIT) / UNIT), y = Math.floor((q.oy + sind(q.dir) * r * UNIT) / UNIT);
+        if (x >= rc.x0 - 8 && x <= rc.x1 + 8 && y >= rc.y0 - 8 && y <= rc.y1 + 8) return true;
+      }
+      return false;
+    })) return true;
     // 接觸要在爆點附近（喊話的區域中心在半徑＋5 格內）才算；只說「包點有人」的接觸閃到 0 人的比例太高
     for (const [key, q] of this.contacts) if (this.contactSite.get(key) === s && obs.tick - q.tick < 5 * this.tps && Number.isFinite(q.x) && dist(q.x, q.y, c.x, c.y) < R + 5 * UNIT) return true;
     return false;

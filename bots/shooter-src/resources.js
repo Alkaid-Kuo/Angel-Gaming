@@ -14,7 +14,7 @@ import { ANCHOR, AWP, ENTRY, LURK, SUPPORT } from './roles.js';
 /** @typedef {'f' | 's' | 'h' | 'm'} KindCode */
 /** @typedef {{ site: 'A' | 'B' | null, ent: number }} Target ent：入口序號，-1＝包點內架點，-2＝未定 */
 /**
- * @typedef {{ idx: number, owner: number, kind: KindCode, purpose: Purpose, target: Target, state: 'plan' | 'used' | 'lost' | 'free', backup: boolean }} UtilItem
+ * @typedef {{ idx: number, owner: number, kind: KindCode, purpose: Purpose, target: Target, state: 'plan' | 'used' | 'lost' | 'free', backup: boolean, refused?: number[] }} UtilItem
  */
 /** @typedef {{ purpose: Purpose, kinds: KindCode[], target: Target, roles: number[], must: boolean }} Need */
 
@@ -163,11 +163,21 @@ export function parseBuyOrders(text) {
 }
 
 /**
+ * 3.0（r7k）：entryFlash 只能給走那個入口那一組的人（split 兩組走不同入口）；fits 由個人層依計畫分組回答，沒給就都行
+ * @typedef {(id: number, target: Target) => boolean} Fits
+ */
+/** @type {Fits} */
+const anyone = () => true;
+/** @param {Purpose} purpose @param {Fits} fits @param {number} id @param {Target} target */
+const fitsFor = (purpose, fits, id, target) => purpose !== 'entryFlash' || fits(id, target);
+
+/**
  * 分配（指揮者）：需求表依序從持有裡找擁有者（角色偏好、id）；找不到就略過。上限 19 筆。
- * @param {Need[]} needs @param {Map<number, KindCode[]>} holds @param {(id: number) => number} roleOf
+ * entryFlash 只在走那個入口那一組裡找（r7k），組裡沒人有就不配（不給別組）
+ * @param {Need[]} needs @param {Map<number, KindCode[]>} holds @param {(id: number) => number} roleOf @param {Fits} [fits]
  * @returns {UtilItem[]}
  */
-export function allocate(needs, holds, roleOf) {
+export function allocate(needs, holds, roleOf, fits = anyone) {
   /** @type {Map<number, KindCode[]>} */
   const left = new Map([...holds].map(([id, ks]) => [id, [...ks]]));
   /** @type {UtilItem[]} */
@@ -178,6 +188,7 @@ export function allocate(needs, holds, roleOf) {
     let best = null;
     let bk = Infinity;
     for (const [id, ks] of [...left].sort((a, b) => a[0] - b[0])) {
+      if (!fitsFor(n.purpose, fits, id, n.target)) continue;
       for (let j = 0; j < n.kinds.length; j++) {
         if (!ks.includes(n.kinds[j])) continue;
         // 多種類可選（佯攻）：先比種類順序，再分散（已分到幾筆），再比角色
@@ -254,9 +265,18 @@ export class Resources {
         if (it !== undefined) it.state = 'used';
         const hs = this.holds.get(c.from);
         if (hs !== undefined && hs.includes(k)) hs.splice(hs.indexOf(k), 1);
+      } else if (t.startsWith('U:f ')) {
+        // 3.0（r7k）：指揮者判定的提早轉自由（審查 (a)）；各副本只讀不算
+        const it = this.items[Number(t.slice(4))];
+        if (it !== undefined && it.state === 'plan') it.state = 'free';
       } else if (t.startsWith('U:x ')) {
         const it = this.items[Number(t.slice(4).split(' ')[0])];
-        if (it !== undefined && it.owner === c.from && it.state === 'plan') it.backup = true;
+        if (it !== undefined && it.owner === c.from && it.state === 'plan') {
+          it.backup = true;
+          // 3.0（r7k，T4）：放棄過的人不再改派回去（否則兩個找不到安全點的人來回接手）
+          if (it.refused === undefined) it.refused = [];
+          it.refused.push(c.from);
+        }
       } else if (t.startsWith('U:r ')) {
         const q = /^U:r (\d+) (\d|-)(?: ([AB])([0-9S-]))?$/.exec(t);
         const it = q === null ? undefined : this.items[Number(q[1])];
@@ -273,9 +293,12 @@ export class Resources {
     }
   }
 
-  /** 這個人身上這種道具，還沒被別的有效計畫佔走的數量 @param {number} id @param {KindCode} k @param {UtilItem | null} [except] */
-  spare(id, k, except = null) {
-    const have = (this.holds.get(id) ?? []).filter((x) => x === k).length;
+  /**
+   * 這個人身上這種道具，還沒被別的有效計畫佔走的數量
+   * @param {number} id @param {KindCode} k @param {UtilItem | null} [except] @param {number} [own] 自己實際持有數（個人層自己問時給；U:h 之後撿到或被換掉的道具副本不知道）
+   */
+  spare(id, k, except = null, own = -1) {
+    const have = own >= 0 ? own : (this.holds.get(id) ?? []).filter((x) => x === k).length;
     const taken = this.items.filter((it) => it !== except && it.owner === id && it.kind === k && it.state === 'plan').length;
     return have - taken;
   }
@@ -283,18 +306,19 @@ export class Resources {
   /**
    * 個人層：丟之前問。用途相符、擁有者是自己的計畫項目；purposes 含 'free' 時，計畫外（或已轉 free）的同種道具也給（回傳 idx −1 的虛項目）。
    * 沒收到計畫（active＝false）一律放行。
-   * @param {number} id @param {import('./base.js').GrenadeId} kind @param {(Purpose | 'free')[]} purposes @returns {UtilItem | null}
+   * @param {number} id @param {import('./base.js').GrenadeId} kind @param {(Purpose | 'free')[]} purposes @param {number} [own] 自己實際持有數 @param {Fits} [fits] @returns {UtilItem | null}
    */
-  claim(id, kind, purposes) {
+  claim(id, kind, purposes, own = -1, fits = anyone) {
     const k = codeOf(kind);
     const virt = /** @returns {UtilItem} */ () => ({ idx: -1, owner: id, kind: k, purpose: 'entryFlash', target: { site: null, ent: -2 }, state: 'free', backup: false });
     if (!this.active) return virt();
-    for (const it of this.items) if (it.owner === id && it.kind === k && it.state === 'plan' && purposes.includes(it.purpose)) return it;
+    // r7k：計畫的 entryFlash 入口不是自己這組的就不給（保險；分配時已擋）
+    for (const it of this.items) if (it.owner === id && it.kind === k && it.state === 'plan' && purposes.includes(it.purpose) && fitsFor(it.purpose, fits, id, it.target)) return it;
     if (!purposes.includes('free')) return null;
     // 轉成 free 的計畫項目、或計畫外的持有
     const fr = this.items.find((it) => it.owner === id && it.kind === k && it.state === 'free');
     if (fr !== undefined) return fr;
-    return this.spare(id, k) > 0 ? virt() : null;
+    return this.spare(id, k, null, own) > 0 ? virt() : null;
   }
 
   /** 讓某些用途到期轉 free（各副本在同樣的公開條件下呼叫） @param {Purpose[]} purposes */
@@ -313,9 +337,10 @@ export class Resources {
    * @param {{ id: number, x: number, y: number, alive: boolean }[]} people
    * @param {(t: Target, it: UtilItem) => import('./base.js').Pt | null} pointOf 目標座標
    * @param {'A' | 'B' | null} planted 包下的點（CT 回防用）
+   * @param {Fits} [fits] entryFlash 只改派給走那個入口的組（r7k）
    * @returns {string[]}
    */
-  upkeep(people, pointOf, planted) {
+  upkeep(people, pointOf, planted, fits = anyone) {
     if (!this.active) return [];
     /** @type {string[]} */
     const say = [];
@@ -330,7 +355,7 @@ export class Resources {
       let best = -1;
       let bd = Infinity;
       for (const p of [...alive.values()].sort((a, b) => a.id - b.id)) {
-        if (it.backup && p.id === it.owner) continue;
+        if ((it.backup && p.id === it.owner) || (it.refused ?? []).includes(p.id) || !fitsFor(it.purpose, fits, p.id, it.target)) continue;
         if (this.spare(p.id, it.kind, it) <= 0) continue;
         const d = at === null ? 0 : Math.round(dist(p.x, p.y, at.x, at.y) / UNIT);
         if (d < bd) {
