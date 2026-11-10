@@ -192,6 +192,7 @@ minDeg: 25,
 dwellSec: 0.5,
 freshConf: 60,
 freshSec: 3,
+hurtSameDeg: 45,
 },
 },
 flashNeedInfo: true,
@@ -6904,7 +6905,7 @@ if (active && wasActive && this.lk !== null) {
 const d = adiff(angleTo(me.x, me.y, this.lk.x, this.lk.y), this.vface);
 this.vface = normDeg(this.vface + Math.max(-step, Math.min(step, d)));
 } else this.vface = me.facing;
-const st = { tick: t, active, peek: null, thr: null, rate: null, hard: '', vf: this.vface };
+const st = { tick: t, active, peek: null, thr: null, rate: null, hard: '', dl: false, vf: this.vface };
 if (active) {
 const off = ( f, x, y) => Math.abs(adiff(f, angleTo(me.x, me.y, x, y)));
 if (li.peek !== null && li.peek.lock) st.peek = [off(me.facing, li.peek.x, li.peek.y), off(this.vface, li.peek.x, li.peek.y)];
@@ -6929,15 +6930,6 @@ return;
 }
 const cands = this.lookCands(obs, li);
 let pick = null;
-if (li.peek !== null && li.peek.lock) {
-pick = cands.find((q) => q.t === 'i' && q.ref === 0) ?? null;
-st.hard = 'p';
-}
-if (pick === null) {
-pick = cands.find((q) => q.t === 'e' && q.ref === 9) ?? null;
-if (pick !== null) st.hard = 'd';
-}
-if (pick === null) {
 const held = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
 if (held === undefined || held.conf < L.freshConf) this.lockId = -1;
 if (this.lockId < 0) {
@@ -6948,11 +6940,26 @@ if (best === null || k.conf > best.conf || (k.conf === best.conf && (dist(me.x, 
 }
 if (best !== null) this.lockId = best.id;
 }
-const k = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
-if (k !== undefined) {
-pick = cands.find((q) => q.t === 'e' && q.id === k.id) ?? { t: 'e', ref: 8, id: k.id, x: k.x, y: k.y, s: L.b.e + L.w.econf * (k.conf / 100) };
-st.hard = 'e';
+const lock = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+const lockC = lock === undefined ? null : (cands.find((q) => q.t === 'e' && q.id === lock.id) ?? { t: 'e', ref: 8, id: lock.id, x: lock.x, y: lock.y, s: L.b.e + L.w.econf * (lock.conf / 100) });
+if (li.peek !== null && li.peek.lock) {
+pick = cands.find((q) => q.t === 'i' && q.ref === 0) ?? null;
+st.hard = 'p';
 }
+const hurt = pick === null ? cands.find((q) => q.t === 'e' && q.ref === 9) : undefined;
+if (hurt !== undefined) {
+if (lockC !== null && Math.abs(adiff(angleTo(me.x, me.y, hurt.x, hurt.y), angleTo(me.x, me.y, lockC.x, lockC.y))) < L.hurtSameDeg) {
+pick = lockC;
+st.hard = 'e';
+} else {
+pick = hurt;
+st.hard = 'd';
+st.dl = lockC !== null;
+}
+}
+if (pick === null && lockC !== null) {
+pick = lockC;
+st.hard = 'e';
 }
 if (pick === null) {
 cands.sort((p, q) => q.s - p.s || LOOKS.indexOf(p.t) - LOOKS.indexOf(q.t) || p.ref - q.ref);

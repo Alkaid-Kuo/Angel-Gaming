@@ -35,7 +35,7 @@ export const LOOKS = /** @type {const} */ (['e', 's', 'i', 'w', 'c', 'n']);
  *   act: import('./base.js').Pt | null, ahead: import('./base.js').Pt | null, soundReact: number }} LookIn
  */
 /** 視線候選：t 種類、ref 參數（e 是名次、e9 受傷方向）、id 敵人 id（e 以外 −1）、s 分數 @typedef {{ t: typeof LOOKS[number], ref: number, id: number, x: number, y: number, s: number }} LookCand */
-/** 視線頭量測（每個 decide tick；r 是 r7l 實際朝向、v 是視線頭的虛擬朝向） @typedef {{ tick: number, active: boolean, peek: [number, number] | null, thr: [number, number, boolean] | null, rate: [number, number] | null, hard: string, vf: number }} LookStat */
+/** 視線頭量測（每個 decide tick；r 是 r7l 實際朝向、v 是視線頭的虛擬朝向；dl＝e9 蓋過了鎖定中的新鮮敵位） @typedef {{ tick: number, active: boolean, peek: [number, number] | null, thr: [number, number, boolean] | null, rate: [number, number] | null, hard: string, dl: boolean, vf: number }} LookStat */
 
 /** 目標點的威脅清單裡，有視線看得到目標點的個數 @param {Ctx} c @param {Cand} a @param {import('./base.js').Grid} g */
 function exposed(c, a, g) {
@@ -393,7 +393,7 @@ export class Choice {
 
   /**
    * 視線頭（第四節第二組、第六節防抖）：產生視線候選、打分、硬優先與防抖，更新虛擬朝向與量測（影子模式不送指令）
-   * 硬優先依序：探頭 hold／shoulder 階段鎖窄口（驗證清單 b）→ 1 秒內受傷的方向 → 新鮮的記得敵位（信心 ≥ freshConf、freshSec 秒內有消息；
+   * 硬優先依序：探頭 hold／shoulder 階段鎖窄口（驗證清單 b）→ 1 秒內受傷的方向（和鎖定的新鮮敵位夾角 < hurtSameDeg 時留在敵位）→ 新鮮的記得敵位（信心 ≥ freshConf、freshSec 秒內有消息；
    * 鎖定後直到信心掉到 freshConf 以下，驗證清單 c）。其他時候照分數，換方向要差 minDeg 度、停滿 dwellSec 秒
    * @param {import('./base.js').Observation} obs @param {LookIn} li @param {boolean} freeze
    */
@@ -413,7 +413,7 @@ export class Choice {
       this.vface = normDeg(this.vface + Math.max(-step, Math.min(step, d)));
     } else this.vface = me.facing;
     /** @type {LookStat} */
-    const st = { tick: t, active, peek: null, thr: null, rate: null, hard: '', vf: this.vface };
+    const st = { tick: t, active, peek: null, thr: null, rate: null, hard: '', dl: false, vf: this.vface };
     if (active) {
       const off = (/** @type {number} */ f, /** @type {number} */ x, /** @type {number} */ y) => Math.abs(adiff(f, angleTo(me.x, me.y, x, y)));
       if (li.peek !== null && li.peek.lock) st.peek = [off(me.facing, li.peek.x, li.peek.y), off(this.vface, li.peek.x, li.peek.y)];
@@ -439,34 +439,43 @@ export class Choice {
     const cands = this.lookCands(obs, li);
     /** @type {LookCand | null} */
     let pick = null;
+    // 新鮮的記得敵位的鎖定（探頭、受傷時也照樣更新）：信心 ≥ freshConf、freshSec 秒內有消息才鎖；鎖住後直到信心掉到門檻以下
+    const held = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+    if (held === undefined || held.conf < L.freshConf) this.lockId = -1;
+    if (this.lockId < 0) {
+      /** @type {import('./memory.js').Known | null} */
+      let best = null;
+      for (const k of this.perc.known.values()) {
+        if (k.conf < L.freshConf || t - k.tick > L.freshSec * this.tps) continue;
+        if (best === null || k.conf > best.conf || (k.conf === best.conf && (dist(me.x, me.y, k.x, k.y) < dist(me.x, me.y, best.x, best.y) || (dist(me.x, me.y, k.x, k.y) === dist(me.x, me.y, best.x, best.y) && k.id < best.id)))) best = k;
+      }
+      if (best !== null) this.lockId = best.id;
+    }
+    const lock = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+    /** @type {LookCand | null} */
+    const lockC = lock === undefined ? null : (cands.find((q) => q.t === 'e' && q.id === lock.id) ?? { t: 'e', ref: 8, id: lock.id, x: lock.x, y: lock.y, s: L.b.e + L.w.econf * (lock.conf / 100) });
     // 1. 探頭鎖窄口
     if (li.peek !== null && li.peek.lock) {
       pick = cands.find((q) => q.t === 'i' && q.ref === 0) ?? null;
       st.hard = 'p';
     }
-    // 2. 受傷方向（1 秒內）
-    if (pick === null) {
-      pick = cands.find((q) => q.t === 'e' && q.ref === 9) ?? null;
-      if (pick !== null) st.hard = 'd';
-    }
-    // 3. 新鮮的記得敵位：鎖定直到信心掉到門檻以下
-    if (pick === null) {
-      const held = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
-      if (held === undefined || held.conf < L.freshConf) this.lockId = -1;
-      if (this.lockId < 0) {
-        /** @type {import('./memory.js').Known | null} */
-        let best = null;
-        for (const k of this.perc.known.values()) {
-          if (k.conf < L.freshConf || t - k.tick > L.freshSec * this.tps) continue;
-          if (best === null || k.conf > best.conf || (k.conf === best.conf && (dist(me.x, me.y, k.x, k.y) < dist(me.x, me.y, best.x, best.y) || (dist(me.x, me.y, k.x, k.y) === dist(me.x, me.y, best.x, best.y) && k.id < best.id)))) best = k;
-        }
-        if (best !== null) this.lockId = best.id;
-      }
-      const k = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
-      if (k !== undefined) {
-        pick = cands.find((q) => q.t === 'e' && q.id === k.id) ?? { t: 'e', ref: 8, id: k.id, x: k.x, y: k.y, s: L.b.e + L.w.econf * (k.conf / 100) };
+    // 2. 受傷方向（1 秒內；只有打我的人沒看到時才會到這裡，看得到就是交戰、不歸視線頭管）。
+    // e9 裁定第 1 條：和鎖定的新鮮敵位夾角小於 hurtSameDeg 度＝同一個威脅，留在敵位、不換
+    const hurt = pick === null ? cands.find((q) => q.t === 'e' && q.ref === 9) : undefined;
+    if (hurt !== undefined) {
+      if (lockC !== null && Math.abs(adiff(angleTo(me.x, me.y, hurt.x, hurt.y), angleTo(me.x, me.y, lockC.x, lockC.y))) < L.hurtSameDeg) {
+        pick = lockC;
         st.hard = 'e';
+      } else {
+        pick = hurt;
+        st.hard = 'd';
+        st.dl = lockC !== null;
       }
+    }
+    // 3. 新鮮的記得敵位
+    if (pick === null && lockC !== null) {
+      pick = lockC;
+      st.hard = 'e';
     }
     // 4. 照分數，加防抖（換方向要差 minDeg 度、停滿 dwellSec 秒；目前的候選消失了就直接換）
     if (pick === null) {
