@@ -3,6 +3,7 @@
 // 第一步影子模式：照算候選、特徵、分數、承諾，記錄前三名與「r7l 實際做的動作」，行為仍由 tactics／combat／nav 驅動（不回傳任何指令）。
 // 特徵表資料驅動（審查決定 3）：每筆 { key, fn, types, min, max }，打分只走訪特徵表與 P.U。
 import { P, UNIT, adiff, angleTo, cosd, dijkstra, dist, normDeg, segDist, sind } from './base.js';
+import { codeOf } from './resources.js';
 import { ENTRY } from './roles.js';
 
 /** 動作字母（第七節正式格式）：h 守、a 推進、p 探頭、f 退掩體、t 補槍、g 丟道具、r 轉點、o 下包／拆包 */
@@ -12,20 +13,31 @@ export const ACTS = /** @type {const} */ (['h', 'a', 'p', 'f', 't', 'g', 'r', 'o
 export const STAGES = /** @type {const} */ (['freeze', 'setup', 'wait', 'execute', 'post', 'retake', 'save']);
 /** @typedef {typeof STAGES[number]} Stage */
 const CH_SITES = /** @type {const} */ (['A', 'B']);
-/** 候選：type 動作、k 同種內序號、x／y 動作結束時人在的位置、ref 參數（隊友 id、包點序號、道具序號…） @typedef {{ type: Act, k: number, x: number, y: number, ref: number }} Cand */
+/**
+ * 候選：type 動作、k 同種內序號、x／y 動作結束時人在的位置（丟道具是落點）、ref 參數（隊友 id、包點序號、道具序號 × 4 ＋ 落點序號…）；
+ * 丟道具另帶 kind 種類、tg 觸發（f18t）、v18 落點價值（f18）
+ * @typedef {{ type: Act, k: number, x: number, y: number, ref: number, kind?: string, tg?: number, v18?: number }} Cand
+ */
 /**
  * 影子模式的輸入（baseline.shadow 從 r7l 這一步整理）
  * @typedef {{ stage: Stage, goal: import('./base.js').Pt | null, hold: import('./base.js').Pt | null, role: number, p: number, fight: boolean, reflex: boolean,
- *   actual: { type: Act, x: number, y: number, ref?: number } | null, inSite: boolean, peek: import('./base.js').Pt | null,
- *   cover: () => import('./base.js').Pt | null, nades: { kind: string, trig: boolean }[], group: (id: number) => number, pathless: boolean,
- *   planWait: boolean, order: { yieldF: number, spawnF: number, awpF: number }, cues: { id: number, x: number, y: number, dead: boolean }[] }} ShadowIn
+ *   actual: { type: Act, x: number, y: number, ref?: number, kind?: string } | null, inSite: boolean, peek: import('./base.js').Pt | null,
+ *   cover: () => import('./base.js').Pt | null, nade: NadeIn, group: (id: number) => number, pathless: boolean,
+ *   planWait: boolean, order: { yieldF: number, spawnF: number, awpF: number }, cues: { id: number, x: number, y: number, dead: boolean }[], site: number }} ShadowIn
+ */
+/**
+ * 丟道具（第 5 步）：res 資源層副本（只讀）、trig 指揮層記的觸發（tactics.trig，只讀）、solve 從我這裡丟得到、fighting 隊友交火中（1.5 秒內開過槍或被記得的敵人看得到）、
+ * canHide 隊友 4 步內躲得到、flashR 閃光半徑、smokes／burns 我方丟過的煙與火（指揮層的紀錄）、info 指揮層的「爆點附近有情報」（flashInfo：記得的敵人、聲音、接觸喊話）
+ * @typedef {{ res: import('./resources.js').Resources, trig: Map<string, { kind: string, purposes: string[] }>, solve: (x: number, y: number) => boolean,
+ *   fighting: (id: number) => boolean, canHide: (x: number, y: number, c: import('./base.js').Pt) => boolean, flashR: number,
+ *   smokes: import('./base.js').Pt[], burns: { x: number, y: number, until: number }[], info: (p: import('./base.js').Pt, site: 'A' | 'B') => boolean }} NadeIn
  */
 /**
  * 決策脈絡（只讀觀察與自己的狀態）
  * @typedef {{ obs: import('./base.js').Observation, in: ShadowIn, threats: import('./memory.js').Threat[], mates: import('./base.js').Observation['teammates'], cur: Cand | null, held: number, site: number }} Ctx
  */
 /** @typedef {{ key: string, fn: (c: Ctx, a: Cand) => number, types: string, min: number, max: number }} Feature */
-/** 決策紀錄（at：選定動作的目標格；丟道具、補槍、轉點是 −2 − 參數；look／ls：視線頭此刻的選擇與分數，'-'＝不歸視線頭管） @typedef {{ tick: number, ev: string, top: [string, number][], pick: string, at: number, act: string, stage: Stage, fight: boolean, reflex: boolean, look: string, ls: number }} LogEntry */
+/** 決策紀錄（gk：選定的與 r7l 實際丟的道具種類字母，沒有是 -；at：選定動作的目標格；丟道具、補槍、轉點是 −2 − 參數；look／ls：視線頭此刻的選擇與分數，'-'＝不歸視線頭管） @typedef {{ tick: number, ev: string, top: [string, number][], pick: string, at: number, act: string, stage: Stage, fight: boolean, reflex: boolean, look: string, ls: number, gk: string }} LogEntry */
 /** 視線種類字母（第七節）：e 記得的敵位、s 聲音、i 入口／窄口、w 守點看向、c 隊友沒看的角、n 行進方向 */
 export const LOOKS = /** @type {const} */ (['e', 's', 'i', 'w', 'c', 'n']);
 /**
@@ -127,6 +139,10 @@ export class Choice {
     this.sndWait = 0;
     /** @type {LookStat | null} */
     this.lstat = null;
+    /** 隊友上一次的位置與位移（f18 的 1.5 秒推定） @type {Map<number, { x: number, y: number, t: number, vx: number, vy: number, dt: number }>} */
+    this.mpos = new Map();
+    /** 最近一次決策的候選（量測工具讀） @type {Cand[]} */
+    this.cands = [];
   }
 
   reset() {
@@ -175,7 +191,9 @@ export class Choice {
       // 指揮層的合法等待（PlanIntent）：2.8 執行品質的慢半拍、跟上等
       { key: 'fw', types: 'ha', min: 0, max: 1, fn: (c) => (c.in.planWait ? 1 : 0) },
       // f18 的計畫時機項：資源層／指揮層的觸發條件成立（設計第八節第 1 點；效用層只讀）
-      { key: 'f18t', types: 'g', min: 0, max: 1, fn: (c, a) => (c.in.nades[a.ref]?.trig ? 1 : 0) },
+      { key: 'f18t', types: 'g', min: 0, max: 1, fn: (_c, a) => a.tg ?? 0 },
+      // f18 落點價值（第八節第 2 點）：產生候選時算好
+      { key: 'f18', types: 'g', min: -1, max: 1, fn: (_c, a) => a.v18 ?? 0 },
       { key: 'f19', types: 'ra', min: 0, max: 1, fn: (c) => this.blocked(c) },
       { key: 'f20', types: '*', min: 0, max: 1, fn: (c, a) => (same(a, c.cur) ? Math.max(P.U.commitMin, 1 - c.held / (P.U.commitSec * this.tps)) : 0) },
     ];
@@ -289,6 +307,11 @@ export class Choice {
       }
     }
     if (ev !== '') this.evAt.set(ev, t);
+    for (const m of obs.teammates) {
+      const q = this.mpos.get(m.id);
+      const dt = q === undefined ? 0 : t - q.t;
+      this.mpos.set(m.id, { x: m.x, y: m.y, t, vx: q === undefined || dt <= 0 ? 0 : m.x - q.x, vy: q === undefined || dt <= 0 ? 0 : m.y - q.y, dt: dt > 0 ? dt : (q?.dt ?? 0) });
+    }
     this.hp = me.hp;
     this.alive = new Set(obs.teammates.filter((m) => m.alive).map((m) => m.id));
     this.bomb = obs.bomb.state;
@@ -317,8 +340,14 @@ export class Choice {
     const threats = this.perc.threats(me.x, me.y);
     /** @type {Cand[]} */
     const cands = [];
-    /** @param {Act} type @param {number} x @param {number} y @param {number} ref */
-    const add = (type, x, y, ref = -1) => { if (cands.length < 16) cands.push({ type, k: cands.filter((q) => q.type === type).length, x, y, ref }); };
+    /** @param {Act} type @param {number} x @param {number} y @param {number} ref @returns {Cand | null} */
+    const add = (type, x, y, ref = -1) => {
+      if (cands.length >= 16) return null;
+      /** @type {Cand} */
+      const a = { type, k: cands.filter((q) => q.type === type).length, x, y, ref };
+      cands.push(a);
+      return a;
+    };
     // 守＝留在這附近：原地，加上 3 格內的守點；遠的守點是「推進」到那裡
     add('h', me.x, me.y, HERE);
     const hold = si.hold;
@@ -337,7 +366,6 @@ export class Choice {
     }
     // 補槍：隊友開火（0.9 秒內）或陣亡（2 秒內）的線索、離我 1.8～9 格（和 cooperation 的跟進條件一致；表 13-1 第 6 條）
     for (const q of si.cues) { const d = dist(q.x, q.y, me.x, me.y); if (d >= 1800 && d <= 9 * UNIT && !me.hasBomb) add('t', q.x, q.y, q.id); }
-    si.nades.forEach((_q, i) => add('g', me.x, me.y, i));
     // 轉點：另一個包點（離我最近的入口外側）；回防時只在入口受阻才換同包點的另一入口
     const site = this.siteOf(si.goal);
     /** @type {Ctx} */
@@ -361,12 +389,16 @@ export class Choice {
     const by = obs.bomb.y;
     if (me.hasBomb && si.inSite) add('o', me.x, me.y);
     else if (me.team === 'CT' && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null && dist(me.x, me.y, bx, by) < 2 * UNIT) add('o', bx, by);
+    // 丟道具：claim 拿得到的道具 × 落點（放在最後，候選上限 16 時先擠掉的是多的落點）
+    this.nadeCands(obs, si, threats, add);
     // 現行動作仍有效就留在候選裡（防抖：守點、掩體在產生門檻邊緣進出時不換掉）
     const cur = this.cur;
     if (cur !== null && !cands.some((q) => same(q, cur)) && cands.length < 16) {
       const d = dist(me.x, me.y, cur.x, cur.y);
       if ((cur.type === 'h' && cur.ref !== HERE && d < (P.U.holdZone + 1) * UNIT) || (cur.type === 'f' && threats.length > 0 && !si.fight)) cands.push({ ...cur, k: cands.filter((q) => q.type === cur.type).length });
     }
+    // 量測工具讀（最近一次決策的候選）
+    this.cands = cands;
     const scored = cands.map((a) => ({ a, s: this.score(c, a) }));
     if (P.choiceTrace) this.trace = cands.map((a) => this.features.filter((f) => f.types === '*' || f.types.includes(a.type)).map((f) => ({ key: f.key, v: f.fn(c, a) })));
     // 同分取動作序號小、再取同種序號小（第四節）
@@ -387,7 +419,7 @@ export class Choice {
     this.cur = pick;
     const code = (/** @type {Cand} */ a) => `${a.type}${a.k}`;
     const act = si.actual === null ? '-' : this.match(cands, si.actual);
-    this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex, look: this.lstat?.active === true && this.lk !== null ? `${this.lk.t}${this.lk.ref}` : '-', ls: this.lk?.s ?? 0 });
+    this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex, look: this.lstat?.active === true && this.lk !== null ? `${this.lk.t}${this.lk.ref}` : '-', ls: this.lk?.s ?? 0, gk: `${pick?.kind === undefined ? '-' : codeOf(pick.kind)}${si.actual?.kind === undefined ? '-' : codeOf(si.actual.kind)}` });
     if (this.log.length > 64) this.log.shift();
   }
 
@@ -580,15 +612,273 @@ export class Choice {
   }
 
   /**
-   * r7l 實際動作對到候選：g 依道具序號、r 依包點／入口參數、其他依位置（3 格內最近的同種）；對不到回 '?'＋種類
-   * @param {Cand[]} cands @param {{ type: Act, x: number, y: number, ref?: number }} act
+   * 丟道具候選（第八節、第 5 步）：不看 r7l 這一步要丟什麼（tactics.lastWish），由資源層 claim 拿得到的道具 × 效用層自己找的落點（最多 3 個）產生。
+   * 道具：自己的計畫項目（plan）各一筆，加上可以自由使用的（轉 free 的計畫或計畫外的持有）一筆；沒收到計畫時每種道具一筆 free。
+   * 觸發（f18t）：指揮層／資源層記下的時機（tactics.trig，只讀）裡，有種類相同、用途相符的；進點閃另外要有情報（P.flashNeedInfo，敵方價值 > 0）。
+   * ref＝道具序號 × 4 ＋ 落點序號
+   * @param {import('./base.js').Observation} obs @param {ShadowIn} si @param {import('./memory.js').Threat[]} threats
+   * @param {(type: Act, x: number, y: number, ref: number) => Cand | null} add
+   */
+  nadeCands(obs, si, threats, add) {
+    const me = obs.me;
+    const N = si.nade;
+    const res = N.res;
+    /** @type {{ kind: string, pur: string, target: import('./resources.js').Target | null }[]} */
+    const items = [];
+    for (const kind of [...new Set(me.loadout.grenades)]) {
+      const own = me.loadout.grenades.filter((x) => x === kind).length;
+      const code = codeOf(kind);
+      if (!res.active) {
+        items.push({ kind, pur: 'free', target: null });
+        continue;
+      }
+      for (const it of res.items) if (it.owner === me.id && it.kind === code && it.state === 'plan') items.push({ kind, pur: it.purpose, target: it.target });
+      if (res.items.some((it) => it.owner === me.id && it.kind === code && it.state === 'free') || res.spare(me.id, code, null, own) > 0) items.push({ kind, pur: 'free', target: null });
+    }
+    const hints = [...N.trig].map(([key, h]) => ({ key, ...h }));
+    /** 全部道具的落點候選；候選上限 16 時，有觸發的先放 @type {{ i: number, j: number, kind: string, tg: number, p: import('./base.js').Pt, v: number }[]} */
+    const all = [];
+    items.slice(0, 4).forEach((it, i) => {
+      const keys = hints.filter((h) => h.kind === it.kind && h.purposes.includes(it.pur)).map((h) => h.key);
+      // 落點照 f18 由高到低（同分照產生順序：計畫目標在前），試丟不丟得到（最多試 10 個），取前 3
+      /** @type {{ p: import('./base.js').Pt, v: { v: number, enemy: number }, o: number }[]} */
+      const all18 = [];
+      this.landings(obs, si, it).forEach((p, o) => {
+        const v = this.f18(obs, si, threats, it.kind, p);
+        if (v !== null) all18.push({ p, v, o });
+      });
+      all18.sort((x, y) => y.v.v - x.v.v || x.o - y.o);
+      /** @type {typeof all18} */
+      const ok = [];
+      let tries = 0;
+      for (const q of all18) {
+        if (ok.length >= 3 || ++tries > 10) break;
+        if (si.nade.solve(q.p.x, q.p.y)) ok.push(q);
+      }
+      ok.forEach((q, j) => {
+        // 進點閃要有情報（P.flashNeedInfo；情報判斷是指揮層的 flashInfo，只讀）
+        const sq = it.kind === 'flash' ? this.siteOf(q.p) : -1;
+        const info = sq >= 0 ? si.nade.info(q.p, CH_SITES[sq]) : q.v.enemy > 0;
+        // 閃光的落點價值要是正的（敵方價值大於隊友代價；r7l 的 gain ≥ ratio × cost 的效用版）
+        const tg = keys.some((k) => !(k === 'entryFlash' && P.flashNeedInfo && !info)) && (it.kind !== 'flash' || q.v.v > 0) ? 1 : 0;
+        all.push({ i, j, kind: it.kind, tg, p: q.p, v: q.v.v });
+      });
+    });
+    all.sort((x, y) => y.tg - x.tg || x.i - y.i || x.j - y.j);
+    for (const q of all) {
+      const a = add('g', q.p.x, q.p.y, q.i * 4 + q.j);
+      if (a === null) break;
+      a.kind = q.kind;
+      a.tg = q.tg;
+      a.v18 = q.v;
+    }
+  }
+
+  /**
+   * 落點候選（還沒檢查丟不丟得到；去重 2 格、最多 40 個），依序：
+   * 計畫項目只用計畫目標推出的點：入口（閃光是入口內側、往未清架點 4、8 格、入口內側 8 格內的包點格〔每 2 格〕；煙是封架點位〔架點往入口內側 smokeOff 格〕、火是入口外側；包點：架點與中心）、
+   * 可以自由使用的道具：路上的火（煙）、槍線（煙：我往威脅 6 格內）、炸彈、記得的敵人、手雷的敵人群中心、計畫或所在包點的各入口、包點中心
+   * @param {import('./base.js').Observation} obs @param {ShadowIn} si @param {{ kind: string, target: import('./resources.js').Target | null }} it
+   * @returns {import('./base.js').Pt[]}
+   */
+  landings(obs, si, it) {
+    const me = obs.me;
+    const t = obs.tick;
+    /** @type {import('./base.js').Pt[]} */
+    const pts = [];
+    const push = (/** @type {number} */ x, /** @type {number} */ y) => {
+      if (pts.length < 40 && pts.every((q) => dist(q.x, q.y, x, y) >= 2 * UNIT)) pts.push({ x: Math.round(x), y: Math.round(y) });
+    };
+    const flash = it.kind === 'flash';
+    const smoke = it.kind === 'smoke';
+    const toward = (/** @type {import('./base.js').Pt} */ a, /** @type {import('./base.js').Pt} */ b, /** @type {number} */ cells, /** @type {number} */ cap) => {
+      const f = Math.min(cap, (cells * UNIT) / Math.max(dist(a.x, a.y, b.x, b.y), 1));
+      push(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+    };
+    /** @param {import('./analysis.js').Entrance} e @param {import('./analysis.js').SiteIntel} site @param {number} n */
+    const entPts = (e, site, n) => {
+      const inner = { x: e.ix, y: e.iy };
+      if (flash) {
+        push(e.ix, e.iy);
+        const hs = site.holds.filter((h) => !this.perc.cleared(h.cell, t) && dist(h.x, h.y, e.ix, e.iy) <= 16 * UNIT).sort((a, b) => dist(a.x, a.y, e.ix, e.iy) - dist(b.x, b.y, e.ix, e.iy) || a.cell - b.cell);
+        for (const h of hs.slice(0, n)) for (const k of [4, 8]) toward(inner, h, k, 1);
+        // 入口內側 8 格內、包點範圍、從入口外側看得到的格（每 2 格取一個；f18 排序後再試丟不丟得到）
+        if (n >= 2) {
+          const g = this.g;
+          const cx = Math.floor(e.ix / UNIT);
+          const cy = Math.floor(e.iy / UNIT);
+          for (let y = cy - 8; y <= cy + 8; y += 2) {
+            for (let x = cx - 8; x <= cx + 8; x += 2) {
+              if (x < 0 || y < 0 || x >= g.W || y >= g.H || g.isWall(x, y)) continue;
+              const i = y * g.W + x;
+              const c = g.center(i);
+              const de = dist(c.x, c.y, e.ix, e.iy);
+              if (!site.regions.has(this.intel.region[i]) || de > 8 * UNIT || de < 2 * UNIT || !g.los(e.ox, e.oy, c.x, c.y)) continue;
+              push(c.x, c.y);
+            }
+          }
+        }
+      } else if (smoke) {
+        // 封架點（和 tactics.smokeSpots 同一套地圖推導：看得到入口內側的架點，遠的先，往入口內側 smokeOff 格）
+        const hs = site.holds.filter((h) => dist(h.x, h.y, e.ix, e.iy) <= 25 * UNIT && this.g.los(h.x, h.y, e.ix, e.iy)).sort((a, b) => dist(b.x, b.y, e.ix, e.iy) - dist(a.x, a.y, e.ix, e.iy) || a.cell - b.cell);
+        for (const h of hs.slice(0, n)) toward(inner, h, P.smokeOff, 0.6);
+        push(e.ix, e.iy);
+        push(e.ox, e.oy);
+      } else {
+        push(e.ox + (e.ox - e.ix) * 0.3, e.oy + (e.oy - e.iy) * 0.3);
+        push(e.ox, e.oy);
+      }
+    };
+    const tgt = it.target;
+    if (tgt !== null && tgt.site !== null) {
+      const site = this.intel.sites[tgt.site];
+      const e = tgt.ent >= 0 ? site.entrances[tgt.ent] : undefined;
+      if (e !== undefined) entPts(e, site, 3);
+      else {
+        // 包點內（S）：從離我最近的入口推（封架點、閃架點）；再加架點與中心
+        for (const x of [...site.entrances].sort((a, b) => dist(me.x, me.y, a.ox, a.oy) - dist(me.x, me.y, b.ox, b.oy) || a.portal - b.portal).slice(0, 2)) entPts(x, site, 2);
+        for (const h of [...site.holds].sort((a, b) => dist(me.x, me.y, a.x, a.y) - dist(me.x, me.y, b.x, b.y) || a.cell - b.cell).slice(0, 2)) push(h.x, h.y);
+        push(site.cx, site.cy);
+      }
+      // 計畫項目（有目標包點）：落點只從計畫目標推（計畫說了丟哪裡）；其他情境的落點給可以自由使用的道具
+      return pts;
+    }
+    const th = this.perc.threats(me.x, me.y, 30).filter((q) => dist(me.x, me.y, q.x, q.y) < 25 * UNIT).slice(0, 2);
+    if (smoke) {
+      for (const f of obs.effects) if (f.kind === 'fire' && dist(me.x, me.y, f.x, f.y) < 20 * UNIT) push(f.x, f.y);
+      for (const q of th) toward(me, q, 6, 0.6);
+    }
+    const bx = obs.bomb.x;
+    const by = obs.bomb.y;
+    if (!smoke && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null) push(bx, by);
+    if (!smoke) for (const q of th) push(q.x, q.y);
+    if (it.kind === 'he') {
+      const list = [...this.perc.known.values()].filter((k) => k.conf >= 70 && t - k.tick <= this.tps);
+      for (const a of list) {
+        const near = list.filter((k) => dist(k.x, k.y, a.x, a.y) < P.nadeCluster * UNIT);
+        if (near.length >= 2) push(near.reduce((q, k) => q + k.x, 0) / near.length, near.reduce((q, k) => q + k.y, 0) / near.length);
+      }
+    }
+    const s0 = this.siteOf(si.goal ?? me);
+    const s = s0 >= 0 ? s0 : si.site;
+    if (s >= 0) {
+      const site = this.intel.sites[CH_SITES[s]];
+      for (const e of [...site.entrances].sort((a, b) => dist(me.x, me.y, a.ox, a.oy) - dist(me.x, me.y, b.ox, b.oy) || a.portal - b.portal).slice(0, 3)) entPts(e, site, 1);
+      if (!smoke) push(site.cx, site.cy);
+    }
+    return pts;
+  }
+
+  /**
+   * f18 落點價值（第八節第 2 點，−1～1）；回傳 null＝硬排除。enemy＝敵方價值（閃光的情報判斷用）
+   * 閃光：敵方＝半徑內記得的敵人（看得到爆點）× (1 − d／2R) × 朝向（看到的敵人用真實面向，推定的算正面）× 信心；
+   *   隊友代價＝現在與 1.5 秒後推定位置（照速度外插，撞牆停在原地），半徑內看得到爆點：正對或側向全額、背對 0.15，× (1 − d／R)；
+   *   推定的敵人（敵方守著的包點裡沒清過的架點，每個 0.5，上限 1）只算價值、不算情報；
+   *   落點離任一個位置 3 格內直接排除；硬否決照 r7l 第一輪（面向爆點或交火中、4 步內躲不掉）
+   * 煙：遮斷的威脅視線（威脅到我或隊友的線段穿過煙）、蓋住路上的火。火、手雷：半徑內的威脅、炸彈（T 下包後）；隊友 4 格內排除
+   * @param {import('./base.js').Observation} obs @param {ShadowIn} si @param {import('./memory.js').Threat[]} threats @param {string} kind @param {import('./base.js').Pt} p
+   * @returns {{ v: number, enemy: number } | null}
+   */
+  f18(obs, si, threats, kind, p) {
+    const me = obs.me;
+    const g = this.g;
+    const mates = obs.teammates.filter((m) => m.alive && m.id !== me.id);
+    const th = threats.filter((q) => q.conf >= 30);
+    if (kind === 'flash') {
+      const R = si.nade.flashR;
+      const side = this.data.rules.grenadeRules.flashSideDeg;
+      let enemy = 0;
+      for (const q of th) {
+        const d = dist(q.x, q.y, p.x, p.y);
+        if (d >= R || !g.los(q.x, q.y, p.x, p.y)) continue;
+        const k = q.id >= 0 ? this.perc.known.get(q.id) : undefined;
+        const face = k !== undefined && k.src === 'see' && Math.abs(adiff(angleTo(k.x, k.y, p.x, p.y), k.facing)) > side ? 0.15 : 1;
+        enemy += (1 - d / (2 * R)) * face * (q.conf / 100);
+      }
+      // 推定的敵人（設計第八節：一律算正面）：敵方守著的包點裡還沒清過的架點，每個 0.5（只算價值，不算情報）
+      let guess = 0;
+      const planted = obs.bomb.state === 'planted' || obs.bomb.state === 'defusing';
+      const s = this.siteOf(p);
+      if (s >= 0 && (me.team === 'T') !== planted) {
+        for (const h of this.intel.sites[CH_SITES[s]].holds) {
+          const d = dist(h.x, h.y, p.x, p.y);
+          if (d < R && !this.perc.cleared(h.cell, obs.tick) && g.los(h.x, h.y, p.x, p.y)) guess += 0.5 * (1 - d / (2 * R));
+        }
+      }
+      let cost = 0;
+      for (const m of mates) {
+        const pos = [{ x: m.x, y: m.y }, this.predict(m)];
+        if (pos.some((q) => dist(q.x, q.y, p.x, p.y) < 3 * UNIT)) return null;
+        const faces = Math.abs(adiff(angleTo(m.x, m.y, p.x, p.y), m.facing)) <= side;
+        const near = dist(m.x, m.y, p.x, p.y) < R && g.los(m.x, m.y, p.x, p.y);
+        // r7l 第一輪：面向爆點或交火中、4 步內躲不掉就排除（第二輪只看交火中：影子模式只記第一輪，全部排除時 landings 會換下一個點）
+        if (near && (si.nade.fighting(m.id) || faces) && !si.nade.canHide(m.x, m.y, p)) return null;
+        let worst = 0;
+        for (const q of pos) {
+          const d = dist(q.x, q.y, p.x, p.y);
+          if (d < R && g.los(q.x, q.y, p.x, p.y)) worst = Math.max(worst, (faces ? 1 : 0.15) * (1 - d / R));
+        }
+        cost += worst;
+      }
+      return { v: Math.max(-1, Math.min(1, enemy + Math.min(1, guess) - cost)), enemy };
+    }
+    if (kind === 'smoke') {
+      // 我方的煙 smokeGap 格內不再丟（和 r7l 同規則）
+      if (si.nade.smokes.some((m) => dist(m.x, m.y, p.x, p.y) < P.smokeGap * UNIT)) return null;
+      const r = 3 * UNIT;
+      let lines = 0;
+      for (const q of th) {
+        for (const m of [me, ...mates]) {
+          if (segDist(q.x, q.y, m.x, m.y, p.x, p.y).d < r && g.los(q.x, q.y, m.x, m.y)) {
+            lines++;
+            break;
+          }
+        }
+      }
+      const fire = obs.effects.some((f) => f.kind === 'fire' && dist(f.x, f.y, p.x, p.y) < f.radius + r) ? 1 : 0;
+      // 擋路：記得的敵人 10 格內（封他過來的路，r7l 封回防入口的條件）
+      const block = th.some((q) => dist(q.x, q.y, p.x, p.y) < 10 * UNIT) ? 0.5 : 0;
+      return { v: Math.min(1, lines / 2 + fire + block), enemy: lines };
+    }
+    if (mates.some((m) => dist(m.x, m.y, p.x, p.y) < 4 * UNIT)) return null;
+    // 火：還在燒的我方火 4 格內不再丟
+    if (kind !== 'he' && si.nade.burns.some((b) => b.until > obs.tick && dist(b.x, b.y, p.x, p.y) < 4 * UNIT)) return null;
+    const r = kind === 'he' ? 3.5 * UNIT : 3 * UNIT;
+    let enemy = 0;
+    for (const q of th) if (dist(q.x, q.y, p.x, p.y) < r + UNIT) enemy += q.conf / 100;
+    const bx = obs.bomb.x;
+    const by = obs.bomb.y;
+    const bomb = me.team === 'T' && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null && dist(bx, by, p.x, p.y) < r ? 0.5 : 0;
+    return { v: Math.min(1, enemy + bomb), enemy };
+  }
+
+  /** 隊友 1.5 秒後的推定位置：照最近兩次看到的速度外插，路線被牆擋住就留在原地 @param {import('./base.js').Observation['teammates'][number]} m */
+  predict(m) {
+    const q = this.mpos.get(m.id);
+    if (q === undefined || q.dt <= 0) return { x: m.x, y: m.y };
+    const k = (1.5 * this.tps) / q.dt;
+    const x = m.x + q.vx * k;
+    const y = m.y + q.vy * k;
+    return this.g.los(m.x, m.y, x, y) ? { x, y } : { x: m.x, y: m.y };
+  }
+
+  /**
+   * r7l 實際動作對到候選：g 依種類與落點（4 格內）、r 依包點／入口參數、其他依位置（3 格內最近的同種）；對不到回 '?'＋種類
+   * @param {Cand[]} cands @param {{ type: Act, x: number, y: number, ref?: number, kind?: string }} act
    */
   match(cands, act) {
     let best = null;
     let bd = 3 * UNIT;
     for (const a of cands) {
       if (a.type !== act.type) continue;
-      if (act.ref !== undefined && (a.type === 'g' || a.type === 'r' || a.type === 't')) {
+      // 丟道具：種類相同、落點 4 格內最近的（第 5 步：候選不再依 r7l 的道具序號產生）
+      if (a.type === 'g') {
+        if (a.kind !== act.kind) continue;
+        const d = dist(a.x, a.y, act.x, act.y);
+        if (d <= Math.max(bd, 4 * UNIT) && (best === null || d < dist(best.x, best.y, act.x, act.y))) best = a;
+        continue;
+      }
+      if (act.ref !== undefined && (a.type === 'r' || a.type === 't')) {
         if (a.ref === act.ref) { best = a; break; }
         continue;
       }

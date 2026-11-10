@@ -160,6 +160,11 @@ export class Tactics {
     this.lastWish = null;
     /** 3.0 視線頭影子模式讀：這一步的看向是丟道具的瞄準 */
     this.utilLook = false;
+    /**
+     * 3.0 效用層影子模式讀（第 5 步）：這一步指揮層／資源層的丟道具觸發條件（鍵 → 種類與可用的用途）。
+     * 只是紀錄，不影響行為；落點與要不要丟由效用層自己算 @type {Map<string, { kind: string, purposes: string[] }>}
+     */
+    this.trig = new Map();
     /** 2.8：split 執行時離入口近的那組要晚出發幾秒（syncAt＝算的時候的 execTick） */
     this.syncAt = -1;
     this.syncWait = 0;
@@ -540,6 +545,7 @@ export class Tactics {
     this.flashOwner = false;
     this.waitTag = '';
     this.utilLook = false;
+    this.trig.clear();
     /** @type {TacOut} */
     const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
@@ -582,7 +588,10 @@ export class Tactics {
       out.role += '・讓突破手先走';
     }
     if (P.resLayer && this.res.active) this.waitFlash(obs, out);
-    if (this.settle(obs, out)) wish = null;
+    if (this.settle(obs, out)) {
+      wish = null;
+      this.trig.clear();
+    }
     if (wish === null && !out.commit) wish = this.anyNade(obs);
     this.overlay(obs, out);
     if (wish === null) {
@@ -593,7 +602,10 @@ export class Tactics {
     const busy = new Set();
     for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
     // 正在躲隊友的閃光、或隊友的閃光還沒爆：不轉頭去丟自己的道具
-    if (out.commit || out.urgent || this.mateFlash.some((x) => t <= x.pop)) wish = null;
+    if (out.commit || out.urgent || this.mateFlash.some((x) => t <= x.pop)) {
+      wish = null;
+      this.trig.clear();
+    }
     // 3.0 效用層影子模式讀：這一步實際要丟的道具（資源層／指揮層的觸發條件成立）
     this.lastWish = wish;
     const u = this.util.step(obs, wish, busy);
@@ -1766,7 +1778,7 @@ export class Tactics {
         }
         const site = this.intel.sites[setup.site];
         const kind = this.pickFor(me, ['he', 'flash', 'molotov'], ['fakeUtil', 'free']);
-        if (kind !== null && kind !== 'flash') return { kind, x: site.cx, y: site.cy, why: '佯攻' };
+        if (kind !== null && kind !== 'flash') return this.fired('fakeUtil', ['fakeUtil', 'free'], { kind, x: site.cx, y: site.cy, why: '佯攻' });
       }
       return null;
     }
@@ -1887,6 +1899,10 @@ export class Tactics {
       const backup = act && burning !== undefined && this.can(me, 'smoke', ['fireBackup']);
       const noBackup = act && !this.res.items.some((it) => it.purpose === 'fireBackup' && it.state === 'plan' && this.isAlive(obs, it.owner));
       const mine = burning !== undefined && (backup || ((!act || noBackup) && (idx === this.smokerIndex(obs, me.id, p) || ((sm === undefined || dist(sm.x, sm.y, burning.x, burning.y) > reach) && closest === me.id))));
+      // 3.0 效用層影子模式：三種進點道具的時機（落點、丟得到與否由效用層自己算）
+      if (burning !== undefined && mine) this.hint('fireBackup', 'smoke', backup ? ['fireBackup'] : ['entrySmoke', 'holdSmoke', 'free']);
+      if (smokeFirst && !supportFirst) this.hint('entrySmoke', 'smoke', act ? ['entrySmoke', 'holdSmoke'] : idx === this.smokerIndex(obs, me.id, p) ? ['free'] : []);
+      if (cue && flashTurn && next.ok && (!smokeFirst || this.smokeHeard >= 0 || this.util.used.has('smoke') || sinceExec > (this.isAlive(obs, this.roles.who(SUPPORT)) ? 4 : 1.5))) this.hint('entryFlash', 'flash', act ? (planned ? ['entryFlash'] : myFlash ? ['free'] : []) : ['free']);
       if (burning !== undefined && mine && (backup || this.can(me, 'smoke', ['entrySmoke', 'holdSmoke', 'free'])) && this.util.solve(me.x, me.y, burning.x, burning.y) !== null) {
         wish = { kind: 'smoke', x: burning.x, y: burning.y, why: '煙滅火' };
       } else if (smokeFirst && (act ? this.can(me, 'smoke', ['entrySmoke', 'holdSmoke']) : this.util.has(me, 'smoke') && idx === this.smokerIndex(obs, me.id, p))) {
@@ -2355,6 +2371,20 @@ export class Tactics {
     return list.find((q) => this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) >= gap) && this.util.solve(me.x, me.y, q.x, q.y) !== null) ?? null;
   }
 
+  /** 3.0 影子模式：記一筆丟道具觸發（只是紀錄） @param {string} key @param {string} kind @param {string[]} purposes */
+  hint(key, kind, purposes) {
+    if (purposes.length > 0) this.trig.set(key, { kind, purposes });
+  }
+
+  /**
+   * 3.0 影子模式：規則成立（含落點）時記觸發，原樣回傳 wish（行為不變）
+   * @param {string} key @param {string[]} purposes @param {import('./utility.js').ThrowWish} w @returns {import('./utility.js').ThrowWish}
+   */
+  fired(key, purposes, w) {
+    this.hint(key, w.kind, purposes);
+    return w;
+  }
+
   /** (x, y) 走 depth 步內有沒有看不到爆點 c 的格（BFS） @param {number} x @param {number} y @param {import('./base.js').Pt} c @param {number} depth */
   canHide(x, y, c, depth) {
     const g = this.g;
@@ -2656,7 +2686,7 @@ export class Tactics {
     if (obs.enemiesAlive === 0) return null;
     if (defusing) {
       const kind = this.pickFor(me, ['molotov', 'he'], ['free']);
-      if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, by) < 3 * UNIT) && !this.burnsMate(obs, bx, by)) return { kind, x: bx, y: by, why: '燒拆包' };
+      if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, by) < 3 * UNIT) && !this.burnsMate(obs, bx, by)) return this.fired('post', ['free'], { kind, x: bx, y: by, why: '燒拆包' });
       if (this.antiDefuse(obs, out, bx, by)) return null;
     }
     return this.postUtility(obs, bx, by, s);
@@ -2682,10 +2712,10 @@ export class Tactics {
     for (const q of entrances) if (entries.every((p) => dist(p.ox, p.oy, q.ox, q.oy) >= (P.smokeGap + 2) * UNIT)) entries.push(q);
     const smoke = entries[smokers.indexOf(me.id)];
     // 下包頭兩秒先交換剩餘煙資訊，之後一個人負責一個入口，連同時準備投擲也不重複。
-    if (smoke !== undefined && (enemies.some((p) => dist(p.x, p.y, smoke.ox, smoke.oy) < 10 * UNIT) || this.data.rules.bombTicks / this.tps - left < 4) && dist(smoke.ox, smoke.oy, bx, by) > 5 * UNIT && this.can(me, 'smoke', ['free']) && obs.enemies.length === 0 && this.smokes.every((p) => dist(p.x, p.y, smoke.ox, smoke.oy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, smoke.ox, smoke.oy) !== null) return { kind: 'smoke', x: smoke.ox, y: smoke.oy, why: '封回防入口' };
+    if (smoke !== undefined && (enemies.some((p) => dist(p.x, p.y, smoke.ox, smoke.oy) < 10 * UNIT) || this.data.rules.bombTicks / this.tps - left < 4) && dist(smoke.ox, smoke.oy, bx, by) > 5 * UNIT && this.can(me, 'smoke', ['free']) && obs.enemies.length === 0 && this.smokes.every((p) => dist(p.x, p.y, smoke.ox, smoke.oy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, smoke.ox, smoke.oy) !== null) return this.fired('post', ['free'], { kind: 'smoke', x: smoke.ox, y: smoke.oy, why: '封回防入口' });
     const burners = alive.filter((id) => this.roles.of(id) === ANCHOR || this.roles.of(id) === SUPPORT);
     const reserve = burners[0] ?? alive[0];
-    if (near && me.id !== reserve && this.can(me, 'molotov', ['free']) && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return { kind: 'molotov', ...target, why: '燒回防入口' };
+    if (near && me.id !== reserve && this.can(me, 'molotov', ['free']) && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return this.fired('post', ['free'], { kind: 'molotov', ...target, why: '燒回防入口' });
     return null;
   }
 
@@ -3207,14 +3237,14 @@ export class Tactics {
     const fire = this.burns.find((b) => t <= b.until && dist(b.x, b.y, outer.x, outer.y) < 4 * UNIT);
     const smoked = this.smokes.some((m) => dist(m.x, m.y, e.ox, e.oy) < P.smokeGap * UNIT);
     const burn = this.chokeBurn(me, s, e);
-    if (burn !== null && fire === undefined && !smoked && !this.burnsMate(obs, outer.x, outer.y) && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return { kind: burn, ...outer, why: '燒入口' };
+    if (burn !== null && fire === undefined && !smoked && !this.burnsMate(obs, outer.x, outer.y) && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return this.fired('chokeMolotov', ['chokeMolotov', 'free'], { kind: burn, ...outer, why: '燒入口' });
     const fading = fire !== undefined && fire.until - t < 3 * this.tps;
-    if (this.can(me, 'smoke', ['free']) && !smoked && (top.n >= 2 || top.fl || fading) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' };
+    if (this.can(me, 'smoke', ['free']) && !smoked && (top.n >= 2 || top.fl || fading) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return this.fired('holdSmoke', ['holdSmoke', 'free'], { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' });
     if (top.n >= 1 && this.can(me, 'flash', ['free']) && !this.flashDone(obs, e)) {
       const th = this.perc.threats(e.ox, e.oy, 50).find((k) => dist(k.x, k.y, e.ox, e.oy) < 10 * UNIT);
       const lay = this.ctLayout(obs, p);
       const partner = obs.teammates.some((m) => m.alive && !m.blind && lay.get(m.id)?.site === s && dist(m.x, m.y, e.x, e.y) < P.deepMax * UNIT && this.g.los(m.x, m.y, e.x, e.y));
-      if (th !== undefined && partner && this.util.solve(me.x, me.y, th.x, th.y) !== null && !this.mateSees(obs, th)) return { kind: 'flash', x: th.x, y: th.y, why: '配對閃' };
+      if (th !== undefined && partner && this.util.solve(me.x, me.y, th.x, th.y) !== null && !this.mateSees(obs, th)) return this.fired('pairFlash', ['free'], { kind: 'flash', x: th.x, y: th.y, why: '配對閃' });
     }
     return null;
   }
@@ -3308,17 +3338,17 @@ export class Tactics {
       const c = th ?? { x: bx, y: by };
       const dm = obs.teammates.find((m) => m.alive && m.id === defuser.id);
       const walking = th === undefined && dm !== undefined && dist(dm.x, dm.y, bx, by) < this.util.blindRange + 8 * UNIT;
-      if (!walking && this.util.solve(me.x, me.y, c.x, c.y) !== null && !this.mateSees(obs, c) && !this.flashTaken(obs, c)) wish = { kind: 'flash', x: c.x, y: c.y, why: '回防閃' };
+      if (!walking && this.util.solve(me.x, me.y, c.x, c.y) !== null && !this.mateSees(obs, c) && !this.flashTaken(obs, c)) wish = this.fired('retakeFlash', ['retakeFlash', 'free'], { kind: 'flash', x: c.x, y: c.y, why: '回防閃' });
     }
     // 3.0：retakeSmoke 封另一個入口（不是自己這條路進的那個）
     if (wish === null && act && go && !inside && obs.enemies.length === 0 && this.can(me, 'smoke', ['retakeSmoke'])) {
       const mine = this.ctEntrance(s, Math.max(0, this.retakeRoute));
       const e2 = this.intel.sites[s].entrances.filter((e) => e !== mine).sort((a, b) => dist(a.ix, a.iy, bx, by) - dist(b.ix, b.iy, bx, by))[0];
-      if (e2 !== undefined && this.smokes.every((m) => dist(m.x, m.y, e2.ix, e2.iy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, e2.ix, e2.iy) !== null) wish = { kind: 'smoke', x: e2.ix, y: e2.iy, why: '回防煙封另一入口' };
+      if (e2 !== undefined && this.smokes.every((m) => dist(m.x, m.y, e2.ix, e2.iy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, e2.ix, e2.iy) !== null) wish = this.fired('retakeSmoke', ['retakeSmoke'], { kind: 'smoke', x: e2.ix, y: e2.iy, why: '回防煙封另一入口' });
     }
     if (wish === null && go && !inside && this.can(me, 'smoke', ['retakeSmoke', 'free']) && obs.enemies.length === 0) {
       const th = this.perc.threats(bx, by, 40).find((k) => dist(k.x, k.y, bx, by) >= 6 * UNIT && dist(k.x, k.y, bx, by) < 20 * UNIT);
-      if (th !== undefined && this.smokes.every((m) => dist(m.x, m.y, th.x, th.y) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, th.x, th.y) !== null) wish = { kind: 'smoke', x: th.x, y: th.y, why: '回防煙' };
+      if (th !== undefined && this.smokes.every((m) => dist(m.x, m.y, th.x, th.y) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, th.x, th.y) !== null) wish = this.fired('retakeSmoke', ['retakeSmoke', 'free'], { kind: 'smoke', x: th.x, y: th.y, why: '回防煙' });
     }
     // 3.0 回防閘門：回防道具的擁有者還活著、還沒有任何回防道具炸開／散開時，點外的人在集結位等（go 後最多 4 秒；剩不到 12 秒不等）
     if (act && go && !inside && !clear && stage.length > 0 && this.retakeGate(obs, (b.ticksLeft ?? 0) / this.tps)) {
@@ -3604,8 +3634,8 @@ export class Tactics {
     const d = Math.max(dist(soon.x, soon.y, q.x, q.y), 1);
     const f = Math.min(0.6, (6 * UNIT) / d);
     const sm = { x: soon.x + (q.x - soon.x) * f, y: soon.y + (q.y - soon.y) * f };
-    if (this.can(me, 'smoke', ['free']) && this.util.solve(me.x, me.y, sm.x, sm.y) !== null) return { kind: 'smoke', x: sm.x, y: sm.y, why: '封槍線' };
-    if (this.can(me, 'flash', ['free']) && d < this.util.flashRadius && this.util.solve(me.x, me.y, q.x, q.y) !== null && !this.flashTaken(obs, q)) return { kind: 'flash', x: q.x, y: q.y, why: '閃槍線' };
+    if (this.can(me, 'smoke', ['free']) && this.util.solve(me.x, me.y, sm.x, sm.y) !== null) return this.fired('line', ['free'], { kind: 'smoke', x: sm.x, y: sm.y, why: '封槍線' });
+    if (this.can(me, 'flash', ['free']) && d < this.util.flashRadius && this.util.solve(me.x, me.y, q.x, q.y) !== null && !this.flashTaken(obs, q)) return this.fired('line', ['free'], { kind: 'flash', x: q.x, y: q.y, why: '閃槍線' });
     return null;
   }
 
@@ -3633,7 +3663,7 @@ export class Tactics {
       const y = near.reduce((s, k) => s + k.y, 0) / near.length;
       if (dist(me.x, me.y, x, y) < 6 * UNIT) continue;
       if (obs.teammates.some((m) => m.alive && dist(m.x, m.y, x, y) < 4 * UNIT)) continue;
-      return { kind: 'he', x, y, why: '手雷' };
+      return this.fired('he', ['free'], { kind: 'he', x, y, why: '手雷' });
     }
     return null;
   }

@@ -232,17 +232,30 @@ export default class ShooterBaseline {
     const peek = this.nav.peek === null ? null : this.nav.peek.hold;
     // 硬反射（不算分母）：火區與手雷自保、避火、閃光躲避與等閃（設計第二節第 2、3 項）
     const reflex = evading || (tac.escape && tac.task !== 'save') || T.util.away !== null || T.mateFlash.some((x) => obs.tick <= x.pop + 2);
-    // 丟道具候選：身上每種道具，資源層 claim 拿得到的（claim 只查詢不改狀態）；觸發＝r7l 這一步要丟這種
-    const all = /** @type {const} */ (['entryFlash', 'entrySmoke', 'holdSmoke', 'fireBackup', 'fakeUtil', 'chokeMolotov', 'retakeSmoke', 'retakeFlash', 'free']);
-    const kinds = [...new Set(me.loadout.grenades)];
+    // 丟道具（第 5 步）：候選由效用層從資源層與指揮層的觸發紀錄自己產生（不看 lastWish）；lastWish 只用來分類 r7l 的實際動作
     const wish = T.lastWish;
-    const nades = kinds.filter((k) => T.res.claim(me.id, k, [...all], me.loadout.grenades.filter((x) => x === k).length) !== null).map((k) => ({ kind: k, trig: wish !== null && wish.kind === k }));
+    const g = this.g;
+    /** @type {import('./choice.js').NadeIn} */
+    const nade = {
+      res: T.res,
+      trig: T.trig,
+      solve: (x, y) => T.util.solve(me.x, me.y, x, y) !== null,
+      fighting: (id) => {
+        const m = obs.teammates.find((q) => q.id === id);
+        return obs.tick - (T.mateFired.get(id) ?? -1e9) < 1.5 * T.tps || (m !== undefined && this.perc.threats(m.x, m.y, 30).some((k) => dist(k.x, k.y, m.x, m.y) < 30 * UNIT && g.los(k.x, k.y, m.x, m.y)));
+      },
+      canHide: (x, y, c) => T.canHide(x, y, c, 4),
+      flashR: T.util.flashRadius,
+      smokes: T.smokes,
+      burns: T.burns,
+      info: (p, site) => T.flashInfo(obs, p, site),
+    };
     const cues = [...T.coop.cues].map(([id, q]) => ({ id, x: q.x, y: q.y, dead: q.dead }));
-    /** @type {{ type: import('./choice.js').Act, x: number, y: number, ref?: number } | null} */
+    /** @type {{ type: import('./choice.js').Act, x: number, y: number, ref?: number, kind?: string } | null} */
     let actual;
     const near = (/** @type {import('./base.js').Pt} */ p) => dist(me.x, me.y, p.x, p.y);
     if (tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse')) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
-    else if (wish !== null) actual = { type: 'g', x: me.x, y: me.y, ref: nades.findIndex((q) => q.kind === wish.kind) };
+    else if (wish !== null) actual = { type: 'g', x: wish.x, y: wish.y, kind: wish.kind };
     else if (nav.peeking && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
     else if (T.coop.acted) {
       // 跟進的是哪個隊友：離 r7l 選的站位最近的線索
@@ -288,7 +301,9 @@ export default class ShooterBaseline {
       ahead: mv.ahead, soundReact: this.combat.soundReact,
     };
     this.choice.shadow(obs, {
-      stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nades, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
+      stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nade, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
+      // 計畫包點（T：這次執行的包點或計畫包點；CT：守點所在包點）：落點找不到所在包點時用
+      site: site0 !== null ? SITE_IDS.indexOf(site0) : this.choice.siteOf(hold ?? tac.goal),
       cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
       group: (id) => T.groups?.get(id) ?? 0,
     }, li);
