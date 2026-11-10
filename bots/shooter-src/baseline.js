@@ -20,6 +20,7 @@ import { Tactics } from './tactics.js';
 import { AWP, ROLE_NAME, autoRole } from './roles.js';
 import { Judgment } from './judgment.js';
 import { Mission } from './mission.js';
+import { Choice } from './choice.js';
 
 export default class ShooterBaseline {
   constructor() {
@@ -39,6 +40,8 @@ export default class ShooterBaseline {
     this.combat = /** @type {any} */ (null);
     /** @type {Tactics} */
     this.tactics = /** @type {any} */ (null);
+    /** @type {Choice} */
+    this.choice = /** @type {any} */ (null);
     this.round = -1;
     /** 除錯用：最近一次決策的說明 */
     this.why = '';
@@ -96,6 +99,8 @@ export default class ShooterBaseline {
     this.tactics.nav = this.nav;
     this.tactics.judge = this.judge;
     this.tactics.mission = this.mission;
+    /** 3.0 效用層（影子模式：只算分與記錄） */
+    this.choice = new Choice(this.g, this.intel, this.perc, data);
   }
 
   /** @param {import('./base.js').Observation} obs */
@@ -107,6 +112,7 @@ export default class ShooterBaseline {
     this.mission?.reset();
     this.combat.reset();
     this.tactics.reset(obs);
+    this.choice?.reset();
   }
 
   /**
@@ -184,8 +190,41 @@ export default class ShooterBaseline {
     const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
     if (walk !== me.walking) out.push({ type: 'walk', on: walk });
     out.push(...late);
+    if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null);
     const reason = this.mission?.reason ?? '';
     this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
     return out;
+  }
+
+  /**
+   * 3.0 影子模式：把 r7l 這一步的情境與實際動作交給效用層記錄（不影響指令）
+   * @param {import('./base.js').Observation} obs @param {import('./tactics.js').TacOut} tac @param {import('./nav.js').NavOut} nav
+   * @param {boolean} engaged @param {boolean} evading
+   */
+  shadow(obs, tac, nav, engaged, evading) {
+    const me = obs.me;
+    const T = this.tactics;
+    const b = obs.bomb.state;
+    const planted = b === 'planted' || b === 'defusing';
+    /** @type {import('./choice.js').Stage} */
+    const stage = obs.round.phase === 'freeze' ? 'freeze'
+      : tac.task === 'save' || T.saving ? 'save'
+        : planted ? (me.team === 'T' ? 'post' : 'retake')
+          : me.team === 'T' && T.execTick >= 0 ? (tac.stop && !tac.objective ? 'wait' : 'execute') : 'setup';
+    const hold = tac.hold === null ? null : { x: tac.hold.x, y: tac.hold.y };
+    const peek = this.nav.peek === null ? null : this.nav.peek.hold;
+    /** @type {{ type: import('./choice.js').Act, x: number, y: number } | null} */
+    let actual;
+    if (tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse')) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
+    else if (tac.cmds.some((c) => c.type === 'throw')) actual = { type: 'g', x: me.x, y: me.y };
+    else if (nav.peeking && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
+    else if (tac.escape || evading) actual = { type: 'f', x: tac.goal?.x ?? me.x, y: tac.goal?.y ?? me.y };
+    else if (T.coop.acted) actual = { type: 't', x: tac.goal?.x ?? me.x, y: tac.goal?.y ?? me.y };
+    else if (hold !== null && dist(me.x, me.y, hold.x, hold.y) < 3 * 1000) actual = { type: 'h', x: dist(me.x, me.y, hold.x, hold.y) > 1000 ? hold.x : me.x, y: dist(me.x, me.y, hold.x, hold.y) > 1000 ? hold.y : me.y };
+    else if (tac.stop || tac.goal === null) actual = { type: 'h', x: me.x, y: me.y };
+    else actual = { type: 'a', x: tac.goal.x, y: tac.goal.y };
+    const p = T.prof === null || T.tagNow === null ? 0.5 : T.pOf(T.tagNow);
+    const inSite = (['A', 'B']).some((k) => { const r = this.intel.sites[/** @type {'A' | 'B'} */ (k)].rect; const cx = me.x / 1000, cy = me.y / 1000; return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1; });
+    this.choice.shadow(obs, { stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, actual, inSite, peek, cover: null, rotate: [] });
   }
 }

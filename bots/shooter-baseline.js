@@ -159,6 +159,27 @@ chaseRange: 15,
 chaseTime: 3,
 flashMateClear: 4,
 resLayer: true,
+choiceShadow: true,
+U: {
+b: ({ h: 0.5, a: 0.5, p: 0.3, f: 0, t: 0.2, g: 0, r: -0.5, o: 1.5 }),
+stage: ({
+h: [0.5, 0.2, 0.4, -0.2, 0.4, 0, 0.3],
+a: [-1, 0.2, -0.3, 0.4, -0.3, 0.3, -0.2],
+}),
+w: ({
+h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0 },
+a: { f4: -0.1, f5: -0.1, f9: -0.2, f10: -0.6, f10p: 0.5, f12: 0.1, f16: 0.1 },
+p: { f4: -0.2, f9: -0.2, f16: 0.1 },
+f: { f1: -0.3, f3: 0.3 },
+t: { f1: -0.2, f5: -0.2, f13: 0.2 },
+r: { f1: -0.2, f10: -0.2 },
+}),
+commit: 0.15,
+commitMin: 0.3,
+commitSec: 1.5,
+dwellSec: 0.6,
+margin: 0.05,
+},
 flashNeedInfo: true,
 flashEdgeTurn: true,
 smokeOff: 4.5,
@@ -6575,6 +6596,157 @@ out.commit = this.critical;
 if (this.critical) { out.allowPeek = false; out.walk = false; out.stop = false; }
 }
 }
+const ACTS = (['h', 'a', 'p', 'f', 't', 'g', 'r', 'o']);
+const STAGES = (['freeze', 'setup', 'wait', 'execute', 'post', 'retake', 'save']);
+function exposed(c, a, g) {
+let n = 0;
+for (const q of c.threats) if (dist(q.x, q.y, a.x, a.y) < 40 * UNIT && g.los(q.x, q.y, a.x, a.y)) n++;
+return n;
+}
+class Choice {
+constructor(g, intel, perc, data) {
+this.g = g;
+this.intel = intel;
+this.perc = perc;
+this.data = data;
+this.tps = data.rules.ticksPerSecond;
+this.slot = data.slot;
+this.log = [];
+this.cur = null;
+this.since = -1;
+this.lastTick = -1e9;
+this.seen = 0;
+this.hp = 100;
+this.mates = 0;
+this.bomb = '';
+this.chatN = 0;
+this.goalField = null;
+this.goalCell = -1;
+this.features = this.table();
+}
+reset() {
+this.cur = null;
+this.since = -1;
+this.lastTick = -1e9;
+this.seen = 0;
+this.hp = 100;
+this.mates = 0;
+this.bomb = '';
+}
+table() {
+const g = this.g;
+const perc = this.perc;
+const intel = this.intel;
+const cell = (a) => g.cellOf(a.x, a.y);
+return [
+{ key: 'f1', types: 'hfrt', fn: (_c, a) => { const i = cell(a); return i < 0 ? 0 : Math.min(1, perc.danger[i] / 60); } },
+{ key: 'f3', types: 'hft', fn: (c, a) => { if (c.threats.length === 0) { const i = cell(a); return i < 0 ? 0 : (intel.cover[i] !== 0 ? 1 : 0); } return 1 - exposed(c, a, g) / c.threats.length; } },
+{ key: 'f4', types: 'hpa', fn: (c, a) => { if (c.threats.length === 0) { const i = cell(a); return i < 0 ? 0 : Math.min(1, intel.exposure[i] / 8); } return Math.min(1, exposed(c, a, g) / 3); } },
+{ key: 'f5', types: 'art', fn: (c, a) => { let d = 1e9; for (const m of c.mates) d = Math.min(d, dist(m.x, m.y, a.x, a.y)); return Math.min(1, d / (20 * UNIT)); } },
+{ key: 'f7', types: '*', fn: (c) => { const r = c.obs.round; return Math.max(0, Math.min(1, r.phaseTicksLeft / this.data.rules.roundTicks)); } },
+{ key: 'f9', types: 'hpa', fn: (c, a) => { let m = 0; for (const q of c.threats) if (dist(q.x, q.y, a.x, a.y) < 15 * UNIT) m = Math.max(m, q.conf); return Math.min(1, m / 100); } },
+{ key: 'f10', types: 'har', fn: (c, a) => this.goalDist(c, a) },
+{ key: 'f10p', types: 'a', fn: (c, a) => Math.min(1, dist(c.obs.me.x, c.obs.me.y, a.x, a.y) / (5 * UNIT)) },
+{ key: 'f12', types: 'har', fn: (c) => Math.max(-1, Math.min(1, (c.mates.length + 1 - c.obs.enemiesAlive) / 4)) },
+{ key: 'f13', types: '*', fn: (c) => c.obs.me.hp / 100 },
+{ key: 'f16', types: 'apt', fn: (c) => (c.role === ENTRY ? 1 : 0) },
+{ key: 'f20', types: '*', fn: (c, a) => (c.cur !== null && c.cur.type === a.type && c.cur.k === a.k ? Math.max(P.U.commitMin, 1 - c.held / (P.U.commitSec * this.tps)) : 0) },
+];
+}
+goalDist(c, a) {
+if (c.goal === null) return 0;
+const gc = this.g.cellOf(c.goal.x, c.goal.y);
+if (gc < 0) return 0;
+if (gc !== this.goalCell || this.goalField === null) {
+this.goalCell = gc;
+this.goalField = dijkstra(this.g, [gc]);
+}
+const i = this.g.cellOf(a.x, a.y);
+const d = i < 0 ? Infinity : this.goalField[i];
+return Number.isFinite(d) ? Math.min(1, d / 40) : 1;
+}
+due(obs, p) {
+const me = obs.me;
+const k = Math.floor(obs.tick / this.data.rules.decisionInterval);
+const n = p < 0.25 ? 6 : 5;
+let ev = '';
+if (obs.enemies.length !== this.seen) ev = 'e';
+else if (me.hp < this.hp) ev = 'd';
+else if (obs.teammates.filter((m) => m.alive).length < this.mates) ev = 'm';
+else if (obs.bomb.state !== this.bomb) ev = 'b';
+else if (obs.chat.some((c) => /^(K:|E:|U:[prf])/.test(c.text))) ev = 'c';
+this.seen = obs.enemies.length;
+this.hp = me.hp;
+this.mates = obs.teammates.filter((m) => m.alive).length;
+this.bomb = obs.bomb.state;
+if (ev !== '' && obs.tick > this.lastTick) return ev;
+return (k - this.slot) % n === 0 ? '' : null;
+}
+shadow(obs, ctx) {
+if (ctx.stage === 'freeze') return;
+const ev = this.due(obs, ctx.p);
+if (ev === null) return;
+this.lastTick = obs.tick;
+const me = obs.me;
+const mates = obs.teammates.filter((m) => m.alive && m.id !== me.id);
+const cands = [];
+const add = (type, x, y, ref = -1) => { if (cands.length < 16) cands.push({ type, k: cands.filter((q) => q.type === type).length, x, y, ref }); };
+add('h', me.x, me.y);
+if (ctx.hold !== null && dist(me.x, me.y, ctx.hold.x, ctx.hold.y) < 3 * UNIT && dist(me.x, me.y, ctx.hold.x, ctx.hold.y) > UNIT) add('h', ctx.hold.x, ctx.hold.y);
+if (ctx.goal !== null) add('a', ctx.goal.x, ctx.goal.y);
+if (ctx.peek !== null) add('p', ctx.peek.x, ctx.peek.y);
+if (ctx.cover !== null) add('f', ctx.cover.x, ctx.cover.y);
+for (const m of mates) if (m.firing && dist(m.x, m.y, me.x, me.y) < 25 * UNIT) add('t', m.x, m.y, m.id);
+for (const r of ctx.rotate) add('r', r.x, r.y);
+const bx = obs.bomb.x;
+const by = obs.bomb.y;
+if (me.hasBomb && ctx.inSite) add('o', me.x, me.y);
+else if (me.team === 'CT' && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null && dist(me.x, me.y, bx, by) < 2 * UNIT) add('o', bx, by);
+const c = { obs, stage: ctx.stage, goal: ctx.goal, threats: this.perc.threats(me.x, me.y), mates, role: ctx.role, cur: this.cur, held: this.since < 0 ? 0 : obs.tick - this.since, entry: 0 };
+const scored = cands.map((a) => ({ a, s: this.score(c, a) }));
+scored.sort((p, q) => q.s - p.s || ACTS.indexOf(p.a.type) - ACTS.indexOf(q.a.type) || p.a.k - q.a.k);
+let pick = scored[0]?.a ?? null;
+const curS = this.cur === null ? null : scored.find((q) => q.a.type === this.cur?.type && q.a.k === this.cur.k);
+if (pick !== null && curS !== undefined && curS !== null && curS.a !== pick) {
+const top = scored[0].s;
+if ((ev === '' && c.held < P.U.dwellSec * this.tps) || top < curS.s + P.U.margin) pick = curS.a;
+}
+if (pick !== null && (this.cur === null || pick.type !== this.cur.type || pick.k !== this.cur.k)) this.since = obs.tick;
+this.cur = pick;
+const code = ( a) => `${a.type}${a.k}`;
+const act = ctx.actual === null ? '-' : this.match(cands, ctx.actual);
+this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), act, stage: ctx.stage, fight: ctx.fight });
+if (this.log.length > 64) this.log.shift();
+}
+match(cands, act) {
+let best = null;
+let bd = 3 * UNIT;
+for (const a of cands) {
+if (a.type !== act.type) continue;
+const d = dist(a.x, a.y, act.x, act.y);
+if (d <= bd) { bd = d; best = a; }
+}
+return best === null ? `?${act.type}` : `${best.type}${best.k}`;
+}
+score(c, a) {
+const W = P.U;
+const row = W.w[a.type];
+let s = (W.b[a.type] ?? 0) + (W.stage[a.type]?.[STAGES.indexOf(c.stage)] ?? 0);
+for (const f of this.features) {
+if (f.types !== '*' && !f.types.includes(a.type)) continue;
+const w = row?.[f.key] ?? 0;
+if (w !== 0) s += w * f.fn(c, a);
+}
+s += W.commit * (this.features.find((f) => f.key === 'f20')?.fn(c, a) ?? 0);
+return s;
+}
+text() {
+const e = this.log[this.log.length - 1];
+if (e === undefined) return '';
+const n = ( v) => v.toFixed(2).replace(/^(-?)0\./, '$1.');
+return `${e.fight ? '!' : ''}${e.top.map(([k, v]) => `${k} ${n(v)}`).join('|')} → ${e.pick}`;
+}
+}
 export default class ShooterBaseline {
 constructor() {
 this.data = (null);
@@ -6585,6 +6757,7 @@ this.perc = (null);
 this.nav = (null);
 this.combat = (null);
 this.tactics = (null);
+this.choice = (null);
 this.round = -1;
 this.why = '';
 }
@@ -6633,6 +6806,7 @@ this.tactics.combat = this.combat;
 this.tactics.nav = this.nav;
 this.tactics.judge = this.judge;
 this.tactics.mission = this.mission;
+this.choice = new Choice(this.g, this.intel, this.perc, data);
 }
 newRound(obs) {
 this.round = obs.round.number;
@@ -6642,6 +6816,7 @@ this.judge?.reset();
 this.mission?.reset();
 this.combat.reset();
 this.tactics.reset(obs);
+this.choice?.reset();
 }
 decide(obs) {
 const me = obs.me;
@@ -6707,8 +6882,33 @@ if (crouch !== me.crouching) out.push({ type: 'crouch', on: crouch });
 const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
 if (walk !== me.walking) out.push({ type: 'walk', on: walk });
 out.push(...late);
+if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null);
 const reason = this.mission?.reason ?? '';
 this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
 return out;
+}
+shadow(obs, tac, nav, engaged, evading) {
+const me = obs.me;
+const T = this.tactics;
+const b = obs.bomb.state;
+const planted = b === 'planted' || b === 'defusing';
+const stage = obs.round.phase === 'freeze' ? 'freeze'
+: tac.task === 'save' || T.saving ? 'save'
+: planted ? (me.team === 'T' ? 'post' : 'retake')
+: me.team === 'T' && T.execTick >= 0 ? (tac.stop && !tac.objective ? 'wait' : 'execute') : 'setup';
+const hold = tac.hold === null ? null : { x: tac.hold.x, y: tac.hold.y };
+const peek = this.nav.peek === null ? null : this.nav.peek.hold;
+let actual;
+if (tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse')) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
+else if (tac.cmds.some((c) => c.type === 'throw')) actual = { type: 'g', x: me.x, y: me.y };
+else if (nav.peeking && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
+else if (tac.escape || evading) actual = { type: 'f', x: tac.goal?.x ?? me.x, y: tac.goal?.y ?? me.y };
+else if (T.coop.acted) actual = { type: 't', x: tac.goal?.x ?? me.x, y: tac.goal?.y ?? me.y };
+else if (hold !== null && dist(me.x, me.y, hold.x, hold.y) < 3 * 1000) actual = { type: 'h', x: dist(me.x, me.y, hold.x, hold.y) > 1000 ? hold.x : me.x, y: dist(me.x, me.y, hold.x, hold.y) > 1000 ? hold.y : me.y };
+else if (tac.stop || tac.goal === null) actual = { type: 'h', x: me.x, y: me.y };
+else actual = { type: 'a', x: tac.goal.x, y: tac.goal.y };
+const p = T.prof === null || T.tagNow === null ? 0.5 : T.pOf(T.tagNow);
+const inSite = (['A', 'B']).some((k) => { const r = this.intel.sites[ (k)].rect; const cx = me.x / 1000, cy = me.y / 1000; return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1; });
+this.choice.shadow(obs, { stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, actual, inSite, peek, cover: null, rotate: [] });
 }
 }

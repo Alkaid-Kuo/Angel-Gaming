@@ -269,6 +269,35 @@ export const P = {
   flashMateClear: 4,
   /** 3.0 資源層（道具計畫、claim、重分配）；false＝2.8 的道具行為 */
   resLayer: true,
+
+  // ── 3.0 效用式個人層（丙-1，PR #44）：影子模式只算分與記錄，不改行為 ──
+  /** 影子模式開關：開著時每次決策照算候選與分數、記錄前三名與 r7l 實際動作（量測一致率用），不影響指令 */
+  choiceShadow: true,
+  /**
+   * 效用權重表（丁-1 搜這張表）：b 依動作的偏置、stage 依動作 × 階段（freeze、setup、wait、execute、post、retake、save）的偏置、
+   * w 依動作 × 特徵鍵的權重；commit 承諾加分、commitMin 衰減後的保留比例、commitSec 衰減秒數、dwellSec 最短停留、margin 切換門檻
+   * （影子模式的手填初始值：照計畫的守與推進領先，2.8 等價）
+   */
+  U: {
+    b: /** @type {Record<string, number>} */ ({ h: 0.5, a: 0.5, p: 0.3, f: 0, t: 0.2, g: 0, r: -0.5, o: 1.5 }),
+    stage: /** @type {Record<string, number[]>} */ ({
+      h: [0.5, 0.2, 0.4, -0.2, 0.4, 0, 0.3],
+      a: [-1, 0.2, -0.3, 0.4, -0.3, 0.3, -0.2],
+    }),
+    w: /** @type {Record<string, Record<string, number>>} */ ({
+      h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0 },
+      a: { f4: -0.1, f5: -0.1, f9: -0.2, f10: -0.6, f10p: 0.5, f12: 0.1, f16: 0.1 },
+      p: { f4: -0.2, f9: -0.2, f16: 0.1 },
+      f: { f1: -0.3, f3: 0.3 },
+      t: { f1: -0.2, f5: -0.2, f13: 0.2 },
+      r: { f1: -0.2, f10: -0.2 },
+    }),
+    commit: 0.15,
+    commitMin: 0.3,
+    commitSec: 1.5,
+    dwellSec: 0.6,
+    margin: 0.05,
+  },
   /** 3.0：計畫的進點閃要有情報（記得的敵人或 5 秒內接觸）才丟 */
   flashNeedInfo: true,
   /** 3.0（r7i）：隊友的閃光、自己在半徑外緣停步等炸開時，沒看到敵人就也轉開（停步要等反應延遲，會滑進半徑） */
