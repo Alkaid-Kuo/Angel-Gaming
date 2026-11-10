@@ -17,7 +17,7 @@ import { Perception } from './memory.js';
 import { Navigator } from './nav.js';
 import { Combat } from './combat.js';
 import { Tactics } from './tactics.js';
-import { AWP, ROLE_NAME, autoRole } from './roles.js';
+import { AWP, ENTRY, ROLE_NAME, autoRole } from './roles.js';
 import { Judgment } from './judgment.js';
 import { Mission } from './mission.js';
 import { Choice } from './choice.js';
@@ -200,6 +200,19 @@ export default class ShooterBaseline {
   }
 
   /**
+   * 3.0：stage 'wait'＝已經執行、計畫裡進點的煙或閃（目標是這次執行的包點）還沒丟（資源層的狀態，不看 r7l 停不停）
+   * @param {import('./base.js').Observation} obs
+   */
+  utilPending(obs) {
+    const T = this.tactics;
+    const p = T.plan;
+    if (p === null || p.kind === 'hold' || !T.res.active) return false;
+    const exec = p.exec ?? p.site;
+    const alive = new Set([obs.me.id, ...obs.teammates.filter((m) => m.alive).map((m) => m.id)]);
+    return T.res.items.some((it) => (it.purpose === 'entrySmoke' || it.purpose === 'entryFlash') && it.state === 'plan' && it.target.site === exec && alive.has(it.owner));
+  }
+
+  /**
    * 3.0 影子模式：把 r7l 這一步的情境與實際動作交給效用層記錄（不影響指令）
    * @param {import('./base.js').Observation} obs @param {import('./tactics.js').TacOut} tac @param {import('./nav.js').NavOut} nav
    * @param {boolean} engaged @param {boolean} evading
@@ -213,7 +226,7 @@ export default class ShooterBaseline {
     const stage = obs.round.phase === 'freeze' ? 'freeze'
       : tac.task === 'save' || T.saving ? 'save'
         : planted ? (me.team === 'T' ? 'post' : 'retake')
-          : me.team === 'T' && T.execTick >= 0 ? (tac.stop && !tac.objective ? 'wait' : 'execute') : 'setup';
+          : me.team === 'T' && T.execTick >= 0 ? (this.utilPending(obs) ? 'wait' : 'execute') : 'setup';
     const hold = tac.hold === null ? null : { x: tac.hold.x, y: tac.hold.y };
     const peek = this.nav.peek === null ? null : this.nav.peek.hold;
     // 硬反射（不算分母）：火區與手雷自保、避火、閃光躲避與等閃（設計第二節第 2、3 項）
@@ -223,21 +236,46 @@ export default class ShooterBaseline {
     const kinds = [...new Set(me.loadout.grenades)];
     const wish = T.lastWish;
     const nades = kinds.filter((k) => T.res.claim(me.id, k, [...all], me.loadout.grenades.filter((x) => x === k).length) !== null).map((k) => ({ kind: k, trig: wish !== null && wish.kind === k }));
+    const cues = [...T.coop.cues].map(([id, q]) => ({ id, x: q.x, y: q.y, dead: q.dead }));
     /** @type {{ type: import('./choice.js').Act, x: number, y: number, ref?: number } | null} */
     let actual;
     const near = (/** @type {import('./base.js').Pt} */ p) => dist(me.x, me.y, p.x, p.y);
     if (tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse')) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
     else if (wish !== null) actual = { type: 'g', x: me.x, y: me.y, ref: nades.findIndex((q) => q.kind === wish.kind) };
     else if (nav.peeking && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
-    else if (T.coop.acted) actual = { type: 't', x: tac.goal?.x ?? me.x, y: tac.goal?.y ?? me.y };
+    else if (T.coop.acted) {
+      // 跟進的是哪個隊友：離 r7l 選的站位最近的線索
+      const gx = tac.goal?.x ?? me.x;
+      const gy = tac.goal?.y ?? me.y;
+      const cue = cues.reduce((b, q) => (b === null || dist(q.x, q.y, gx, gy) < dist(b.x, b.y, gx, gy) ? q : b), /** @type {typeof cues[number] | null} */ (null));
+      actual = { type: 't', x: gx, y: gy, ref: cue?.id ?? -1 };
+    }
     else if (hold !== null && near(hold) < 3 * UNIT) actual = near(hold) > UNIT ? { type: 'h', x: hold.x, y: hold.y } : { type: 'h', x: me.x, y: me.y };
     else if (tac.stop || tac.goal === null) actual = { type: 'h', x: me.x, y: me.y };
+    else if (near(tac.goal) < P.U.holdZone * UNIT) actual = near(tac.goal) > UNIT ? { type: 'h', x: tac.goal.x, y: tac.goal.y } : { type: 'h', x: me.x, y: me.y };
     else actual = { type: 'a', x: tac.goal.x, y: tac.goal.y };
     const p = T.prof === null || T.tagNow === null ? 0.5 : T.pOf(T.tagNow);
     const inSite = SITE_IDS.some((k) => { const r = this.intel.sites[k].rect; const cx = me.x / UNIT, cy = me.y / UNIT; return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1; });
     const pathless = tac.goal !== null && this.nav.path.length === 0 && near(tac.goal) > UNIT;
+    // PlanIntent 的合法等待（指揮層）：2.8 執行品質（熟練度低的慢半拍、跟上、慢了一步、跟上隊形）
+    const planWait = T.waitTag === 'qpause' || T.waitTag === 'qlag' || T.waitTag === 'qsync' || T.waitTag === 'qflash';
+    // f21 進點順序（取代 yieldTo、spawnWait 的條件；只讀，不碰 tactics 的計時器與快取）
+    const plan = T.plan;
+    const exec = me.team === 'T' && plan !== null && plan.kind !== 'hold' && T.execTick >= 0 ? (plan.exec ?? plan.site) : null;
+    const c0 = this.g.cellOf(me.x, me.y);
+    let yieldF = 0;
+    if (exec !== null && plan !== null && plan.kind !== 'go' && c0 >= 0 && this.intel.distSite[exec][c0] <= P.yieldNear * 10 && T.waitEntry(obs, exec)) yieldF = 1;
+    let spawnF = 0;
+    const ent = obs.teammates.find((m) => m.alive && m.id === T.roles.who(ENTRY));
+    const site0 = exec ?? (plan !== null && plan.kind !== 'hold' ? plan.site : null);
+    if (me.team === 'T' && site0 !== null && plan !== null && plan.kind !== 'go' && ent !== undefined && c0 >= 0 && this.intel.distSpawn.T[c0] <= P.spawnLead * 10 && (T.groups?.get(ent.id) ?? 0) === (T.groups?.get(me.id) ?? 0)) {
+      const ce = this.g.cellOf(ent.x, ent.y);
+      const dS = this.intel.distSite[site0];
+      if (ce >= 0 && dS[ce] >= dS[c0] - 10) spawnF = 1;
+    }
+    const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && hold !== null && near(hold) < 4 * UNIT ? 1 : 0;
     this.choice.shadow(obs, {
-      stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nades, pathless,
+      stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nades, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
       cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
       group: (id) => T.groups?.get(id) ?? 0,
     });
