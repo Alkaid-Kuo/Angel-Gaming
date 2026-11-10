@@ -58,6 +58,8 @@ let coaching: CoachInfo | null = null;
 /** 停下來等教練下指令 */
 let coachWaiting = false;
 let coachRoundSent = -1;
+/** 狀態列上次送出時是不是回放中 */
+let coachReplaySent = false;
 
 /** 教練模式中（還沒離席）：畫面只送己方視野聯集 */
 const coachMode = (): boolean => live !== null && coaching !== null && !(setup?.spectate ?? false);
@@ -65,7 +67,52 @@ const coachGroup = (): 0 | 1 => (live?.group ?? 0);
 
 function coachStatus(): void {
   if (live === null) return;
-  post({ type: 'coachStatus', status: { round: live.driver.match.roundNumber, timeoutsLeft: live.timeoutsLeft(), pending: live.pausePending, left: live.leftAt !== null } });
+  post({ type: 'coachStatus', status: { round: live.driver.match.roundNumber, timeoutsLeft: live.timeoutsLeft(), pending: live.pausePending, left: live.leftAt !== null, replay: live.replaying || live.seeking, liveRound: live.liveRound, canRewind: live.canRewind(), seeking: live.seeking } });
+}
+
+/** 教練往回看：一次迴圈最多重跑多久（毫秒）。分段推進，中間收得到訊息、回報進度 */
+const SEEK_SLICE_MS = 30;
+
+/** 教練往回看、回放中跳下一回合、回到現場：開始重跑（面板先收起，推回現場時再交還停點） */
+function coachStartSeek(ok: boolean, target: number): void {
+  if (!ok || live === null) return;
+  coachWaiting = false;
+  coachStatus();
+  post({ type: 'seeking', at: live.driver.match.roundNumber, target });
+}
+
+/** 重跑一段；到了就換上驅動、送畫面（rewound：主執行緒清掉逐幀累積的東西），推回現場時有停點就再交出 */
+function coachSeekSlice(): void {
+  const lc = live;
+  if (lc === null) return;
+  const t0 = performance.now();
+  let at = lc.driver.match.roundNumber;
+  let done = false;
+  while (!done && performance.now() - t0 < SEEK_SLICE_MS) {
+    done = lc.seekStep(60);
+    if (lc.driver.match.roundNumber !== at) {
+      at = lc.driver.match.roundNumber;
+      post({ type: 'seeking', at, target: Math.max(at, lc.liveRound) });
+    }
+  }
+  if (!done) return;
+  driver = lc.driver;
+  const m = driver.match;
+  skipped = m.rounds.map((r) => ({ number: r.number, winner: r.winner, winnerGroup: r.winnerGroup, reason: r.reason }));
+  rewound = true;
+  shotTick = m.tick - 1;
+  feedIdx = m.kills.length;
+  pendingSounds = [];
+  acc = 0;
+  last = performance.now();
+  coachRoundSent = m.roundNumber;
+  sendFrame();
+  const stop = lc.waiting;
+  if (stop !== null) {
+    coachWaiting = true;
+    post({ type: 'coachStop', stop });
+  }
+  coachStatus();
 }
 
 /** 經營層教練身分即時看：請求單 → LiveCoach（與閘道同一條建驅動的路徑）；不能透視、不能往後跳 */
@@ -258,9 +305,10 @@ function sendFrame(viewObs?: ShooterObservation): void {
     // 教練視角：只有己方活著選手的觀察資料聯集＋計分板公開欄位（coach-view.ts），沒有全狀態
     const feed: KillFeedItem[] = m.kills.slice(feedIdx).map((k) => ({ tick: k.tick, killer: k.killer, victim: k.victim, weapon: k.weapon }));
     feedIdx = m.kills.length;
-    post({ type: 'frame', frame: { ...coachFrame(m, coachGroup(), viewId), sounds: pendingSounds, feed, paused: paused || coachWaiting, ...(skipped.length > 0 ? { skipped } : {}) } });
+    post({ type: 'frame', frame: { ...coachFrame(m, coachGroup(), viewId), sounds: pendingSounds, feed, paused: paused || coachWaiting, ...(skipped.length > 0 ? { skipped } : {}), ...(rewound ? { rewound } : {}) } });
     pendingSounds = [];
     skipped = [];
+    rewound = false;
     return;
   }
   const view = viewObs !== undefined && viewObs.me.id === viewId && viewObs.tick === m.tick ? viewObs : m.observe(viewId);
@@ -296,6 +344,10 @@ function sendOver(): void {
 }
 
 function loop(): void {
+  if (live !== null && live.seeking && coachMode()) {
+    coachSeekSlice();
+    return;
+  }
   const now = performance.now();
   const dt = now - last;
   last = now;
@@ -311,8 +363,10 @@ function loop(): void {
     if (live !== null && live.driver === d) {
       const stop = live.step();
       stepped += 1;
-      if (d.match.roundNumber !== coachRoundSent) {
+      // 回合換了、回放推回現場（回放標記變了）：更新狀態列
+      if (d.match.roundNumber !== coachRoundSent || live.replaying !== coachReplaySent) {
         coachRoundSent = d.match.roundNumber;
+        coachReplaySent = live.replaying;
         coachStatus();
       }
       if (stop !== null) {
@@ -374,11 +428,16 @@ ctx.onmessage = (ev: MessageEvent<ToShooterWorker>) => {
       case 'coachLeave':
         coachLeave();
         break;
+      case 'coachLive':
+        if (live !== null && coachMode()) coachStartSeek(live.backToLive(), live.liveRound);
+        break;
       case 'skipRound':
-        skipRound();
+        if (live !== null && coachMode()) coachStartSeek(live.skipRound(), Math.min(live.driver.match.roundNumber + 1, live.liveRound));
+        else skipRound();
         break;
       case 'seek':
-        seek(msg.round);
+        if (live !== null && coachMode()) coachStartSeek(live.rewind(msg.round), Math.max(1, Math.min(msg.round, live.liveRound)));
+        else seek(msg.round);
         break;
       case 'getReplay':
         if (driver?.replay && driver.match.over) post({ type: 'replay', replay: setup !== null && watching === null ? { ...driver.replay, ...seatLabels(setup) } : driver.replay });

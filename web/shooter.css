@@ -380,6 +380,7 @@ body:has(.setup:not(.hidden)) { background: #0b0e14; }
 .sg-coach .sps button { padding: 0 8px; font-family: var(--en); }
 .sg-coach .lv { color: var(--grey); }
 .sg-coach .tag { color: var(--grey); letter-spacing: 0.1em; }
+.sg-coach b.rp { color: var(--gold2); }
 .sg-coachp { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; background: rgba(var(--ink-rgb), 0.35); }
 .sg-coachp.hidden { display: none; }
 .sg-coachp .box { width: min(720px, calc(100% - 32px)); box-sizing: border-box; padding: 18px 22px 20px; display: flex; flex-direction: column; gap: 12px; background: var(--sheet); box-shadow: inset 0 0 0 1px var(--hair); }

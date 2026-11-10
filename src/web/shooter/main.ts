@@ -173,6 +173,9 @@ class Game {
             resolve: (plan, call) => this.post({ type: 'coachResolve', plan, call }),
             leave: () => this.post({ type: 'coachLeave' }),
             speed: (i) => this.setSpeed(i),
+            prev: () => this.prevRound(),
+            next: () => this.skipRound(),
+            live: () => this.post({ type: 'coachLive' }),
           })
         : null;
     this.root.classList.toggle('coach', meta.coach !== undefined);
@@ -350,16 +353,18 @@ class Game {
     this.post({ type: 'speed', speed: SPEEDS[this.speedIdx] });
   }
 
-  /** 觀戰：跳到下一回合（Worker 同步推進，暫停中也可以） */
+  /** 觀戰：跳到下一回合（Worker 同步推進，暫停中也可以）；教練模式只在回放中（不能超過現場） */
   private skipRound(): void {
-    if (!this.meta.spectate || this.over !== null) return;
+    if (this.over !== null) return;
+    if (this.coachUi !== null ? !this.coachUi.replaying || this.coachStatus?.seeking === true : !this.meta.spectate) return;
     this.post({ type: 'skipRound' });
   }
 
-  /** 觀戰：回到第 round 回合開始（Worker 重跑，等它回 frame）；教練模式是即時打的，不能倒帶 */
+  /** 觀戰：回到第 round 回合開始（Worker 重跑，等它回 frame）；教練模式只能回到已打過的回合（規格 6.12），回放中不能下指令 */
   private seek(round: number): void {
     const spec = this.spec;
-    if (spec === null || spec.busy || this.cur === null || this.coachUi !== null) return;
+    if (spec === null || spec.busy || this.cur === null) return;
+    if (this.coachUi !== null && (this.coachStatus?.canRewind !== true || this.coachStatus.seeking)) return;
     spec.seeking(this.cur.view.round.number, round);
     this.post({ type: 'seek', round });
   }
