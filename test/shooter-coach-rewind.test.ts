@@ -5,6 +5,7 @@
 // 3 回放中不能下指令：requestPause 回 false、resolve 丟例外，指令陣列不變。
 // 4 回放中離席：先推回現場再離席，結果＝「同指令、在第 n 回合離席（助理教練接手）」的批次重跑。
 // 5 沒回看時行為與原本相同：剩餘暫停次數照即時回合算＝原本照目前回合算，每個 tick 都相同。
+// 6 加時：打進第二段加時後回看正規回合，剩餘次數＝現場的加時次數（不是正規回合的次數）；沒回看時正規與加時各段逐 tick 與原算法相同。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { SHOOTER_TACTICS } from '../src/manage/content-shooter.ts';
@@ -131,6 +132,51 @@ describe('教練模式往回看（真引擎 MR6）', () => {
     expect(batch.outcome.calls).toEqual(lc.log);
     expect(lc.log.some((c) => c.side === 'b' && c.by === 'npc')).toBe(true);
     for (const r of [3, 10]) expect(batch.outcome.rounds[r - 1].tactics?.a).toBe(lc.calls.find((c) => c.round === r)?.call?.tactic);
+  }, 900_000);
+
+  it('加時：打到第二段加時再回看第 5 回合，剩餘暫停次數照現場（加時）算；沒回看時正規與加時各段逐 tick 與原算法相同', () => {
+    // 種子 3：這張請求單（我方不喊）打 24 回合，有兩段加時。第 19 回合前不喊任何指令，所以到第 20 回合為止與不喊的那場相同
+    const ot: MatchRequest = { ...req, seed: 3 };
+    const lc = new LiveCoach({ request: ot, bot, side: 'a', assistant: false });
+    const allowedSeen = new Set<number>();
+    while (lc.waiting === null || lc.waiting.round < 20) {
+      const m = lc.driver.match;
+      expect(m.over).toBe(false);
+      if (m.roundNumber === 19 && !lc.pausePending) expect(lc.requestPause()).toBe(true);
+      const stop = lc.step();
+      const used = lc.calls.filter((c) => c.kind === 'timeout').length;
+      const old = timeoutsAllowed(Math.max(1, m.roundNumber + 1), rules) - used;
+      expect(lc.timeoutsLeft()).toBe(old);
+      allowedSeen.add(timeoutsAllowed(Math.max(1, m.roundNumber + 1), rules));
+      if (stop !== null && stop.round < 20) {
+        expect(stop.kind).toBe('halftime');
+        lc.resolve(null, null);
+      }
+    }
+    // 正規 2 次、第一段加時 3 次、第二段加時 4 次都走過
+    expect([...allowedSeen].sort()).toEqual([2, 3, 4]);
+    const stop = lc.waiting;
+    expect(stop?.kind).toBe('timeout');
+    lc.resolve(null, { tactic: null, buy: 'force' });
+    const live = lc.timeoutsLeft();
+    expect(live).toBe(timeoutsAllowed(21, rules) - 1);
+    // 回看第 5 回合：剩餘次數照現場（第二段加時 4 − 1 = 3），不是第 5 回合的正規次數（2 − 1 = 1）
+    expect(lc.rewind(5)).toBe(true);
+    seekAll(lc);
+    expect(lc.driver.match.roundNumber).toBe(5);
+    expect(lc.timeoutsLeft()).toBe(live);
+    expect(live).not.toBe(timeoutsAllowed(6, rules) - 1);
+    while (lc.replaying) {
+      expect(lc.step()).toBeNull();
+      expect(lc.timeoutsLeft()).toBe(live);
+    }
+    expect(lc.driver.match.roundNumber).toBe(20);
+    while (!lc.driver.match.over) {
+      const s = lc.step();
+      if (s !== null) lc.resolve(null, null);
+    }
+    const batch = runGatewayMatch(liveRequest(ot, 'a', lc.calls, null, false), bot);
+    expect(batch.finalHash).toBe(lc.driver.match.hash());
   }, 900_000);
 
   it('回放中離席：先推回現場再離席；結果＝在第 n 回合離席、助理教練接手的批次重跑；離席後不能往回看', () => {
