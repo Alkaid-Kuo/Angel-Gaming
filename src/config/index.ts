@@ -221,7 +221,8 @@ export const RULES = {
     initMs: 1000,
   },
   botModule: {
-    maxBytes: 256 * 1024,
+    /** 2026-11-07 使用者授權由 256 KB 擴為 288 KB（Bot 3.0 資源層，PR #36）；全平台共用 */
+    maxBytes: 288 * 1024,
     minKnobs: 3,
     maxKnobs: 6,
   },

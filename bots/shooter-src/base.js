@@ -267,6 +267,12 @@ export const P = {
   chaseTime: 3,
   /** 閃光：隊友離爆點太近（格）就不丟 */
   flashMateClear: 4,
+  /** 3.0 資源層（道具計畫、claim、重分配）；false＝2.8 的道具行為 */
+  resLayer: true,
+  /** 3.0：計畫的進點閃要有情報（記得的敵人或 5 秒內接觸）才丟 */
+  flashNeedInfo: true,
+  /** 3.0（r7i）：隊友的閃光、自己在半徑外緣停步等炸開時，沒看到敵人就也轉開（停步要等反應延遲，會滑進半徑） */
+  flashEdgeTurn: true,
   /** 煙霧：放在入口往架點方向幾格 */
   smokeOff: 4.5,
   /** 同回合兩顆煙的落點至少隔幾格（2.2） */

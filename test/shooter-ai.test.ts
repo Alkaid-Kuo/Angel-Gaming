@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { SHOOTER_BOTS, buildShooterBot } from '../scripts/build-shooter-bots.ts';
 import { compileBot } from '../src/sandbox/compile.ts';
+import { RULES } from '../src/config/index.ts';
 import { resolveKnobs } from '../src/sandbox/controller.ts';
 import type { ShooterHelpers, ShooterInitData } from '../src/shooter/api.ts';
 import { AI_SCENARIOS, AI_SCENARIO_SEEDS, runAiScenarios } from '../src/shooter/ai-scenarios.ts';
@@ -34,11 +35,11 @@ describe('射擊基準 Bot：檔案與宣告', () => {
     for (const b of SHOOTER_BOTS) expect(readFileSync(b.out, 'utf8').replaceAll('\r\n', '\n')).toBe(buildShooterBot(b.entry));
   });
 
-  it('符合選手模組限制（≤ 200 KB、可編譯）並宣告 3～6 顆旋鈕、名稱與版本', () => {
-    expect(baseline.sizeBytes).toBeLessThanOrEqual(256 * 1024);
+  it('符合選手模組限制（≤ RULES.botModule.maxBytes、可編譯）並宣告 3～6 顆旋鈕、名稱與版本', () => {
+    expect(baseline.sizeBytes).toBeLessThanOrEqual(RULES.botModule.maxBytes);
     const c = new ShooterBatchController(baseline, 'baseline', 1, 0, MAPS.redrock());
     expect(c.declaration.name).toBe('shooter-baseline');
-    expect(c.declaration.version).toBe('2.7.0');
+    expect(c.declaration.version).toBe('3.0.0');
     expect(c.declaration.style).toBe('基準');
     expect(c.declaration.knobs.length).toBeGreaterThanOrEqual(3);
     expect(c.declaration.knobs.length).toBeLessThanOrEqual(6);

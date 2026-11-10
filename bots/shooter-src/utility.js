@@ -32,8 +32,14 @@ export class Utility {
     this.aimAt = null;
     /** 自己丟的閃光：指令生效前（from）繼續看投擲方向，之後背對到 until @type {{ x: number, y: number, tx: number, ty: number, from: number, until: number } | null} */
     this.away = null;
-    /** 本回合丟過的種類（每種每人一次） @type {Set<string>} */
+    /** 本回合丟過的種類 @type {Set<string>} */
     this.used = new Set();
+    /** 3.0：已送出、背包還沒扣掉的投擲（種類、送出 tick、送出時的持有數）；引擎丟出後才從背包移除，這段時間內不重丟 @type {{ kind: string, t: number, n: number }[]} */
+    this.pending = [];
+    /** 目前 tick（戰術層每次決策開頭設） */
+    this.now = 0;
+    /** 3.0：依持有數量扣減（資源層有計畫時才開；沒有計畫照 2.8 每種一次） */
+    this.countMode = false;
   }
 
   reset() {
@@ -43,11 +49,16 @@ export class Utility {
     this.aimAt = null;
     this.away = null;
     this.used = new Set();
+    this.pending = [];
   }
 
   /** 身上有這種道具、本回合還沒丟過 @param {import('./base.js').Observation['me']} me @param {import('./base.js').GrenadeId} kind */
   has(me, kind) {
-    return me.loadout.grenades.includes(kind) && !this.used.has(kind);
+    if (!this.countMode) return me.loadout.grenades.includes(kind) && !this.used.has(kind);
+    // 3.0：依持有數量扣減（兩顆閃都丟得出去）；送出後 reactionTicks＋2 個決策內當作還在路上
+    const win = this.rules.reactionTicks + 2 * this.rules.decisionInterval;
+    const n = me.loadout.grenades.filter((g) => g === kind).length;
+    return n - this.pending.filter((p) => p.kind === kind && p.n === n && this.now - p.t <= win).length > 0;
   }
 
   /** 第一個身上有的種類 @param {import('./base.js').Observation['me']} me @param {import('./base.js').GrenadeId[]} kinds */
@@ -167,6 +178,7 @@ export class Utility {
     out.cmds.push({ type: 'throw', grenade: wish.kind, deg: s.deg, power: s.power });
     this.lastThrow = t;
     this.used.add(wish.kind);
+    this.pending.push({ kind: wish.kind, t, n: me.loadout.grenades.filter((g) => g === wish.kind).length });
     out.thrown = { ...wish, x: Math.round(s.x), y: Math.round(s.y) };
     if (wish.kind === 'flash') {
       const pop = t + this.rules.reactionTicks + (this.fuse.get('flash') ?? 45);
