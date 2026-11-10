@@ -3048,7 +3048,6 @@ const codeOf = (k) => (k === 'flash' ? 'f' : k === 'smoke' ? 's' : k === 'he' ? 
 const kindOf = (c, team) => (c === 'f' ? 'flash' : c === 's' ? 'smoke' : c === 'h' ? 'he' : team === 'T' ? 'molotov' : 'incendiary');
 const PURPOSES = (['entryFlash', 'entrySmoke', 'holdSmoke', 'fireBackup', 'fakeUtil', 'chokeMolotov', 'retakeSmoke', 'retakeFlash']);
 const PCODE = 'aedbkcrq';
-const RESERVED = new Set(['fireBackup', 'retakeSmoke', 'retakeFlash']);
 function encodeItem(it) {
 const s = it.target.site ?? '-';
 const e = it.target.ent >= 0 ? String(it.target.ent) : it.target.ent === -1 ? 'S' : '-';
@@ -6592,7 +6591,7 @@ this.why = '';
 declare() {
 return {
 name: 'shooter-baseline',
-version: '2.7.0',
+version: '3.0.0',
 style: '基準',
 knobs: [
 { key: 'aggression', name: '侵略偏移', description: '加在屬性「侵略」上的偏移（−50～50）：影響探頭方式、撤退門檻、架槍時間', min: -50, max: 50, default: 0, integer: true },

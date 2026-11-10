@@ -39,7 +39,7 @@ describe('射擊基準 Bot：檔案與宣告', () => {
     expect(baseline.sizeBytes).toBeLessThanOrEqual(RULES.botModule.maxBytes);
     const c = new ShooterBatchController(baseline, 'baseline', 1, 0, MAPS.redrock());
     expect(c.declaration.name).toBe('shooter-baseline');
-    expect(c.declaration.version).toBe('2.7.0');
+    expect(c.declaration.version).toBe('3.0.0');
     expect(c.declaration.style).toBe('基準');
     expect(c.declaration.knobs.length).toBeGreaterThanOrEqual(3);
     expect(c.declaration.knobs.length).toBeLessThanOrEqual(6);

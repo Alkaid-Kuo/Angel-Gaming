@@ -26,8 +26,6 @@ export const kindOf = (c, team) => (c === 'f' ? 'flash' : c === 's' ? 'smoke' : 
 /** 用途 ↔ 字母 */
 const PURPOSES = /** @type {const} */ (['entryFlash', 'entrySmoke', 'holdSmoke', 'fireBackup', 'fakeUtil', 'chokeMolotov', 'retakeSmoke', 'retakeFlash']);
 const PCODE = 'aedbkcrq';
-/** 保留不出借（到期前其他用途拿不走） */
-export const RESERVED = new Set(['fireBackup', 'retakeSmoke', 'retakeFlash']);
 
 /** @param {UtilItem} it */
 export function encodeItem(it) {

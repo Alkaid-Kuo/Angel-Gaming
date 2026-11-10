@@ -530,8 +530,8 @@ export class Tactics {
   update(obs) {
     const me = obs.me;
     const t = obs.tick;
-    /** @type {TacOut} */
     this.flashOwner = false;
+    /** @type {TacOut} */
     const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
     this.util.now = t;
@@ -1295,7 +1295,6 @@ export class Tactics {
     this.boughtAt = obs.tick;
   }
 
-  /** 3.0：這回合計畫的需求表 @param {import('./base.js').Observation} obs */
   /**
    * 3.0（r7k）：這個隊員走不走這個目標入口（T 照計畫分組：主組 r1、第二組 r2；rush／go 全隊同一路）；CT、守點、沒指定入口都算符合
    * @param {import('./base.js').Observation} obs @returns {import('./resources.js').Fits}
@@ -1310,6 +1309,7 @@ export class Tactics {
     };
   }
 
+  /** 3.0：這回合計畫的需求表 @param {import('./base.js').Observation} obs */
   needs(obs) {
     const p = /** @type {Plan} */ (this.plan);
     const ent = (/** @type {SiteId} */ site, /** @type {number} */ route) => {
