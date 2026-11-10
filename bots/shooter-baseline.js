@@ -159,6 +159,41 @@ chaseRange: 15,
 chaseTime: 3,
 flashMateClear: 4,
 resLayer: true,
+choiceShadow: true,
+choiceTrace: false,
+U: {
+b: ({ h: 0.5, a: 0.5, p: 1.6, f: 0, t: 0, g: 0, r: -0.5, o: 1.5 }),
+stage: ({
+h: [0.5, 0.2, -0.2, -0.2, 0.4, 0, 0.3],
+a: [-1, 0.2, 0.4, 0.4, 0.2, 0.3, 0.3],
+t: [0, -1, 0.6, 0.6, -1, 0.6, -1],
+}),
+w: ({
+h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0, f16w: 0.5, fw: 0.5, fhp: 0.2 },
+a: { f4: -0.1, f5: -0.1, f9: -0.2, f10: -0.6, f10p: 0.5, f12: 0.1, f16: 0.1, f21y: -1, f21s: -1, fw: -1 },
+p: { f4: -0.2, f9: -0.2, f16: 0.1 },
+f: { f1: -0.3, f3: 0.3 },
+t: { f1: -0.2, f13: 0.2, f6t: 0.6 },
+g: { f18t: 1.6 },
+r: { f1: -0.2, f10: -0.2 },
+}),
+commit: 0.15,
+commitMin: 0.3,
+commitSec: 1.5,
+dwellSec: 0.6,
+margin: 0.1,
+holdGap: 4,
+holdZone: 3,
+evCool: 0.3,
+L: {
+b: ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2 }),
+w: ({ econf: 0.6, efresh: 0.4, sfresh: 0.3, shold: -0.6, ipeek: 1, iact: 0.8, whold: 0.4, wcov: -0.5, chold: 0.2, nmove: 0.3, nchoke: 0.1 }),
+minDeg: 25,
+dwellSec: 0.5,
+freshConf: 60,
+freshSec: 3,
+},
+},
 flashNeedInfo: true,
 flashEdgeTurn: true,
 smokeOff: 4.5,
@@ -3382,6 +3417,9 @@ this.usedTeam = '';
 this.tagSaid = false;
 this.tagPick = null;
 this.tagNow = null;
+this.waitTag = '';
+this.lastWish = null;
+this.utilLook = false;
 this.syncAt = -1;
 this.syncWait = 0;
 const reaction = clamp(data.attributes.reaction, 0, 100);
@@ -3665,6 +3703,8 @@ update(obs) {
 const me = obs.me;
 const t = obs.tick;
 this.flashOwner = false;
+this.waitTag = '';
+this.utilLook = false;
 const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
 if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
 this.util.now = t;
@@ -3714,6 +3754,7 @@ if (!this.coop.acted) wish = this.lineCheck(obs, out);
 const busy = new Set();
 for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
 if (out.commit || out.urgent || this.mateFlash.some((x) => t <= x.pop)) wish = null;
+this.lastWish = wish;
 const u = this.util.step(obs, wish, busy);
 if (P.flashClaim && wish !== null && wish.kind === 'flash' && u.look !== null && u.thrown === null && this.util.away === null) {
 const c = this.myClaim;
@@ -3735,6 +3776,7 @@ this.flashSpots.push({ x: u.thrown.x, y: u.thrown.y, tick: t, by: me.id, pop: th
 }
 if (u.thrown !== null && (u.thrown.kind === 'molotov' || u.thrown.kind === 'incendiary')) this.burns.push({ x: u.thrown.x, y: u.thrown.y, until: t + 8 * this.tps });
 out.cmds.push(...u.cmds);
+this.utilLook = u.look !== null;
 if (u.look !== null) {
 out.look = u.look;
 if (this.util.away !== null) out.urgent = true;
@@ -4573,6 +4615,7 @@ const setup = this.setupOf(obs, me.id, p);
 this.slow = obs.round.phase === 'live' && p.kind !== 'go' && this.spawnWait(obs, p, exec ?? setup.site);
 if (this.slow && this.spawnHeld <= P.spawnStop * this.tps) {
 out.stop = true;
+this.waitTag = 'spawn';
 out.role = '讓突破手先走';
 return null;
 }
@@ -4625,6 +4668,7 @@ if (lowP > 0 && d > 3 * UNIT && obs.enemies.length === 0 && (this.perc.lastSound
 const c = this.g.cellOf(me.x, me.y);
 if (c >= 0 && this.intel.cover[c] > 0 && rollOf(obs.round.number * 16 + me.id, Math.floor(t / (this.tps / 2))) % 1000 < lowP * P.qPause * 1000) {
 out.stop = true;
+this.waitTag = 'qpause';
 out.role = '跟上隊形';
 }
 }
@@ -4647,6 +4691,7 @@ return null;
 const lag = this.pLow() * P.qLag * this.tps;
 if (lag > 0 && p.kind !== 'go' && this.execTick >= 0 && t - this.execTick < lag && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
 out.stop = true;
+this.waitTag = 'qlag';
 out.role = '跟上';
 return null;
 }
@@ -4658,12 +4703,14 @@ this.syncWait = this.splitBehind(obs, p, exec) ? qgs * P.qSyncLag : 0;
 }
 if (t - this.execTick < this.syncWait * this.tps) {
 out.stop = true;
+this.waitTag = 'qsync';
 out.role = '慢了一步';
 return null;
 }
 }
 if (qgs > 0 && p.kind !== 'go' && t >= this.flashPop && t - this.flashPop < qgs * P.qFlashLate * this.tps && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
 out.stop = true;
+this.waitTag = 'qflash';
 out.role = '慢半拍';
 return null;
 }
@@ -4773,6 +4820,7 @@ out.role = `執行 ${exec}`;
 const flashed = t >= this.flashPop && t < this.flashPop + 2 * this.tps;
 if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && !this.flashOwner && this.yieldTo(obs, exec)) {
 out.stop = true;
+this.waitTag = 'yield';
 out.look = { x: site.cx, y: site.cy };
 out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
 const st = this.memberStage(obs, me.id, p);
@@ -4985,6 +5033,7 @@ awpSettle(obs, out, st) {
 const me = obs.me;
 if (this.roles.of(me.id) !== AWP || me.loadout.primary !== 'awp' || dist(me.x, me.y, st.x, st.y) >= 4 * UNIT) return;
 out.stop = true;
+this.waitTag = 'awp';
 out.hold = { ...st, x: me.x, y: me.y };
 }
 waitEntry(obs, s) {
@@ -6057,6 +6106,7 @@ if (q.awp && obs.teammates.some((m) => m.alive && dist(m.x, m.y, me.x, me.y) < 3
 if (this.smokes.some((s) => segDist(s.x, s.y, soon.x, soon.y, q.x, q.y).d < 3 * UNIT)) return null;
 this.lineHeld += this.data.rules.decisionInterval;
 out.stop = true;
+this.waitTag = 'line';
 out.look = { x: q.x, y: q.y };
 out.role += '・等槍線';
 const d = Math.max(dist(soon.x, soon.y, q.x, q.y), 1);
@@ -6575,6 +6625,450 @@ out.commit = this.critical;
 if (this.critical) { out.allowPeek = false; out.walk = false; out.stop = false; }
 }
 }
+const ACTS = (['h', 'a', 'p', 'f', 't', 'g', 'r', 'o']);
+const STAGES = (['freeze', 'setup', 'wait', 'execute', 'post', 'retake', 'save']);
+const CH_SITES = (['A', 'B']);
+const LOOKS = (['e', 's', 'i', 'w', 'c', 'n']);
+function exposed(c, a, g) {
+let n = 0;
+for (const q of c.threats) if (dist(q.x, q.y, a.x, a.y) < 40 * UNIT && g.los(q.x, q.y, a.x, a.y)) n++;
+return n;
+}
+function same(a, b) {
+if (b === null || a.type !== b.type) return false;
+if (a.type === 'g' || a.type === 't' || a.type === 'r') return a.ref === b.ref;
+if (a.ref === HERE || b.ref === HERE) return a.ref === b.ref;
+return dist(a.x, a.y, b.x, b.y) < UNIT;
+}
+const HERE = -9;
+const unit = (v) => Math.max(0, Math.min(1, v));
+class Choice {
+constructor(g, intel, perc, data) {
+this.g = g;
+this.intel = intel;
+this.perc = perc;
+this.data = data;
+this.tps = data.rules.ticksPerSecond;
+this.turn = data.rules.turnDegPerSec ?? 720;
+this.slot = data.slot;
+this.log = [];
+this.cur = null;
+this.prev = null;
+this.since = -1;
+this.lastTick = -1e9;
+this.seenAt = new Map();
+this.vis = new Set();
+this.missing = new Map();
+this.evAt = new Map();
+this.hp = 100;
+this.alive = new Set();
+this.bomb = '';
+this.fx = new Set();
+this.flying = new Set();
+this.kDone = '';
+this.goalField = null;
+this.goalCell = -1;
+this.features = this.table();
+this.commitF = (this.features.find((f) => f.key === 'f20'));
+this.trace = [];
+this.lk = null;
+this.lkSince = -1;
+this.lockId = -1;
+this.vface = 0;
+this.lkTick = -1;
+this.rface = 0;
+this.sndObj = null;
+this.sndSeen = -1;
+this.sndWait = 0;
+this.lstat = null;
+}
+reset() {
+this.cur = null;
+this.prev = null;
+this.since = -1;
+this.lastTick = -1e9;
+this.lk = null;
+this.lkSince = -1;
+this.lockId = -1;
+this.lkTick = -1;
+this.sndObj = null;
+this.lstat = null;
+}
+table() {
+const g = this.g;
+const perc = this.perc;
+const intel = this.intel;
+const cell = (a) => g.cellOf(a.x, a.y);
+return [
+{ key: 'f1', types: 'hfrt', min: 0, max: 1, fn: (_c, a) => { const i = cell(a); return i < 0 ? 0 : unit(perc.danger[i] / 60); } },
+{ key: 'f3', types: 'hft', min: 0, max: 1, fn: (c, a) => { if (c.threats.length === 0) { const i = cell(a); return i < 0 ? 0 : (intel.cover[i] !== 0 ? 1 : 0); } return 1 - exposed(c, a, g) / c.threats.length; } },
+{ key: 'f4', types: 'hpa', min: 0, max: 1, fn: (c, a) => { if (c.threats.length === 0) { const i = cell(a); return i < 0 ? 0 : unit(intel.exposure[i] / 8); } return unit(exposed(c, a, g) / 3); } },
+{ key: 'f5', types: 'art', min: 0, max: 1, fn: (c, a) => { let d = 1e9; for (const m of c.mates) d = Math.min(d, dist(m.x, m.y, a.x, a.y)); return unit(d / (20 * UNIT)); } },
+{ key: 'f7', types: '*', min: 0, max: 1, fn: (c) => unit(c.obs.round.phaseTicksLeft / this.data.rules.roundTicks) },
+{ key: 'f9', types: 'hpaf', min: 0, max: 1, fn: (c, a) => { let m = 0; for (const q of c.threats) if (dist(q.x, q.y, a.x, a.y) < 15 * UNIT) m = Math.max(m, q.conf); return unit(m / 100); } },
+{ key: 'f10', types: 'har', min: 0, max: 1, fn: (c, a) => this.goalDist(c, a) },
+{ key: 'f10p', types: 'a', min: 0, max: 1, fn: (c, a) => { const d = dist(c.obs.me.x, c.obs.me.y, a.x, a.y); return d < (c.cur !== null && c.cur.type === 'h' ? P.U.holdGap : P.U.holdZone) * UNIT ? 0 : unit(d / (5 * UNIT)); } },
+{ key: 'f12', types: 'harf', min: -1, max: 1, fn: (c) => Math.max(-1, Math.min(1, (c.mates.length + 1 - c.obs.enemiesAlive) / 4)) },
+{ key: 'f13', types: '*', min: 0, max: 1, fn: (c) => unit(c.obs.me.hp / 100) },
+{ key: 'f16', types: 'apt', min: 0, max: 1, fn: (c) => (c.in.role === ENTRY ? 1 : 0) },
+{ key: 'f6t', types: 't', min: 0, max: 1, fn: (c, a) => this.helper(c, a) },
+{ key: 'fhp', types: 'h', min: 0, max: 1, fn: (c, a) => (a.ref !== HERE && [c.in.hold, c.in.goal].some((p) => p !== null && dist(p.x, p.y, a.x, a.y) < UNIT) ? 1 : 0) },
+{ key: 'f16w', types: 'h', min: 0, max: 1, fn: (c) => c.in.order.awpF },
+{ key: 'f21y', types: 'a', min: 0, max: 1, fn: (c) => c.in.order.yieldF },
+{ key: 'f21s', types: 'a', min: 0, max: 1, fn: (c) => c.in.order.spawnF },
+{ key: 'fw', types: 'ha', min: 0, max: 1, fn: (c) => (c.in.planWait ? 1 : 0) },
+{ key: 'f18t', types: 'g', min: 0, max: 1, fn: (c, a) => (c.in.nades[a.ref]?.trig ? 1 : 0) },
+{ key: 'f19', types: 'ra', min: 0, max: 1, fn: (c) => this.blocked(c) },
+{ key: 'f20', types: '*', min: 0, max: 1, fn: (c, a) => (same(a, c.cur) ? Math.max(P.U.commitMin, 1 - c.held / (P.U.commitSec * this.tps)) : 0) },
+];
+}
+helper(c, a) {
+const me = c.obs.me;
+if (!this.g.los(me.x, me.y, a.x, a.y)) return 0;
+const d0 = dist(me.x, me.y, a.x, a.y);
+for (const m of c.mates) {
+if (m.id === a.ref || m.hasBomb || m.blind || m.planting || m.defusing) continue;
+const d = dist(m.x, m.y, a.x, a.y);
+if (d <= 9 * UNIT && (d < d0 || (d === d0 && m.id < me.id)) && this.g.los(m.x, m.y, a.x, a.y)) return 0;
+}
+return 1;
+}
+goalDist(c, a) {
+const goal = c.in.goal;
+if (goal === null) return 0;
+const gc = this.g.cellOf(goal.x, goal.y);
+if (gc < 0) return 0;
+if (gc !== this.goalCell || this.goalField === null) {
+this.goalCell = gc;
+this.goalField = dijkstra(this.g, [gc], 400);
+}
+const i = this.g.cellOf(a.x, a.y);
+const d = i < 0 ? Infinity : this.goalField[i];
+return Number.isFinite(d) ? unit(d / 400) : 1;
+}
+siteOf(p) {
+if (p === null) return -1;
+for (let s = 0; s < 2; s++) {
+const r = this.intel.sites[CH_SITES[s]].rect;
+const cx = p.x / UNIT;
+const cy = p.y / UNIT;
+if (cx >= r.x0 - 8 && cx < r.x1 + 8 && cy >= r.y0 - 8 && cy < r.y1 + 8) return s;
+}
+return -1;
+}
+blocked(c) {
+if (c.site < 0) return 0;
+const me = c.obs.me;
+const ents = this.intel.sites[CH_SITES[c.site]].entrances;
+let e = ents[0];
+for (const x of ents) if (dist(me.x, me.y, x.ox, x.oy) < dist(me.x, me.y, e.ox, e.oy)) e = x;
+if (e === undefined) return 0;
+return c.obs.effects.some((f) => segDist(f.x, f.y, e.ox, e.oy, e.ix, e.iy).d <= f.radius + UNIT) ? 1 : 0;
+}
+events(obs, si) {
+const me = obs.me;
+const near = ( x, y) => dist(me.x, me.y, x, y) < 20 * UNIT;
+const t = obs.tick;
+const vis = new Set(obs.enemies.map((e) => e.id));
+let appear = false;
+for (const id of vis) {
+const at = this.seenAt.get(id);
+if (at === undefined || t - at > this.tps) appear = true;
+this.seenAt.set(id, t);
+this.missing.delete(id);
+}
+let gone = false;
+for (const id of this.vis) if (!vis.has(id)) this.missing.set(id, 0);
+for (const [id, n] of this.missing) {
+if (n + 1 >= 2) {
+gone = true;
+this.missing.delete(id);
+} else this.missing.set(id, n + 1);
+}
+this.vis = vis;
+const evs = [];
+if (appear || gone) evs.push('e');
+if (me.hp < this.hp) evs.push('d');
+if (obs.sounds.some((s) => s.kind === 'shot' && s.range === 'near' && !s.friendly)) evs.push('s');
+if (obs.teammates.some((m) => !m.alive && this.alive.has(m.id) && (si.group(m.id) === si.group(me.id) || near(m.x, m.y)))) evs.push('m');
+if (obs.bomb.state !== this.bomb) evs.push('b');
+if (obs.chat.some((c) => /^(K:|E:|U:[prf])/.test(c.text))) evs.push('c');
+const cool = ( e) => e !== 'd' && e !== 'm' && t - (this.evAt.get(e) ?? -1e9) < P.U.evCool * this.tps;
+let ev = evs.find((e) => !cool(e)) ?? '';
+const fx = new Set(obs.effects.filter((f) => near(f.x, f.y)).map((f) => `${f.kind}${Math.round(f.x / UNIT)},${Math.round(f.y / UNIT)}`));
+const flying = new Set(obs.projectiles.filter((q) => q.kind === 'flash' && near(q.x, q.y)).map((q) => `${Math.round(q.x / UNIT)},${Math.round(q.y / UNIT)}`));
+if (ev === '' && !cool('n') && ([...fx].some((k) => !this.fx.has(k)) || [...this.fx].some((k) => !fx.has(k)) || (this.flying.size > 0 && flying.size < this.flying.size))) ev = 'n';
+const cur = this.cur;
+if (ev === '' && cur !== null && obs.round.phase === 'live') {
+const arrived = (cur.type === 'a' || cur.type === 'r' || cur.type === 'f' || cur.type === 't') && dist(me.x, me.y, cur.x, cur.y) < UNIT;
+const taken = cur.type === 'h' && obs.teammates.some((m) => m.alive && m.id !== me.id && dist(m.x, m.y, cur.x, cur.y) < UNIT && dist(me.x, me.y, cur.x, cur.y) > UNIT);
+const thrown = cur.type === 'g' && si.actual?.type !== 'g';
+const key = `${cur.type}${Math.round(cur.x / UNIT)},${Math.round(cur.y / UNIT)}`;
+if ((arrived || taken || thrown || (si.pathless && (cur.type === 'a' || cur.type === 'r'))) && key !== this.kDone && !cool('k')) {
+ev = 'k';
+this.kDone = key;
+}
+}
+if (ev !== '') this.evAt.set(ev, t);
+this.hp = me.hp;
+this.alive = new Set(obs.teammates.filter((m) => m.alive).map((m) => m.id));
+this.bomb = obs.bomb.state;
+this.fx = fx;
+this.flying = flying;
+return ev;
+}
+shadow(obs, si, li) {
+const ev = this.events(obs, si);
+this.look(obs, li, si.stage === 'freeze');
+if (si.stage === 'freeze') return;
+const k = Math.floor(obs.tick / this.data.rules.decisionInterval);
+const n = si.p < 0.25 ? 6 : 5;
+if (ev === '' && (k - this.slot) % n !== 0) return;
+if (obs.tick <= this.lastTick) return;
+this.lastTick = obs.tick;
+const me = obs.me;
+const mates = obs.teammates.filter((m) => m.alive && m.id !== me.id);
+const threats = this.perc.threats(me.x, me.y);
+const cands = [];
+const add = (type, x, y, ref = -1) => { if (cands.length < 16) cands.push({ type, k: cands.filter((q) => q.type === type).length, x, y, ref }); };
+add('h', me.x, me.y, HERE);
+const hold = si.hold;
+if (hold !== null && dist(me.x, me.y, hold.x, hold.y) < 3 * UNIT && dist(me.x, me.y, hold.x, hold.y) > UNIT) add('h', hold.x, hold.y);
+const zone = (this.cur !== null && this.cur.type === 'h' ? P.U.holdGap : P.U.holdZone) * UNIT;
+const gd = si.goal === null ? Infinity : dist(me.x, me.y, si.goal.x, si.goal.y);
+if (si.goal !== null && gd >= zone) add('a', si.goal.x, si.goal.y);
+else if (si.goal !== null && gd > UNIT && !cands.some((q) => q.type === 'h' && q.ref !== HERE && dist(q.x, q.y, si.goal?.x ?? 0, si.goal?.y ?? 0) < UNIT)) add('h', si.goal.x, si.goal.y);
+if (si.peek !== null) add('p', si.peek.x, si.peek.y);
+if (threats.length > 0 && !si.fight) {
+const cv = si.cover();
+if (cv !== null) add('f', cv.x, cv.y);
+}
+for (const q of si.cues) { const d = dist(q.x, q.y, me.x, me.y); if (d >= 1800 && d <= 9 * UNIT && !me.hasBomb) add('t', q.x, q.y, q.id); }
+si.nades.forEach((_q, i) => add('g', me.x, me.y, i));
+const site = this.siteOf(si.goal);
+const c = { obs, in: si, threats, mates, cur: this.cur, held: this.since < 0 ? 0 : obs.tick - this.since, site };
+if (si.stage !== 'retake') {
+for (let s = 0; s < 2; s++) {
+if (s === site || site < 0) continue;
+const ents = this.intel.sites[CH_SITES[s]].entrances;
+let e = ents[0];
+for (const x of ents) if (dist(me.x, me.y, x.ox, x.oy) < dist(me.x, me.y, e.ox, e.oy)) e = x;
+if (e !== undefined) add('r', e.ox, e.oy, s);
+}
+} else if (site >= 0 && this.blocked(c) === 1) {
+const ents = this.intel.sites[CH_SITES[site]].entrances;
+const sorted = [...ents].sort((p, q) => dist(me.x, me.y, p.ox, p.oy) - dist(me.x, me.y, q.ox, q.oy));
+const e = sorted[1];
+if (e !== undefined) add('r', e.ox, e.oy, 2 + ents.indexOf(e));
+}
+const bx = obs.bomb.x;
+const by = obs.bomb.y;
+if (me.hasBomb && si.inSite) add('o', me.x, me.y);
+else if (me.team === 'CT' && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null && dist(me.x, me.y, bx, by) < 2 * UNIT) add('o', bx, by);
+const cur = this.cur;
+if (cur !== null && !cands.some((q) => same(q, cur)) && cands.length < 16) {
+const d = dist(me.x, me.y, cur.x, cur.y);
+if ((cur.type === 'h' && cur.ref !== HERE && d < (P.U.holdZone + 1) * UNIT) || (cur.type === 'f' && threats.length > 0 && !si.fight)) cands.push({ ...cur, k: cands.filter((q) => q.type === cur.type).length });
+}
+const scored = cands.map((a) => ({ a, s: this.score(c, a) }));
+if (P.choiceTrace) this.trace = cands.map((a) => this.features.filter((f) => f.types === '*' || f.types.includes(a.type)).map((f) => ({ key: f.key, v: f.fn(c, a) })));
+scored.sort((p, q) => q.s - p.s || ACTS.indexOf(p.a.type) - ACTS.indexOf(q.a.type) || p.a.k - q.a.k);
+let pick = scored[0]?.a ?? null;
+const curS = this.cur === null ? undefined : scored.find((q) => same(q.a, this.cur));
+if (pick !== null && curS !== undefined && curS.a !== pick) {
+const top = scored[0].s;
+const back = same(pick, this.prev) && c.held <= 2 * this.tps;
+if ((ev === '' && c.held < P.U.dwellSec * this.tps) || top < curS.s + P.U.margin * (back ? 2 : 1)) pick = curS.a;
+}
+if (pick !== null && !same(pick, this.cur)) {
+this.prev = this.cur;
+this.since = obs.tick;
+}
+this.cur = pick;
+const code = ( a) => `${a.type}${a.k}`;
+const act = si.actual === null ? '-' : this.match(cands, si.actual);
+this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex, look: this.lstat?.active === true && this.lk !== null ? `${this.lk.t}${this.lk.ref}` : '-', ls: this.lk?.s ?? 0 });
+if (this.log.length > 64) this.log.shift();
+}
+look(obs, li, freeze) {
+const me = obs.me;
+const t = obs.tick;
+const L = P.U.L;
+const dt = this.lkTick < 0 ? 0 : t - this.lkTick;
+this.lkTick = t;
+const active = !freeze && li.active;
+const was = this.lstat;
+const wasActive = was !== null && was.active;
+const step = (this.turn / this.tps) * dt;
+if (active && wasActive && this.lk !== null) {
+const d = adiff(angleTo(me.x, me.y, this.lk.x, this.lk.y), this.vface);
+this.vface = normDeg(this.vface + Math.max(-step, Math.min(step, d)));
+} else this.vface = me.facing;
+const st = { tick: t, active, peek: null, thr: null, rate: null, hard: '', vf: this.vface };
+if (active) {
+const off = ( f, x, y) => Math.abs(adiff(f, angleTo(me.x, me.y, x, y)));
+if (li.peek !== null && li.peek.lock) st.peek = [off(me.facing, li.peek.x, li.peek.y), off(this.vface, li.peek.x, li.peek.y)];
+let r = 1e9;
+let v = 1e9;
+let fresh = false;
+for (const k of this.perc.known.values()) {
+if (k.conf < L.freshConf) continue;
+r = Math.min(r, off(me.facing, k.x, k.y));
+v = Math.min(v, off(this.vface, k.x, k.y));
+if (t - k.tick <= L.freshSec * this.tps) fresh = true;
+}
+if (r < 1e9) st.thr = [r, v, fresh];
+if (wasActive && dt > 0) st.rate = [(Math.abs(adiff(me.facing, this.rface)) * this.tps) / dt, (Math.abs(adiff(this.vface, was.vf)) * this.tps) / dt];
+}
+this.rface = me.facing;
+this.lstat = st;
+if (!active) {
+this.lk = null;
+this.lockId = -1;
+return;
+}
+const cands = this.lookCands(obs, li);
+let pick = null;
+if (li.peek !== null && li.peek.lock) {
+pick = cands.find((q) => q.t === 'i' && q.ref === 0) ?? null;
+st.hard = 'p';
+}
+if (pick === null) {
+pick = cands.find((q) => q.t === 'e' && q.ref === 9) ?? null;
+if (pick !== null) st.hard = 'd';
+}
+if (pick === null) {
+const held = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+if (held === undefined || held.conf < L.freshConf) this.lockId = -1;
+if (this.lockId < 0) {
+let best = null;
+for (const k of this.perc.known.values()) {
+if (k.conf < L.freshConf || t - k.tick > L.freshSec * this.tps) continue;
+if (best === null || k.conf > best.conf || (k.conf === best.conf && (dist(me.x, me.y, k.x, k.y) < dist(me.x, me.y, best.x, best.y) || (dist(me.x, me.y, k.x, k.y) === dist(me.x, me.y, best.x, best.y) && k.id < best.id)))) best = k;
+}
+if (best !== null) this.lockId = best.id;
+}
+const k = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+if (k !== undefined) {
+pick = cands.find((q) => q.t === 'e' && q.id === k.id) ?? { t: 'e', ref: 8, id: k.id, x: k.x, y: k.y, s: L.b.e + L.w.econf * (k.conf / 100) };
+st.hard = 'e';
+}
+}
+if (pick === null) {
+cands.sort((p, q) => q.s - p.s || LOOKS.indexOf(p.t) - LOOKS.indexOf(q.t) || p.ref - q.ref);
+pick = cands[0] ?? this.lk;
+const cur = this.lk;
+const keep = cur === null ? undefined : cands.find((q) => this.sameLook(q, cur));
+if (pick !== null && keep !== undefined && keep !== pick) {
+const turn = Math.abs(adiff(angleTo(me.x, me.y, pick.x, pick.y), angleTo(me.x, me.y, keep.x, keep.y)));
+if (turn < L.minDeg || t - this.lkSince < L.dwellSec * this.tps) pick = keep;
+}
+}
+if (pick !== null && (this.lk === null || !this.sameLook(pick, this.lk))) this.lkSince = t;
+this.lk = pick;
+}
+sameLook(a, b) {
+return a.t === b.t && (a.t === 'e' ? a.id === b.id : a.ref === b.ref);
+}
+lookCands(obs, li) {
+const me = obs.me;
+const t = obs.tick;
+const g = this.g;
+const L = P.U.L;
+const W = L.w;
+const out = [];
+const add = (type, ref, x, y, s, id = -1) => out.push({ t: type, ref, id, x, y, s: (L.b[type] ?? 0) + s });
+const hurt = this.perc.lastHurt;
+if (hurt !== null && t - hurt.tick < this.tps) add('e', 9, me.x + cosd(hurt.dir) * 8 * UNIT, me.y + sind(hurt.dir) * 8 * UNIT, W.econf + W.efresh);
+const ks = [...this.perc.known.values()].filter((k) => k.conf >= P.unconfirmed && dist(me.x, me.y, k.x, k.y) <= 25 * UNIT)
+.sort((a, b) => b.conf - a.conf || a.id - b.id).slice(0, 2);
+ks.forEach((k, i) => add('e', i, k.x, k.y, W.econf * (k.conf / 100) + W.efresh * unit(1 - (t - k.tick) / (L.freshSec * this.tps)), k.id));
+const snd = this.perc.lastSound;
+if (snd !== null && t - snd.tick < this.tps) {
+if (this.sndObj !== snd || snd.tick - this.sndSeen > this.tps) {
+this.sndObj = snd;
+this.sndWait = li.soundReact;
+} else if (this.sndWait > 0) this.sndWait--;
+this.sndSeen = snd.tick;
+}
+const secs = this.perc.sectors.filter((q) => t - q.tick < this.tps && (q !== this.sndObj || this.sndWait <= 0)).sort((a, b) => b.tick - a.tick).slice(0, 2);
+secs.forEach((q, i) => {
+const r = Math.max(4, Math.min(12, (q.r0 + q.r1) / 2));
+add('s', i, q.ox + cosd(q.dir) * r * UNIT, q.oy + sind(q.dir) * r * UNIT, W.sfresh * unit(1 - (t - q.tick) / this.tps) + W.shold * (li.holding ? 1 : 0));
+});
+if (li.peek !== null) add('i', 0, li.peek.x, li.peek.y, W.ipeek);
+if (li.act !== null) add('i', 2, li.act.x, li.act.y, W.iact);
+if (li.hold !== null) add('w', 0, li.hold.fx, li.hold.fy, W.whold * (li.holding ? 1 : 0) + W.wcov * (this.covered(obs, li.hold.fx, li.hold.fy) ? 1 : 0));
+const s0 = this.siteOf(li.hold ?? me);
+if (s0 >= 0) {
+const ents = this.intel.sites[CH_SITES[s0]].entrances;
+const open = ents.map((e, i) => ({ e, i, d: dist(me.x, me.y, e.x, e.y) }))
+.filter((q) => q.d <= 25 * UNIT && q.d > 2 * UNIT && g.los(me.x, me.y, q.e.x, q.e.y) && !this.covered(obs, q.e.x, q.e.y))
+.sort((a, b) => a.d - b.d || a.i - b.i).slice(0, 2);
+for (const q of open) add('c', q.i, q.e.x, q.e.y, W.chold * (li.holding ? 1 : 0));
+}
+if (!li.holding && li.ahead !== null) {
+const ah = li.ahead;
+const dir = angleTo(me.x, me.y, ah.x, ah.y);
+let best = null;
+let bestS = -Infinity;
+for (const p of this.intel.portals) {
+const d = dist(me.x, me.y, p.x, p.y);
+if (d < 2 * UNIT || d > 15 * UNIT) continue;
+const c = g.cellOf(p.x, p.y);
+if (!this.perc.reachable(c, t, 3) || this.perc.cleared(c, t)) continue;
+if (Math.abs(adiff(angleTo(me.x, me.y, p.x, p.y), dir)) > 100) continue;
+if (!g.los(me.x, me.y, p.x, p.y)) continue;
+const s = this.perc.portalThreat[p.id] * 2 - d / UNIT + (p.choke ? 3 : 0);
+if (s > bestS) {
+bestS = s;
+best = p;
+}
+}
+const mv = W.nmove * (li.moving ? 1 : 0);
+if (best !== null) add('n', 0, best.x, best.y, mv + W.nchoke * (best.choke ? 1 : 0));
+add('n', 1, ah.x, ah.y, mv);
+}
+return out;
+}
+covered(obs, x, y) {
+const me = obs.me;
+return obs.teammates.some((m) => m.alive && m.id !== me.id && dist(m.x, m.y, me.x, me.y) <= 8 * UNIT && Math.abs(adiff(m.facing, angleTo(m.x, m.y, x, y))) <= 45 && this.g.los(m.x, m.y, x, y));
+}
+match(cands, act) {
+let best = null;
+let bd = 3 * UNIT;
+for (const a of cands) {
+if (a.type !== act.type) continue;
+if (act.ref !== undefined && (a.type === 'g' || a.type === 'r' || a.type === 't')) {
+if (a.ref === act.ref) { best = a; break; }
+continue;
+}
+const d = dist(a.x, a.y, act.x, act.y);
+if (d <= bd) { bd = d; best = a; }
+}
+return best === null ? `?${act.type}` : `${best.type}${best.k}`;
+}
+score(c, a) {
+const W = P.U;
+const row = W.w[a.type];
+let s = (W.b[a.type] ?? 0) + (W.stage[a.type]?.[STAGES.indexOf(c.in.stage)] ?? 0);
+for (const f of this.features) {
+if (f.types !== '*' && !f.types.includes(a.type)) continue;
+const w = row?.[f.key] ?? 0;
+if (w !== 0) s += w * f.fn(c, a);
+}
+s += W.commit * this.commitF.fn(c, a);
+return s;
+}
+text() {
+const e = this.log[this.log.length - 1];
+if (e === undefined) return '';
+const n = ( v) => v.toFixed(2).replace(/^(-?)0\./, '$1.');
+return `${e.fight ? '!' : ''}${e.top.map(([k, v]) => `${k} ${n(v)}`).join('|')} → ${e.pick}${e.look === '-' ? '' : `｜L:${e.look} ${n(e.ls)}`}`;
+}
+}
+const SITE_IDS = (['A', 'B']);
 export default class ShooterBaseline {
 constructor() {
 this.data = (null);
@@ -6585,6 +7079,7 @@ this.perc = (null);
 this.nav = (null);
 this.combat = (null);
 this.tactics = (null);
+this.choice = (null);
 this.round = -1;
 this.why = '';
 }
@@ -6633,6 +7128,7 @@ this.tactics.combat = this.combat;
 this.tactics.nav = this.nav;
 this.tactics.judge = this.judge;
 this.tactics.mission = this.mission;
+this.choice = new Choice(this.g, this.intel, this.perc, data);
 }
 newRound(obs) {
 this.round = obs.round.number;
@@ -6642,6 +7138,7 @@ this.judge?.reset();
 this.mission?.reset();
 this.combat.reset();
 this.tactics.reset(obs);
+this.choice?.reset();
 }
 decide(obs) {
 const me = obs.me;
@@ -6707,8 +7204,83 @@ if (crouch !== me.crouching) out.push({ type: 'crouch', on: crouch });
 const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
 if (walk !== me.walking) out.push({ type: 'walk', on: walk });
 out.push(...late);
+if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null, { holding: holding && !moving, moving, ahead: next });
 const reason = this.mission?.reason ?? '';
 this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
 return out;
+}
+utilPending(obs) {
+const T = this.tactics;
+const p = T.plan;
+if (p === null || p.kind === 'hold' || !T.res.active) return false;
+const exec = p.exec ?? p.site;
+const alive = new Set([obs.me.id, ...obs.teammates.filter((m) => m.alive).map((m) => m.id)]);
+return T.res.items.some((it) => (it.purpose === 'entrySmoke' || it.purpose === 'entryFlash') && it.state === 'plan' && it.target.site === exec && alive.has(it.owner));
+}
+shadow(obs, tac, nav, engaged, evading, mv) {
+const me = obs.me;
+const T = this.tactics;
+const b = obs.bomb.state;
+const planted = b === 'planted' || b === 'defusing';
+const stage = obs.round.phase === 'freeze' ? 'freeze'
+: tac.task === 'save' || T.saving ? 'save'
+: planted ? (me.team === 'T' ? 'post' : 'retake')
+: me.team === 'T' && T.execTick >= 0 ? (this.utilPending(obs) ? 'wait' : 'execute') : 'setup';
+const hold = tac.hold === null ? null : { x: tac.hold.x, y: tac.hold.y };
+const peek = this.nav.peek === null ? null : this.nav.peek.hold;
+const reflex = evading || (tac.escape && tac.task !== 'save') || T.util.away !== null || T.mateFlash.some((x) => obs.tick <= x.pop + 2);
+const all = (['entryFlash', 'entrySmoke', 'holdSmoke', 'fireBackup', 'fakeUtil', 'chokeMolotov', 'retakeSmoke', 'retakeFlash', 'free']);
+const kinds = [...new Set(me.loadout.grenades)];
+const wish = T.lastWish;
+const nades = kinds.filter((k) => T.res.claim(me.id, k, [...all], me.loadout.grenades.filter((x) => x === k).length) !== null).map((k) => ({ kind: k, trig: wish !== null && wish.kind === k }));
+const cues = [...T.coop.cues].map(([id, q]) => ({ id, x: q.x, y: q.y, dead: q.dead }));
+let actual;
+const near = ( p) => dist(me.x, me.y, p.x, p.y);
+if (tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse')) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
+else if (wish !== null) actual = { type: 'g', x: me.x, y: me.y, ref: nades.findIndex((q) => q.kind === wish.kind) };
+else if (nav.peeking && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
+else if (T.coop.acted) {
+const gx = tac.goal?.x ?? me.x;
+const gy = tac.goal?.y ?? me.y;
+const cue = cues.reduce((b, q) => (b === null || dist(q.x, q.y, gx, gy) < dist(b.x, b.y, gx, gy) ? q : b), (null));
+actual = { type: 't', x: gx, y: gy, ref: cue?.id ?? -1 };
+}
+else if (hold !== null && near(hold) < 3 * UNIT) actual = near(hold) > UNIT ? { type: 'h', x: hold.x, y: hold.y } : { type: 'h', x: me.x, y: me.y };
+else if (tac.stop || tac.goal === null) actual = { type: 'h', x: me.x, y: me.y };
+else if (near(tac.goal) < P.U.holdZone * UNIT) actual = near(tac.goal) > UNIT ? { type: 'h', x: tac.goal.x, y: tac.goal.y } : { type: 'h', x: me.x, y: me.y };
+else actual = { type: 'a', x: tac.goal.x, y: tac.goal.y };
+const p = T.prof === null || T.tagNow === null ? 0.5 : T.pOf(T.tagNow);
+const inSite = SITE_IDS.some((k) => { const r = this.intel.sites[k].rect; const cx = me.x / UNIT, cy = me.y / UNIT; return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1; });
+const pathless = tac.goal !== null && this.nav.path.length === 0 && near(tac.goal) > UNIT;
+const planWait = T.waitTag === 'qpause' || T.waitTag === 'qlag' || T.waitTag === 'qsync' || T.waitTag === 'qflash';
+const plan = T.plan;
+const exec = me.team === 'T' && plan !== null && plan.kind !== 'hold' && T.execTick >= 0 ? (plan.exec ?? plan.site) : null;
+const c0 = this.g.cellOf(me.x, me.y);
+let yieldF = 0;
+if (exec !== null && plan !== null && plan.kind !== 'go' && c0 >= 0 && this.intel.distSite[exec][c0] <= P.yieldNear * 10 && T.waitEntry(obs, exec)) yieldF = 1;
+let spawnF = 0;
+const ent = obs.teammates.find((m) => m.alive && m.id === T.roles.who(ENTRY));
+const site0 = exec ?? (plan !== null && plan.kind !== 'hold' ? plan.site : null);
+if (me.team === 'T' && site0 !== null && plan !== null && plan.kind !== 'go' && ent !== undefined && c0 >= 0 && this.intel.distSpawn.T[c0] <= P.spawnLead * 10 && (T.groups?.get(ent.id) ?? 0) === (T.groups?.get(me.id) ?? 0)) {
+const ce = this.g.cellOf(ent.x, ent.y);
+const dS = this.intel.distSite[site0];
+if (ce >= 0 && dS[ce] >= dS[c0] - 10) spawnF = 1;
+}
+const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && hold !== null && near(hold) < 4 * UNIT ? 1 : 0;
+const pk = nav.peeking ? this.nav.peek : null;
+const own = tac.urgent || tac.hard || T.utilLook;
+const li = {
+active: obs.round.phase !== 'freeze' && obs.round.phase !== 'over' && obs.enemies.length === 0 && !engaged && !evading && !own && !tac.objective,
+peek: pk === null ? null : { x: pk.far.x, y: pk.far.y, lock: pk.phase === 'hold' || pk.phase === 'shoulder' },
+hold: tac.hold !== null && near(tac.hold) < 3 * UNIT ? { x: tac.hold.x, y: tac.hold.y, fx: tac.hold.fx, fy: tac.hold.fy } : null,
+holding: mv.holding, moving: mv.moving,
+act: tac.look !== null && !own ? { x: tac.look.x, y: tac.look.y } : null,
+ahead: mv.ahead, soundReact: this.combat.soundReact,
+};
+this.choice.shadow(obs, {
+stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nades, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
+cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
+group: (id) => T.groups?.get(id) ?? 0,
+}, li);
 }
 }

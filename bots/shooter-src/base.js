@@ -269,6 +269,57 @@ export const P = {
   flashMateClear: 4,
   /** 3.0 資源層（道具計畫、claim、重分配）；false＝2.8 的道具行為 */
   resLayer: true,
+
+  // ── 3.0 效用式個人層（丙-1，PR #44）：影子模式只算分與記錄，不改行為 ──
+  /** 影子模式開關：開著時每次決策照算候選與分數、記錄前三名與 r7l 實際動作（量測一致率用），不影響指令 */
+  choiceShadow: true,
+  /** 除錯：記下最近一次決策每個候選的特徵值（測試檢查範圍用） */
+  choiceTrace: false,
+  /**
+   * 效用權重表（丁-1 搜這張表）：b 依動作的偏置、stage 依動作 × 階段（freeze、setup、wait、execute、post、retake、save）的偏置、
+   * w 依動作 × 特徵鍵的權重；commit 承諾加分、commitMin 衰減後的保留比例、commitSec 衰減秒數、dwellSec 最短停留、margin 切換門檻
+   * （影子模式的手填初始值：照計畫的守與推進領先，2.8 等價）
+   */
+  U: {
+    b: /** @type {Record<string, number>} */ ({ h: 0.5, a: 0.5, p: 1.6, f: 0, t: 0, g: 0, r: -0.5, o: 1.5 }),
+    stage: /** @type {Record<string, number[]>} */ ({
+      h: [0.5, 0.2, -0.2, -0.2, 0.4, 0, 0.3],
+      a: [-1, 0.2, 0.4, 0.4, 0.2, 0.3, 0.3],
+      t: [0, -1, 0.6, 0.6, -1, 0.6, -1],
+    }),
+    w: /** @type {Record<string, Record<string, number>>} */ ({
+      h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0, f16w: 0.5, fw: 0.5, fhp: 0.2 },
+      a: { f4: -0.1, f5: -0.1, f9: -0.2, f10: -0.6, f10p: 0.5, f12: 0.1, f16: 0.1, f21y: -1, f21s: -1, fw: -1 },
+      p: { f4: -0.2, f9: -0.2, f16: 0.1 },
+      f: { f1: -0.3, f3: 0.3 },
+      t: { f1: -0.2, f13: 0.2, f6t: 0.6 },
+      g: { f18t: 1.6 },
+      r: { f1: -0.2, f10: -0.2 },
+    }),
+    commit: 0.15,
+    commitMin: 0.3,
+    commitSec: 1.5,
+    dwellSec: 0.6,
+    margin: 0.1,
+    /** 遲滯：已經在守，目標要在幾格以上才產生推進候選（大於 holdZone，兩者之差就是遲滯寬度） */
+    holdGap: 4,
+    /** 守的範圍（格）：沒在守時，目標在這以內不產生推進候選（守的候選與對照組 r7l 的「守」都用這個範圍） */
+    holdZone: 3,
+    /** 同類事件冷卻（秒；d 受傷、m 隊友陣亡不冷卻） */
+    evCool: 0.3,
+    /**
+     * 視線頭（第四節第二組效用；設計第 4 步）：b 依視線種類的偏置（e 記得的敵位、s 聲音、i 入口／窄口、w 守點看向、c 隊友沒看的角、n 行進方向），
+     * w 依特徵鍵的權重；minDeg 換方向至少差幾度、dwellSec 最短停留、freshConf／freshSec 記得的敵位硬優先的信心與秒數
+     */
+    L: {
+      b: /** @type {Record<string, number>} */ ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2 }),
+      w: /** @type {Record<string, number>} */ ({ econf: 0.6, efresh: 0.4, sfresh: 0.3, shold: -0.6, ipeek: 1, iact: 0.8, whold: 0.4, wcov: -0.5, chold: 0.2, nmove: 0.3, nchoke: 0.1 }),
+      minDeg: 25,
+      dwellSec: 0.5,
+      freshConf: 60,
+      freshSec: 3,
+    },
+  },
   /** 3.0：計畫的進點閃要有情報（記得的敵人或 5 秒內接觸）才丟 */
   flashNeedInfo: true,
   /** 3.0（r7i）：隊友的閃光、自己在半徑外緣停步等炸開時，沒看到敵人就也轉開（停步要等反應延遲，會滑進半徑） */

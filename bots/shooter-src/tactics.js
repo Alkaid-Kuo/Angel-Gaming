@@ -153,6 +153,13 @@ export class Tactics {
     this.tagPick = null;
     /** 2.8：本回合打的戰術代號（自己喊的或聽到的 K:；執行品質用它的熟練度） @type {string | null} */
     this.tagNow = null;
+    /** 3.0：這一步停下來的原因碼（不影響行為）：spawn 出生區讓位、yield 等突破手、awp 狙擊到位、line 架槍線、q* 執行品質（熟練度）。
+     * 效用層只讀 q*（指揮層的合法等待，經 PlanIntent）；spawn、yield、awp、line 只給量測工具分類不一致原因，不當特徵 */
+    this.waitTag = '';
+    /** 3.0：這一步實際要丟的道具（影子模式讀；不影響行為） @type {import('./utility.js').ThrowWish | null} */
+    this.lastWish = null;
+    /** 3.0 視線頭影子模式讀：這一步的看向是丟道具的瞄準 */
+    this.utilLook = false;
     /** 2.8：split 執行時離入口近的那組要晚出發幾秒（syncAt＝算的時候的 execTick） */
     this.syncAt = -1;
     this.syncWait = 0;
@@ -531,6 +538,8 @@ export class Tactics {
     const me = obs.me;
     const t = obs.tick;
     this.flashOwner = false;
+    this.waitTag = '';
+    this.utilLook = false;
     /** @type {TacOut} */
     const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
@@ -585,6 +594,8 @@ export class Tactics {
     for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
     // 正在躲隊友的閃光、或隊友的閃光還沒爆：不轉頭去丟自己的道具
     if (out.commit || out.urgent || this.mateFlash.some((x) => t <= x.pop)) wish = null;
+    // 3.0 效用層影子模式讀：這一步實際要丟的道具（資源層／指揮層的觸發條件成立）
+    this.lastWish = wish;
     const u = this.util.step(obs, wish, busy);
     // 宣告再丟（2.6）：開始轉向瞄準閃光就先喊，丟出要再等一次以上的決策；隊友聽到就把爆點當成已認領
     if (P.flashClaim && wish !== null && wish.kind === 'flash' && u.look !== null && u.thrown === null && this.util.away === null) {
@@ -608,6 +619,8 @@ export class Tactics {
     }
     if (u.thrown !== null && (u.thrown.kind === 'molotov' || u.thrown.kind === 'incendiary')) this.burns.push({ x: u.thrown.x, y: u.thrown.y, until: t + 8 * this.tps });
     out.cmds.push(...u.cmds);
+    // 3.0 視線頭影子模式讀：這一步的看向是丟道具的瞄準（不歸視線頭管）
+    this.utilLook = u.look !== null;
     if (u.look !== null) {
       out.look = u.look;
       if (this.util.away !== null) out.urgent = true;
@@ -1680,6 +1693,7 @@ export class Tactics {
     this.slow = obs.round.phase === 'live' && p.kind !== 'go' && this.spawnWait(obs, p, exec ?? setup.site);
     if (this.slow && this.spawnHeld <= P.spawnStop * this.tps) {
       out.stop = true;
+      this.waitTag = 'spawn';
       out.role = '讓突破手先走';
       return null;
     }
@@ -1735,6 +1749,7 @@ export class Tactics {
         const c = this.g.cellOf(me.x, me.y);
         if (c >= 0 && this.intel.cover[c] > 0 && rollOf(obs.round.number * 16 + me.id, Math.floor(t / (this.tps / 2))) % 1000 < lowP * P.qPause * 1000) {
           out.stop = true;
+          this.waitTag = 'qpause';
           out.role = '跟上隊形';
         }
       }
@@ -1759,6 +1774,7 @@ export class Tactics {
     const lag = this.pLow() * P.qLag * this.tps;
     if (lag > 0 && p.kind !== 'go' && this.execTick >= 0 && t - this.execTick < lag && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
       out.stop = true;
+      this.waitTag = 'qlag';
       out.role = '跟上';
       return null;
     }
@@ -1771,6 +1787,7 @@ export class Tactics {
       }
       if (t - this.execTick < this.syncWait * this.tps) {
         out.stop = true;
+        this.waitTag = 'qsync';
         out.role = '慢了一步';
         return null;
       }
@@ -1778,6 +1795,7 @@ export class Tactics {
     // 2.8（P.qFlashLate）：隊伍執行熟練度低，隊友的閃光炸開後慢半拍才跟進（(0.5−q) × qFlashLate 秒）；q ≥ 0.5 同 2.7
     if (qgs > 0 && p.kind !== 'go' && t >= this.flashPop && t - this.flashPop < qgs * P.qFlashLate * this.tps && obs.enemies.length === 0 && !this.inRectSite(me.x, me.y, exec)) {
       out.stop = true;
+      this.waitTag = 'qflash';
       out.role = '慢半拍';
       return null;
     }
@@ -1920,6 +1938,7 @@ export class Tactics {
     // 狙擊手不跟著衝（2.6.1：閃光一炸開就先進點，R2 的反例）
     if (p.kind !== 'go' && (!flashed || this.roles.of(me.id) === AWP) && !this.flashOwner && this.yieldTo(obs, exec)) {
       out.stop = true;
+      this.waitTag = 'yield';
       out.look = { x: site.cx, y: site.cy };
       out.role = this.roles.of(me.id) === AWP ? '等隊友先進' : '等突破手先進';
       const st = this.memberStage(obs, me.id, p);
@@ -2207,6 +2226,7 @@ export class Tactics {
     const me = obs.me;
     if (this.roles.of(me.id) !== AWP || me.loadout.primary !== 'awp' || dist(me.x, me.y, st.x, st.y) >= 4 * UNIT) return;
     out.stop = true;
+    this.waitTag = 'awp';
     out.hold = { ...st, x: me.x, y: me.y };
   }
 
@@ -3578,6 +3598,7 @@ export class Tactics {
     if (this.smokes.some((s) => segDist(s.x, s.y, soon.x, soon.y, q.x, q.y).d < 3 * UNIT)) return null;
     this.lineHeld += this.data.rules.decisionInterval;
     out.stop = true;
+    this.waitTag = 'line';
     out.look = { x: q.x, y: q.y };
     out.role += '・等槍線';
     const d = Math.max(dist(soon.x, soon.y, q.x, q.y), 1);

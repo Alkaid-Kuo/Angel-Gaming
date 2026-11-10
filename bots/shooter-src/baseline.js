@@ -11,15 +11,19 @@
 // aggression 探頭等待與方式、架槍時間、T 計畫（rush 比例、default 執行時機）、殘局找人、保槍（撤退門檻步驟 7 起固定）；
 // discipline 隊友擋線的安全距離、守位中不追出射程外的目標、經濟服從（eco 不偷買）、不追殘血、殘局保槍；
 // movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步、佈置時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、T 計畫、角色）。
-import { Grid, P, clamp, dist, initTrig } from './base.js';
+import { Grid, P, UNIT, clamp, dist, initTrig } from './base.js';
 import { MapIntel } from './analysis.js';
 import { Perception } from './memory.js';
 import { Navigator } from './nav.js';
 import { Combat } from './combat.js';
 import { Tactics } from './tactics.js';
-import { AWP, ROLE_NAME, autoRole } from './roles.js';
+import { AWP, ENTRY, ROLE_NAME, autoRole } from './roles.js';
 import { Judgment } from './judgment.js';
 import { Mission } from './mission.js';
+import { Choice } from './choice.js';
+
+/** 包點代號 */
+const SITE_IDS = /** @type {const} */ (['A', 'B']);
 
 export default class ShooterBaseline {
   constructor() {
@@ -39,6 +43,8 @@ export default class ShooterBaseline {
     this.combat = /** @type {any} */ (null);
     /** @type {Tactics} */
     this.tactics = /** @type {any} */ (null);
+    /** @type {Choice} */
+    this.choice = /** @type {any} */ (null);
     this.round = -1;
     /** 除錯用：最近一次決策的說明 */
     this.why = '';
@@ -96,6 +102,8 @@ export default class ShooterBaseline {
     this.tactics.nav = this.nav;
     this.tactics.judge = this.judge;
     this.tactics.mission = this.mission;
+    /** 3.0 效用層（影子模式：只算分與記錄） */
+    this.choice = new Choice(this.g, this.intel, this.perc, data);
   }
 
   /** @param {import('./base.js').Observation} obs */
@@ -107,6 +115,7 @@ export default class ShooterBaseline {
     this.mission?.reset();
     this.combat.reset();
     this.tactics.reset(obs);
+    this.choice?.reset();
   }
 
   /**
@@ -184,8 +193,104 @@ export default class ShooterBaseline {
     const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
     if (walk !== me.walking) out.push({ type: 'walk', on: walk });
     out.push(...late);
+    if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null, { holding: holding && !moving, moving, ahead: next });
     const reason = this.mission?.reason ?? '';
     this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
     return out;
+  }
+
+  /**
+   * 3.0：stage 'wait'＝已經執行、計畫裡進點的煙或閃（目標是這次執行的包點）還沒丟（資源層的狀態，不看 r7l 停不停）
+   * @param {import('./base.js').Observation} obs
+   */
+  utilPending(obs) {
+    const T = this.tactics;
+    const p = T.plan;
+    if (p === null || p.kind === 'hold' || !T.res.active) return false;
+    const exec = p.exec ?? p.site;
+    const alive = new Set([obs.me.id, ...obs.teammates.filter((m) => m.alive).map((m) => m.id)]);
+    return T.res.items.some((it) => (it.purpose === 'entrySmoke' || it.purpose === 'entryFlash') && it.state === 'plan' && it.target.site === exec && alive.has(it.owner));
+  }
+
+  /**
+   * 3.0 影子模式：把 r7l 這一步的情境與實際動作交給效用層記錄（不影響指令）
+   * @param {import('./base.js').Observation} obs @param {import('./tactics.js').TacOut} tac @param {import('./nav.js').NavOut} nav
+   * @param {boolean} engaged @param {boolean} evading
+   * @param {{ holding: boolean, moving: boolean, ahead: import('./base.js').Pt | null }} mv 視線頭用：r7l 這一步的守位、移動與行進方向
+   */
+  shadow(obs, tac, nav, engaged, evading, mv) {
+    const me = obs.me;
+    const T = this.tactics;
+    const b = obs.bomb.state;
+    const planted = b === 'planted' || b === 'defusing';
+    /** @type {import('./choice.js').Stage} */
+    const stage = obs.round.phase === 'freeze' ? 'freeze'
+      : tac.task === 'save' || T.saving ? 'save'
+        : planted ? (me.team === 'T' ? 'post' : 'retake')
+          : me.team === 'T' && T.execTick >= 0 ? (this.utilPending(obs) ? 'wait' : 'execute') : 'setup';
+    const hold = tac.hold === null ? null : { x: tac.hold.x, y: tac.hold.y };
+    const peek = this.nav.peek === null ? null : this.nav.peek.hold;
+    // 硬反射（不算分母）：火區與手雷自保、避火、閃光躲避與等閃（設計第二節第 2、3 項）
+    const reflex = evading || (tac.escape && tac.task !== 'save') || T.util.away !== null || T.mateFlash.some((x) => obs.tick <= x.pop + 2);
+    // 丟道具候選：身上每種道具，資源層 claim 拿得到的（claim 只查詢不改狀態）；觸發＝r7l 這一步要丟這種
+    const all = /** @type {const} */ (['entryFlash', 'entrySmoke', 'holdSmoke', 'fireBackup', 'fakeUtil', 'chokeMolotov', 'retakeSmoke', 'retakeFlash', 'free']);
+    const kinds = [...new Set(me.loadout.grenades)];
+    const wish = T.lastWish;
+    const nades = kinds.filter((k) => T.res.claim(me.id, k, [...all], me.loadout.grenades.filter((x) => x === k).length) !== null).map((k) => ({ kind: k, trig: wish !== null && wish.kind === k }));
+    const cues = [...T.coop.cues].map(([id, q]) => ({ id, x: q.x, y: q.y, dead: q.dead }));
+    /** @type {{ type: import('./choice.js').Act, x: number, y: number, ref?: number } | null} */
+    let actual;
+    const near = (/** @type {import('./base.js').Pt} */ p) => dist(me.x, me.y, p.x, p.y);
+    if (tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse')) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
+    else if (wish !== null) actual = { type: 'g', x: me.x, y: me.y, ref: nades.findIndex((q) => q.kind === wish.kind) };
+    else if (nav.peeking && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
+    else if (T.coop.acted) {
+      // 跟進的是哪個隊友：離 r7l 選的站位最近的線索
+      const gx = tac.goal?.x ?? me.x;
+      const gy = tac.goal?.y ?? me.y;
+      const cue = cues.reduce((b, q) => (b === null || dist(q.x, q.y, gx, gy) < dist(b.x, b.y, gx, gy) ? q : b), /** @type {typeof cues[number] | null} */ (null));
+      actual = { type: 't', x: gx, y: gy, ref: cue?.id ?? -1 };
+    }
+    else if (hold !== null && near(hold) < 3 * UNIT) actual = near(hold) > UNIT ? { type: 'h', x: hold.x, y: hold.y } : { type: 'h', x: me.x, y: me.y };
+    else if (tac.stop || tac.goal === null) actual = { type: 'h', x: me.x, y: me.y };
+    else if (near(tac.goal) < P.U.holdZone * UNIT) actual = near(tac.goal) > UNIT ? { type: 'h', x: tac.goal.x, y: tac.goal.y } : { type: 'h', x: me.x, y: me.y };
+    else actual = { type: 'a', x: tac.goal.x, y: tac.goal.y };
+    const p = T.prof === null || T.tagNow === null ? 0.5 : T.pOf(T.tagNow);
+    const inSite = SITE_IDS.some((k) => { const r = this.intel.sites[k].rect; const cx = me.x / UNIT, cy = me.y / UNIT; return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1; });
+    const pathless = tac.goal !== null && this.nav.path.length === 0 && near(tac.goal) > UNIT;
+    // PlanIntent 的合法等待（指揮層）：2.8 執行品質（熟練度低的慢半拍、跟上、慢了一步、跟上隊形）
+    const planWait = T.waitTag === 'qpause' || T.waitTag === 'qlag' || T.waitTag === 'qsync' || T.waitTag === 'qflash';
+    // f21 進點順序（取代 yieldTo、spawnWait 的條件；只讀，不碰 tactics 的計時器與快取）
+    const plan = T.plan;
+    const exec = me.team === 'T' && plan !== null && plan.kind !== 'hold' && T.execTick >= 0 ? (plan.exec ?? plan.site) : null;
+    const c0 = this.g.cellOf(me.x, me.y);
+    let yieldF = 0;
+    if (exec !== null && plan !== null && plan.kind !== 'go' && c0 >= 0 && this.intel.distSite[exec][c0] <= P.yieldNear * 10 && T.waitEntry(obs, exec)) yieldF = 1;
+    let spawnF = 0;
+    const ent = obs.teammates.find((m) => m.alive && m.id === T.roles.who(ENTRY));
+    const site0 = exec ?? (plan !== null && plan.kind !== 'hold' ? plan.site : null);
+    if (me.team === 'T' && site0 !== null && plan !== null && plan.kind !== 'go' && ent !== undefined && c0 >= 0 && this.intel.distSpawn.T[c0] <= P.spawnLead * 10 && (T.groups?.get(ent.id) ?? 0) === (T.groups?.get(me.id) ?? 0)) {
+      const ce = this.g.cellOf(ent.x, ent.y);
+      const dS = this.intel.distSite[site0];
+      if (ce >= 0 && dS[ce] >= dS[c0] - 10) spawnF = 1;
+    }
+    const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && hold !== null && near(hold) < 4 * UNIT ? 1 : 0;
+    // 視線頭（第 4 步）：不接管的看向＝躲閃光與守包撤離（urgent／hard）、丟道具的瞄準、下拆包、交戰中與自保
+    const pk = nav.peeking ? this.nav.peek : null;
+    const own = tac.urgent || tac.hard || T.utilLook;
+    /** @type {import('./choice.js').LookIn} */
+    const li = {
+      active: obs.round.phase !== 'freeze' && obs.round.phase !== 'over' && obs.enemies.length === 0 && !engaged && !evading && !own && !tac.objective,
+      peek: pk === null ? null : { x: pk.far.x, y: pk.far.y, lock: pk.phase === 'hold' || pk.phase === 'shoulder' },
+      hold: tac.hold !== null && near(tac.hold) < 3 * UNIT ? { x: tac.hold.x, y: tac.hold.y, fx: tac.hold.fx, fy: tac.hold.fy } : null,
+      holding: mv.holding, moving: mv.moving,
+      act: tac.look !== null && !own ? { x: tac.look.x, y: tac.look.y } : null,
+      ahead: mv.ahead, soundReact: this.combat.soundReact,
+    };
+    this.choice.shadow(obs, {
+      stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nades, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
+      cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
+      group: (id) => T.groups?.get(id) ?? 0,
+    }, li);
   }
 }
