@@ -307,6 +307,18 @@ export const P = {
     holdZone: 3,
     /** 同類事件冷卻（秒；d 受傷、m 隊友陣亡不冷卻） */
     evCool: 0.3,
+    /**
+     * 視線頭（第四節第二組效用；設計第 4 步）：b 依視線種類的偏置（e 記得的敵位、s 聲音、i 入口／窄口、w 守點看向、c 隊友沒看的角、n 行進方向），
+     * w 依特徵鍵的權重；minDeg 換方向至少差幾度、dwellSec 最短停留、freshConf／freshSec 記得的敵位硬優先的信心與秒數
+     */
+    L: {
+      b: /** @type {Record<string, number>} */ ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2 }),
+      w: /** @type {Record<string, number>} */ ({ econf: 0.6, efresh: 0.4, sfresh: 0.3, shold: -0.6, ipeek: 1, iact: 0.8, whold: 0.4, wcov: -0.5, chold: 0.2, nmove: 0.3, nchoke: 0.1 }),
+      minDeg: 25,
+      dwellSec: 0.5,
+      freshConf: 60,
+      freshSec: 3,
+    },
   },
   /** 3.0：計畫的進點閃要有情報（記得的敵人或 5 秒內接觸）才丟 */
   flashNeedInfo: true,

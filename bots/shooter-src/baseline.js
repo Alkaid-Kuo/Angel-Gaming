@@ -193,7 +193,7 @@ export default class ShooterBaseline {
     const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
     if (walk !== me.walking) out.push({ type: 'walk', on: walk });
     out.push(...late);
-    if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null);
+    if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null, { holding: holding && !moving, moving, ahead: next });
     const reason = this.mission?.reason ?? '';
     this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
     return out;
@@ -216,8 +216,9 @@ export default class ShooterBaseline {
    * 3.0 影子模式：把 r7l 這一步的情境與實際動作交給效用層記錄（不影響指令）
    * @param {import('./base.js').Observation} obs @param {import('./tactics.js').TacOut} tac @param {import('./nav.js').NavOut} nav
    * @param {boolean} engaged @param {boolean} evading
+   * @param {{ holding: boolean, moving: boolean, ahead: import('./base.js').Pt | null }} mv 視線頭用：r7l 這一步的守位、移動與行進方向
    */
-  shadow(obs, tac, nav, engaged, evading) {
+  shadow(obs, tac, nav, engaged, evading, mv) {
     const me = obs.me;
     const T = this.tactics;
     const b = obs.bomb.state;
@@ -274,10 +275,22 @@ export default class ShooterBaseline {
       if (ce >= 0 && dS[ce] >= dS[c0] - 10) spawnF = 1;
     }
     const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && hold !== null && near(hold) < 4 * UNIT ? 1 : 0;
+    // 視線頭（第 4 步）：不接管的看向＝躲閃光與守包撤離（urgent／hard）、丟道具的瞄準、下拆包、交戰中與自保
+    const pk = nav.peeking ? this.nav.peek : null;
+    const own = tac.urgent || tac.hard || T.utilLook;
+    /** @type {import('./choice.js').LookIn} */
+    const li = {
+      active: obs.round.phase !== 'freeze' && obs.round.phase !== 'over' && obs.enemies.length === 0 && !engaged && !evading && !own && !tac.objective,
+      peek: pk === null ? null : { x: pk.far.x, y: pk.far.y, lock: pk.phase === 'hold' || pk.phase === 'shoulder' },
+      hold: tac.hold !== null && near(tac.hold) < 3 * UNIT ? { x: tac.hold.x, y: tac.hold.y, fx: tac.hold.fx, fy: tac.hold.fy } : null,
+      holding: mv.holding, moving: mv.moving,
+      act: tac.look !== null && !own ? { x: tac.look.x, y: tac.look.y } : null,
+      ahead: mv.ahead, soundReact: this.combat.soundReact,
+    };
     this.choice.shadow(obs, {
       stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nades, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
       cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
       group: (id) => T.groups?.get(id) ?? 0,
-    });
+    }, li);
   }
 }

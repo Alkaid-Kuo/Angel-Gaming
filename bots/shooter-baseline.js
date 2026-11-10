@@ -185,6 +185,14 @@ margin: 0.1,
 holdGap: 4,
 holdZone: 3,
 evCool: 0.3,
+L: {
+b: ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2 }),
+w: ({ econf: 0.6, efresh: 0.4, sfresh: 0.3, shold: -0.6, ipeek: 1, iact: 0.8, whold: 0.4, wcov: -0.5, chold: 0.2, nmove: 0.3, nchoke: 0.1 }),
+minDeg: 25,
+dwellSec: 0.5,
+freshConf: 60,
+freshSec: 3,
+},
 },
 flashNeedInfo: true,
 flashEdgeTurn: true,
@@ -3411,6 +3419,7 @@ this.tagPick = null;
 this.tagNow = null;
 this.waitTag = '';
 this.lastWish = null;
+this.utilLook = false;
 this.syncAt = -1;
 this.syncWait = 0;
 const reaction = clamp(data.attributes.reaction, 0, 100);
@@ -3695,6 +3704,7 @@ const me = obs.me;
 const t = obs.tick;
 this.flashOwner = false;
 this.waitTag = '';
+this.utilLook = false;
 const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
 if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
 this.util.now = t;
@@ -3766,6 +3776,7 @@ this.flashSpots.push({ x: u.thrown.x, y: u.thrown.y, tick: t, by: me.id, pop: th
 }
 if (u.thrown !== null && (u.thrown.kind === 'molotov' || u.thrown.kind === 'incendiary')) this.burns.push({ x: u.thrown.x, y: u.thrown.y, until: t + 8 * this.tps });
 out.cmds.push(...u.cmds);
+this.utilLook = u.look !== null;
 if (u.look !== null) {
 out.look = u.look;
 if (this.util.away !== null) out.urgent = true;
@@ -6617,6 +6628,7 @@ if (this.critical) { out.allowPeek = false; out.walk = false; out.stop = false; 
 const ACTS = (['h', 'a', 'p', 'f', 't', 'g', 'r', 'o']);
 const STAGES = (['freeze', 'setup', 'wait', 'execute', 'post', 'retake', 'save']);
 const CH_SITES = (['A', 'B']);
+const LOOKS = (['e', 's', 'i', 'w', 'c', 'n']);
 function exposed(c, a, g) {
 let n = 0;
 for (const q of c.threats) if (dist(q.x, q.y, a.x, a.y) < 40 * UNIT && g.los(q.x, q.y, a.x, a.y)) n++;
@@ -6637,6 +6649,7 @@ this.intel = intel;
 this.perc = perc;
 this.data = data;
 this.tps = data.rules.ticksPerSecond;
+this.turn = data.rules.turnDegPerSec ?? 720;
 this.slot = data.slot;
 this.log = [];
 this.cur = null;
@@ -6658,12 +6671,28 @@ this.goalCell = -1;
 this.features = this.table();
 this.commitF = (this.features.find((f) => f.key === 'f20'));
 this.trace = [];
+this.lk = null;
+this.lkSince = -1;
+this.lockId = -1;
+this.vface = 0;
+this.lkTick = -1;
+this.rface = 0;
+this.sndObj = null;
+this.sndSeen = -1;
+this.sndWait = 0;
+this.lstat = null;
 }
 reset() {
 this.cur = null;
 this.prev = null;
 this.since = -1;
 this.lastTick = -1e9;
+this.lk = null;
+this.lkSince = -1;
+this.lockId = -1;
+this.lkTick = -1;
+this.sndObj = null;
+this.lstat = null;
 }
 table() {
 const g = this.g;
@@ -6788,8 +6817,9 @@ this.fx = fx;
 this.flying = flying;
 return ev;
 }
-shadow(obs, si) {
+shadow(obs, si, li) {
 const ev = this.events(obs, si);
+this.look(obs, li, si.stage === 'freeze');
 if (si.stage === 'freeze') return;
 const k = Math.floor(obs.tick / this.data.rules.decisionInterval);
 const n = si.p < 0.25 ? 6 : 5;
@@ -6857,8 +6887,153 @@ this.since = obs.tick;
 this.cur = pick;
 const code = ( a) => `${a.type}${a.k}`;
 const act = si.actual === null ? '-' : this.match(cands, si.actual);
-this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex });
+this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex, look: this.lstat?.active === true && this.lk !== null ? `${this.lk.t}${this.lk.ref}` : '-', ls: this.lk?.s ?? 0 });
 if (this.log.length > 64) this.log.shift();
+}
+look(obs, li, freeze) {
+const me = obs.me;
+const t = obs.tick;
+const L = P.U.L;
+const dt = this.lkTick < 0 ? 0 : t - this.lkTick;
+this.lkTick = t;
+const active = !freeze && li.active;
+const was = this.lstat;
+const wasActive = was !== null && was.active;
+const step = (this.turn / this.tps) * dt;
+if (active && wasActive && this.lk !== null) {
+const d = adiff(angleTo(me.x, me.y, this.lk.x, this.lk.y), this.vface);
+this.vface = normDeg(this.vface + Math.max(-step, Math.min(step, d)));
+} else this.vface = me.facing;
+const st = { tick: t, active, peek: null, thr: null, rate: null, hard: '', vf: this.vface };
+if (active) {
+const off = ( f, x, y) => Math.abs(adiff(f, angleTo(me.x, me.y, x, y)));
+if (li.peek !== null && li.peek.lock) st.peek = [off(me.facing, li.peek.x, li.peek.y), off(this.vface, li.peek.x, li.peek.y)];
+let r = 1e9;
+let v = 1e9;
+let fresh = false;
+for (const k of this.perc.known.values()) {
+if (k.conf < L.freshConf) continue;
+r = Math.min(r, off(me.facing, k.x, k.y));
+v = Math.min(v, off(this.vface, k.x, k.y));
+if (t - k.tick <= L.freshSec * this.tps) fresh = true;
+}
+if (r < 1e9) st.thr = [r, v, fresh];
+if (wasActive && dt > 0) st.rate = [(Math.abs(adiff(me.facing, this.rface)) * this.tps) / dt, (Math.abs(adiff(this.vface, was.vf)) * this.tps) / dt];
+}
+this.rface = me.facing;
+this.lstat = st;
+if (!active) {
+this.lk = null;
+this.lockId = -1;
+return;
+}
+const cands = this.lookCands(obs, li);
+let pick = null;
+if (li.peek !== null && li.peek.lock) {
+pick = cands.find((q) => q.t === 'i' && q.ref === 0) ?? null;
+st.hard = 'p';
+}
+if (pick === null) {
+pick = cands.find((q) => q.t === 'e' && q.ref === 9) ?? null;
+if (pick !== null) st.hard = 'd';
+}
+if (pick === null) {
+const held = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+if (held === undefined || held.conf < L.freshConf) this.lockId = -1;
+if (this.lockId < 0) {
+let best = null;
+for (const k of this.perc.known.values()) {
+if (k.conf < L.freshConf || t - k.tick > L.freshSec * this.tps) continue;
+if (best === null || k.conf > best.conf || (k.conf === best.conf && (dist(me.x, me.y, k.x, k.y) < dist(me.x, me.y, best.x, best.y) || (dist(me.x, me.y, k.x, k.y) === dist(me.x, me.y, best.x, best.y) && k.id < best.id)))) best = k;
+}
+if (best !== null) this.lockId = best.id;
+}
+const k = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+if (k !== undefined) {
+pick = cands.find((q) => q.t === 'e' && q.id === k.id) ?? { t: 'e', ref: 8, id: k.id, x: k.x, y: k.y, s: L.b.e + L.w.econf * (k.conf / 100) };
+st.hard = 'e';
+}
+}
+if (pick === null) {
+cands.sort((p, q) => q.s - p.s || LOOKS.indexOf(p.t) - LOOKS.indexOf(q.t) || p.ref - q.ref);
+pick = cands[0] ?? this.lk;
+const cur = this.lk;
+const keep = cur === null ? undefined : cands.find((q) => this.sameLook(q, cur));
+if (pick !== null && keep !== undefined && keep !== pick) {
+const turn = Math.abs(adiff(angleTo(me.x, me.y, pick.x, pick.y), angleTo(me.x, me.y, keep.x, keep.y)));
+if (turn < L.minDeg || t - this.lkSince < L.dwellSec * this.tps) pick = keep;
+}
+}
+if (pick !== null && (this.lk === null || !this.sameLook(pick, this.lk))) this.lkSince = t;
+this.lk = pick;
+}
+sameLook(a, b) {
+return a.t === b.t && (a.t === 'e' ? a.id === b.id : a.ref === b.ref);
+}
+lookCands(obs, li) {
+const me = obs.me;
+const t = obs.tick;
+const g = this.g;
+const L = P.U.L;
+const W = L.w;
+const out = [];
+const add = (type, ref, x, y, s, id = -1) => out.push({ t: type, ref, id, x, y, s: (L.b[type] ?? 0) + s });
+const hurt = this.perc.lastHurt;
+if (hurt !== null && t - hurt.tick < this.tps) add('e', 9, me.x + cosd(hurt.dir) * 8 * UNIT, me.y + sind(hurt.dir) * 8 * UNIT, W.econf + W.efresh);
+const ks = [...this.perc.known.values()].filter((k) => k.conf >= P.unconfirmed && dist(me.x, me.y, k.x, k.y) <= 25 * UNIT)
+.sort((a, b) => b.conf - a.conf || a.id - b.id).slice(0, 2);
+ks.forEach((k, i) => add('e', i, k.x, k.y, W.econf * (k.conf / 100) + W.efresh * unit(1 - (t - k.tick) / (L.freshSec * this.tps)), k.id));
+const snd = this.perc.lastSound;
+if (snd !== null && t - snd.tick < this.tps) {
+if (this.sndObj !== snd || snd.tick - this.sndSeen > this.tps) {
+this.sndObj = snd;
+this.sndWait = li.soundReact;
+} else if (this.sndWait > 0) this.sndWait--;
+this.sndSeen = snd.tick;
+}
+const secs = this.perc.sectors.filter((q) => t - q.tick < this.tps && (q !== this.sndObj || this.sndWait <= 0)).sort((a, b) => b.tick - a.tick).slice(0, 2);
+secs.forEach((q, i) => {
+const r = Math.max(4, Math.min(12, (q.r0 + q.r1) / 2));
+add('s', i, q.ox + cosd(q.dir) * r * UNIT, q.oy + sind(q.dir) * r * UNIT, W.sfresh * unit(1 - (t - q.tick) / this.tps) + W.shold * (li.holding ? 1 : 0));
+});
+if (li.peek !== null) add('i', 0, li.peek.x, li.peek.y, W.ipeek);
+if (li.act !== null) add('i', 2, li.act.x, li.act.y, W.iact);
+if (li.hold !== null) add('w', 0, li.hold.fx, li.hold.fy, W.whold * (li.holding ? 1 : 0) + W.wcov * (this.covered(obs, li.hold.fx, li.hold.fy) ? 1 : 0));
+const s0 = this.siteOf(li.hold ?? me);
+if (s0 >= 0) {
+const ents = this.intel.sites[CH_SITES[s0]].entrances;
+const open = ents.map((e, i) => ({ e, i, d: dist(me.x, me.y, e.x, e.y) }))
+.filter((q) => q.d <= 25 * UNIT && q.d > 2 * UNIT && g.los(me.x, me.y, q.e.x, q.e.y) && !this.covered(obs, q.e.x, q.e.y))
+.sort((a, b) => a.d - b.d || a.i - b.i).slice(0, 2);
+for (const q of open) add('c', q.i, q.e.x, q.e.y, W.chold * (li.holding ? 1 : 0));
+}
+if (!li.holding && li.ahead !== null) {
+const ah = li.ahead;
+const dir = angleTo(me.x, me.y, ah.x, ah.y);
+let best = null;
+let bestS = -Infinity;
+for (const p of this.intel.portals) {
+const d = dist(me.x, me.y, p.x, p.y);
+if (d < 2 * UNIT || d > 15 * UNIT) continue;
+const c = g.cellOf(p.x, p.y);
+if (!this.perc.reachable(c, t, 3) || this.perc.cleared(c, t)) continue;
+if (Math.abs(adiff(angleTo(me.x, me.y, p.x, p.y), dir)) > 100) continue;
+if (!g.los(me.x, me.y, p.x, p.y)) continue;
+const s = this.perc.portalThreat[p.id] * 2 - d / UNIT + (p.choke ? 3 : 0);
+if (s > bestS) {
+bestS = s;
+best = p;
+}
+}
+const mv = W.nmove * (li.moving ? 1 : 0);
+if (best !== null) add('n', 0, best.x, best.y, mv + W.nchoke * (best.choke ? 1 : 0));
+add('n', 1, ah.x, ah.y, mv);
+}
+return out;
+}
+covered(obs, x, y) {
+const me = obs.me;
+return obs.teammates.some((m) => m.alive && m.id !== me.id && dist(m.x, m.y, me.x, me.y) <= 8 * UNIT && Math.abs(adiff(m.facing, angleTo(m.x, m.y, x, y))) <= 45 && this.g.los(m.x, m.y, x, y));
 }
 match(cands, act) {
 let best = null;
@@ -6890,7 +7065,7 @@ text() {
 const e = this.log[this.log.length - 1];
 if (e === undefined) return '';
 const n = ( v) => v.toFixed(2).replace(/^(-?)0\./, '$1.');
-return `${e.fight ? '!' : ''}${e.top.map(([k, v]) => `${k} ${n(v)}`).join('|')} → ${e.pick}`;
+return `${e.fight ? '!' : ''}${e.top.map(([k, v]) => `${k} ${n(v)}`).join('|')} → ${e.pick}${e.look === '-' ? '' : `｜L:${e.look} ${n(e.ls)}`}`;
 }
 }
 const SITE_IDS = (['A', 'B']);
@@ -7029,7 +7204,7 @@ if (crouch !== me.crouching) out.push({ type: 'crouch', on: crouch });
 const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
 if (walk !== me.walking) out.push({ type: 'walk', on: walk });
 out.push(...late);
-if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null);
+if (P.choiceShadow && this.choice !== null) this.shadow(obs, tac, nav, fight.engaged, ev !== null, { holding: holding && !moving, moving, ahead: next });
 const reason = this.mission?.reason ?? '';
 this.why = `${ROLE_NAME[this.tactics.roles.of(me.id)]}・${tac.role}${reason ? `・${reason}` : ''}｜${ev !== null && !tac.objective ? ev.why : fight.why || check?.why || (nav.peeking ? `探頭 ${this.nav.peek?.phase ?? ''}` : nav.moving ? '移動' : '待命')}`;
 return out;
@@ -7042,7 +7217,7 @@ const exec = p.exec ?? p.site;
 const alive = new Set([obs.me.id, ...obs.teammates.filter((m) => m.alive).map((m) => m.id)]);
 return T.res.items.some((it) => (it.purpose === 'entrySmoke' || it.purpose === 'entryFlash') && it.state === 'plan' && it.target.site === exec && alive.has(it.owner));
 }
-shadow(obs, tac, nav, engaged, evading) {
+shadow(obs, tac, nav, engaged, evading, mv) {
 const me = obs.me;
 const T = this.tactics;
 const b = obs.bomb.state;
@@ -7092,10 +7267,20 @@ const dS = this.intel.distSite[site0];
 if (ce >= 0 && dS[ce] >= dS[c0] - 10) spawnF = 1;
 }
 const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && hold !== null && near(hold) < 4 * UNIT ? 1 : 0;
+const pk = nav.peeking ? this.nav.peek : null;
+const own = tac.urgent || tac.hard || T.utilLook;
+const li = {
+active: obs.round.phase !== 'freeze' && obs.round.phase !== 'over' && obs.enemies.length === 0 && !engaged && !evading && !own && !tac.objective,
+peek: pk === null ? null : { x: pk.far.x, y: pk.far.y, lock: pk.phase === 'hold' || pk.phase === 'shoulder' },
+hold: tac.hold !== null && near(tac.hold) < 3 * UNIT ? { x: tac.hold.x, y: tac.hold.y, fx: tac.hold.fx, fy: tac.hold.fy } : null,
+holding: mv.holding, moving: mv.moving,
+act: tac.look !== null && !own ? { x: tac.look.x, y: tac.look.y } : null,
+ahead: mv.ahead, soundReact: this.combat.soundReact,
+};
 this.choice.shadow(obs, {
 stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nades, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
 cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
 group: (id) => T.groups?.get(id) ?? 0,
-});
+}, li);
 }
 }

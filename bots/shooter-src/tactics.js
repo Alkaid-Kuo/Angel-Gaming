@@ -158,6 +158,8 @@ export class Tactics {
     this.waitTag = '';
     /** 3.0：這一步實際要丟的道具（影子模式讀；不影響行為） @type {import('./utility.js').ThrowWish | null} */
     this.lastWish = null;
+    /** 3.0 視線頭影子模式讀：這一步的看向是丟道具的瞄準 */
+    this.utilLook = false;
     /** 2.8：split 執行時離入口近的那組要晚出發幾秒（syncAt＝算的時候的 execTick） */
     this.syncAt = -1;
     this.syncWait = 0;
@@ -537,6 +539,7 @@ export class Tactics {
     const t = obs.tick;
     this.flashOwner = false;
     this.waitTag = '';
+    this.utilLook = false;
     /** @type {TacOut} */
     const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
     if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
@@ -616,6 +619,8 @@ export class Tactics {
     }
     if (u.thrown !== null && (u.thrown.kind === 'molotov' || u.thrown.kind === 'incendiary')) this.burns.push({ x: u.thrown.x, y: u.thrown.y, until: t + 8 * this.tps });
     out.cmds.push(...u.cmds);
+    // 3.0 視線頭影子模式讀：這一步的看向是丟道具的瞄準（不歸視線頭管）
+    this.utilLook = u.look !== null;
     if (u.look !== null) {
       out.look = u.look;
       if (this.util.away !== null) out.urgent = true;

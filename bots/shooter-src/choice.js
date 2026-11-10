@@ -2,7 +2,7 @@
 // 3.0 效用式個人層（丙-1，設計 docs/2026-11-10_CS射擊_Bot3.0效用式個人層設計.md）。
 // 第一步影子模式：照算候選、特徵、分數、承諾，記錄前三名與「r7l 實際做的動作」，行為仍由 tactics／combat／nav 驅動（不回傳任何指令）。
 // 特徵表資料驅動（審查決定 3）：每筆 { key, fn, types, min, max }，打分只走訪特徵表與 P.U。
-import { P, UNIT, dijkstra, dist, segDist } from './base.js';
+import { P, UNIT, adiff, angleTo, cosd, dijkstra, dist, normDeg, segDist, sind } from './base.js';
 import { ENTRY } from './roles.js';
 
 /** 動作字母（第七節正式格式）：h 守、a 推進、p 探頭、f 退掩體、t 補槍、g 丟道具、r 轉點、o 下包／拆包 */
@@ -25,7 +25,17 @@ const CH_SITES = /** @type {const} */ (['A', 'B']);
  * @typedef {{ obs: import('./base.js').Observation, in: ShadowIn, threats: import('./memory.js').Threat[], mates: import('./base.js').Observation['teammates'], cur: Cand | null, held: number, site: number }} Ctx
  */
 /** @typedef {{ key: string, fn: (c: Ctx, a: Cand) => number, types: string, min: number, max: number }} Feature */
-/** 決策紀錄（at：選定動作的目標格；丟道具、補槍、轉點是 −2 − 參數） @typedef {{ tick: number, ev: string, top: [string, number][], pick: string, at: number, act: string, stage: Stage, fight: boolean, reflex: boolean }} LogEntry */
+/** 決策紀錄（at：選定動作的目標格；丟道具、補槍、轉點是 −2 − 參數；look／ls：視線頭此刻的選擇與分數，'-'＝不歸視線頭管） @typedef {{ tick: number, ev: string, top: [string, number][], pick: string, at: number, act: string, stage: Stage, fight: boolean, reflex: boolean, look: string, ls: number }} LogEntry */
+/** 視線種類字母（第七節）：e 記得的敵位、s 聲音、i 入口／窄口、w 守點看向、c 隊友沒看的角、n 行進方向 */
+export const LOOKS = /** @type {const} */ (['e', 's', 'i', 'w', 'c', 'n']);
+/**
+ * 視線頭的輸入（baseline.shadow 每個 decide tick 整理）。active：歸視線頭管（live、沒看到敵人、沒交戰、不是躲閃光／丟道具／下拆包這類不接管的視線）
+ * peek：正在探的窄口（lock＝hold 或 shoulder 階段）；hold：3 格內的守點（含看向）；act：動作附帶的看向（等槍線、讓位、補槍、佯攻）；ahead：行進方向的下一個路點
+ * @typedef {{ active: boolean, peek: { x: number, y: number, lock: boolean } | null, hold: { x: number, y: number, fx: number, fy: number } | null, holding: boolean, moving: boolean,
+ *   act: import('./base.js').Pt | null, ahead: import('./base.js').Pt | null, soundReact: number }} LookIn
+ */
+/** 視線候選：t 種類、ref 參數（e 是名次、e9 受傷方向）、id 敵人 id（e 以外 −1）、s 分數 @typedef {{ t: typeof LOOKS[number], ref: number, id: number, x: number, y: number, s: number }} LookCand */
+/** 視線頭量測（每個 decide tick；r 是 r7l 實際朝向、v 是視線頭的虛擬朝向） @typedef {{ tick: number, active: boolean, peek: [number, number] | null, thr: [number, number, boolean] | null, rate: [number, number] | null, hard: string, vf: number }} LookStat */
 
 /** 目標點的威脅清單裡，有視線看得到目標點的個數 @param {Ctx} c @param {Cand} a @param {import('./base.js').Grid} g */
 function exposed(c, a, g) {
@@ -60,6 +70,8 @@ export class Choice {
     this.perc = perc;
     this.data = data;
     this.tps = data.rules.ticksPerSecond;
+    /** 引擎轉身速度（度／秒；視線頭的虛擬朝向用） */
+    this.turn = data.rules.turnDegPerSec ?? 720;
     /** 錯開：隊內序號（審查意見 C） */
     this.slot = data.slot;
     /** @type {LogEntry[]} */
@@ -98,6 +110,23 @@ export class Choice {
     this.commitF = /** @type {Feature} */ (this.features.find((f) => f.key === 'f20'));
     /** 除錯：最近一次決策每個候選的特徵值（測試檢查範圍用；P.choiceTrace 開時才記） @type {{ key: string, v: number }[][]} */
     this.trace = [];
+    // ── 視線頭（第二組效用） ──
+    /** 目前看的方向 @type {LookCand | null} */
+    this.lk = null;
+    this.lkSince = -1;
+    /** 硬優先鎖定的敵人 id（信心掉到 freshConf 以下才放） */
+    this.lockId = -1;
+    /** 虛擬朝向（影子模式：照視線頭的選擇、以引擎轉速轉過去的朝向；不歸視線頭管時跟實際朝向同步） */
+    this.vface = 0;
+    this.lkTick = -1;
+    /** 上一個量測點的實際朝向（角速度） */
+    this.rface = 0;
+    /** 聲音的反應延遲（自己的狀態，和 combat.heard 同規則，不碰 combat） @type {import('./memory.js').Sector | null} */
+    this.sndObj = null;
+    this.sndSeen = -1;
+    this.sndWait = 0;
+    /** @type {LookStat | null} */
+    this.lstat = null;
   }
 
   reset() {
@@ -105,6 +134,12 @@ export class Choice {
     this.prev = null;
     this.since = -1;
     this.lastTick = -1e9;
+    this.lk = null;
+    this.lkSince = -1;
+    this.lockId = -1;
+    this.lkTick = -1;
+    this.sndObj = null;
+    this.lstat = null;
   }
 
   /** 特徵表（第五節）：影子模式先實作對應 r7l 必要的子集，其餘之後逐項補 @returns {Feature[]} */
@@ -263,11 +298,13 @@ export class Choice {
   }
 
   /**
-   * 影子模式一步：偵測事件；輪到自己的槽或有事件時產生候選、打分、承諾防抖、記錄（不回傳指令）
-   * @param {import('./base.js').Observation} obs @param {ShadowIn} si
+   * 影子模式一步：偵測事件；視線頭；輪到自己的槽或有事件時產生候選、打分、承諾防抖、記錄（不回傳指令）
+   * @param {import('./base.js').Observation} obs @param {ShadowIn} si @param {LookIn} li
    */
-  shadow(obs, si) {
+  shadow(obs, si, li) {
     const ev = this.events(obs, si);
+    // 視線頭每個 decide tick 都走（瞄準指令每次決策都送）；凍結期間只同步朝向
+    this.look(obs, li, si.stage === 'freeze');
     // 凍結期間只買與喊話（硬反射第 6 項），不決策
     if (si.stage === 'freeze') return;
     const k = Math.floor(obs.tick / this.data.rules.decisionInterval);
@@ -350,8 +387,187 @@ export class Choice {
     this.cur = pick;
     const code = (/** @type {Cand} */ a) => `${a.type}${a.k}`;
     const act = si.actual === null ? '-' : this.match(cands, si.actual);
-    this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex });
+    this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex, look: this.lstat?.active === true && this.lk !== null ? `${this.lk.t}${this.lk.ref}` : '-', ls: this.lk?.s ?? 0 });
     if (this.log.length > 64) this.log.shift();
+  }
+
+  /**
+   * 視線頭（第四節第二組、第六節防抖）：產生視線候選、打分、硬優先與防抖，更新虛擬朝向與量測（影子模式不送指令）
+   * 硬優先依序：探頭 hold／shoulder 階段鎖窄口（驗證清單 b）→ 1 秒內受傷的方向 → 新鮮的記得敵位（信心 ≥ freshConf、freshSec 秒內有消息；
+   * 鎖定後直到信心掉到 freshConf 以下，驗證清單 c）。其他時候照分數，換方向要差 minDeg 度、停滿 dwellSec 秒
+   * @param {import('./base.js').Observation} obs @param {LookIn} li @param {boolean} freeze
+   */
+  look(obs, li, freeze) {
+    const me = obs.me;
+    const t = obs.tick;
+    const L = P.U.L;
+    const dt = this.lkTick < 0 ? 0 : t - this.lkTick;
+    this.lkTick = t;
+    const active = !freeze && li.active;
+    const was = this.lstat;
+    const wasActive = was !== null && was.active;
+    // 先照上一次的選擇把虛擬朝向轉過去（引擎轉速；量的是這一拍的朝向，和實際朝向一樣是之前指令的結果）
+    const step = (this.turn / this.tps) * dt;
+    if (active && wasActive && this.lk !== null) {
+      const d = adiff(angleTo(me.x, me.y, this.lk.x, this.lk.y), this.vface);
+      this.vface = normDeg(this.vface + Math.max(-step, Math.min(step, d)));
+    } else this.vface = me.facing;
+    /** @type {LookStat} */
+    const st = { tick: t, active, peek: null, thr: null, rate: null, hard: '', vf: this.vface };
+    if (active) {
+      const off = (/** @type {number} */ f, /** @type {number} */ x, /** @type {number} */ y) => Math.abs(adiff(f, angleTo(me.x, me.y, x, y)));
+      if (li.peek !== null && li.peek.lock) st.peek = [off(me.facing, li.peek.x, li.peek.y), off(this.vface, li.peek.x, li.peek.y)];
+      let r = 1e9;
+      let v = 1e9;
+      let fresh = false;
+      for (const k of this.perc.known.values()) {
+        if (k.conf < L.freshConf) continue;
+        r = Math.min(r, off(me.facing, k.x, k.y));
+        v = Math.min(v, off(this.vface, k.x, k.y));
+        if (t - k.tick <= L.freshSec * this.tps) fresh = true;
+      }
+      if (r < 1e9) st.thr = [r, v, fresh];
+      if (wasActive && dt > 0) st.rate = [(Math.abs(adiff(me.facing, this.rface)) * this.tps) / dt, (Math.abs(adiff(this.vface, was.vf)) * this.tps) / dt];
+    }
+    this.rface = me.facing;
+    this.lstat = st;
+    if (!active) {
+      this.lk = null;
+      this.lockId = -1;
+      return;
+    }
+    const cands = this.lookCands(obs, li);
+    /** @type {LookCand | null} */
+    let pick = null;
+    // 1. 探頭鎖窄口
+    if (li.peek !== null && li.peek.lock) {
+      pick = cands.find((q) => q.t === 'i' && q.ref === 0) ?? null;
+      st.hard = 'p';
+    }
+    // 2. 受傷方向（1 秒內）
+    if (pick === null) {
+      pick = cands.find((q) => q.t === 'e' && q.ref === 9) ?? null;
+      if (pick !== null) st.hard = 'd';
+    }
+    // 3. 新鮮的記得敵位：鎖定直到信心掉到門檻以下
+    if (pick === null) {
+      const held = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+      if (held === undefined || held.conf < L.freshConf) this.lockId = -1;
+      if (this.lockId < 0) {
+        /** @type {import('./memory.js').Known | null} */
+        let best = null;
+        for (const k of this.perc.known.values()) {
+          if (k.conf < L.freshConf || t - k.tick > L.freshSec * this.tps) continue;
+          if (best === null || k.conf > best.conf || (k.conf === best.conf && (dist(me.x, me.y, k.x, k.y) < dist(me.x, me.y, best.x, best.y) || (dist(me.x, me.y, k.x, k.y) === dist(me.x, me.y, best.x, best.y) && k.id < best.id)))) best = k;
+        }
+        if (best !== null) this.lockId = best.id;
+      }
+      const k = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+      if (k !== undefined) {
+        pick = cands.find((q) => q.t === 'e' && q.id === k.id) ?? { t: 'e', ref: 8, id: k.id, x: k.x, y: k.y, s: L.b.e + L.w.econf * (k.conf / 100) };
+        st.hard = 'e';
+      }
+    }
+    // 4. 照分數，加防抖（換方向要差 minDeg 度、停滿 dwellSec 秒；目前的候選消失了就直接換）
+    if (pick === null) {
+      cands.sort((p, q) => q.s - p.s || LOOKS.indexOf(p.t) - LOOKS.indexOf(q.t) || p.ref - q.ref);
+      // 沒有任何候選（停著、沒守點、沒路點）：照舊看原來的方向
+      pick = cands[0] ?? this.lk;
+      const cur = this.lk;
+      const keep = cur === null ? undefined : cands.find((q) => this.sameLook(q, cur));
+      if (pick !== null && keep !== undefined && keep !== pick) {
+        const turn = Math.abs(adiff(angleTo(me.x, me.y, pick.x, pick.y), angleTo(me.x, me.y, keep.x, keep.y)));
+        if (turn < L.minDeg || t - this.lkSince < L.dwellSec * this.tps) pick = keep;
+      }
+    }
+    if (pick !== null && (this.lk === null || !this.sameLook(pick, this.lk))) this.lkSince = t;
+    this.lk = pick;
+  }
+
+  /** 同一個看向：種類相同，記得的敵位看敵人 id，其他看參數 @param {LookCand} a @param {LookCand} b */
+  sameLook(a, b) {
+    return a.t === b.t && (a.t === 'e' ? a.id === b.id : a.ref === b.ref);
+  }
+
+  /**
+   * 視線候選（第四節）：受傷方向、記得的敵位 2 個、聲音 2 個、窄口（探頭、動作附帶）、守點看向、隊友沒看的角 2 個、行進方向（前方窄口、下一個路點）
+   * @param {import('./base.js').Observation} obs @param {LookIn} li @returns {LookCand[]}
+   */
+  lookCands(obs, li) {
+    const me = obs.me;
+    const t = obs.tick;
+    const g = this.g;
+    const L = P.U.L;
+    const W = L.w;
+    /** @type {LookCand[]} */
+    const out = [];
+    /** @param {LookCand['t']} type @param {number} ref @param {number} x @param {number} y @param {number} s @param {number} [id] */
+    const add = (type, ref, x, y, s, id = -1) => out.push({ t: type, ref, id, x, y, s: (L.b[type] ?? 0) + s });
+    // e：受傷方向（1 秒內，ref 9）、記得的敵人（25 格內、信心最高的 2 個）
+    const hurt = this.perc.lastHurt;
+    if (hurt !== null && t - hurt.tick < this.tps) add('e', 9, me.x + cosd(hurt.dir) * 8 * UNIT, me.y + sind(hurt.dir) * 8 * UNIT, W.econf + W.efresh);
+    const ks = [...this.perc.known.values()].filter((k) => k.conf >= P.unconfirmed && dist(me.x, me.y, k.x, k.y) <= 25 * UNIT)
+      .sort((a, b) => b.conf - a.conf || a.id - b.id).slice(0, 2);
+    ks.forEach((k, i) => add('e', i, k.x, k.y, W.econf * (k.conf / 100) + W.efresh * unit(1 - (t - k.tick) / (L.freshSec * this.tps)), k.id));
+    // s：聲音扇形中心（1 秒內；最新的聲音要過反應延遲，和 combat.heard 同規則；最近的 2 個）
+    const snd = this.perc.lastSound;
+    if (snd !== null && t - snd.tick < this.tps) {
+      if (this.sndObj !== snd || snd.tick - this.sndSeen > this.tps) {
+        this.sndObj = snd;
+        this.sndWait = li.soundReact;
+      } else if (this.sndWait > 0) this.sndWait--;
+      this.sndSeen = snd.tick;
+    }
+    const secs = this.perc.sectors.filter((q) => t - q.tick < this.tps && (q !== this.sndObj || this.sndWait <= 0)).sort((a, b) => b.tick - a.tick).slice(0, 2);
+    secs.forEach((q, i) => {
+      const r = Math.max(4, Math.min(12, (q.r0 + q.r1) / 2));
+      add('s', i, q.ox + cosd(q.dir) * r * UNIT, q.oy + sind(q.dir) * r * UNIT, W.sfresh * unit(1 - (t - q.tick) / this.tps) + W.shold * (li.holding ? 1 : 0));
+    });
+    // i：探頭的窄口（ref 0）、動作附帶的看向（ref 2）
+    if (li.peek !== null) add('i', 0, li.peek.x, li.peek.y, W.ipeek);
+    if (li.act !== null) add('i', 2, li.act.x, li.act.y, W.iact);
+    // w：守點看向（隊友已經看著同一方向就扣分）
+    if (li.hold !== null) add('w', 0, li.hold.fx, li.hold.fy, W.whold * (li.holding ? 1 : 0) + W.wcov * (this.covered(obs, li.hold.fx, li.hold.fy) ? 1 : 0));
+    // c：守點（或自己）所在包點的入口裡，隊友沒看的（看得到、2～25 格，最近的 2 個；ref＝入口序號）
+    const s0 = this.siteOf(li.hold ?? me);
+    if (s0 >= 0) {
+      const ents = this.intel.sites[CH_SITES[s0]].entrances;
+      const open = ents.map((e, i) => ({ e, i, d: dist(me.x, me.y, e.x, e.y) }))
+        .filter((q) => q.d <= 25 * UNIT && q.d > 2 * UNIT && g.los(me.x, me.y, q.e.x, q.e.y) && !this.covered(obs, q.e.x, q.e.y))
+        .sort((a, b) => a.d - b.d || a.i - b.i).slice(0, 2);
+      for (const q of open) add('c', q.i, q.e.x, q.e.y, W.chold * (li.holding ? 1 : 0));
+    }
+    // n：行進中，前方 15 格內看得到、敵人可能已到、沒清過的交界（和 combat.look 第 7 項同條件，ref 0），以及下一個路點（ref 1）
+    if (!li.holding && li.ahead !== null) {
+      const ah = li.ahead;
+      const dir = angleTo(me.x, me.y, ah.x, ah.y);
+      /** @type {import('./analysis.js').Portal | null} */
+      let best = null;
+      let bestS = -Infinity;
+      for (const p of this.intel.portals) {
+        const d = dist(me.x, me.y, p.x, p.y);
+        if (d < 2 * UNIT || d > 15 * UNIT) continue;
+        const c = g.cellOf(p.x, p.y);
+        if (!this.perc.reachable(c, t, 3) || this.perc.cleared(c, t)) continue;
+        if (Math.abs(adiff(angleTo(me.x, me.y, p.x, p.y), dir)) > 100) continue;
+        if (!g.los(me.x, me.y, p.x, p.y)) continue;
+        const s = this.perc.portalThreat[p.id] * 2 - d / UNIT + (p.choke ? 3 : 0);
+        if (s > bestS) {
+          bestS = s;
+          best = p;
+        }
+      }
+      const mv = W.nmove * (li.moving ? 1 : 0);
+      if (best !== null) add('n', 0, best.x, best.y, mv + W.nchoke * (best.choke ? 1 : 0));
+      add('n', 1, ah.x, ah.y, mv);
+    }
+    return out;
+  }
+
+  /** 有隊友（離我 8 格內、看得到這點）面向這點 ±45°（f17 的視線版） @param {import('./base.js').Observation} obs @param {number} x @param {number} y */
+  covered(obs, x, y) {
+    const me = obs.me;
+    return obs.teammates.some((m) => m.alive && m.id !== me.id && dist(m.x, m.y, me.x, me.y) <= 8 * UNIT && Math.abs(adiff(m.facing, angleTo(m.x, m.y, x, y))) <= 45 && this.g.los(m.x, m.y, x, y));
   }
 
   /**
@@ -392,6 +608,6 @@ export class Choice {
     const e = this.log[this.log.length - 1];
     if (e === undefined) return '';
     const n = (/** @type {number} */ v) => v.toFixed(2).replace(/^(-?)0\./, '$1.');
-    return `${e.fight ? '!' : ''}${e.top.map(([k, v]) => `${k} ${n(v)}`).join('|')} → ${e.pick}`;
+    return `${e.fight ? '!' : ''}${e.top.map(([k, v]) => `${k} ${n(v)}`).join('|')} → ${e.pick}${e.look === '-' ? '' : `｜L:${e.look} ${n(e.ls)}`}`;
   }
 }
