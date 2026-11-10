@@ -11,7 +11,7 @@
 // aggression 探頭等待與方式、架槍時間、T 計畫（rush 比例、default 執行時機）、殘局找人、保槍（撤退門檻步驟 7 起固定）；
 // discipline 隊友擋線的安全距離、守位中不追出射程外的目標、經濟服從（eco 不偷買）、不追殘血、殘局保槍；
 // movement 停步乾淨度、肩探（太低只會寬探）、附近有敵人時靜步、佈置時靜步。旋鈕是外部粗調（侵略偏移、經濟、狙擊手、CT 分點、T 計畫、角色）。
-import { Grid, P, clamp, dist, initTrig } from './base.js';
+import { Grid, P, UNIT, clamp, dist, initTrig } from './base.js';
 import { MapIntel } from './analysis.js';
 import { Perception } from './memory.js';
 import { Navigator } from './nav.js';
@@ -21,6 +21,9 @@ import { AWP, ROLE_NAME, autoRole } from './roles.js';
 import { Judgment } from './judgment.js';
 import { Mission } from './mission.js';
 import { Choice } from './choice.js';
+
+/** 包點代號 */
+const SITE_IDS = /** @type {const} */ (['A', 'B']);
 
 export default class ShooterBaseline {
   constructor() {
@@ -213,18 +216,30 @@ export default class ShooterBaseline {
           : me.team === 'T' && T.execTick >= 0 ? (tac.stop && !tac.objective ? 'wait' : 'execute') : 'setup';
     const hold = tac.hold === null ? null : { x: tac.hold.x, y: tac.hold.y };
     const peek = this.nav.peek === null ? null : this.nav.peek.hold;
-    /** @type {{ type: import('./choice.js').Act, x: number, y: number } | null} */
+    // 硬反射（不算分母）：火區與手雷自保、避火、閃光躲避與等閃（設計第二節第 2、3 項）
+    const reflex = evading || (tac.escape && tac.task !== 'save') || T.util.away !== null || T.mateFlash.some((x) => obs.tick <= x.pop + 2);
+    // 丟道具候選：身上每種道具，資源層 claim 拿得到的（claim 只查詢不改狀態）；觸發＝r7l 這一步要丟這種
+    const all = /** @type {const} */ (['entryFlash', 'entrySmoke', 'holdSmoke', 'fireBackup', 'fakeUtil', 'chokeMolotov', 'retakeSmoke', 'retakeFlash', 'free']);
+    const kinds = [...new Set(me.loadout.grenades)];
+    const wish = T.lastWish;
+    const nades = kinds.filter((k) => T.res.claim(me.id, k, [...all], me.loadout.grenades.filter((x) => x === k).length) !== null).map((k) => ({ kind: k, trig: wish !== null && wish.kind === k }));
+    /** @type {{ type: import('./choice.js').Act, x: number, y: number, ref?: number } | null} */
     let actual;
+    const near = (/** @type {import('./base.js').Pt} */ p) => dist(me.x, me.y, p.x, p.y);
     if (tac.objective || tac.cmds.some((c) => c.type === 'plant' || c.type === 'defuse')) actual = { type: 'o', x: obs.bomb.x ?? me.x, y: obs.bomb.y ?? me.y };
-    else if (tac.cmds.some((c) => c.type === 'throw')) actual = { type: 'g', x: me.x, y: me.y };
+    else if (wish !== null) actual = { type: 'g', x: me.x, y: me.y, ref: nades.findIndex((q) => q.kind === wish.kind) };
     else if (nav.peeking && peek !== null) actual = { type: 'p', x: peek.x, y: peek.y };
-    else if (tac.escape || evading) actual = { type: 'f', x: tac.goal?.x ?? me.x, y: tac.goal?.y ?? me.y };
     else if (T.coop.acted) actual = { type: 't', x: tac.goal?.x ?? me.x, y: tac.goal?.y ?? me.y };
-    else if (hold !== null && dist(me.x, me.y, hold.x, hold.y) < 3 * 1000) actual = { type: 'h', x: dist(me.x, me.y, hold.x, hold.y) > 1000 ? hold.x : me.x, y: dist(me.x, me.y, hold.x, hold.y) > 1000 ? hold.y : me.y };
+    else if (hold !== null && near(hold) < 3 * UNIT) actual = near(hold) > UNIT ? { type: 'h', x: hold.x, y: hold.y } : { type: 'h', x: me.x, y: me.y };
     else if (tac.stop || tac.goal === null) actual = { type: 'h', x: me.x, y: me.y };
     else actual = { type: 'a', x: tac.goal.x, y: tac.goal.y };
     const p = T.prof === null || T.tagNow === null ? 0.5 : T.pOf(T.tagNow);
-    const inSite = (['A', 'B']).some((k) => { const r = this.intel.sites[/** @type {'A' | 'B'} */ (k)].rect; const cx = me.x / 1000, cy = me.y / 1000; return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1; });
-    this.choice.shadow(obs, { stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, actual, inSite, peek, cover: null, rotate: [] });
+    const inSite = SITE_IDS.some((k) => { const r = this.intel.sites[k].rect; const cx = me.x / UNIT, cy = me.y / UNIT; return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1; });
+    const pathless = tac.goal !== null && this.nav.path.length === 0 && near(tac.goal) > UNIT;
+    this.choice.shadow(obs, {
+      stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nades, pathless,
+      cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
+      group: (id) => T.groups?.get(id) ?? 0,
+    });
   }
 }

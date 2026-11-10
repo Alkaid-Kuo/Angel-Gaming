@@ -153,6 +153,8 @@ export class Tactics {
     this.tagPick = null;
     /** 2.8：本回合打的戰術代號（自己喊的或聽到的 K:；執行品質用它的熟練度） @type {string | null} */
     this.tagNow = null;
+    /** 3.0：這一步實際要丟的道具（影子模式讀；不影響行為） @type {import('./utility.js').ThrowWish | null} */
+    this.lastWish = null;
     /** 2.8：split 執行時離入口近的那組要晚出發幾秒（syncAt＝算的時候的 execTick） */
     this.syncAt = -1;
     this.syncWait = 0;
@@ -585,6 +587,8 @@ export class Tactics {
     for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
     // 正在躲隊友的閃光、或隊友的閃光還沒爆：不轉頭去丟自己的道具
     if (out.commit || out.urgent || this.mateFlash.some((x) => t <= x.pop)) wish = null;
+    // 3.0 效用層影子模式讀：這一步實際要丟的道具（資源層／指揮層的觸發條件成立）
+    this.lastWish = wish;
     const u = this.util.step(obs, wish, busy);
     // 宣告再丟（2.6）：開始轉向瞄準閃光就先喊，丟出要再等一次以上的決策；隊友聽到就把爆點當成已認領
     if (P.flashClaim && wish !== null && wish.kind === 'flash' && u.look !== null && u.thrown === null && this.util.away === null) {

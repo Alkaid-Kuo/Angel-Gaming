@@ -273,6 +273,8 @@ export const P = {
   // ── 3.0 效用式個人層（丙-1，PR #44）：影子模式只算分與記錄，不改行為 ──
   /** 影子模式開關：開著時每次決策照算候選與分數、記錄前三名與 r7l 實際動作（量測一致率用），不影響指令 */
   choiceShadow: true,
+  /** 除錯：記下最近一次決策每個候選的特徵值（測試檢查範圍用） */
+  choiceTrace: false,
   /**
    * 效用權重表（丁-1 搜這張表）：b 依動作的偏置、stage 依動作 × 階段（freeze、setup、wait、execute、post、retake、save）的偏置、
    * w 依動作 × 特徵鍵的權重；commit 承諾加分、commitMin 衰減後的保留比例、commitSec 衰減秒數、dwellSec 最短停留、margin 切換門檻
