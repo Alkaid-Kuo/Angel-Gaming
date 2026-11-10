@@ -235,6 +235,10 @@ export default class ShooterBaseline {
     // 丟道具（第 5 步）：候選由效用層從資源層與指揮層的觸發紀錄自己產生（不看 lastWish）；lastWish 只用來分類 r7l 的實際動作
     const wish = T.lastWish;
     const g = this.g;
+    // 丟出那一步：用丟出前的煙、火、閃光紀錄與資源層狀態（影子量測的假象，切換後不存在）
+    const tn = T.thrownNow;
+    const fs = T.flashSpots;
+    const lastFs = tn?.kind === 'flash' && fs.length > 0 && fs[fs.length - 1].tick === obs.tick;
     /** @type {import('./choice.js').NadeIn} */
     const nade = {
       res: T.res,
@@ -246,10 +250,26 @@ export default class ShooterBaseline {
       },
       canHide: (x, y, c) => T.canHide(x, y, c, 4),
       flashR: T.util.flashRadius,
-      smokes: T.smokes,
-      burns: T.burns,
+      smokes: tn?.kind === 'smoke' ? T.smokes.slice(0, -1) : T.smokes,
+      burns: tn?.kind === 'molotov' || tn?.kind === 'incendiary' ? T.burns.slice(0, -1) : T.burns,
+      used: tn?.it === null || tn === null ? null : { it: tn.it, state: tn.state },
       info: (p, site) => T.flashInfo(obs, p, site),
+      deep: (s) => T.deepSpots(s),
+      taken: (p) => {
+        if (!lastFs) return T.flashTaken(obs, p);
+        T.flashSpots = fs.slice(0, -1);
+        const r = T.flashTaken(obs, p);
+        T.flashSpots = fs;
+        return r;
+      },
+      ent: T.planEnt,
+      awp: T.awp,
+      post: me.team === 'T' && planted && obs.bomb.site !== null ? T.postEnt(obs, obs.bomb.site) : null,
     };
+    // 照路徑再走 3 格的位置（封槍線的起點；和指揮層 lineCheck 同一個算法）
+    const w0 = this.nav.wps[this.nav.wpIdx];
+    const k0 = w0 === undefined ? 0 : Math.min(1, (3 * UNIT) / Math.max(dist(me.x, me.y, w0.x, w0.y), 1));
+    const soon = w0 === undefined ? null : { x: me.x + (w0.x - me.x) * k0, y: me.y + (w0.y - me.y) * k0 };
     const cues = [...T.coop.cues].map(([id, q]) => ({ id, x: q.x, y: q.y, dead: q.dead }));
     /** @type {{ type: import('./choice.js').Act, x: number, y: number, ref?: number, kind?: string } | null} */
     let actual;
@@ -277,8 +297,6 @@ export default class ShooterBaseline {
     const plan = T.plan;
     const exec = me.team === 'T' && plan !== null && plan.kind !== 'hold' && T.execTick >= 0 ? (plan.exec ?? plan.site) : null;
     const c0 = this.g.cellOf(me.x, me.y);
-    let yieldF = 0;
-    if (exec !== null && plan !== null && plan.kind !== 'go' && c0 >= 0 && this.intel.distSite[exec][c0] <= P.yieldNear * 10 && T.waitEntry(obs, exec)) yieldF = 1;
     let spawnF = 0;
     const ent = obs.teammates.find((m) => m.alive && m.id === T.roles.who(ENTRY));
     const site0 = exec ?? (plan !== null && plan.kind !== 'hold' ? plan.site : null);
@@ -301,9 +319,13 @@ export default class ShooterBaseline {
       ahead: mv.ahead, soundReact: this.combat.soundReact,
     };
     this.choice.shadow(obs, {
-      stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nade, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
+      stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nade, pathless, planWait, order: { spawnF, awpF },
+      exec, planGo: plan === null || plan.kind === 'go', entryId: T.roles.who(ENTRY),
+      path: this.nav.path, allowPeek: tac.allowPeek && !tac.commit, follow: tac.task === 'execute' || tac.task === 'retake',
+      // 探一次停幾個決策：停 peekHold，低積極、高走位的人再側身出去 3、退回 3
+      peekLen: this.nav.peekHold + (this.nav.attrs.aggression * 100 < P.shoulderBelow && this.nav.attrs.movement * 100 >= P.shoulderMove ? 6 : 0),
       // 計畫包點（T：這次執行的包點或計畫包點；CT：守點所在包點）：落點找不到所在包點時用
-      site: site0 !== null ? SITE_IDS.indexOf(site0) : this.choice.siteOf(hold ?? tac.goal),
+      site: site0 !== null ? SITE_IDS.indexOf(site0) : this.choice.siteOf(hold ?? tac.goal), soon,
       cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
       group: (id) => T.groups?.get(id) ?? 0,
     }, li);

@@ -166,15 +166,15 @@ b: ({ h: 0.5, a: 0.5, p: 1.6, f: 0, t: 0, g: -0.6, r: -0.5, o: 1.5 }),
 stage: ({
 h: [0.5, 0.2, -0.2, -0.2, 0.4, 0, 0.3],
 a: [-1, 0.2, 0.4, 0.4, 0.2, 0.3, 0.3],
-t: [0, -1, 0.6, 0.6, -1, 0.6, -1],
+t: [0, -1, -1, -1, -1, -1, -1],
 }),
 w: ({
 h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0, f16w: 0.5, fw: 0.5, fhp: 0.2 },
 a: { f4: -0.1, f5: -0.1, f9: -0.2, f10: -0.6, f10p: 0.5, f12: 0.1, f16: 0.1, f21y: -1, f21s: -1, fw: -1 },
 p: { f4: -0.2, f9: -0.2, f16: 0.1 },
 f: { f1: -0.3, f3: 0.3 },
-t: { f1: -0.2, f13: 0.2, f6t: 0.6 },
-g: { f18t: 2.2, f18: 0.4 },
+t: { f1: -0.2, f13: 0.2, f6t: 0.6, ftk: 1.6 },
+g: { f18t: 2.2, f18: 0.4, f18a: 0.5 },
 r: { f1: -0.2, f10: -0.2 },
 }),
 commit: 0.15,
@@ -3422,6 +3422,8 @@ this.waitTag = '';
 this.lastWish = null;
 this.utilLook = false;
 this.trig = new Map();
+this.planEnt = null;
+this.thrownNow = null;
 this.syncAt = -1;
 this.syncWait = 0;
 const reaction = clamp(data.attributes.reaction, 0, 100);
@@ -3708,6 +3710,8 @@ this.flashOwner = false;
 this.waitTag = '';
 this.utilLook = false;
 this.trig.clear();
+this.planEnt = null;
+this.thrownNow = null;
 const out = { goal: null, route: null, hold: null, objective: me.plantTicks > 0 || me.defuseTicks > 0, allowPeek: false, cmds: [], role: '', look: null, urgent: false, hard: false, stop: false, walk: null, noise: false, escape: false };
 if (this.liveStart < 0 && obs.round.phase !== 'freeze') this.liveStart = t;
 this.util.now = t;
@@ -3773,6 +3777,10 @@ out.cmds.push({ type: 'say', text: `E:flashing ${Math.round(wish.x / 100)} ${Mat
 }
 }
 if (u.thrown !== null) this.lastThrow = u.thrown.why;
+if (u.thrown !== null) {
+const it = this.claimed.get(u.thrown.kind) ?? null;
+this.thrownNow = { kind: u.thrown.kind, it, state: it?.state ?? 'free' };
+}
 if (u.thrown !== null && this.res.active) {
 const it = this.claimed.get(u.thrown.kind);
 out.cmds.push({ type: 'say', text: it !== undefined ? this.res.usedText(it) : `U:u ${codeOf(u.thrown.kind)}` });
@@ -4743,6 +4751,7 @@ return null;
 }
 }
 const ent = mine ? this.entranceOf(exec, setup.route) : flank?.second ?? null;
+this.planEnt = ent;
 if (flank !== null && !mine && !this.flanked) {
 if (dist(me.x, me.y, flank.second.ox, flank.second.oy) < 3 * UNIT || this.inRectSite(me.x, me.y, exec)) this.flanked = true;
 else {
@@ -5145,6 +5154,17 @@ list = mine.filter((q) => first === undefined || dist(q.x, q.y, first.x, first.y
 }
 return list.find((q) => this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) >= gap) && this.util.solve(me.x, me.y, q.x, q.y) !== null) ?? null;
 }
+may(me, kind, purposes) {
+return this.util.has(me, kind) && (!P.resLayer || this.res.claim(me.id, kind, purposes, me.loadout.grenades.filter((g) => g === kind).length) !== null);
+}
+postEnt(obs, s) {
+const me = obs.me;
+const entrances = [...this.intel.sites[s].entrances].sort((a, b) => a.ctDist - b.ctDist || a.portal - b.portal);
+const smokers = [...new Set([...this.postSmokers, ...(this.may(me, 'smoke', ['free']) ? [me.id] : [])])].filter((id) => this.isAlive(obs, id)).sort((a, b) => a - b);
+const entries = [];
+for (const q of entrances) if (entries.every((p) => dist(p.ox, p.oy, q.ox, q.oy) >= (P.smokeGap + 2) * UNIT)) entries.push(q);
+return entries[smokers.indexOf(me.id)] ?? null;
+}
 hint(key, kind, purposes) {
 if (purposes.length > 0) this.trig.set(key, { kind, purposes });
 }
@@ -5386,7 +5406,8 @@ out.role = '撤離前守線';
 if (obs.enemiesAlive === 0) return null;
 if (defusing) {
 const kind = this.pickFor(me, ['molotov', 'he'], ['free']);
-if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, by) < 3 * UNIT) && !this.burnsMate(obs, bx, by)) return this.fired('post', ['free'], { kind, x: bx, y: by, why: '燒拆包' });
+if (kind !== null) this.hint('postDefuse', kind, ['free']);
+if (kind !== null && !this.burns.some((p) => p.until > t && dist(p.x, p.y, bx, by) < 3 * UNIT) && !this.burnsMate(obs, bx, by)) return { kind, x: bx, y: by, why: '燒拆包' };
 if (this.antiDefuse(obs, out, bx, by)) return null;
 }
 return this.postUtility(obs, bx, by, s);
@@ -5407,10 +5428,12 @@ const smokers = [...new Set([...this.postSmokers, ...(this.can(me, 'smoke', ['fr
 const entries = [];
 for (const q of entrances) if (entries.every((p) => dist(p.ox, p.oy, q.ox, q.oy) >= (P.smokeGap + 2) * UNIT)) entries.push(q);
 const smoke = entries[smokers.indexOf(me.id)];
-if (smoke !== undefined && (enemies.some((p) => dist(p.x, p.y, smoke.ox, smoke.oy) < 10 * UNIT) || this.data.rules.bombTicks / this.tps - left < 4) && dist(smoke.ox, smoke.oy, bx, by) > 5 * UNIT && this.can(me, 'smoke', ['free']) && obs.enemies.length === 0 && this.smokes.every((p) => dist(p.x, p.y, smoke.ox, smoke.oy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, smoke.ox, smoke.oy) !== null) return this.fired('post', ['free'], { kind: 'smoke', x: smoke.ox, y: smoke.oy, why: '封回防入口' });
+if (smoke !== undefined && (enemies.some((p) => dist(p.x, p.y, smoke.ox, smoke.oy) < 10 * UNIT) || this.data.rules.bombTicks / this.tps - left < 4) && obs.enemies.length === 0 && this.may(me, 'smoke', ['free'])) this.hint('postSmoke', 'smoke', ['free']);
+if (smoke !== undefined && (enemies.some((p) => dist(p.x, p.y, smoke.ox, smoke.oy) < 10 * UNIT) || this.data.rules.bombTicks / this.tps - left < 4) && dist(smoke.ox, smoke.oy, bx, by) > 5 * UNIT && this.can(me, 'smoke', ['free']) && obs.enemies.length === 0 && this.smokes.every((p) => dist(p.x, p.y, smoke.ox, smoke.oy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, smoke.ox, smoke.oy) !== null) return { kind: 'smoke', x: smoke.ox, y: smoke.oy, why: '封回防入口' };
 const burners = alive.filter((id) => this.roles.of(id) === ANCHOR || this.roles.of(id) === SUPPORT);
 const reserve = burners[0] ?? alive[0];
-if (near && me.id !== reserve && this.can(me, 'molotov', ['free']) && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return this.fired('post', ['free'], { kind: 'molotov', ...target, why: '燒回防入口' });
+if (near && me.id !== reserve && this.may(me, 'molotov', ['free'])) this.hint('postBurn', 'molotov', ['free']);
+if (near && me.id !== reserve && this.can(me, 'molotov', ['free']) && this.burns.every((p) => p.until <= obs.tick || dist(p.x, p.y, target.x, target.y) >= 6 * UNIT) && this.util.solve(me.x, me.y, target.x, target.y) !== null && !obs.teammates.some((m) => m.alive && dist(m.x, m.y, target.x, target.y) < 4 * UNIT)) return { kind: 'molotov', ...target, why: '燒回防入口' };
 return null;
 }
 antiDefuse(obs, out, bx, by) {
@@ -5816,14 +5839,17 @@ const outer = { x: e.ox + (e.ox - e.ix) * 0.3, y: e.oy + (e.oy - e.iy) * 0.3 };
 const fire = this.burns.find((b) => t <= b.until && dist(b.x, b.y, outer.x, outer.y) < 4 * UNIT);
 const smoked = this.smokes.some((m) => dist(m.x, m.y, e.ox, e.oy) < P.smokeGap * UNIT);
 const burn = this.chokeBurn(me, s, e);
-if (burn !== null && fire === undefined && !smoked && !this.burnsMate(obs, outer.x, outer.y) && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return this.fired('chokeMolotov', ['chokeMolotov', 'free'], { kind: burn, ...outer, why: '燒入口' });
 const fading = fire !== undefined && fire.until - t < 3 * this.tps;
-if (this.can(me, 'smoke', ['free']) && !smoked && (top.n >= 2 || top.fl || fading) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return this.fired('holdSmoke', ['holdSmoke', 'free'], { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' });
+if (burn !== null && fire === undefined && !smoked) this.hint('chokeTime', burn, ['chokeMolotov', 'free']);
+if (!smoked && (top.n >= 2 || top.fl || fading) && this.may(me, 'smoke', ['free'])) this.hint('holdTime', 'smoke', ['holdSmoke', 'free']);
+if (burn !== null && fire === undefined && !smoked && !this.burnsMate(obs, outer.x, outer.y) && this.util.solve(me.x, me.y, outer.x, outer.y) !== null) return { kind: burn, ...outer, why: '燒入口' };
+if (this.can(me, 'smoke', ['free']) && !smoked && (top.n >= 2 || top.fl || fading) && this.util.solve(me.x, me.y, e.ox, e.oy) !== null) return { kind: 'smoke', x: e.ox, y: e.oy, why: '封入口' };
 if (top.n >= 1 && this.can(me, 'flash', ['free']) && !this.flashDone(obs, e)) {
 const th = this.perc.threats(e.ox, e.oy, 50).find((k) => dist(k.x, k.y, e.ox, e.oy) < 10 * UNIT);
 const lay = this.ctLayout(obs, p);
 const partner = obs.teammates.some((m) => m.alive && !m.blind && lay.get(m.id)?.site === s && dist(m.x, m.y, e.x, e.y) < P.deepMax * UNIT && this.g.los(m.x, m.y, e.x, e.y));
-if (th !== undefined && partner && this.util.solve(me.x, me.y, th.x, th.y) !== null && !this.mateSees(obs, th)) return this.fired('pairFlash', ['free'], { kind: 'flash', x: th.x, y: th.y, why: '配對閃' });
+if (th !== undefined && partner && !this.mateSees(obs, th)) this.hint('pairTime', 'flash', ['free']);
+if (th !== undefined && partner && this.util.solve(me.x, me.y, th.x, th.y) !== null && !this.mateSees(obs, th)) return { kind: 'flash', x: th.x, y: th.y, why: '配對閃' };
 }
 return null;
 }
@@ -5893,16 +5919,19 @@ const th = this.perc.threats(bx, by, 30).find((k) => dist(k.x, k.y, bx, by) < 12
 const c = th ?? { x: bx, y: by };
 const dm = obs.teammates.find((m) => m.alive && m.id === defuser.id);
 const walking = th === undefined && dm !== undefined && dist(dm.x, dm.y, bx, by) < this.util.blindRange + 8 * UNIT;
-if (!walking && this.util.solve(me.x, me.y, c.x, c.y) !== null && !this.mateSees(obs, c) && !this.flashTaken(obs, c)) wish = this.fired('retakeFlash', ['retakeFlash', 'free'], { kind: 'flash', x: c.x, y: c.y, why: '回防閃' });
+if (!walking && !this.mateSees(obs, c) && !this.flashTaken(obs, c)) this.hint('retakeFlashTime', 'flash', ['retakeFlash', 'free']);
+if (!walking && this.util.solve(me.x, me.y, c.x, c.y) !== null && !this.mateSees(obs, c) && !this.flashTaken(obs, c)) wish = { kind: 'flash', x: c.x, y: c.y, why: '回防閃' };
 }
 if (wish === null && act && go && !inside && obs.enemies.length === 0 && this.can(me, 'smoke', ['retakeSmoke'])) {
 const mine = this.ctEntrance(s, Math.max(0, this.retakeRoute));
 const e2 = this.intel.sites[s].entrances.filter((e) => e !== mine).sort((a, b) => dist(a.ix, a.iy, bx, by) - dist(b.ix, b.iy, bx, by))[0];
-if (e2 !== undefined && this.smokes.every((m) => dist(m.x, m.y, e2.ix, e2.iy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, e2.ix, e2.iy) !== null) wish = this.fired('retakeSmoke', ['retakeSmoke'], { kind: 'smoke', x: e2.ix, y: e2.iy, why: '回防煙封另一入口' });
+if (e2 !== undefined) this.hint('retakeSmokeTime', 'smoke', ['retakeSmoke']);
+if (e2 !== undefined && this.smokes.every((m) => dist(m.x, m.y, e2.ix, e2.iy) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, e2.ix, e2.iy) !== null) wish = { kind: 'smoke', x: e2.ix, y: e2.iy, why: '回防煙封另一入口' };
 }
 if (wish === null && go && !inside && this.can(me, 'smoke', ['retakeSmoke', 'free']) && obs.enemies.length === 0) {
 const th = this.perc.threats(bx, by, 40).find((k) => dist(k.x, k.y, bx, by) >= 6 * UNIT && dist(k.x, k.y, bx, by) < 20 * UNIT);
-if (th !== undefined && this.smokes.every((m) => dist(m.x, m.y, th.x, th.y) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, th.x, th.y) !== null) wish = this.fired('retakeSmoke', ['retakeSmoke', 'free'], { kind: 'smoke', x: th.x, y: th.y, why: '回防煙' });
+if (th !== undefined) this.hint('retakeSmokeTime2', 'smoke', ['retakeSmoke', 'free']);
+if (th !== undefined && this.smokes.every((m) => dist(m.x, m.y, th.x, th.y) >= P.smokeGap * UNIT) && this.util.solve(me.x, me.y, th.x, th.y) !== null) wish = { kind: 'smoke', x: th.x, y: th.y, why: '回防煙' };
 }
 if (act && go && !inside && !clear && stage.length > 0 && this.retakeGate(obs, (b.ticksLeft ?? 0) / this.tps)) {
 const others = this.ids.filter((id) => this.isAlive(obs, id));
@@ -6131,8 +6160,10 @@ out.role += '・等槍線';
 const d = Math.max(dist(soon.x, soon.y, q.x, q.y), 1);
 const f = Math.min(0.6, (6 * UNIT) / d);
 const sm = { x: soon.x + (q.x - soon.x) * f, y: soon.y + (q.y - soon.y) * f };
-if (this.can(me, 'smoke', ['free']) && this.util.solve(me.x, me.y, sm.x, sm.y) !== null) return this.fired('line', ['free'], { kind: 'smoke', x: sm.x, y: sm.y, why: '封槍線' });
-if (this.can(me, 'flash', ['free']) && d < this.util.flashRadius && this.util.solve(me.x, me.y, q.x, q.y) !== null && !this.flashTaken(obs, q)) return this.fired('line', ['free'], { kind: 'flash', x: q.x, y: q.y, why: '閃槍線' });
+if (this.may(me, 'smoke', ['free'])) this.hint('lineTime', 'smoke', ['free']);
+if (this.may(me, 'flash', ['free']) && d < this.util.flashRadius) this.hint('lineTime2', 'flash', ['free']);
+if (this.can(me, 'smoke', ['free']) && this.util.solve(me.x, me.y, sm.x, sm.y) !== null) return { kind: 'smoke', x: sm.x, y: sm.y, why: '封槍線' };
+if (this.can(me, 'flash', ['free']) && d < this.util.flashRadius && this.util.solve(me.x, me.y, q.x, q.y) !== null && !this.flashTaken(obs, q)) return { kind: 'flash', x: q.x, y: q.y, why: '閃槍線' };
 return null;
 }
 entersView(obs, c) {
@@ -6149,11 +6180,12 @@ const list = [...this.perc.known.values()].filter((k) => k.conf >= 70 && obs.tic
 for (const a of list) {
 const near = list.filter((k) => dist(k.x, k.y, a.x, a.y) < P.nadeCluster * UNIT);
 if (near.length < 2) continue;
+this.hint('heTime', 'he', ['free']);
 const x = near.reduce((s, k) => s + k.x, 0) / near.length;
 const y = near.reduce((s, k) => s + k.y, 0) / near.length;
 if (dist(me.x, me.y, x, y) < 6 * UNIT) continue;
 if (obs.teammates.some((m) => m.alive && dist(m.x, m.y, x, y) < 4 * UNIT)) continue;
-return this.fired('he', ['free'], { kind: 'he', x, y, why: '手雷' });
+return { kind: 'he', x, y, why: '手雷' };
 }
 return null;
 }
@@ -6702,6 +6734,12 @@ this.sndWait = 0;
 this.lstat = null;
 this.mpos = new Map();
 this.cands = [];
+this.cues = new Map();
+this.pk = null;
+this.peeked = new Map();
+this.lastPeek = null;
+this.wentIn = new Set();
+this.ndiag = new Map();
 }
 reset() {
 this.cur = null;
@@ -6733,13 +6771,15 @@ return [
 { key: 'f13', types: '*', min: 0, max: 1, fn: (c) => unit(c.obs.me.hp / 100) },
 { key: 'f16', types: 'apt', min: 0, max: 1, fn: (c) => (c.in.role === ENTRY ? 1 : 0) },
 { key: 'f6t', types: 't', min: 0, max: 1, fn: (c, a) => this.helper(c, a) },
+{ key: 'ftk', types: 't', min: 0, max: 1, fn: (c) => (c.in.follow ? 1 : 0) },
 { key: 'fhp', types: 'h', min: 0, max: 1, fn: (c, a) => (a.ref !== HERE && [c.in.hold, c.in.goal].some((p) => p !== null && dist(p.x, p.y, a.x, a.y) < UNIT) ? 1 : 0) },
 { key: 'f16w', types: 'h', min: 0, max: 1, fn: (c) => c.in.order.awpF },
-{ key: 'f21y', types: 'a', min: 0, max: 1, fn: (c) => c.in.order.yieldF },
+{ key: 'f21y', types: 'a', min: 0, max: 1, fn: (c) => c.yieldF },
 { key: 'f21s', types: 'a', min: 0, max: 1, fn: (c) => c.in.order.spawnF },
 { key: 'fw', types: 'ha', min: 0, max: 1, fn: (c) => (c.in.planWait ? 1 : 0) },
 { key: 'f18t', types: 'g', min: 0, max: 1, fn: (_c, a) => a.tg ?? 0 },
 { key: 'f18', types: 'g', min: -1, max: 1, fn: (_c, a) => a.v18 ?? 0 },
+{ key: 'f18a', types: 'g', min: 0, max: 1, fn: (c, a) => { const e = c.in.nade.post; return a.kind === 'smoke' && e !== null && dist(e.ox, e.oy, a.x, a.y) < 2 * UNIT ? 1 : 0; } },
 { key: 'f19', types: 'ra', min: 0, max: 1, fn: (c) => this.blocked(c) },
 { key: 'f20', types: '*', min: 0, max: 1, fn: (c, a) => (same(a, c.cur) ? Math.max(P.U.commitMin, 1 - c.held / (P.U.commitSec * this.tps)) : 0) },
 ];
@@ -6777,6 +6817,86 @@ const cy = p.y / UNIT;
 if (cx >= r.x0 - 8 && cx < r.x1 + 8 && cy >= r.y0 - 8 && cy < r.y1 + 8) return s;
 }
 return -1;
+}
+peekStep(obs, si) {
+const g = this.g;
+const me = obs.me;
+const t = obs.tick;
+const goal = si.goal;
+if (!si.allowPeek || si.stage === 'freeze' || goal === null || dist(me.x, me.y, goal.x, goal.y) < 450) {
+this.pk = null;
+return;
+}
+const pk = this.pk;
+if (pk !== null) {
+const dh = dist(me.x, me.y, pk.hold.x, pk.hold.y);
+if (pk.at < 0 && dh < 700) pk.at = t;
+const done = pk.at >= 0 && t - pk.at >= si.peekLen * this.data.rules.decisionInterval;
+if (done || dh > pk.reach || t - pk.since > 8 * this.tps) {
+this.peeked.set(pk.portal, t);
+if (done) this.lastPeek = { x: pk.hold.x, y: pk.hold.y, t };
+this.pk = null;
+}
+return;
+}
+const path = si.path;
+if (path.length < 4) return;
+let k = path.indexOf(g.cellOf(me.x, me.y));
+if (k < 0) {
+let best = Infinity;
+for (let i = 0; i < path.length; i++) {
+const c = g.center(path[i]);
+const d = dist(c.x, c.y, me.x, me.y);
+if (d < best) {
+best = d;
+k = i;
+}
+}
+}
+const intel = this.intel;
+for (let i = Math.max(k, 0); i < Math.min(path.length - 1, k + 12); i++) {
+if (intel.region[path[i]] === intel.region[path[i + 1]]) continue;
+const pid = intel.portalAt[path[i]] >= 0 ? intel.portalAt[path[i]] : intel.portalAt[path[i + 1]];
+if (pid < 0) continue;
+if (!intel.portals[pid].choke && !CH_SITES.some((s) => intel.sites[s].entrances.some((e) => e.portal === pid))) continue;
+const last = this.peeked.get(pid);
+if (last !== undefined && t - last < 15 * this.tps) continue;
+const lp = this.lastPeek;
+if (lp !== null && t - lp.t < 5 * this.tps && dist(lp.x, lp.y, g.center(path[i]).x, g.center(path[i]).y) < 8 * UNIT) continue;
+const fi = Math.min(path.length - 1, i + 6);
+const far = g.center(path[fi]);
+if (!this.perc.reachable(path[fi], t, 4) || this.perc.cleared(path[fi], t)) continue;
+if (obs.teammates.some((m) => m.alive && dist(m.x, m.y, far.x, far.y) < 6 * UNIT)) continue;
+const hi = Math.max(k, i - P.peekStop);
+if (hi === k && i - k < P.peekStop) {
+this.peeked.set(pid, t);
+continue;
+}
+const hold = g.center(path[hi]);
+this.pk = { portal: pid, hold, far, since: t, reach: dist(me.x, me.y, hold.x, hold.y) + 3 * UNIT, at: -1 };
+return;
+}
+}
+inRect(s, x, y) {
+const r = this.intel.sites[s].rect;
+const cx = Math.floor(x / UNIT);
+const cy = Math.floor(y / UNIT);
+return cx >= r.x0 && cx < r.x1 && cy >= r.y0 && cy < r.y1;
+}
+yieldF(obs, si) {
+const s = si.exec;
+const me = obs.me;
+const c = this.g.cellOf(me.x, me.y);
+if (s === null || si.planGo || c < 0) return 0;
+const dS = this.intel.distSite[s];
+if (dS[c] > P.yieldNear * 10 || si.role === ENTRY || this.inRect(s, me.x, me.y)) return 0;
+const mates = obs.teammates.filter((m) => m.alive);
+const other = s === 'A' ? 'B' : 'A';
+const went = ( id) => this.wentIn.has(`${s}${id}`) || (!P.wentInSite && this.wentIn.has(`${other}${id}`));
+if (si.role === AWP) return mates.filter((m) => went(m.id)).length < Math.min(2, mates.length) ? 1 : 0;
+const e = mates.find((m) => m.id === si.entryId);
+const ce = e === undefined ? -1 : this.g.cellOf(e.x, e.y);
+return e !== undefined && ce >= 0 && !went(e.id) && dS[ce] >= dS[c] - 10 ? 1 : 0;
 }
 blocked(c) {
 if (c.site < 0) return 0;
@@ -6837,6 +6957,13 @@ const q = this.mpos.get(m.id);
 const dt = q === undefined ? 0 : t - q.t;
 this.mpos.set(m.id, { x: m.x, y: m.y, t, vx: q === undefined || dt <= 0 ? 0 : m.x - q.x, vy: q === undefined || dt <= 0 ? 0 : m.y - q.y, dt: dt > 0 ? dt : (q?.dt ?? 0) });
 }
+for (const m of obs.teammates) {
+if (m.alive && m.firing) this.cues.set(m.id, { x: m.x, y: m.y, tick: t, dead: false });
+if (this.alive.has(m.id) && !m.alive) this.cues.set(m.id, { x: m.x, y: m.y, tick: t, dead: true });
+}
+for (const [id, q] of this.cues) if (t - q.tick > (q.dead ? 2 : 0.9) * this.tps) this.cues.delete(id);
+if (obs.round.phase === 'freeze') this.wentIn.clear();
+else for (const m of obs.teammates) if (m.alive) for (const s of CH_SITES) if (this.inRect(s, m.x, m.y)) this.wentIn.add(`${s}${m.id}`);
 this.hp = me.hp;
 this.alive = new Set(obs.teammates.filter((m) => m.alive).map((m) => m.id));
 this.bomb = obs.bomb.state;
@@ -6846,6 +6973,7 @@ return ev;
 }
 shadow(obs, si, li) {
 const ev = this.events(obs, si);
+this.peekStep(obs, si);
 this.look(obs, li, si.stage === 'freeze');
 if (si.stage === 'freeze') return;
 const k = Math.floor(obs.tick / this.data.rules.decisionInterval);
@@ -6870,14 +6998,14 @@ const zone = (this.cur !== null && this.cur.type === 'h' ? P.U.holdGap : P.U.hol
 const gd = si.goal === null ? Infinity : dist(me.x, me.y, si.goal.x, si.goal.y);
 if (si.goal !== null && gd >= zone) add('a', si.goal.x, si.goal.y);
 else if (si.goal !== null && gd > UNIT && !cands.some((q) => q.type === 'h' && q.ref !== HERE && dist(q.x, q.y, si.goal?.x ?? 0, si.goal?.y ?? 0) < UNIT)) add('h', si.goal.x, si.goal.y);
-if (si.peek !== null) add('p', si.peek.x, si.peek.y);
+if (this.pk !== null) add('p', this.pk.hold.x, this.pk.hold.y);
 if (threats.length > 0 && !si.fight) {
 const cv = si.cover();
 if (cv !== null) add('f', cv.x, cv.y);
 }
-for (const q of si.cues) { const d = dist(q.x, q.y, me.x, me.y); if (d >= 1800 && d <= 9 * UNIT && !me.hasBomb) add('t', q.x, q.y, q.id); }
+for (const [id, q0] of this.cues) { const q = { id, ...q0 }; const d = dist(q.x, q.y, me.x, me.y); if (d >= 1800 && d <= 9 * UNIT && !me.hasBomb) add('t', q.x, q.y, q.id); }
 const site = this.siteOf(si.goal);
-const c = { obs, in: si, threats, mates, cur: this.cur, held: this.since < 0 ? 0 : obs.tick - this.since, site };
+const c = { obs, in: si, threats, mates, cur: this.cur, held: this.since < 0 ? 0 : obs.tick - this.since, site, yieldF: this.yieldF(obs, si) };
 if (si.stage !== 'retake') {
 for (let s = 0; s < 2; s++) {
 if (s === site || site < 0) continue;
@@ -6895,7 +7023,7 @@ if (e !== undefined) add('r', e.ox, e.oy, 2 + ents.indexOf(e));
 const bx = obs.bomb.x;
 const by = obs.bomb.y;
 if (me.hasBomb && si.inSite) add('o', me.x, me.y);
-else if (me.team === 'CT' && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null && dist(me.x, me.y, bx, by) < 2 * UNIT) add('o', bx, by);
+else if (me.team === 'CT' && (obs.bomb.state === 'planted' || (obs.bomb.state === 'defusing' && me.defuseTicks > 0)) && bx !== null && by !== null && dist(me.x, me.y, bx, by) < 2 * UNIT) add('o', bx, by);
 this.nadeCands(obs, si, threats, add);
 const cur = this.cur;
 if (cur !== null && !cands.some((q) => same(q, cur)) && cands.length < 16) {
@@ -7086,36 +7214,69 @@ if (!res.active) {
 items.push({ kind, pur: 'free', target: null });
 continue;
 }
-for (const it of res.items) if (it.owner === me.id && it.kind === code && it.state === 'plan') items.push({ kind, pur: it.purpose, target: it.target });
-if (res.items.some((it) => it.owner === me.id && it.kind === code && it.state === 'free') || res.spare(me.id, code, null, own) > 0) items.push({ kind, pur: 'free', target: null });
+const st = ( it) => (N.used !== null && N.used.it === it ? N.used.state : it.state);
+const taken = res.items.filter((it) => it.owner === me.id && it.kind === code && st(it) === 'plan').length;
+for (const it of res.items) if (it.owner === me.id && it.kind === code && st(it) === 'plan') items.push({ kind, pur: it.purpose, target: it.target });
+if (res.items.some((it) => it.owner === me.id && it.kind === code && st(it) === 'free') || own - taken > 0) items.push({ kind, pur: 'free', target: null });
 }
 const hints = [...N.trig].map(([key, h]) => ({ key, ...h }));
+const dg = new Map();
+this.ndiag = dg;
+const dgOf = ( k) => { let r = dg.get(k); if (r === undefined) dg.set(k, (r = [0, 0, 0, 0, 0])); return r; };
 const all = [];
 items.slice(0, 4).forEach((it, i) => {
 const keys = hints.filter((h) => h.kind === it.kind && h.purposes.includes(it.pur)).map((h) => h.key);
 const all18 = [];
-this.landings(obs, si, it).forEach((p, o) => {
-const v = this.f18(obs, si, threats, it.kind, p);
-if (v !== null) all18.push({ p, v, o });
+const lp = this.landings(obs, si, it);
+const dr = dgOf(it.kind);
+dr[0]++;
+dr[1] += lp.length;
+const strict = it.pur !== 'entryFlash' && !keys.includes('entryFlash');
+const pe = si.nade.post;
+const bx = obs.bomb.x;
+const by = obs.bomb.y;
+const lines = keys.includes('lineTime2') ? this.lineSrc(obs, si) : [];
+const tgOf = (p, v) => {
+if (it.kind === 'flash' && v.v <= 0) return 0;
+const onFoe = () => threats.some((k) => k.conf >= 30 && dist(k.x, k.y, p.x, p.y) < 3 * UNIT);
+const onBomb = () => bx !== null && by !== null && dist(bx, by, p.x, p.y) < 3 * UNIT;
+const onEnt = () => CH_SITES.some((s) => this.intel.sites[s].entrances.some((e) => Math.min(dist(e.ox, e.oy, p.x, p.y), dist(e.ix, e.iy, p.x, p.y)) < 3 * UNIT + (it.kind === 'smoke' ? 0 : 0.3 * dist(e.ox, e.oy, e.ix, e.iy))));
+const ok1 = ( k) => {
+if (k === 'entryFlash') {
+if (!P.flashNeedInfo) return true;
+const sq = this.siteOf(p);
+return sq >= 0 ? si.nade.info(p, CH_SITES[sq]) : v.enemy > 0;
+}
+if (k === 'postSmoke') return pe !== null && dist(pe.ox, pe.oy, p.x, p.y) < 2 * UNIT;
+if (k === 'pairTime') return onFoe();
+if (k === 'lineTime2') return onFoe() || lines.some((q) => dist(q.x, q.y, p.x, p.y) < 3 * UNIT);
+if (k === 'retakeFlashTime' || k === 'postDefuse') return onFoe() || onBomb();
+if (k === 'heTime' || k === 'postBurn' || k === 'retakeSmokeTime2') return v.enemy > 0 || (k === 'postBurn' && onBomb());
+if (k === 'chokeTime' || k === 'holdTime' || k === 'retakeSmokeTime') return onEnt();
+return true;
+};
+return keys.some(ok1) ? 1 : 0;
+};
+lp.forEach((p, o) => {
+const v = this.f18(obs, si, threats, it.kind, p, strict);
+if (v !== null) all18.push({ p, v, o, tg: keys.length === 0 ? 0 : tgOf(p, v) });
 });
-all18.sort((x, y) => y.v.v - x.v.v || x.o - y.o);
+all18.sort((x, y) => y.tg - x.tg || y.v.v - x.v.v || x.o - y.o);
 const ok = [];
 let tries = 0;
 for (const q of all18) {
-if (ok.length >= 3 || ++tries > 10) break;
+if (ok.length >= 3 || ++tries > (it.kind === 'flash' ? 40 : 12)) break;
 if (si.nade.solve(q.p.x, q.p.y)) ok.push(q);
 }
-ok.forEach((q, j) => {
-const sq = it.kind === 'flash' ? this.siteOf(q.p) : -1;
-const info = sq >= 0 ? si.nade.info(q.p, CH_SITES[sq]) : q.v.enemy > 0;
-const tg = keys.some((k) => !(k === 'entryFlash' && P.flashNeedInfo && !info)) && (it.kind !== 'flash' || q.v.v > 0) ? 1 : 0;
-all.push({ i, j, kind: it.kind, tg, p: q.p, v: q.v.v });
-});
+dr[2] += all18.length;
+dr[3] += ok.length;
+ok.forEach((q, j) => all.push({ i, j, kind: it.kind, tg: q.tg, p: q.p, v: q.v.v }));
 });
 all.sort((x, y) => y.tg - x.tg || x.i - y.i || x.j - y.j);
 for (const q of all) {
 const a = add('g', q.p.x, q.p.y, q.i * 4 + q.j);
 if (a === null) break;
+dgOf(q.kind)[4]++;
 a.kind = q.kind;
 a.tg = q.tg;
 a.v18 = q.v;
@@ -7125,13 +7286,14 @@ landings(obs, si, it) {
 const me = obs.me;
 const t = obs.tick;
 const pts = [];
+const cap = it.kind === 'flash' ? 80 : 40;
 const push = ( x, y) => {
-if (pts.length < 40 && pts.every((q) => dist(q.x, q.y, x, y) >= 2 * UNIT)) pts.push({ x: Math.round(x), y: Math.round(y) });
+if (pts.length < cap && pts.every((q) => dist(q.x, q.y, x, y) >= 2 * UNIT)) pts.push({ x: Math.round(x), y: Math.round(y) });
 };
 const flash = it.kind === 'flash';
 const smoke = it.kind === 'smoke';
-const toward = ( a, b, cells, cap) => {
-const f = Math.min(cap, (cells * UNIT) / Math.max(dist(a.x, a.y, b.x, b.y), 1));
+const toward = ( a, b, cells, top) => {
+const f = Math.min(top, (cells * UNIT) / Math.max(dist(a.x, a.y, b.x, b.y), 1));
 push(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
 };
 const entPts = (e, site, n) => {
@@ -7142,22 +7304,24 @@ const hs = site.holds.filter((h) => !this.perc.cleared(h.cell, t) && dist(h.x, h
 for (const h of hs.slice(0, n)) for (const k of [4, 8]) toward(inner, h, k, 1);
 if (n >= 2) {
 const g = this.g;
+const R = P.flashDeep;
 const cx = Math.floor(e.ix / UNIT);
 const cy = Math.floor(e.iy / UNIT);
-for (let y = cy - 8; y <= cy + 8; y += 2) {
-for (let x = cx - 8; x <= cx + 8; x += 2) {
+for (let y = cy - R; y <= cy + R; y += 2) {
+for (let x = cx - R; x <= cx + R; x += 2) {
 if (x < 0 || y < 0 || x >= g.W || y >= g.H || g.isWall(x, y)) continue;
 const i = y * g.W + x;
 const c = g.center(i);
 const de = dist(c.x, c.y, e.ix, e.iy);
-if (!site.regions.has(this.intel.region[i]) || de > 8 * UNIT || de < 2 * UNIT || !g.los(e.ox, e.oy, c.x, c.y)) continue;
+if (!site.regions.has(this.intel.region[i]) || de > R * UNIT || de < 1.5 * UNIT) continue;
 push(c.x, c.y);
 }
 }
 }
 } else if (smoke) {
+for (const k of this.perc.known.values()) if (k.conf >= 50 && dist(k.x, k.y, e.ix, e.iy) <= 25 * UNIT && this.g.los(k.x, k.y, e.ix, e.iy)) toward(inner, k, P.smokeOff, 0.6);
 const hs = site.holds.filter((h) => dist(h.x, h.y, e.ix, e.iy) <= 25 * UNIT && this.g.los(h.x, h.y, e.ix, e.iy)).sort((a, b) => dist(b.x, b.y, e.ix, e.iy) - dist(a.x, a.y, e.ix, e.iy) || a.cell - b.cell);
-for (const h of hs.slice(0, n)) toward(inner, h, P.smokeOff, 0.6);
+for (const h of hs.slice(0, n >= 2 ? hs.length : n)) toward(inner, h, P.smokeOff, 0.6);
 push(e.ix, e.iy);
 push(e.ox, e.oy);
 } else {
@@ -7168,7 +7332,8 @@ push(e.ox, e.oy);
 const tgt = it.target;
 if (tgt !== null && tgt.site !== null) {
 const site = this.intel.sites[tgt.site];
-const e = tgt.ent >= 0 ? site.entrances[tgt.ent] : undefined;
+const pe = si.nade.ent;
+const e = smoke && pe !== null && site.entrances.includes(pe) ? pe : tgt.ent >= 0 ? site.entrances[tgt.ent] : undefined;
 if (e !== undefined) entPts(e, site, 3);
 else {
 for (const x of [...site.entrances].sort((a, b) => dist(me.x, me.y, a.ox, a.oy) - dist(me.x, me.y, b.ox, b.oy) || a.portal - b.portal).slice(0, 2)) entPts(x, site, 2);
@@ -7177,22 +7342,36 @@ push(site.cx, site.cy);
 }
 return pts;
 }
-const th = this.perc.threats(me.x, me.y, 30).filter((q) => dist(me.x, me.y, q.x, q.y) < 25 * UNIT).slice(0, 2);
+const th = this.perc.threats(me.x, me.y, 30).filter((q) => dist(me.x, me.y, q.x, q.y) < 25 * UNIT).slice(0, 3);
+for (const q of this.lineSrc(obs, si)) {
+if (it.kind === 'flash') push(q.x, q.y);
+else if (smoke) toward(si.soon ?? me, q, 6, 0.6);
+}
+const pe = si.nade.post;
+if (smoke && pe !== null) push(pe.ox, pe.oy);
+if (it.kind === 'he') {
+const list = [...this.perc.known.values()].filter((k) => k.conf >= 70 && t - k.tick <= this.tps && Math.abs(k.vx) + Math.abs(k.vy) < 40);
+for (const a of list) {
+const near = list.filter((k) => dist(k.x, k.y, a.x, a.y) < P.nadeCluster * UNIT);
+const x = near.reduce((q, k) => q + k.x, 0) / near.length;
+const y = near.reduce((q, k) => q + k.y, 0) / near.length;
+if (near.length >= 2 && dist(me.x, me.y, x, y) >= 6 * UNIT) push(x, y);
+}
+}
 if (smoke) {
 for (const f of obs.effects) if (f.kind === 'fire' && dist(me.x, me.y, f.x, f.y) < 20 * UNIT) push(f.x, f.y);
-for (const q of th) toward(me, q, 6, 0.6);
+const so = si.soon ?? me;
+for (const q of th) {
+toward(so, q, 6, 0.6);
+if (so !== me) toward(me, q, 6, 0.6);
+}
 }
 const bx = obs.bomb.x;
 const by = obs.bomb.y;
 if (!smoke && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null) push(bx, by);
 if (!smoke) for (const q of th) push(q.x, q.y);
-if (it.kind === 'he') {
-const list = [...this.perc.known.values()].filter((k) => k.conf >= 70 && t - k.tick <= this.tps);
-for (const a of list) {
-const near = list.filter((k) => dist(k.x, k.y, a.x, a.y) < P.nadeCluster * UNIT);
-if (near.length >= 2) push(near.reduce((q, k) => q + k.x, 0) / near.length, near.reduce((q, k) => q + k.y, 0) / near.length);
-}
-}
+const pe0 = si.nade.ent;
+if (pe0 !== null && !it.kind.startsWith('he')) for (const k of CH_SITES) if (this.intel.sites[k].entrances.includes(pe0)) entPts(pe0, this.intel.sites[k], 3);
 const s0 = this.siteOf(si.goal ?? me);
 const s = s0 >= 0 ? s0 : si.site;
 if (s >= 0) {
@@ -7202,12 +7381,13 @@ if (!smoke) push(site.cx, site.cy);
 }
 return pts;
 }
-f18(obs, si, threats, kind, p) {
+f18(obs, si, threats, kind, p, strict) {
 const me = obs.me;
 const g = this.g;
 const mates = obs.teammates.filter((m) => m.alive && m.id !== me.id);
 const th = threats.filter((q) => q.conf >= 30);
 if (kind === 'flash') {
+if (si.nade.taken(p)) return null;
 const R = si.nade.flashR;
 const side = this.data.rules.grenadeRules.flashSideDeg;
 let enemy = 0;
@@ -7222,10 +7402,17 @@ let guess = 0;
 const planted = obs.bomb.state === 'planted' || obs.bomb.state === 'defusing';
 const s = this.siteOf(p);
 if (s >= 0 && (me.team === 'T') !== planted) {
-for (const h of this.intel.sites[CH_SITES[s]].holds) {
+for (const h of [...this.intel.sites[CH_SITES[s]].holds, ...si.nade.deep(CH_SITES[s])]) {
 const d = dist(h.x, h.y, p.x, p.y);
-if (d < R && !this.perc.cleared(h.cell, obs.tick) && g.los(h.x, h.y, p.x, p.y)) guess += 0.5 * (1 - d / (2 * R));
+if (d < R && !this.perc.cleared(g.cellOf(h.x, h.y), obs.tick) && g.los(h.x, h.y, p.x, p.y)) guess += 0.5 * (1 - d / (2 * R));
 }
+}
+for (const sc of this.perc.sectors) {
+if (sc.conf < 25 || sc.kind === 'hurt') continue;
+const r = clamp(dist(sc.ox, sc.oy, p.x, p.y) / UNIT, sc.r0, sc.r1) * UNIT;
+const q = { x: sc.ox + cosd(sc.dir) * r, y: sc.oy + sind(sc.dir) * r };
+const d = dist(q.x, q.y, p.x, p.y);
+if (d < R && g.los(q.x, q.y, p.x, p.y)) guess += 0.5 * (1 - d / (2 * R));
 }
 let cost = 0;
 for (const m of mates) {
@@ -7233,6 +7420,7 @@ const pos = [{ x: m.x, y: m.y }, this.predict(m)];
 if (pos.some((q) => dist(q.x, q.y, p.x, p.y) < 3 * UNIT)) return null;
 const faces = Math.abs(adiff(angleTo(m.x, m.y, p.x, p.y), m.facing)) <= side;
 const near = dist(m.x, m.y, p.x, p.y) < R && g.los(m.x, m.y, p.x, p.y);
+if (near && strict) return null;
 if (near && (si.nade.fighting(m.id) || faces) && !si.nade.canHide(m.x, m.y, p)) return null;
 let worst = 0;
 for (const q of pos) {
@@ -7245,6 +7433,9 @@ return { v: Math.max(-1, Math.min(1, enemy + Math.min(1, guess) - cost)), enemy 
 }
 if (kind === 'smoke') {
 if (si.nade.smokes.some((m) => dist(m.x, m.y, p.x, p.y) < P.smokeGap * UNIT)) return null;
+const sx = obs.bomb.x;
+const sy = obs.bomb.y;
+if (me.team === 'T' && sx !== null && sy !== null && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && dist(sx, sy, p.x, p.y) < 5 * UNIT) return null;
 const r = 3 * UNIT;
 let lines = 0;
 for (const q of th) {
@@ -7266,8 +7457,21 @@ let enemy = 0;
 for (const q of th) if (dist(q.x, q.y, p.x, p.y) < r + UNIT) enemy += q.conf / 100;
 const bx = obs.bomb.x;
 const by = obs.bomb.y;
-const bomb = me.team === 'T' && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null && dist(bx, by, p.x, p.y) < r ? 0.5 : 0;
+const bomb = me.team === 'T' && (obs.bomb.state === 'planted' || obs.bomb.state === 'defusing') && bx !== null && by !== null && dist(bx, by, p.x, p.y) < r ? (obs.bomb.state === 'defusing' ? 1 : 0.5) : 0;
 return { v: Math.min(1, enemy + bomb), enemy };
+}
+lineSrc(obs, si) {
+const g = this.g;
+const t = obs.tick;
+const out = [];
+for (const a of this.perc.anon) {
+if (a.src !== 'death' || t - a.tick >= P.lineMemo * this.tps) continue;
+const th = this.perc.threats(a.x, a.y, 30).find((q) => dist(q.x, q.y, a.x, a.y) < 30 * UNIT && g.los(q.x, q.y, a.x, a.y));
+out.push(th ?? a);
+}
+const w = si.nade.awp;
+if (w !== null && t - w.tick < P.awpMemo * this.tps && dist(obs.me.x, obs.me.y, w.x, w.y) < 45 * UNIT) out.push(w);
+return out;
 }
 predict(m) {
 const q = this.mpos.get(m.id);
@@ -7479,6 +7683,9 @@ const peek = this.nav.peek === null ? null : this.nav.peek.hold;
 const reflex = evading || (tac.escape && tac.task !== 'save') || T.util.away !== null || T.mateFlash.some((x) => obs.tick <= x.pop + 2);
 const wish = T.lastWish;
 const g = this.g;
+const tn = T.thrownNow;
+const fs = T.flashSpots;
+const lastFs = tn?.kind === 'flash' && fs.length > 0 && fs[fs.length - 1].tick === obs.tick;
 const nade = {
 res: T.res,
 trig: T.trig,
@@ -7489,10 +7696,25 @@ return obs.tick - (T.mateFired.get(id) ?? -1e9) < 1.5 * T.tps || (m !== undefine
 },
 canHide: (x, y, c) => T.canHide(x, y, c, 4),
 flashR: T.util.flashRadius,
-smokes: T.smokes,
-burns: T.burns,
+smokes: tn?.kind === 'smoke' ? T.smokes.slice(0, -1) : T.smokes,
+burns: tn?.kind === 'molotov' || tn?.kind === 'incendiary' ? T.burns.slice(0, -1) : T.burns,
+used: tn?.it === null || tn === null ? null : { it: tn.it, state: tn.state },
 info: (p, site) => T.flashInfo(obs, p, site),
+deep: (s) => T.deepSpots(s),
+taken: (p) => {
+if (!lastFs) return T.flashTaken(obs, p);
+T.flashSpots = fs.slice(0, -1);
+const r = T.flashTaken(obs, p);
+T.flashSpots = fs;
+return r;
+},
+ent: T.planEnt,
+awp: T.awp,
+post: me.team === 'T' && planted && obs.bomb.site !== null ? T.postEnt(obs, obs.bomb.site) : null,
 };
+const w0 = this.nav.wps[this.nav.wpIdx];
+const k0 = w0 === undefined ? 0 : Math.min(1, (3 * UNIT) / Math.max(dist(me.x, me.y, w0.x, w0.y), 1));
+const soon = w0 === undefined ? null : { x: me.x + (w0.x - me.x) * k0, y: me.y + (w0.y - me.y) * k0 };
 const cues = [...T.coop.cues].map(([id, q]) => ({ id, x: q.x, y: q.y, dead: q.dead }));
 let actual;
 const near = ( p) => dist(me.x, me.y, p.x, p.y);
@@ -7516,8 +7738,6 @@ const planWait = T.waitTag === 'qpause' || T.waitTag === 'qlag' || T.waitTag ===
 const plan = T.plan;
 const exec = me.team === 'T' && plan !== null && plan.kind !== 'hold' && T.execTick >= 0 ? (plan.exec ?? plan.site) : null;
 const c0 = this.g.cellOf(me.x, me.y);
-let yieldF = 0;
-if (exec !== null && plan !== null && plan.kind !== 'go' && c0 >= 0 && this.intel.distSite[exec][c0] <= P.yieldNear * 10 && T.waitEntry(obs, exec)) yieldF = 1;
 let spawnF = 0;
 const ent = obs.teammates.find((m) => m.alive && m.id === T.roles.who(ENTRY));
 const site0 = exec ?? (plan !== null && plan.kind !== 'hold' ? plan.site : null);
@@ -7538,8 +7758,11 @@ act: tac.look !== null && !own ? { x: tac.look.x, y: tac.look.y } : null,
 ahead: mv.ahead, soundReact: this.combat.soundReact,
 };
 this.choice.shadow(obs, {
-stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nade, pathless, planWait, order: { yieldF, spawnF, awpF }, cues,
-site: site0 !== null ? SITE_IDS.indexOf(site0) : this.choice.siteOf(hold ?? tac.goal),
+stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nade, pathless, planWait, order: { spawnF, awpF },
+exec, planGo: plan === null || plan.kind === 'go', entryId: T.roles.who(ENTRY),
+path: this.nav.path, allowPeek: tac.allowPeek && !tac.commit, follow: tac.task === 'execute' || tac.task === 'retake',
+peekLen: this.nav.peekHold + (this.nav.attrs.aggression * 100 < P.shoulderBelow && this.nav.attrs.movement * 100 >= P.shoulderMove ? 6 : 0),
+site: site0 !== null ? SITE_IDS.indexOf(site0) : this.choice.siteOf(hold ?? tac.goal), soon,
 cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),
 group: (id) => T.groups?.get(id) ?? 0,
 }, li);
