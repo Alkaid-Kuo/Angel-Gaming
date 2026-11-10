@@ -130,6 +130,8 @@ export class Choice {
       { key: 'f16', types: 'apt', min: 0, max: 1, fn: (c) => (c.in.role === ENTRY ? 1 : 0) },
       // 補槍：我是看得到線索、離線索最近的可支援隊友（和 cooperation 的跟進人選一致）
       { key: 'f6t', types: 't', min: 0, max: 1, fn: (c, a) => this.helper(c, a) },
+      // 守的是指揮層給的守點或計畫目標（1 格內）
+      { key: 'fhp', types: 'h', min: 0, max: 1, fn: (c, a) => (a.ref !== HERE && [c.in.hold, c.in.goal].some((p) => p !== null && dist(p.x, p.y, a.x, a.y) < UNIT) ? 1 : 0) },
       // 狙擊手拿狙擊槍、離守點 4 格內（取代 awpSettle 的條件）
       { key: 'f16w', types: 'h', min: 0, max: 1, fn: (c) => c.in.order.awpF },
       // f21 進點順序：等突破手先進（yieldTo 的條件）、出生區讓位（spawnWait 的條件）
@@ -286,8 +288,10 @@ export class Choice {
     if (hold !== null && dist(me.x, me.y, hold.x, hold.y) < 3 * UNIT && dist(me.x, me.y, hold.x, hold.y) > UNIT) add('h', hold.x, hold.y);
     // 推進：目標在守的範圍（P.U.holdZone 格）外才算；範圍內走過去就是守
     const zone = (this.cur !== null && this.cur.type === 'h' ? P.U.holdGap : P.U.holdZone) * UNIT;
-    if (si.goal !== null && dist(me.x, me.y, si.goal.x, si.goal.y) >= zone) add('a', si.goal.x, si.goal.y);
-    else if (si.goal !== null && dist(me.x, me.y, si.goal.x, si.goal.y) > UNIT && cands.length === 1) add('h', si.goal.x, si.goal.y);
+    const gd = si.goal === null ? Infinity : dist(me.x, me.y, si.goal.x, si.goal.y);
+    if (si.goal !== null && gd >= zone) add('a', si.goal.x, si.goal.y);
+    // 目標在守的範圍內（1 格外）：守在目標點（對照組 r7l 這時記成守目標點）
+    else if (si.goal !== null && gd > UNIT && !cands.some((q) => q.type === 'h' && q.ref !== HERE && dist(q.x, q.y, si.goal?.x ?? 0, si.goal?.y ?? 0) < UNIT)) add('h', si.goal.x, si.goal.y);
     if (si.peek !== null) add('p', si.peek.x, si.peek.y);
     // 退掩體：對記得的威脅（接觸前；交戰中的撤退是 combat.finishMove）
     if (threats.length > 0 && !si.fight) {

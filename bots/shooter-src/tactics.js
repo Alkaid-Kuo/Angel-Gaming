@@ -153,7 +153,8 @@ export class Tactics {
     this.tagPick = null;
     /** 2.8：本回合打的戰術代號（自己喊的或聽到的 K:；執行品質用它的熟練度） @type {string | null} */
     this.tagNow = null;
-    /** 3.0：這一步停下來的原因碼（影子模式讀；不影響行為）：spawn 出生區讓位、yield 等突破手、awp 狙擊到位、line 架槍線、q* 執行品質（熟練度） */
+    /** 3.0：這一步停下來的原因碼（不影響行為）：spawn 出生區讓位、yield 等突破手、awp 狙擊到位、line 架槍線、q* 執行品質（熟練度）。
+     * 效用層只讀 q*（指揮層的合法等待，經 PlanIntent）；spawn、yield、awp、line 只給量測工具分類不一致原因，不當特徵 */
     this.waitTag = '';
     /** 3.0：這一步實際要丟的道具（影子模式讀；不影響行為） @type {import('./utility.js').ThrowWish | null} */
     this.lastWish = null;

@@ -169,7 +169,7 @@ a: [-1, 0.2, 0.4, 0.4, 0.2, 0.3, 0.3],
 t: [0, -1, 0.6, 0.6, -1, 0.6, -1],
 }),
 w: ({
-h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0, f16w: 0.5, fw: 0.5 },
+h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0, f16w: 0.5, fw: 0.5, fhp: 0.2 },
 a: { f4: -0.1, f5: -0.1, f9: -0.2, f10: -0.6, f10p: 0.5, f12: 0.1, f16: 0.1, f21y: -1, f21s: -1, fw: -1 },
 p: { f4: -0.2, f9: -0.2, f16: 0.1 },
 f: { f1: -0.3, f3: 0.3 },
@@ -182,7 +182,7 @@ commitMin: 0.3,
 commitSec: 1.5,
 dwellSec: 0.6,
 margin: 0.1,
-holdGap: 3,
+holdGap: 4,
 holdZone: 3,
 evCool: 0.3,
 },
@@ -6683,6 +6683,7 @@ return [
 { key: 'f13', types: '*', min: 0, max: 1, fn: (c) => unit(c.obs.me.hp / 100) },
 { key: 'f16', types: 'apt', min: 0, max: 1, fn: (c) => (c.in.role === ENTRY ? 1 : 0) },
 { key: 'f6t', types: 't', min: 0, max: 1, fn: (c, a) => this.helper(c, a) },
+{ key: 'fhp', types: 'h', min: 0, max: 1, fn: (c, a) => (a.ref !== HERE && [c.in.hold, c.in.goal].some((p) => p !== null && dist(p.x, p.y, a.x, a.y) < UNIT) ? 1 : 0) },
 { key: 'f16w', types: 'h', min: 0, max: 1, fn: (c) => c.in.order.awpF },
 { key: 'f21y', types: 'a', min: 0, max: 1, fn: (c) => c.in.order.yieldF },
 { key: 'f21s', types: 'a', min: 0, max: 1, fn: (c) => c.in.order.spawnF },
@@ -6804,8 +6805,9 @@ add('h', me.x, me.y, HERE);
 const hold = si.hold;
 if (hold !== null && dist(me.x, me.y, hold.x, hold.y) < 3 * UNIT && dist(me.x, me.y, hold.x, hold.y) > UNIT) add('h', hold.x, hold.y);
 const zone = (this.cur !== null && this.cur.type === 'h' ? P.U.holdGap : P.U.holdZone) * UNIT;
-if (si.goal !== null && dist(me.x, me.y, si.goal.x, si.goal.y) >= zone) add('a', si.goal.x, si.goal.y);
-else if (si.goal !== null && dist(me.x, me.y, si.goal.x, si.goal.y) > UNIT && cands.length === 1) add('h', si.goal.x, si.goal.y);
+const gd = si.goal === null ? Infinity : dist(me.x, me.y, si.goal.x, si.goal.y);
+if (si.goal !== null && gd >= zone) add('a', si.goal.x, si.goal.y);
+else if (si.goal !== null && gd > UNIT && !cands.some((q) => q.type === 'h' && q.ref !== HERE && dist(q.x, q.y, si.goal?.x ?? 0, si.goal?.y ?? 0) < UNIT)) add('h', si.goal.x, si.goal.y);
 if (si.peek !== null) add('p', si.peek.x, si.peek.y);
 if (threats.length > 0 && !si.fight) {
 const cv = si.cover();
