@@ -1000,6 +1000,9 @@ export class ShooterMatch {
   /** 套用選手指令（不合法的指令忽略） */
   applyCommands(pid: number, raw: unknown): void {
     if (this.over || !Array.isArray(raw)) return;
+    // 指令會改蹲下、開鏡、換槍（視野矩陣的輸入）：同一 tick 先前算好的視野快取作廢。
+    // 否則旁觀者（觀戰畫面、教練視野）在套用前先 observe，Bot 隨後在同一 tick 拿到的是舊視野，結果與批次不同
+    this.visTick = -1;
     const p = this.players[pid];
     for (const c of raw.slice(0, MAX_COMMANDS)) {
       if (typeof c !== 'object' || c === null) continue;
