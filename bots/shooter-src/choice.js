@@ -174,6 +174,8 @@ export class Choice {
     this.gDone = false;
     /** 上一次看到的 PlanIntent 目標（目標換地方＝計畫改變事件） @type {import('./base.js').Pt | null} */
     this.goal0 = null;
+    /** 上一次事件偵測時的階段（C2：單調前進的階段改變不冷卻） */
+    this.stg = '';
   }
 
   reset() {
@@ -181,6 +183,8 @@ export class Choice {
     this.yHeld = 0;
     this.yF = 0;
     this.goal0 = null;
+    /** 上一次事件偵測時的階段（C2：單調前進的階段改變不冷卻） */
+    this.stg = '';
     this.prev = null;
     this.since = -1;
     this.lastTick = -1e9;
@@ -432,8 +436,12 @@ export class Choice {
     const g0 = this.goal0;
     const goalMoved = si.goal !== null && (g0 === null || dist(g0.x, g0.y, si.goal.x, si.goal.y) >= P.U.holdZone * UNIT);
     if (si.goal !== null && (g0 === null || goalMoved)) this.goal0 = { x: si.goal.x, y: si.goal.y };
-    if (obs.chat.some((c) => /^(K:|E:|U:[prf])/.test(c.text)) || (goalMoved && g0 !== null)) evs.push('c');
-    const cool = (/** @type {string} */ e) => e !== 'd' && e !== 'm' && !(e === 'b' && objEv) && t - (this.evAt.get(e) ?? -1e9) < P.U.evCool * this.tps;
+    // 計畫階段單調前進（setup→wait→execute→post、setup→retake；P.U.stageNoCool）也算 c，而且不冷卻；往返的改變（execute→wait 等）不算這一條
+    const rk = (/** @type {string} */ s) => (s === 'setup' ? 0 : s === 'wait' || s === 'retake' ? 1 : s === 'execute' ? 2 : s === 'post' ? 3 : -1);
+    const stEv = P.U.stageNoCool && rk(this.stg) >= 0 && rk(si.stage) > rk(this.stg) && !(this.stg === 'wait' && si.stage === 'retake') && !(this.stg === 'retake');
+    this.stg = si.stage;
+    if (obs.chat.some((c) => /^(K:|E:|U:[prf])/.test(c.text)) || (goalMoved && g0 !== null) || stEv) evs.push('c');
+    const cool = (/** @type {string} */ e) => e !== 'd' && e !== 'm' && !(e === 'b' && objEv) && !(e === 'c' && stEv) && t - (this.evAt.get(e) ?? -1e9) < P.U.evCool * this.tps;
     let ev = evs.find((e) => !cool(e)) ?? '';
     const fx = new Set(obs.effects.filter((f) => near(f.x, f.y)).map((f) => `${f.kind}${Math.round(f.x / UNIT)},${Math.round(f.y / UNIT)}`));
     const flying = new Set(obs.projectiles.filter((q) => q.kind === 'flash' && near(q.x, q.y)).map((q) => `${Math.round(q.x / UNIT)},${Math.round(q.y / UNIT)}`));

@@ -186,6 +186,7 @@ margin: 0.1,
 holdGap: 4,
 holdZone: 3,
 fakeNade: false,
+stageNoCool: true,
 flashAnchor: true,
 evCool: 0.3,
 L: {
@@ -6797,12 +6798,14 @@ this.ndiag = new Map();
 this.nitems = [];
 this.gDone = false;
 this.goal0 = null;
+this.stg = '';
 }
 reset() {
 this.cur = null;
 this.yHeld = 0;
 this.yF = 0;
 this.goal0 = null;
+this.stg = '';
 this.prev = null;
 this.since = -1;
 this.lastTick = -1e9;
@@ -7001,8 +7004,11 @@ if (obs.bomb.state !== this.bomb || objEv) evs.push('b');
 const g0 = this.goal0;
 const goalMoved = si.goal !== null && (g0 === null || dist(g0.x, g0.y, si.goal.x, si.goal.y) >= P.U.holdZone * UNIT);
 if (si.goal !== null && (g0 === null || goalMoved)) this.goal0 = { x: si.goal.x, y: si.goal.y };
-if (obs.chat.some((c) => /^(K:|E:|U:[prf])/.test(c.text)) || (goalMoved && g0 !== null)) evs.push('c');
-const cool = ( e) => e !== 'd' && e !== 'm' && !(e === 'b' && objEv) && t - (this.evAt.get(e) ?? -1e9) < P.U.evCool * this.tps;
+const rk = ( s) => (s === 'setup' ? 0 : s === 'wait' || s === 'retake' ? 1 : s === 'execute' ? 2 : s === 'post' ? 3 : -1);
+const stEv = P.U.stageNoCool && rk(this.stg) >= 0 && rk(si.stage) > rk(this.stg) && !(this.stg === 'wait' && si.stage === 'retake') && !(this.stg === 'retake');
+this.stg = si.stage;
+if (obs.chat.some((c) => /^(K:|E:|U:[prf])/.test(c.text)) || (goalMoved && g0 !== null) || stEv) evs.push('c');
+const cool = ( e) => e !== 'd' && e !== 'm' && !(e === 'b' && objEv) && !(e === 'c' && stEv) && t - (this.evAt.get(e) ?? -1e9) < P.U.evCool * this.tps;
 let ev = evs.find((e) => !cool(e)) ?? '';
 const fx = new Set(obs.effects.filter((f) => near(f.x, f.y)).map((f) => `${f.kind}${Math.round(f.x / UNIT)},${Math.round(f.y / UNIT)}`));
 const flying = new Set(obs.projectiles.filter((q) => q.kind === 'flash' && near(q.x, q.y)).map((q) => `${Math.round(q.x / UNIT)},${Math.round(q.y / UNIT)}`));
