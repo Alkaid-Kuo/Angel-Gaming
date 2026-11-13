@@ -172,6 +172,9 @@ export class Choice {
     this.nitems = [];
     /** 目前的丟道具動作已經丟出（執行層回報；下一次決策前不再丟） */
     this.gDone = false;
+    /** 丟道具鎖定：選定的 g 最近一次觸發還在的 tick、最近一次 utility 有在瞄準丟出的 tick（P.U.gLock） */
+    this.gSeen = -1;
+    this.gAim = -1;
     /** 上一次看到的 PlanIntent 目標（目標換地方＝計畫改變事件） @type {import('./base.js').Pt | null} */
     this.goal0 = null;
     /** 上一次事件偵測時的階段（C2：單調前進的階段改變不冷卻） */
@@ -494,6 +497,14 @@ export class Choice {
     this.yF = yf;
     // 凍結期間只買與喊話（硬反射第 6 項），不決策
     if (si.stage === 'freeze') return;
+    // 丟道具鎖定（P.U.gLock；第 6 步修正 T4 種子 4）：選了 g 之後不重選，直到丟出、道具沒了、硬反射接管（交戰、閃避、下拆包）、或觸發消失超過 P.U.gLockSec 秒
+    if (P.U.gLock && this.cur !== null && this.cur.type === 'g' && !this.gDone) {
+      const c = this.cur;
+      if ((c.why ?? '').split('+').some((x) => si.nade.trig.has(x))) this.gSeen = obs.tick;
+      const has = c.kind !== undefined && obs.me.loadout.grenades.includes(/** @type {import('./base.js').GrenadeId} */ (c.kind));
+      // 選了以後一直丟不出去（不安全、丟不到，utility 沒開始瞄準）超過 gLockSec 秒也放開，讓效用層改選（換落點或不丟）
+      if (has && !si.fight && !si.reflex && !si.objOk && obs.tick - this.gSeen <= P.U.gLockSec * this.tps && obs.tick - this.gAim <= P.U.gLockSec * this.tps) return;
+    }
     const k = Math.floor(obs.tick / this.data.rules.decisionInterval);
     const n = si.p < 0.25 ? 6 : 5;
     if (ev === '' && (k - this.slot) % n !== 0) return;
@@ -581,6 +592,7 @@ export class Choice {
       this.since = obs.tick;
     }
     this.cur = pick;
+    if (pick !== null && pick.type === 'g') this.gSeen = this.gAim = obs.tick;
     const code = (/** @type {Cand} */ a) => `${a.type}${a.k}`;
     const act = si.actual === null ? '-' : this.match(cands, si.actual);
     this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex, look: '-', ls: 0, gk: `${pick?.kind === undefined ? '-' : codeOf(pick.kind)}${si.actual?.kind === undefined ? '-' : codeOf(si.actual.kind)}` });

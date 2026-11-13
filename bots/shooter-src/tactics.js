@@ -237,6 +237,8 @@ export class Tactics {
     /** 3.0 第 6 步修正（R2）：這一步我這組的待命格（T 執行中才有）、waitEntry 的 lead 條件成立（只讀，給效用層 f21y／f16w） @type {import('./analysis.js').Spot | null} */
     this.stageNow = null;
     this.leadNow = false;
+    /** 這一步 utility 有在瞄準丟出（丟道具鎖定讀；第 6 步修正） */
+    this.utilAiming = false;
     this.rotSince = -1;
     /** @type {Map<number, number>} */
     this.defuseStarted = new Map();
@@ -641,6 +643,8 @@ export class Tactics {
     const busy = new Set();
     for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
     const u = this.util.step(obs, wish, busy);
+    // 這一步有在瞄準丟出（通過了丟得到、閃光安全等條件；效用層的丟道具鎖定讀）
+    this.utilAiming = u.stop;
     // 宣告再丟（2.6）：開始轉向瞄準閃光就先喊，丟出要再等一次以上的決策；隊友聽到就把爆點當成已認領
     if (P.flashClaim && wish !== null && wish.kind === 'flash' && u.look !== null && u.thrown === null && this.util.away === null) {
       const c = this.myClaim;

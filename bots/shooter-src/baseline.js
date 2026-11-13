@@ -152,6 +152,7 @@ export default class ShooterBaseline {
       const it = act !== null && act.type === 'g' && !C.gDone && !tac.objective && !tac.commit && !tac.urgent && !tac.escape ? C.nitems[Math.floor(act.ref / 4)] : undefined;
       T.finish(obs, tac, it === undefined || act === null || act.kind === undefined ? null : { kind: /** @type {import('./base.js').GrenadeId} */ (act.kind), x: act.x, y: act.y, why: `效用・${act.why ?? it.pur}` }, it?.it ?? null);
       if (T.thrownNow !== null) C.gDone = true;
+      if (T.utilAiming) C.gAim = obs.tick;
     }
     /** @type {import('./base.js').Command[]} */
     const out = [];
@@ -195,6 +196,8 @@ export default class ShooterBaseline {
           tlook = sp.look;
         }
       } else if (act.type === 'o') stop = true;
+      // 丟道具：站住等丟出（對應 r7l「丟道具瞄準」的 halt；P.U.gLock 鎖定期間）
+      else if (act.type === 'g' && P.U.gLock && !C.gDone) stop = true;
     }
     if (goal !== null) this.nav.setGoal(goal.x, goal.y, route);
     else this.nav.clearGoal();

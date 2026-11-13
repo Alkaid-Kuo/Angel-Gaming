@@ -188,6 +188,8 @@ holdZone: 3,
 fakeNade: false,
 stageNoCool: true,
 entryNeedTrig: true,
+gLock: true,
+gLockSec: 1,
 flashAnchor: true,
 evCool: 0.3,
 L: {
@@ -3491,6 +3493,7 @@ this.curObs = null;
 this.flashOwner = false;
 this.stageNow = null;
 this.leadNow = false;
+this.utilAiming = false;
 this.rotSince = -1;
 this.defuseStarted = new Map();
 this.defuseIssued = -1;
@@ -3805,6 +3808,7 @@ if (item !== null && wish !== null) this.claimed.set(wish.kind, item);
 const busy = new Set();
 for (const [id, tk] of this.mateFired) if (t - tk < 1.5 * this.tps) busy.add(id);
 const u = this.util.step(obs, wish, busy);
+this.utilAiming = u.stop;
 if (P.flashClaim && wish !== null && wish.kind === 'flash' && u.look !== null && u.thrown === null && this.util.away === null) {
 const c = this.myClaim;
 if (c === null || t > c.until || dist(c.x, c.y, wish.x, wish.y) > 3 * UNIT) {
@@ -6798,6 +6802,8 @@ this.wentIn = new Set();
 this.ndiag = new Map();
 this.nitems = [];
 this.gDone = false;
+this.gSeen = -1;
+this.gAim = -1;
 this.goal0 = null;
 this.stg = '';
 }
@@ -7052,6 +7058,12 @@ const yf = si.stage === 'freeze' ? 0 : si.lead ? 1 : si.flashOwner || (si.flashe
 if (yf > 0 && !si.lead) this.yHeld += this.data.rules.decisionInterval;
 this.yF = yf;
 if (si.stage === 'freeze') return;
+if (P.U.gLock && this.cur !== null && this.cur.type === 'g' && !this.gDone) {
+const c = this.cur;
+if ((c.why ?? '').split('+').some((x) => si.nade.trig.has(x))) this.gSeen = obs.tick;
+const has = c.kind !== undefined && obs.me.loadout.grenades.includes( (c.kind));
+if (has && !si.fight && !si.reflex && !si.objOk && obs.tick - this.gSeen <= P.U.gLockSec * this.tps && obs.tick - this.gAim <= P.U.gLockSec * this.tps) return;
+}
 const k = Math.floor(obs.tick / this.data.rules.decisionInterval);
 const n = si.p < 0.25 ? 6 : 5;
 if (ev === '' && (k - this.slot) % n !== 0) return;
@@ -7120,6 +7132,7 @@ this.prev = this.cur;
 this.since = obs.tick;
 }
 this.cur = pick;
+if (pick !== null && pick.type === 'g') this.gSeen = this.gAim = obs.tick;
 const code = ( a) => `${a.type}${a.k}`;
 const act = si.actual === null ? '-' : this.match(cands, si.actual);
 this.log.push({ tick: obs.tick, ev, top: scored.slice(0, 3).map((q) => [code(q.a), q.s]), pick: pick === null ? '-' : code(pick), at: pick === null ? -1 : (pick.type === 'g' || pick.type === 't' || pick.type === 'r' || pick.ref === HERE ? -2 - pick.ref : this.g.cellOf(pick.x, pick.y)), act, stage: si.stage, fight: si.fight, reflex: si.reflex, look: '-', ls: 0, gk: `${pick?.kind === undefined ? '-' : codeOf(pick.kind)}${si.actual?.kind === undefined ? '-' : codeOf(si.actual.kind)}` });
@@ -7757,6 +7770,7 @@ act = obs.round.phase === 'freeze' ? null : C.cur;
 const it = act !== null && act.type === 'g' && !C.gDone && !tac.objective && !tac.commit && !tac.urgent && !tac.escape ? C.nitems[Math.floor(act.ref / 4)] : undefined;
 T.finish(obs, tac, it === undefined || act === null || act.kind === undefined ? null : { kind: (act.kind), x: act.x, y: act.y, why: `效用・${act.why ?? it.pur}` }, it?.it ?? null);
 if (T.thrownNow !== null) C.gDone = true;
+if (T.utilAiming) C.gAim = obs.tick;
 }
 const out = [];
 const late = [];
@@ -7793,6 +7807,7 @@ route = null;
 tlook = sp.look;
 }
 } else if (act.type === 'o') stop = true;
+else if (act.type === 'g' && P.U.gLock && !C.gDone) stop = true;
 }
 if (goal !== null) this.nav.setGoal(goal.x, goal.y, route);
 else this.nav.clearGoal();
