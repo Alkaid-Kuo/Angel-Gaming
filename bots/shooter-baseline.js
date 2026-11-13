@@ -7026,7 +7026,7 @@ step(obs, si) {
 const ev = this.events(obs, si);
 this.peekStep(obs, si);
 const yf = si.stage === 'freeze' ? 0 : si.lead ? 1 : si.flashOwner || (si.flashed && si.role !== AWP) || this.yHeld >= (si.rush ? P.yieldMax : P.yieldMaxSplit) * this.tps ? 0 : this.yieldF(obs, si);
-if (yf > 0) this.yHeld += this.data.rules.decisionInterval;
+if (yf > 0 && !si.lead) this.yHeld += this.data.rules.decisionInterval;
 this.yF = yf;
 if (si.stage === 'freeze') return;
 const k = Math.floor(obs.tick / this.data.rules.decisionInterval);

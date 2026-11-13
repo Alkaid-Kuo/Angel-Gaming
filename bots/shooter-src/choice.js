@@ -475,7 +475,8 @@ export class Choice {
     // f21y 每個 decide tick 算並計時（和 yieldTo 一樣：讓位累計到上限就不再讓；閃光剛炸開不讓〔狙擊手照讓〕；持有計畫進點閃的人不讓）
     // lead 分支（第 6 步修正，R2：原 tactics waitEntry 的「等突破手先走」待命，上限是執行後 P.stageLead 秒，不受讓位上限管，和 r7l 相同）
     const yf = si.stage === 'freeze' ? 0 : si.lead ? 1 : si.flashOwner || (si.flashed && si.role !== AWP) || this.yHeld >= (si.rush ? P.yieldMax : P.yieldMaxSplit) * this.tps ? 0 : this.yieldF(obs, si);
-    if (yf > 0) this.yHeld += this.data.rules.decisionInterval;
+    // lead 期間不佔讓位額度（r7l 的 waitEntry lead 和 yieldTo 是分開的；第 6 步修正批二）
+    if (yf > 0 && !si.lead) this.yHeld += this.data.rules.decisionInterval;
     this.yF = yf;
     // 凍結期間只買與喊話（硬反射第 6 項），不決策
     if (si.stage === 'freeze') return;
