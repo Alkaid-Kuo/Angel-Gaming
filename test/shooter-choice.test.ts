@@ -185,7 +185,7 @@ describe('Bot 3.0 視線頭：i2（指揮層這一步的看向）硬優先與失
     }
   }, 120000);
 
-  it('先架危險角度的預瞄 j 壓過 i2 與新鮮敵位；沒給就沒有；approachHard 關掉時只是計分候選', () => {
+  it('先架危險角度的預瞄 j：要停步時壓過 i2 與新鮮敵位；不停的預瞄只是計分候選（approachHard＝stop）；always 一律硬優先、off 純計分', () => {
     const { ch, obs } = setup();
     const me = obs.me;
     const perc = (ch as unknown as { perc: { known: Map<number, unknown>; lastHurt: unknown; sectors: unknown[] } }).perc;
@@ -206,14 +206,19 @@ describe('Bot 3.0 視線頭：i2（指揮層這一步的看向）硬優先與失
     expect(look(a1, j1)).toMatchObject({ t: 'j', x: j1.x, y: j1.y, hard: 'j' });
     // 預瞄消失：照 i2
     expect(look(a1, null)).toMatchObject({ t: 'i', hard: 'i' });
-    // 只有預瞄與敵位：預瞄優先
+    // 只有預瞄與敵位：要停步的預瞄優先
     expect(look(null, j1)).toMatchObject({ t: 'j', hard: 'j' });
-    // 計分版：新鮮敵位照舊硬優先
-    P.U.L.approachHard = false;
+    // 不停的預瞄（預瞄前進）：只是計分候選，新鮮敵位照舊硬優先
+    const j2 = { ...j1, stop: false };
+    expect(look(null, j2)).toMatchObject({ t: 'e', hard: 'e' });
+    P.U.L.approachHard = 'always';
     try {
+      expect(look(null, j2)).toMatchObject({ t: 'j', hard: 'j' });
+      // 純計分版：新鮮敵位照舊硬優先
+      P.U.L.approachHard = 'off';
       expect(look(null, j1)).toMatchObject({ t: 'e', hard: 'e' });
     } finally {
-      P.U.L.approachHard = true;
+      P.U.L.approachHard = 'stop';
     }
   }, 120000);
 });

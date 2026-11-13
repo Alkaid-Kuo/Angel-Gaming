@@ -198,7 +198,7 @@ freshConf: 60,
 freshSec: 3,
 hurtSameDeg: 45,
 i2Hard: true,
-approachHard: true,
+approachHard: ('stop'),
 holdLockCap: true,
 holdScan: true,
 },
@@ -7201,8 +7201,8 @@ st.hard = 'd';
 st.dl = lockC !== null;
 }
 }
-if (L.approachHard && pick === null) {
-const ja = cands.find((q) => q.t === 'j');
+if (L.approachHard !== 'off' && pick === null) {
+const ja = cands.find((q) => q.t === 'j' && (L.approachHard === 'always' || (li.pre !== null && li.pre.stop)));
 if (ja !== undefined) {
 pick = ja;
 st.hard = 'j';

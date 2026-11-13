@@ -681,9 +681,9 @@ export class Choice {
         st.dl = lockC !== null;
       }
     }
-    // 3. 先架危險角度的預瞄（j；P.U.L.approachHard）：judgment.approach 每拍重給，沒有就沒有候選。關掉時 j 只是計分候選；不論哪種，沒採用 j 時 baseline 不送它的停步（耦合規則）
-    if (L.approachHard && pick === null) {
-      const ja = cands.find((q) => q.t === 'j');
+    // 3. 先架危險角度的預瞄（j；P.U.L.approachHard）：judgment.approach 每拍重給，沒有就沒有候選。'stop'＝只在要停步的拍硬優先、'always'＝一律、'off'＝純計分；不論哪種，沒採用 j 時 baseline 不送它的停步（耦合規則）
+    if (L.approachHard !== 'off' && pick === null) {
+      const ja = cands.find((q) => q.t === 'j' && (L.approachHard === 'always' || (li.pre !== null && li.pre.stop)));
       if (ja !== undefined) {
         pick = ja;
         st.hard = 'j';
