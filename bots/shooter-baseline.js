@@ -185,6 +185,7 @@ dwellSec: 0.6,
 margin: 0.1,
 holdGap: 4,
 holdZone: 3,
+fakeNade: false,
 evCool: 0.3,
 L: {
 b: ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2, j: 1 }),
@@ -7306,7 +7307,7 @@ this.ndiag = dg;
 const dgOf = ( k) => { let r = dg.get(k); if (r === undefined) dg.set(k, (r = [0, 0, 0, 0, 0])); return r; };
 const all = [];
 items.slice(0, 4).forEach((it, i) => {
-const keys = hints.filter((h) => h.kind === it.kind && h.purposes.includes(it.pur)).map((h) => h.key);
+const keys = hints.filter((h) => h.kind === it.kind && h.purposes.includes(it.pur) && (P.U.fakeNade || h.key !== 'fakeUtil')).map((h) => h.key);
 const all18 = [];
 const lp = this.landings(obs, si, it);
 const dr = dgOf(it.kind);

@@ -830,7 +830,8 @@ export class Choice {
     /** 全部道具的落點候選；候選上限 16 時，有觸發的先放 @type {{ i: number, j: number, kind: string, tg: number, p: import('./base.js').Pt, v: number, why: string }[]} */
     const all = [];
     items.slice(0, 4).forEach((it, i) => {
-      const keys = hints.filter((h) => h.kind === it.kind && h.purposes.includes(it.pur)).map((h) => h.key);
+      // 佯攻雷（觸發紀錄 fakeUtil）預設不當觸發（P.U.fakeNade；第 6 步修正：r7l 同時機幾乎不丟，新行為沒有證據前收回）
+      const keys = hints.filter((h) => h.kind === it.kind && h.purposes.includes(it.pur) && (P.U.fakeNade || h.key !== 'fakeUtil')).map((h) => h.key);
       // 落點先看合不合觸發、再照 f18 由高到低（同分照產生順序：計畫目標在前），試丟不丟得到（閃光最多試 40 個、其他 12 個），取前 3
       /** @type {{ p: import('./base.js').Pt, v: { v: number, enemy: number, raw: number }, o: number, tg: number, why: string }[]} */
       const all18 = [];
