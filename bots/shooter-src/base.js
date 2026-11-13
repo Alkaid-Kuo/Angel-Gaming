@@ -343,6 +343,13 @@ export const P = {
        * false＝j 只是計分候選（丁-1 搜權重用）；兩種都有耦合規則：視線頭沒採用 j 就不送它的停步
        */
       approachHard: true,
+      /**
+       * 守位、沒在移動時（第 6 步修正批二 C1，2026-11-13 審查核准，只限守位）：
+       * holdLockCap：雷達上以外的新鮮敵位鎖定要在 25 格內（r7l combat.look 第 4 項的上限）；
+       * holdScan：非硬優先時照 r7l 的掃描節奏（主要入口三次裡兩次、其餘輪掃；combat.look 第 6 項），計數是視線頭自己的。關掉＝照分數（留給丁-1）
+       */
+      holdLockCap: true,
+      holdScan: true,
     },
   },
   /**

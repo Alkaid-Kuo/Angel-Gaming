@@ -135,6 +135,9 @@ export class Choice {
     this.lkSince = -1;
     /** 硬優先鎖定的敵人 id（信心掉到 freshConf 以下才放） */
     this.lockId = -1;
+    /** 守位掃描的計數（P.U.L.holdScan；視線頭自己的狀態，和 r7l combat.look 第 6 項同一套節奏） */
+    this.scanIdx = 0;
+    this.scanLeft = 0;
     /** 虛擬朝向（影子模式：照視線頭的選擇、以引擎轉速轉過去的朝向；不歸視線頭管時跟實際朝向同步） */
     this.vface = 0;
     this.lkTick = -1;
@@ -184,6 +187,8 @@ export class Choice {
     this.lk = null;
     this.lkSince = -1;
     this.lockId = -1;
+    this.scanIdx = 0;
+    this.scanLeft = 0;
     this.lkTick = -1;
     this.sndObj = null;
     this.lstat = null;
@@ -645,7 +650,9 @@ export class Choice {
       }
       if (best !== null) this.lockId = best.id;
     }
-    const lock = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+    let lock = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+    // 守位、沒在移動時（r7l combat.look 的 holding）：雷達上以外的鎖定要在 25 格內（r7l 第 4 項記得的敵人的上限；P.U.L.holdLockCap）
+    if (L.holdLockCap && li.holding && lock !== undefined && !obs.radar.some((r) => r.id === lock?.id) && dist(me.x, me.y, lock.x, lock.y) > 25 * UNIT) lock = undefined;
     /** @type {LookCand | null} */
     const lockC = lock === undefined ? null : (cands.find((q) => q.t === 'e' && q.id === lock.id) ?? { t: 'e', ref: 8, id: lock.id, x: lock.x, y: lock.y, s: L.b.e + L.w.econf * (lock.conf / 100) });
     // 1. 探頭鎖窄口
@@ -687,7 +694,12 @@ export class Choice {
       pick = lockC;
       st.hard = 'e';
     }
-    // 6. 照分數，加防抖（換方向要差 minDeg 度、停滿 dwellSec 秒；目前的候選消失了就直接換）
+    // 6. 守位、沒在移動時照 r7l 的掃描節奏（P.U.L.holdScan；combat.look 第 6 項）：主要入口（守點看向）三次裡兩次，其餘輪掃看得到的其他交界
+    if (L.holdScan && pick === null && li.holding && li.hold !== null) {
+      pick = this.holdScan(obs, li.hold);
+      st.hard = 'h';
+    }
+    // 7. 照分數，加防抖（換方向要差 minDeg 度、停滿 dwellSec 秒；目前的候選消失了就直接換）
     if (pick === null) {
       cands.sort((p, q) => q.s - p.s || LOOKS.indexOf(p.t) - LOOKS.indexOf(q.t) || p.ref - q.ref);
       // 沒有任何候選（停著、沒守點、沒路點）：照舊看原來的方向
@@ -706,6 +718,33 @@ export class Choice {
       e.look = `${pick.t}${pick.ref}`;
       e.ls = pick.s;
     }
+  }
+
+  /**
+   * 守位掃描（r7l combat.look 第 6 項的同一套節奏，計數是視線頭自己的）：views＝守點看向＋最多 2 個看得到的其他交界（離守點 5～25 格、6 秒內可能有人、和主要方向差 20° 以上）；
+   * 每 P.scanEvery 次換一格，三次裡兩次看主要入口。主要入口是 w0，其他是 c（ref＝序號）
+   * @param {import('./base.js').Observation} obs @param {{ x: number, y: number, fx: number, fy: number }} hold @returns {LookCand}
+   */
+  holdScan(obs, hold) {
+    const g = this.g;
+    const t = obs.tick;
+    if (--this.scanLeft <= 0) {
+      this.scanLeft = P.scanEvery;
+      this.scanIdx++;
+    }
+    /** @type {import('./base.js').Pt[]} */
+    const views = [{ x: hold.fx, y: hold.fy }];
+    for (const p of this.intel.portals) {
+      if (views.length >= 3) break;
+      const d = dist(p.x, p.y, hold.x, hold.y);
+      if (d < 5 * UNIT || d > 25 * UNIT || !g.los(hold.x, hold.y, p.x, p.y)) continue;
+      if (!this.perc.reachable(g.cellOf(p.x, p.y), t, 6)) continue;
+      if (Math.abs(adiff(angleTo(hold.x, hold.y, p.x, p.y), angleTo(hold.x, hold.y, hold.fx, hold.fy))) < 20) continue;
+      views.push({ x: p.x, y: p.y });
+    }
+    const k = this.scanIdx % (views.length + 1);
+    const v = k < 2 ? views[0] : views[k - 1];
+    return k < 2 ? { t: 'w', ref: 0, id: -1, x: v.x, y: v.y, s: 0 } : { t: 'c', ref: 10 + k, id: -1, x: v.x, y: v.y, s: 0 };
   }
 
   /** 同一個看向：種類相同，記得的敵位看敵人 id，其他看參數 @param {LookCand} a @param {LookCand} b */

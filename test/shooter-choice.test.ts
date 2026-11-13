@@ -113,7 +113,7 @@ describe('Bot 3.0 效用層：決策與視線頭（第 6 步起驅動行為）',
     expect(new Set(act.map((l) => l.lk?.t)).size).toBeGreaterThanOrEqual(4);
   });
 
-  it('視線頭硬優先：探頭 hold／shoulder 鎖窄口；先架危險角度的預瞄 j；沒在探、沒挨打、沒有預瞄與指揮層的看向（i2）時，新鮮的記得敵位（信心 ≥ 60、3 秒內）優先', () => {
+  it('視線頭硬優先：探頭 hold／shoulder 鎖窄口；先架危險角度的預瞄 j；沒在探、沒挨打、沒有預瞄與指揮層的看向（i2）時，新鮮的記得敵位（信心 ≥ 60、3 秒內；守位時雷達外要在 25 格內）優先，守位沒有鎖定時照掃描節奏', () => {
     let peeks = 0;
     let fresh = 0;
     for (const l of looks) {
@@ -123,6 +123,8 @@ describe('Bot 3.0 效用層：決策與視線頭（第 6 步起驅動行為）',
         expect(l.st.hard).toBe('p');
         expect(l.lk?.t === 'i' && l.lk.ref === 0).toBe(true);
       } else if (l.st.hard === 'j') expect(l.lk?.t).toBe('j');
+      // 守位掃描（holdScan；守位時雷達外 25 格以上的敵位不鎖，照 r7l 的掃描節奏）
+      else if (l.st.hard === 'h') expect(['w', 'c']).toContain(l.lk?.t);
       else if (l.st.hard === 'i') expect(l.lk?.t === 'i' && l.lk.ref === 2).toBe(true);
       else if (l.st.hard !== 'd' && l.st.thr !== null && l.st.thr[2]) {
         fresh++;

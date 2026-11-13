@@ -198,6 +198,8 @@ freshSec: 3,
 hurtSameDeg: 45,
 i2Hard: true,
 approachHard: true,
+holdLockCap: true,
+holdScan: true,
 },
 },
 retakeRouteMemo: false,
@@ -6773,6 +6775,8 @@ this.trace = [];
 this.lk = null;
 this.lkSince = -1;
 this.lockId = -1;
+this.scanIdx = 0;
+this.scanLeft = 0;
 this.vface = 0;
 this.lkTick = -1;
 this.rface = 0;
@@ -6805,6 +6809,8 @@ this.lastTick = -1e9;
 this.lk = null;
 this.lkSince = -1;
 this.lockId = -1;
+this.scanIdx = 0;
+this.scanLeft = 0;
 this.lkTick = -1;
 this.sndObj = null;
 this.lstat = null;
@@ -7171,7 +7177,8 @@ if (best === null || k.conf > best.conf || (k.conf === best.conf && (dist(me.x, 
 }
 if (best !== null) this.lockId = best.id;
 }
-const lock = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+let lock = this.lockId >= 0 ? this.perc.known.get(this.lockId) : undefined;
+if (L.holdLockCap && li.holding && lock !== undefined && !obs.radar.some((r) => r.id === lock?.id) && dist(me.x, me.y, lock.x, lock.y) > 25 * UNIT) lock = undefined;
 const lockC = lock === undefined ? null : (cands.find((q) => q.t === 'e' && q.id === lock.id) ?? { t: 'e', ref: 8, id: lock.id, x: lock.x, y: lock.y, s: L.b.e + L.w.econf * (lock.conf / 100) });
 if (li.peek !== null && li.peek.lock) {
 pick = cands.find((q) => q.t === 'i' && q.ref === 0) ?? null;
@@ -7206,6 +7213,10 @@ if (pick === null && lockC !== null) {
 pick = lockC;
 st.hard = 'e';
 }
+if (L.holdScan && pick === null && li.holding && li.hold !== null) {
+pick = this.holdScan(obs, li.hold);
+st.hard = 'h';
+}
 if (pick === null) {
 cands.sort((p, q) => q.s - p.s || LOOKS.indexOf(p.t) - LOOKS.indexOf(q.t) || p.ref - q.ref);
 pick = cands[0] ?? this.lk;
@@ -7223,6 +7234,26 @@ if (e !== undefined && e.tick === t && pick !== null) {
 e.look = `${pick.t}${pick.ref}`;
 e.ls = pick.s;
 }
+}
+holdScan(obs, hold) {
+const g = this.g;
+const t = obs.tick;
+if (--this.scanLeft <= 0) {
+this.scanLeft = P.scanEvery;
+this.scanIdx++;
+}
+const views = [{ x: hold.fx, y: hold.fy }];
+for (const p of this.intel.portals) {
+if (views.length >= 3) break;
+const d = dist(p.x, p.y, hold.x, hold.y);
+if (d < 5 * UNIT || d > 25 * UNIT || !g.los(hold.x, hold.y, p.x, p.y)) continue;
+if (!this.perc.reachable(g.cellOf(p.x, p.y), t, 6)) continue;
+if (Math.abs(adiff(angleTo(hold.x, hold.y, p.x, p.y), angleTo(hold.x, hold.y, hold.fx, hold.fy))) < 20) continue;
+views.push({ x: p.x, y: p.y });
+}
+const k = this.scanIdx % (views.length + 1);
+const v = k < 2 ? views[0] : views[k - 1];
+return k < 2 ? { t: 'w', ref: 0, id: -1, x: v.x, y: v.y, s: 0 } : { t: 'c', ref: 10 + k, id: -1, x: v.x, y: v.y, s: 0 };
 }
 sameLook(a, b) {
 return a.t === b.t && (a.t === 'e' ? a.id === b.id : a.ref === b.ref);
