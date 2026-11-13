@@ -160,30 +160,27 @@ function driver(seed: number, pick: (pid: number) => CompiledBot, cb: (pid: numb
 const kindName = (k: string, team: 'T' | 'CT'): string => (k === 'f' ? 'flash' : k === 's' ? 'smoke' : k === 'h' ? 'he' : team === 'T' ? 'molotov' : 'incendiary');
 
 describe('Bot 3.0 資源層：整場', () => {
-  it('購買時序與購買單生效：隊友在聽到 U:b 之後才買，每人買完後持有的道具（原有＋買的）包含 U:b 指定的', () => {
-    let checked = 0;
+  it('購買時序與購買單生效：隊友在聽到 U:b 之後才買，每人買完後持有的道具（回合開始時原有＋買的）包含 U:b 指定的；每個種子各自要檢查到', () => {
     for (const seed of [3, 4]) {
-      // 從第 2 回合起找第一個有購買單的回合（最多到第 6 回合）：第 2 回合有沒有購買單看第 1 回合的經濟，固定第 2 回合會依賴種子
-      for (let round = 2; round <= 6; round++) {
-        const n = checkRound(seed, round);
-        checked += n;
-        if (n > 0) break;
-      }
+      // 從第 2 回合起找第一個有購買單的回合（最多到第 6 回合）：第 2 回合有沒有購買單看第 1 回合的經濟，固定第 2 回合會依賴種子；每個種子各自要檢查到
+      let checked = 0;
+      for (let round = 2; round <= 6 && checked === 0; round++) checked = checkRound(seed, round);
+      expect(checked, `種子 ${seed}`).toBeGreaterThan(0);
     }
-    expect(checked).toBeGreaterThan(0);
   }, 240000);
 
-  /** 一個種子的某一回合：檢查購買時序與購買單（持有＝第一次購買時身上原有的＋這次買的），回傳檢查過的購買單筆數（這一回合沒有購買單就是 0） */
+  /** 一個種子的某一回合：檢查購買時序與購買單（持有＝回合開始時身上原有的＋這次買的），回傳檢查過的購買單筆數（這一回合沒有購買單就是 0） */
   function checkRound(seed: number, round: number): number {
     let checked = 0;
     const orders = new Map<number, string>();
     const saidAt = new Map<string, number>();
     const buyAt = new Map<number, number>();
     const bought = new Map<number, string[]>();
-    /** 第一次購買時身上已經有的道具（上一回合留下的；購買單算的是持有，已經有的不必再買） */
+    /** 回合開始時身上已經有的道具（上一回合留下的；購買單算的是持有，已經有的不必再買；每個人都記，不只有下購買指令的人） */
     const had = new Map<number, string[]>();
     const { d, m } = driver(seed, () => base, (pid, obs, cmds) => {
       if (obs.round.number !== round) return;
+      if (!had.has(pid)) had.set(pid, [...obs.me.loadout.grenades]);
       for (const c of cmds) {
         if (c.type === 'say' && c.text.startsWith('U:b')) {
           saidAt.set(obs.me.team, obs.tick);
@@ -192,7 +189,6 @@ describe('Bot 3.0 資源層：整場', () => {
         if (c.type === 'buy' && !buyAt.has(pid)) {
           buyAt.set(pid, obs.tick);
           bought.set(pid, [...c.items]);
-          had.set(pid, [...obs.me.loadout.grenades]);
         }
       }
     });
