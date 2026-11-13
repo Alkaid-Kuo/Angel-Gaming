@@ -204,6 +204,7 @@ i2Hard: true,
 approachHard: ('stop'),
 holdLockCap: true,
 holdScan: true,
+holdScanEvery: 9,
 },
 },
 retakeRouteMemo: false,
@@ -7259,7 +7260,7 @@ holdScan(obs, hold) {
 const g = this.g;
 const t = obs.tick;
 if (--this.scanLeft <= 0) {
-this.scanLeft = P.scanEvery;
+this.scanLeft = P.U.L.holdScanEvery;
 this.scanIdx++;
 }
 const views = [{ x: hold.fx, y: hold.fy }];

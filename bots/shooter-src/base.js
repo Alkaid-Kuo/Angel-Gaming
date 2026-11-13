@@ -367,6 +367,8 @@ export const P = {
        */
       holdLockCap: true,
       holdScan: true,
+      /** 守位掃描每幾次換一格（r7l combat.look 是 P.scanEvery＝9；審查要求的對照：放慢三倍） */
+      holdScanEvery: 9,
     },
   },
   /**

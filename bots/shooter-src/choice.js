@@ -742,14 +742,14 @@ export class Choice {
 
   /**
    * 守位掃描（r7l combat.look 第 6 項的同一套節奏，計數是視線頭自己的）：views＝守點看向＋最多 2 個看得到的其他交界（離守點 5～25 格、6 秒內可能有人、和主要方向差 20° 以上）；
-   * 每 P.scanEvery 次換一格，三次裡兩次看主要入口。主要入口是 w0，其他是 c（ref＝序號）
+   * 每 P.U.L.holdScanEvery 次換一格（r7l 是 P.scanEvery），三次裡兩次看主要入口。主要入口是 w0，其他是 c（ref＝序號）
    * @param {import('./base.js').Observation} obs @param {{ x: number, y: number, fx: number, fy: number }} hold @returns {LookCand}
    */
   holdScan(obs, hold) {
     const g = this.g;
     const t = obs.tick;
     if (--this.scanLeft <= 0) {
-      this.scanLeft = P.scanEvery;
+      this.scanLeft = P.U.L.holdScanEvery;
       this.scanIdx++;
     }
     /** @type {import('./base.js').Pt[]} */
