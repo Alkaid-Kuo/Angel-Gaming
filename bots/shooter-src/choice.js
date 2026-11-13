@@ -927,6 +927,9 @@ export class Choice {
         const v = this.f18(obs, si, threats, it.kind, p, strict);
         if (v === null) return;
         const ks = keys.length === 0 ? [] : tgOf(p, v);
+        // 計畫的進點閃要有觸發才是候選（P.U.entryNeedTrig）：觸發紀錄 entryFlash 帶著指揮層的順序條件（輪到誰丟、下一個是不是我、先煙後閃的等待；tactics 照算、只讀），
+        // 沒有觸發的進點閃（第 6 步修正批二歸因：r7l 這時不會丟的 42 顆，當拍都沒有觸發）不丟
+        if (P.U.entryNeedTrig && it.kind === 'flash' && it.pur === 'entryFlash' && ks.length === 0) return;
         all18.push({ p, v, o, tg: ks.length > 0 ? 1 : 0, why: ks.join('+') || it.pur });
       });
       // 排序用未封頂的原始值（特徵值 f18 夾在 ±1，很多落點會同分）

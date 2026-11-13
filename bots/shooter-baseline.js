@@ -187,6 +187,7 @@ holdGap: 4,
 holdZone: 3,
 fakeNade: false,
 stageNoCool: true,
+entryNeedTrig: true,
 flashAnchor: true,
 evCool: 0.3,
 L: {
@@ -7390,6 +7391,7 @@ lp.forEach((p, o) => {
 const v = this.f18(obs, si, threats, it.kind, p, strict);
 if (v === null) return;
 const ks = keys.length === 0 ? [] : tgOf(p, v);
+if (P.U.entryNeedTrig && it.kind === 'flash' && it.pur === 'entryFlash' && ks.length === 0) return;
 all18.push({ p, v, o, tg: ks.length > 0 ? 1 : 0, why: ks.join('+') || it.pur });
 });
 const anc = it.kind === 'flash' && P.U.flashAnchor && si.nade.anchor !== null ? all18.find((q) => q.o === 0 && dist(q.p.x, q.p.y, si.nade.anchor?.x ?? 0, si.nade.anchor?.y ?? 0) < UNIT) : undefined;
