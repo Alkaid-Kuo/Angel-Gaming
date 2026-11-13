@@ -199,6 +199,7 @@ i2Hard: true,
 approachHard: true,
 },
 },
+retakeRouteMemo: true,
 flashNeedInfo: true,
 flashEdgeTurn: true,
 smokeOff: 4.5,
@@ -3480,6 +3481,7 @@ this.flashUnsafe = false;
 this.lastThrow = '';
 this.retakeRoute = -1;
 this.retakeThrown = -1;
+this.retakeSmoke = new Map();
 this.curObs = null;
 this.flashOwner = false;
 this.stageNow = null;
@@ -3586,6 +3588,7 @@ this.noFlashSince = -1;
 this.gaveUp.clear();
 this.retakeRoute = -1;
 this.retakeThrown = -1;
+this.retakeSmoke.clear();
 this.tagSaid = false;
 this.tagPick = null;
 this.tagNow = null;
@@ -6008,9 +6011,15 @@ return this.intel.sites[s].entrances.find((e) => e.portal === pid) ?? null;
 }
 retakeRouteOf(obs, s) {
 const n = this.intel.routes.CT[s].length;
+const memo = P.choiceDrive && P.retakeRouteMemo;
 const smoked = ( i) => {
 const e = this.ctEntrance(s, i);
-return e !== null && obs.effects.some((q) => q.kind === 'smoke' && Math.min(dist(q.x, q.y, e.ox, e.oy), dist(q.x, q.y, e.ix, e.iy)) < q.radius + UNIT && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) > 2 * UNIT));
+if (e === null) return false;
+const q = obs.effects.find((f) => f.kind === 'smoke' && Math.min(dist(f.x, f.y, e.ox, e.oy), dist(f.x, f.y, e.ix, e.iy)) < f.radius + UNIT && this.smokes.every((m) => dist(m.x, m.y, f.x, f.y) > 2 * UNIT));
+if (!memo) return q !== undefined;
+const key = e.portal;
+if (q !== undefined) this.retakeSmoke.set(key, Math.max(this.retakeSmoke.get(key) ?? -1, obs.tick + q.ticksLeft));
+return (this.retakeSmoke.get(key) ?? -1) > obs.tick;
 };
 if (!smoked(0)) return 0;
 for (let i = 1; i < n; i++) if (this.ctEntrance(s, i) !== this.ctEntrance(s, 0) && !smoked(i)) return i;

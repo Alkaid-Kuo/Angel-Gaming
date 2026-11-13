@@ -228,6 +228,8 @@ export class Tactics {
     /** 3.0：回防走的 CT 路線（-1＝還沒定）；自己丟出回防道具的 tick */
     this.retakeRoute = -1;
     this.retakeThrown = -1;
+    /** 第 6 步修正批二（P.retakeRouteMemo）：看過被敵方煙蓋住的 CT 入口 → 煙推定散掉的 tick（看到時的 ticksLeft） @type {Map<number, number>} */
+    this.retakeSmoke = new Map();
     /** 3.0（r7k）：這次決策自己持有入口還沒丟的計畫進點閃（不讓位給突破手） */
     /** @type {import('./base.js').Observation | null} */
     this.curObs = null;
@@ -388,6 +390,7 @@ export class Tactics {
     this.gaveUp.clear();
     this.retakeRoute = -1;
     this.retakeThrown = -1;
+    this.retakeSmoke.clear();
     this.tagSaid = false;
     this.tagPick = null;
     this.tagNow = null;
@@ -3478,9 +3481,16 @@ export class Tactics {
    */
   retakeRouteOf(obs, s) {
     const n = this.intel.routes.CT[s].length;
+    // 第 6 步修正批二：看過的煙記到它推定散掉（看到時的 ticksLeft），看不到了也不忘（不然煙在視野進出，路線就在 0↔1 之間跳）；切換後才開，回退照 r7l
+    const memo = P.choiceDrive && P.retakeRouteMemo;
     const smoked = (/** @type {number} */ i) => {
       const e = this.ctEntrance(s, i);
-      return e !== null && obs.effects.some((q) => q.kind === 'smoke' && Math.min(dist(q.x, q.y, e.ox, e.oy), dist(q.x, q.y, e.ix, e.iy)) < q.radius + UNIT && this.smokes.every((m) => dist(m.x, m.y, q.x, q.y) > 2 * UNIT));
+      if (e === null) return false;
+      const q = obs.effects.find((f) => f.kind === 'smoke' && Math.min(dist(f.x, f.y, e.ox, e.oy), dist(f.x, f.y, e.ix, e.iy)) < f.radius + UNIT && this.smokes.every((m) => dist(m.x, m.y, f.x, f.y) > 2 * UNIT));
+      if (!memo) return q !== undefined;
+      const key = e.portal;
+      if (q !== undefined) this.retakeSmoke.set(key, Math.max(this.retakeSmoke.get(key) ?? -1, obs.tick + q.ticksLeft));
+      return (this.retakeSmoke.get(key) ?? -1) > obs.tick;
     };
     if (!smoked(0)) return 0;
     for (let i = 1; i < n; i++) if (this.ctEntrance(s, i) !== this.ctEntrance(s, 0) && !smoked(i)) return i;
