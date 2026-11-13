@@ -43,13 +43,14 @@ const CH_SITES = /** @type {const} */ (['A', 'B']);
  */
 /** @typedef {{ key: string, fn: (c: Ctx, a: Cand) => number, types: string, min: number, max: number }} Feature */
 /** 決策紀錄（gk：選定的與 r7l 實際丟的道具種類字母，沒有是 -；at：選定動作的目標格；丟道具、補槍、轉點是 −2 − 參數；look／ls：視線頭此刻的選擇與分數，'-'＝不歸視線頭管） @typedef {{ tick: number, ev: string, top: [string, number][], pick: string, at: number, act: string, stage: Stage, fight: boolean, reflex: boolean, look: string, ls: number, gk: string }} LogEntry */
-/** 視線種類字母（第七節）：e 記得的敵位、s 聲音、i 入口／窄口、w 守點看向、c 隊友沒看的角、n 行進方向 */
-export const LOOKS = /** @type {const} */ (['e', 's', 'i', 'w', 'c', 'n']);
+/** 視線種類字母（第七節）：e 記得的敵位、s 聲音、i 入口／窄口、w 守點看向、c 隊友沒看的角、n 行進方向、j 先架危險角度的預瞄（第 6 步修正，排最後不影響既有的同分順序） */
+export const LOOKS = /** @type {const} */ (['e', 's', 'i', 'w', 'c', 'n', 'j']);
 /**
  * 視線頭的輸入（baseline.shadow 每個 decide tick 整理）。active：歸視線頭管（live、沒看到敵人、沒交戰、不是躲閃光／丟道具／下拆包這類不接管的視線）
- * peek：正在探的窄口（lock＝hold 或 shoulder 階段）；hold：3 格內的守點（含看向）；act：指揮層這一步的看向 i2（等槍線、佯攻、換血架槍、補槍站位；每拍重給，沒有就是 null）；ahead：行進方向的下一個路點
+ * peek：正在探的窄口（lock＝hold 或 shoulder 階段）；hold：3 格內的守點（含看向）；act：指揮層這一步的看向 i2（等槍線、佯攻、換血架槍、補槍站位；每拍重給，沒有就是 null）；ahead：行進方向的下一個路點；
+ * pre：先架危險角度（judgment.approach）這一拍要預瞄的點與要不要停（每拍重給，沒有就是 null）
  * @typedef {{ active: boolean, peek: { x: number, y: number, lock: boolean } | null, hold: { x: number, y: number, fx: number, fy: number } | null, holding: boolean, moving: boolean,
- *   act: import('./base.js').Pt | null, ahead: import('./base.js').Pt | null, soundReact: number }} LookIn
+ *   act: import('./base.js').Pt | null, pre: { x: number, y: number, stop: boolean } | null, ahead: import('./base.js').Pt | null, soundReact: number }} LookIn
  */
 /** 視線候選：t 種類、ref 參數（e 是名次、e9 受傷方向）、id 敵人 id（e 以外 −1）、s 分數 @typedef {{ t: typeof LOOKS[number], ref: number, id: number, x: number, y: number, s: number }} LookCand */
 /** 視線頭量測（每個 decide tick；r 是 r7l 實際朝向、v 是視線頭的虛擬朝向；dl＝e9 蓋過了鎖定中的新鮮敵位） @typedef {{ tick: number, active: boolean, peek: [number, number] | null, thr: [number, number, boolean] | null, rate: [number, number] | null, hard: string, dl: boolean, vf: number }} LookStat */
@@ -571,7 +572,7 @@ export class Choice {
 
   /**
    * 視線頭（第四節第二組、第六節防抖）：產生視線候選、打分、硬優先與防抖，更新虛擬朝向與量測（影子模式不送指令）
-   * 硬優先依序：探頭 hold／shoulder 階段鎖窄口（驗證清單 b）→ 1 秒內受傷的方向（和鎖定的新鮮敵位夾角 < hurtSameDeg 時留在敵位）→ 指揮層這一步的看向 i2（P.U.L.i2Hard）→ 新鮮的記得敵位（信心 ≥ freshConf、freshSec 秒內有消息；
+   * 硬優先依序：探頭 hold／shoulder 階段鎖窄口（驗證清單 b）→ 1 秒內受傷的方向（和鎖定的新鮮敵位夾角 < hurtSameDeg 時留在敵位）→ 先架危險角度的預瞄 j（P.U.L.approachHard）→ 指揮層這一步的看向 i2（P.U.L.i2Hard）→ 新鮮的記得敵位（信心 ≥ freshConf、freshSec 秒內有消息；
    * 鎖定後直到信心掉到 freshConf 以下，驗證清單 c）。其他時候照分數，換方向要差 minDeg 度、停滿 dwellSec 秒
    * @param {import('./base.js').Observation} obs @param {LookIn} li @param {boolean} freeze
    */
@@ -661,7 +662,15 @@ export class Choice {
         st.dl = lockC !== null;
       }
     }
-    // 3. 指揮層這一步的看向（i2；P.U.L.i2Hard）：li.act 每拍由這一步的指令重新給，指令消失就沒有 i2 候選、不會殘留
+    // 3. 先架危險角度的預瞄（j；P.U.L.approachHard）：judgment.approach 每拍重給，沒有就沒有候選。關掉時 j 只是計分候選；不論哪種，沒採用 j 時 baseline 不送它的停步（耦合規則）
+    if (L.approachHard && pick === null) {
+      const ja = cands.find((q) => q.t === 'j');
+      if (ja !== undefined) {
+        pick = ja;
+        st.hard = 'j';
+      }
+    }
+    // 4. 指揮層這一步的看向（i2；P.U.L.i2Hard）：li.act 每拍由這一步的指令重新給，指令消失就沒有 i2 候選、不會殘留
     if (L.i2Hard && pick === null) {
       const ia = cands.find((q) => q.t === 'i' && q.ref === 2);
       if (ia !== undefined) {
@@ -669,12 +678,12 @@ export class Choice {
         st.hard = 'i';
       }
     }
-    // 4. 新鮮的記得敵位
+    // 5. 新鮮的記得敵位
     if (pick === null && lockC !== null) {
       pick = lockC;
       st.hard = 'e';
     }
-    // 5. 照分數，加防抖（換方向要差 minDeg 度、停滿 dwellSec 秒；目前的候選消失了就直接換）
+    // 6. 照分數，加防抖（換方向要差 minDeg 度、停滿 dwellSec 秒；目前的候選消失了就直接換）
     if (pick === null) {
       cands.sort((p, q) => q.s - p.s || LOOKS.indexOf(p.t) - LOOKS.indexOf(q.t) || p.ref - q.ref);
       // 沒有任何候選（停著、沒守點、沒路點）：照舊看原來的方向
@@ -737,6 +746,8 @@ export class Choice {
     // i：探頭的窄口（ref 0）、動作附帶的看向（ref 2）
     if (li.peek !== null) add('i', 0, li.peek.x, li.peek.y, W.ipeek);
     if (li.act !== null) add('i', 2, li.act.x, li.act.y, W.iact);
+    // j：先架危險角度的預瞄（要停步的另外加分）
+    if (li.pre !== null) add('j', 0, li.pre.x, li.pre.y, W.jstop * (li.pre.stop ? 1 : 0));
     // w：守點看向（隊友已經看著同一方向就扣分）
     if (li.hold !== null) add('w', 0, li.hold.fx, li.hold.fy, W.whold * (li.holding ? 1 : 0) + W.wcov * (this.covered(obs, li.hold.fx, li.hold.fy) ? 1 : 0));
     // c：守點（或自己）所在包點的入口裡，隊友沒看的（看得到、2～25 格，最近的 2 個；ref＝入口序號）

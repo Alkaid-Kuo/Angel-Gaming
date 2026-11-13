@@ -187,14 +187,15 @@ holdGap: 4,
 holdZone: 3,
 evCool: 0.3,
 L: {
-b: ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2 }),
-w: ({ econf: 0.6, efresh: 0.4, sfresh: 0.3, shold: -0.6, ipeek: 1, iact: 0.8, whold: 0.4, wcov: -0.5, chold: 0.2, nmove: 0.3, nchoke: 0.1 }),
+b: ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2, j: 1 }),
+w: ({ econf: 0.6, efresh: 0.4, sfresh: 0.3, shold: -0.6, ipeek: 1, iact: 0.8, whold: 0.4, wcov: -0.5, chold: 0.2, nmove: 0.3, nchoke: 0.1, jstop: 0.6 }),
 minDeg: 25,
 dwellSec: 0.5,
 freshConf: 60,
 freshSec: 3,
 hurtSameDeg: 45,
 i2Hard: true,
+approachHard: true,
 },
 },
 flashNeedInfo: true,
@@ -6708,7 +6709,7 @@ if (this.critical) { out.allowPeek = false; out.walk = false; out.stop = false; 
 const ACTS = (['h', 'a', 'p', 'f', 't', 'g', 'r', 'o']);
 const STAGES = (['freeze', 'setup', 'wait', 'execute', 'post', 'retake', 'save']);
 const CH_SITES = (['A', 'B']);
-const LOOKS = (['e', 's', 'i', 'w', 'c', 'n']);
+const LOOKS = (['e', 's', 'i', 'w', 'c', 'n', 'j']);
 function exposed(c, a, g) {
 let n = 0;
 for (const q of c.threats) if (dist(q.x, q.y, a.x, a.y) < 40 * UNIT && g.los(q.x, q.y, a.x, a.y)) n++;
@@ -7169,6 +7170,13 @@ st.hard = 'd';
 st.dl = lockC !== null;
 }
 }
+if (L.approachHard && pick === null) {
+const ja = cands.find((q) => q.t === 'j');
+if (ja !== undefined) {
+pick = ja;
+st.hard = 'j';
+}
+}
 if (L.i2Hard && pick === null) {
 const ia = cands.find((q) => q.t === 'i' && q.ref === 2);
 if (ia !== undefined) {
@@ -7229,6 +7237,7 @@ add('s', i, q.ox + cosd(q.dir) * r * UNIT, q.oy + sind(q.dir) * r * UNIT, W.sfre
 });
 if (li.peek !== null) add('i', 0, li.peek.x, li.peek.y, W.ipeek);
 if (li.act !== null) add('i', 2, li.act.x, li.act.y, W.iact);
+if (li.pre !== null) add('j', 0, li.pre.x, li.pre.y, W.jstop * (li.pre.stop ? 1 : 0));
 if (li.hold !== null) add('w', 0, li.hold.fx, li.hold.fy, W.whold * (li.holding ? 1 : 0) + W.wcov * (this.covered(obs, li.hold.fx, li.hold.fy) ? 1 : 0));
 const s0 = this.siteOf(li.hold ?? me);
 if (s0 >= 0) {
@@ -7734,6 +7743,7 @@ const ahead = this.nav.wps[this.nav.wpIdx] ?? goal;
 const check = ahead !== null && !fight.engaged && ev === null && !tac.objective && !tac.urgent && !stop && !tac.escape && !tac.commit && dist(me.x, me.y, ahead.x, ahead.y) > 900 ? this.judge?.approach(obs, ahead) : null;
 let moving = false;
 let navUsed = false;
+let ckIdx = -1;
 if (!tac.objective) {
 if (ev !== null && ev.move !== null) {
 out.push({ type: 'move', x: Math.round(ev.move.x), y: Math.round(ev.move.y) });
@@ -7751,21 +7761,29 @@ navUsed = true;
 else if (fight.move !== null) {
 out.push({ type: 'move', x: Math.round(fight.move.x), y: Math.round(fight.move.y) });
 moving = true;
-} else if (check?.stop || fight.holdNav || (stop && !fight.engaged)) out.push({ type: 'stop' });
-else {
+} else if (fight.holdNav || (stop && !fight.engaged)) out.push({ type: 'stop' });
+else if (check?.stop) {
+ckIdx = out.length;
+out.push({ type: 'stop' });
+} else {
 out.push(...nav.cmds);
 moving = nav.moving;
 navUsed = true;
 }
 }
-if (!navUsed) this.nav.idle();
 const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
 const mv = { holding: holding && !moving, moving, ahead: next };
 let head = null;
 if (drive) {
-C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, own ? tac.look : (tlook ?? tac.look)), obs.round.phase === 'freeze');
+C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, own ? tac.look : (tlook ?? tac.look), check), obs.round.phase === 'freeze');
 if (C.lstat?.active === true && C.lk !== null) head = { x: C.lk.x, y: C.lk.y };
+if (ckIdx >= 0 && C.lstat?.active === true && C.lk?.t !== 'j') {
+out.splice(ckIdx, 1, ...nav.cmds);
+moving = nav.moving;
+navUsed = true;
 }
+}
+if (!navUsed) this.nav.idle();
 const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : head ?? this.combat.alert(obs, holding) ?? check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
 if (aim !== null && (Math.abs(aim.x - me.x) > 50 || Math.abs(aim.y - me.y) > 50)) out.push({ type: 'aim', x: Math.round(aim.x), y: Math.round(aim.y) });
 const shoot = (fight.fire || (tac.noise && !fight.engaged)) && !tac.objective && !tac.hard;
@@ -7780,7 +7798,7 @@ if (walk !== me.walking) out.push({ type: 'walk', on: walk });
 out.push(...late);
 if (!drive && P.choiceShadow && C !== null) {
 C.step(obs, this.intent(obs, tac, fight.engaged, ev !== null, true, nav));
-C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, tac.look), obs.round.phase === 'freeze');
+C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, tac.look, check), obs.round.phase === 'freeze');
 }
 const reason = this.mission?.reason ?? '';
 const tag = act === null ? '' : `・${act.type}`;
@@ -7795,7 +7813,7 @@ const exec = p.exec ?? p.site;
 const alive = new Set([obs.me.id, ...obs.teammates.filter((m) => m.alive).map((m) => m.id)]);
 return T.res.items.some((it) => (it.purpose === 'entrySmoke' || it.purpose === 'entryFlash') && it.state === 'plan' && it.target.site === exec && alive.has(it.owner));
 }
-lookIn(obs, tac, nav, engaged, evading, mv, actLook) {
+lookIn(obs, tac, nav, engaged, evading, mv, actLook, check) {
 const me = obs.me;
 const T = this.tactics;
 const near = ( p) => dist(me.x, me.y, p.x, p.y);
@@ -7807,6 +7825,7 @@ peek: pk === null ? null : { x: pk.far.x, y: pk.far.y, lock: pk.phase === 'hold'
 hold: tac.hold !== null && near(tac.hold) < 3 * UNIT ? { x: tac.hold.x, y: tac.hold.y, fx: tac.hold.fx, fy: tac.hold.fy } : null,
 holding: mv.holding, moving: mv.moving,
 act: actLook !== null && !own ? { x: actLook.x, y: actLook.y } : null,
+pre: check === null || check === undefined || check.look === null ? null : { x: check.look.x, y: check.look.y, stop: check.stop },
 ahead: mv.ahead, soundReact: this.combat.soundReact,
 };
 }

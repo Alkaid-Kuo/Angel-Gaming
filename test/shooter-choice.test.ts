@@ -95,7 +95,7 @@ describe('Bot 3.0 效用層：決策與視線頭（第 6 步起驅動行為）',
 
   it('紀錄字串照第七節正式格式；凍結期間不決策', () => {
     for (const r of rows) {
-      expect(r.text).toMatch(/^!?([hapftgro]\d+ -?\d*\.\d\d)(\|[hapftgro]\d+ -?\d*\.\d\d){0,2} → [hapftgro]\d+(｜L:[esiwcn]\d+ -?\d*\.\d\d)?$/);
+      expect(r.text).toMatch(/^!?([hapftgro]\d+ -?\d*\.\d\d)(\|[hapftgro]\d+ -?\d*\.\d\d){0,2} → [hapftgro]\d+(｜L:[esiwcnj]\d+ -?\d*\.\d\d)?$/);
       expect(r.e.stage).not.toBe('freeze');
     }
   });
@@ -113,7 +113,7 @@ describe('Bot 3.0 效用層：決策與視線頭（第 6 步起驅動行為）',
     expect(new Set(act.map((l) => l.lk?.t)).size).toBeGreaterThanOrEqual(4);
   });
 
-  it('視線頭硬優先：探頭 hold／shoulder 鎖窄口；沒在探、沒挨打、沒有指揮層的看向（i2）時，新鮮的記得敵位（信心 ≥ 60、3 秒內）優先', () => {
+  it('視線頭硬優先：探頭 hold／shoulder 鎖窄口；先架危險角度的預瞄 j；沒在探、沒挨打、沒有預瞄與指揮層的看向（i2）時，新鮮的記得敵位（信心 ≥ 60、3 秒內）優先', () => {
     let peeks = 0;
     let fresh = 0;
     for (const l of looks) {
@@ -122,7 +122,8 @@ describe('Bot 3.0 效用層：決策與視線頭（第 6 步起驅動行為）',
         peeks++;
         expect(l.st.hard).toBe('p');
         expect(l.lk?.t === 'i' && l.lk.ref === 0).toBe(true);
-      } else if (l.st.hard === 'i') expect(l.lk?.t === 'i' && l.lk.ref === 2).toBe(true);
+      } else if (l.st.hard === 'j') expect(l.lk?.t).toBe('j');
+      else if (l.st.hard === 'i') expect(l.lk?.t === 'i' && l.lk.ref === 2).toBe(true);
       else if (l.st.hard !== 'd' && l.st.thr !== null && l.st.thr[2]) {
         fresh++;
         expect(l.st.hard).toBe('e');
@@ -147,7 +148,7 @@ describe('Bot 3.0 視線頭：i2（指揮層這一步的看向）硬優先與失
     return { ch, obs };
   }
   type Li = Parameters<Choice['look']>[1];
-  const li = (act: { x: number; y: number } | null): Li => ({ active: true, peek: null, hold: null, holding: false, moving: false, act, ahead: null, soundReact: 0 });
+  const li = (act: { x: number; y: number } | null, pre: { x: number; y: number; stop: boolean } | null = null): Li => ({ active: true, peek: null, hold: null, holding: false, moving: false, act, pre, ahead: null, soundReact: 0 });
 
   it('有 i2 時壓過新鮮敵位；指令消失的下一拍回到敵位；換目標就照新的；i2Hard 關掉時敵位優先', () => {
     const { ch, obs } = setup();
@@ -179,6 +180,38 @@ describe('Bot 3.0 視線頭：i2（指揮層這一步的看向）硬優先與失
       expect(look(a2)).toMatchObject({ t: 'e', hard: 'e' });
     } finally {
       P.U.L.i2Hard = true;
+    }
+  }, 120000);
+
+  it('先架危險角度的預瞄 j 壓過 i2 與新鮮敵位；沒給就沒有；approachHard 關掉時只是計分候選', () => {
+    const { ch, obs } = setup();
+    const me = obs.me;
+    const perc = (ch as unknown as { perc: { known: Map<number, unknown>; lastHurt: unknown; sectors: unknown[] } }).perc;
+    perc.lastHurt = null;
+    perc.sectors = [];
+    const enemy = { id: 99, x: me.x + 8000, y: me.y, vx: 0, vy: 0, facing: 0, weapon: 'ak', tick: obs.tick, seenTick: obs.tick, conf: 90, src: 'see' };
+    perc.known.set(99, enemy);
+    const look = (a: { x: number; y: number } | null, pre: { x: number; y: number; stop: boolean } | null): { t: string; x: number; y: number; hard: string } => {
+      obs.tick += 3;
+      enemy.tick = obs.tick;
+      ch.look(obs as never, li(a, pre), false);
+      const lk = ch.lk;
+      expect(lk).not.toBeNull();
+      return { t: lk?.t ?? '', x: lk?.x ?? 0, y: lk?.y ?? 0, hard: ch.lstat?.hard ?? '' };
+    };
+    const a1 = { x: me.x, y: me.y + 6000 };
+    const j1 = { x: me.x - 5000, y: me.y - 5000, stop: true };
+    expect(look(a1, j1)).toMatchObject({ t: 'j', x: j1.x, y: j1.y, hard: 'j' });
+    // 預瞄消失：照 i2
+    expect(look(a1, null)).toMatchObject({ t: 'i', hard: 'i' });
+    // 只有預瞄與敵位：預瞄優先
+    expect(look(null, j1)).toMatchObject({ t: 'j', hard: 'j' });
+    // 計分版：新鮮敵位照舊硬優先
+    P.U.L.approachHard = false;
+    try {
+      expect(look(null, j1)).toMatchObject({ t: 'e', hard: 'e' });
+    } finally {
+      P.U.L.approachHard = true;
     }
   }, 120000);
 });

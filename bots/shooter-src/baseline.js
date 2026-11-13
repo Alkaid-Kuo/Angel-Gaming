@@ -206,6 +206,8 @@ export default class ShooterBaseline {
     // ── 移動：自保 → 交戰 → 架槍 → 導航 ──
     let moving = false;
     let navUsed = false;
+    /** 先架危險角度的停步在 out 的位置（−1＝沒有） */
+    let ckIdx = -1;
     if (!tac.objective) {
       if (ev !== null && ev.move !== null) {
         out.push({ type: 'move', x: Math.round(ev.move.x), y: Math.round(ev.move.y) });
@@ -223,23 +225,33 @@ export default class ShooterBaseline {
       else if (fight.move !== null) {
         out.push({ type: 'move', x: Math.round(fight.move.x), y: Math.round(fight.move.y) });
         moving = true;
-      } else if (check?.stop || fight.holdNav || (stop && !fight.engaged)) out.push({ type: 'stop' });
-      else {
+      } else if (fight.holdNav || (stop && !fight.engaged)) out.push({ type: 'stop' });
+      else if (check?.stop) {
+        // 先架危險角度的停步：切換後要看視線頭這一拍有沒有採用預瞄 j（耦合規則），在視線頭之後決定
+        ckIdx = out.length;
+        out.push({ type: 'stop' });
+      } else {
         out.push(...nav.cmds);
         moving = nav.moving;
         navUsed = true;
       }
     }
-    if (!navUsed) this.nav.idle();
     // ── 瞄準 ──
     const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
     const mv = { holding: holding && !moving, moving, ahead: next };
     /** 視線頭的看向（切換後；不歸視線頭管的拍是 null） @type {import('./base.js').Pt | null} */
     let head = null;
     if (drive) {
-      C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, own ? tac.look : (tlook ?? tac.look)), obs.round.phase === 'freeze');
+      C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, own ? tac.look : (tlook ?? tac.look), check), obs.round.phase === 'freeze');
       if (C.lstat?.active === true && C.lk !== null) head = { x: C.lk.x, y: C.lk.y };
+      // 耦合規則（第 6 步修正，根因甲）：視線頭這一拍歸它管、卻沒採用預瞄 j（被探頭或受傷方向蓋過，或計分沒選它），就不送先架危險角度的停步，照導航走
+      if (ckIdx >= 0 && C.lstat?.active === true && C.lk?.t !== 'j') {
+        out.splice(ckIdx, 1, ...nav.cmds);
+        moving = nav.moving;
+        navUsed = true;
+      }
     }
+    if (!navUsed) this.nav.idle();
     const aim = ((tac.urgent && !fight.engaged) || tac.hard ? tac.look : null) ?? (fight.engaged ? fight.aim : head ?? this.combat.alert(obs, holding) ?? check?.look) ?? fight.aim ?? tac.look ?? this.combat.look(obs, { hold: tac.hold, holding: holding && !moving, navLook: nav.look, ahead: next });
     if (aim !== null && (Math.abs(aim.x - me.x) > 50 || Math.abs(aim.y - me.y) > 50)) out.push({ type: 'aim', x: Math.round(aim.x), y: Math.round(aim.y) });
     // ── 開火與武器 ──
@@ -257,7 +269,7 @@ export default class ShooterBaseline {
     out.push(...late);
     if (!drive && P.choiceShadow && C !== null) {
       C.step(obs, this.intent(obs, tac, fight.engaged, ev !== null, true, nav));
-      C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, tac.look), obs.round.phase === 'freeze');
+      C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, tac.look, check), obs.round.phase === 'freeze');
     }
     const reason = this.mission?.reason ?? '';
     const tag = act === null ? '' : `・${act.type}`;
@@ -284,9 +296,10 @@ export default class ShooterBaseline {
    * @param {boolean} engaged @param {boolean} evading
    * @param {{ holding: boolean, moving: boolean, ahead: import('./base.js').Pt | null }} mv 這一步的守位、移動與行進方向
    * @param {import('./base.js').Pt | null} actLook 動作附帶的看向（等槍線、補槍、佯攻）
+   * @param {{ look: import('./base.js').Pt | null, stop: boolean } | null | undefined} check 先架危險角度（judgment.approach）這一拍的結果
    * @returns {import('./choice.js').LookIn}
    */
-  lookIn(obs, tac, nav, engaged, evading, mv, actLook) {
+  lookIn(obs, tac, nav, engaged, evading, mv, actLook, check) {
     const me = obs.me;
     const T = this.tactics;
     const near = (/** @type {import('./base.js').Pt} */ p) => dist(me.x, me.y, p.x, p.y);
@@ -298,6 +311,7 @@ export default class ShooterBaseline {
       hold: tac.hold !== null && near(tac.hold) < 3 * UNIT ? { x: tac.hold.x, y: tac.hold.y, fx: tac.hold.fx, fy: tac.hold.fy } : null,
       holding: mv.holding, moving: mv.moving,
       act: actLook !== null && !own ? { x: actLook.x, y: actLook.y } : null,
+      pre: check === null || check === undefined || check.look === null ? null : { x: check.look.x, y: check.look.y, stop: check.stop },
       ahead: mv.ahead, soundReact: this.combat.soundReact,
     };
   }

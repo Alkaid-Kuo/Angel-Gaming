@@ -314,8 +314,8 @@ export const P = {
      * w 依特徵鍵的權重；minDeg 換方向至少差幾度、dwellSec 最短停留、freshConf／freshSec 記得的敵位硬優先的信心與秒數
      */
     L: {
-      b: /** @type {Record<string, number>} */ ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2 }),
-      w: /** @type {Record<string, number>} */ ({ econf: 0.6, efresh: 0.4, sfresh: 0.3, shold: -0.6, ipeek: 1, iact: 0.8, whold: 0.4, wcov: -0.5, chold: 0.2, nmove: 0.3, nchoke: 0.1 }),
+      b: /** @type {Record<string, number>} */ ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2, j: 1 }),
+      w: /** @type {Record<string, number>} */ ({ econf: 0.6, efresh: 0.4, sfresh: 0.3, shold: -0.6, ipeek: 1, iact: 0.8, whold: 0.4, wcov: -0.5, chold: 0.2, nmove: 0.3, nchoke: 0.1, jstop: 0.6 }),
       minDeg: 25,
       dwellSec: 0.5,
       freshConf: 60,
@@ -327,6 +327,12 @@ export const P = {
        * 只認這一步的指令：指令消失或換目標，下一拍就照新的（或不再壓過敵位）。false＝i2 只是計分候選（丁-1 量軟性版用）
        */
       i2Hard: true,
+      /**
+       * j（先架危險角度的預瞄，judgment.approach）是硬優先，排在 e9 之後、i2 之前（第 6 步修正，2026-11-13 審查裁定）。
+       * 理由：還原 r7l 的瞄準順序（check.look 先於 tac.look 與記得的敵位；影子一致率是對著它校的），以及計分會讓停步與看向逐拍來回。
+       * false＝j 只是計分候選（丁-1 搜權重用）；兩種都有耦合規則：視線頭沒採用 j 就不送它的停步
+       */
+      approachHard: true,
     },
   },
   /** 3.0：計畫的進點閃要有情報（記得的敵人或 5 秒內接觸）才丟 */
