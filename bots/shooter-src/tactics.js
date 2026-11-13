@@ -232,6 +232,9 @@ export class Tactics {
     /** @type {import('./base.js').Observation | null} */
     this.curObs = null;
     this.flashOwner = false;
+    /** 3.0 第 6 步修正（R2）：這一步我這組的待命格（T 執行中才有）、waitEntry 的 lead 條件成立（只讀，給效用層 f21y／f16w） @type {import('./analysis.js').Spot | null} */
+    this.stageNow = null;
+    this.leadNow = false;
     this.rotSince = -1;
     /** @type {Map<number, number>} */
     this.defuseStarted = new Map();
@@ -551,6 +554,8 @@ export class Tactics {
     const me = obs.me;
     const t = obs.tick;
     this.flashOwner = false;
+    this.stageNow = null;
+    this.leadNow = false;
     this.waitTag = '';
     this.utilLook = false;
     this.trig.clear();
@@ -1970,7 +1975,11 @@ export class Tactics {
       // 等突破手先走（狙擊手等兩個人進點）：執行後最多 P.stageLead 秒
       // 3.0（r7k，T4 死結）：持有這個入口還沒丟的計畫進點閃的人不等突破手先走，先到投擲位（突破手等的是閃光出手）
       this.flashOwner = planned && !thrownHere;
-      const lead = !P.choiceDrive && smokeFirst && near && wish === null && sinceExec < P.stageLead && !this.flashOwner && this.waitEntry(obs, exec);
+      const leadOk = smokeFirst && near && wish === null && sinceExec < P.stageLead && !this.flashOwner && this.waitEntry(obs, exec);
+      // 切換後 lead 不停人，條件交給效用層（f21y 的 lead 分支、f16w 的待命格）
+      this.stageNow = st;
+      this.leadNow = leadOk;
+      const lead = !P.choiceDrive && leadOk;
       // 正在準備丟煙／閃的人也留在待命格（最多到執行後 4 秒，丟不出去就照樣進）
       if ((waiting || lead || (smokeFirst && near && wish !== null && sinceExec < 4)) && st !== null) {
         out.goal = { x: st.x, y: st.y };

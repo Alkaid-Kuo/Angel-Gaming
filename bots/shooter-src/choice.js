@@ -19,13 +19,13 @@ const CH_SITES = /** @type {const} */ (['A', 'B']);
  * @typedef {{ type: Act, k: number, x: number, y: number, ref: number, kind?: string, tg?: number, v18?: number, why?: string, src?: 'goal' | 'hold' }} Cand
  */
 /**
- * 效用層的輸入（PlanIntent 與個人狀態；baseline 每個 decide tick 整理）。rush：計畫是 rush（讓位上限 P.yieldMax，其他 P.yieldMaxSplit）；flashed：我方閃光剛炸開 2 秒內；flashOwner：我持有這個入口還沒丟的計畫進點閃（指揮層）；objOk：指揮層這一步要下包或拆包（下包點、拆包分工留在指揮層；或正在下拆包中）；follow：指揮層的任務允許跟進補槍（執行或回防；PlanIntent）；path：往計畫目標的路徑（格）、allowPeek：指揮層允許探頭（PlanIntent）、peekLen：探一次停幾個決策（個人屬性）；exec：T 這次執行的包點（PlanIntent）、planGo：計畫是 go（不等突破手）、entryId：突破手的 id（角色分配）
+ * 效用層的輸入（PlanIntent 與個人狀態；baseline 每個 decide tick 整理）。rush：計畫是 rush（讓位上限 P.yieldMax，其他 P.yieldMaxSplit）；flashed：我方閃光剛炸開 2 秒內；flashOwner：我持有這個入口還沒丟的計畫進點閃（指揮層）；lead：waitEntry 的 lead 條件（待命格附近、先煙的計畫、執行後 P.stageLead 秒內、我這一步不丟、不是閃光擁有者，而且突破手還沒走在我前面；狙擊手等兩個隊友進點；指揮層算、只讀）；objOk：指揮層這一步要下包或拆包（下包點、拆包分工留在指揮層；或正在下拆包中）；follow：指揮層的任務允許跟進補槍（執行或回防；PlanIntent）；path：往計畫目標的路徑（格）、allowPeek：指揮層允許探頭（PlanIntent）、peekLen：探一次停幾個決策（個人屬性）；exec：T 這次執行的包點（PlanIntent）、planGo：計畫是 go（不等突破手）、entryId：突破手的 id（角色分配）
  * @typedef {{ stage: Stage, goal: import('./base.js').Pt | null, hold: import('./base.js').Pt | null, role: number, p: number, fight: boolean, reflex: boolean,
  *   actual: { type: Act, x: number, y: number, ref?: number, kind?: string } | null, inSite: boolean, peek: import('./base.js').Pt | null,
  *   cover: () => import('./base.js').Pt | null, trade: (q: { x: number, y: number, dead: boolean }) => boolean, nade: NadeIn, group: (id: number) => number, pathless: boolean,
  *   planWait: boolean, order: { spawnF: number, awpF: number }, site: number, soon: import('./base.js').Pt | null,
  *   exec: 'A' | 'B' | null, planGo: boolean, entryId: number, path: number[], allowPeek: boolean, peekLen: number, follow: boolean, objOk: boolean,
- *   rush: boolean, flashed: boolean, flashOwner: boolean }} ShadowIn
+ *   rush: boolean, flashed: boolean, flashOwner: boolean, lead: boolean }} ShadowIn
  */
 /**
  * 丟道具（第 5 步）：res 資源層副本（只讀）、trig 指揮層記的觸發（tactics.trig，只讀）、solve 從我這裡丟得到、fighting 隊友交火中（1.5 秒內開過槍或被記得的敵人看得到）、
@@ -215,10 +215,11 @@ export class Choice {
       { key: 'ftk', types: 't', min: 0, max: 1, fn: (c) => (c.in.follow ? 1 : 0) },
       // 守的是指揮層這一步要去的點（1 格內）：計畫目標；守點只在目標就在守點附近（守的範圍內）或沒有目標時才算（目標已經換到別處＝守點是舊的）
       { key: 'fhp', types: 'h', min: 0, max: 1, fn: (c, a) => { if (a.ref === HERE) return 0; const g = c.in.goal; const h = c.in.hold; const at = (/** @type {import('./base.js').Pt | null} */ p) => p !== null && dist(p.x, p.y, a.x, a.y) < UNIT; return at(g) || (at(h) && h !== null && (g === null || dist(g.x, g.y, h.x, h.y) < P.U.holdZone * UNIT)) ? 1 : 0; } },
-      // 狙擊手拿狙擊槍、離守點 4 格內（取代 awpSettle 的條件）
-      { key: 'f16w', types: 'h', min: 0, max: 1, fn: (c) => c.in.order.awpF },
+      // 狙擊手拿狙擊槍、離守點或這一組的待命格 4 格內（取代 awpSettle 的條件）；只加在站得住的那一個：原地或 4 格內的 h（awpSettle 是就地站定，第 6 步修正 R2）
+      { key: 'f16w', types: 'h', min: 0, max: 1, fn: (c, a) => (c.in.order.awpF && (a.ref === HERE || dist(c.obs.me.x, c.obs.me.y, a.x, a.y) < 4 * UNIT) ? 1 : 0) },
       // f21 進點順序：等突破手先進（yieldTo 的條件）、出生區讓位（spawnWait 的條件）
-      { key: 'f21y', types: 'a', min: 0, max: 1, fn: (c) => c.yieldF },
+      // 遠處的守（4 格以上，例如執行開始後搬進包點的守點）也是往前走，一樣要讓（第 6 步修正 R2）
+      { key: 'f21y', types: 'ah', min: 0, max: 1, fn: (c, a) => (a.type === 'a' || (a.ref !== HERE && dist(c.obs.me.x, c.obs.me.y, a.x, a.y) >= 4 * UNIT) ? c.yieldF : 0) },
       { key: 'f21s', types: 'a', min: 0, max: 1, fn: (c) => c.in.order.spawnF },
       // 指揮層的合法等待（PlanIntent）：2.8 執行品質的慢半拍、跟上等
       { key: 'fw', types: 'ha', min: 0, max: 1, fn: (c) => (c.in.planWait ? 1 : 0) },
@@ -472,7 +473,8 @@ export class Choice {
     const ev = this.events(obs, si);
     this.peekStep(obs, si);
     // f21y 每個 decide tick 算並計時（和 yieldTo 一樣：讓位累計到上限就不再讓；閃光剛炸開不讓〔狙擊手照讓〕；持有計畫進點閃的人不讓）
-    const yf = si.stage === 'freeze' || si.flashOwner || (si.flashed && si.role !== AWP) || this.yHeld >= (si.rush ? P.yieldMax : P.yieldMaxSplit) * this.tps ? 0 : this.yieldF(obs, si);
+    // lead 分支（第 6 步修正，R2：原 tactics waitEntry 的「等突破手先走」待命，上限是執行後 P.stageLead 秒，不受讓位上限管，和 r7l 相同）
+    const yf = si.stage === 'freeze' ? 0 : si.lead ? 1 : si.flashOwner || (si.flashed && si.role !== AWP) || this.yHeld >= (si.rush ? P.yieldMax : P.yieldMaxSplit) * this.tps ? 0 : this.yieldF(obs, si);
     if (yf > 0) this.yHeld += this.data.rules.decisionInterval;
     this.yF = yf;
     // 凍結期間只買與喊話（硬反射第 6 項），不決策

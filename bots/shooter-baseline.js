@@ -170,7 +170,7 @@ a: [-1, 0.2, 0.4, 0.4, 0.2, 0.3, 0.3],
 t: [0, -1, -1, -1, -1, -1, -1],
 }),
 w: ({
-h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0, f16w: 0.5, fw: 0.5, fhp: 0.2 },
+h: { f1: -0.3, f3: 0.2, f4: -0.1, f9: 0.2, f10: -0.3, f12: 0, f16w: 0.5, fw: 0.5, fhp: 0.2, f21y: -1 },
 a: { f4: -0.1, f5: -0.1, f9: -0.2, f10: -0.6, f10p: 0.5, f12: 0.1, f16: 0.1, f21y: -1, f21s: -1, fw: -1 },
 p: { f4: -0.2, f9: -0.2, f16: 0.1 },
 f: { f1: -0.3, f3: 0.3 },
@@ -3481,6 +3481,8 @@ this.retakeRoute = -1;
 this.retakeThrown = -1;
 this.curObs = null;
 this.flashOwner = false;
+this.stageNow = null;
+this.leadNow = false;
 this.rotSince = -1;
 this.defuseStarted = new Map();
 this.defuseIssued = -1;
@@ -3724,6 +3726,8 @@ update(obs) {
 const me = obs.me;
 const t = obs.tick;
 this.flashOwner = false;
+this.stageNow = null;
+this.leadNow = false;
 this.waitTag = '';
 this.utilLook = false;
 this.trig.clear();
@@ -4854,7 +4858,10 @@ const flashHere = st !== null && dist(st.x, st.y, ent.ox, ent.oy) < P.flashLead 
 const cover = smokeFirst && near && wish === null && !cue && flashTurn && idx > 0 && sinceExec < P.stageLead + 3 && next.ok && (act ? myFlash : this.util.has(me, 'flash')) && this.flashPoint(obs, exec, ent, 2, next.avoid, act ? ent : null) !== null;
 const waiting = cover || (smokeFirst && near && wish === null && (pending || (flashHere && sinceExec < 3 && this.flashHeard < 0 && !this.util.used.has('flash'))));
 this.flashOwner = planned && !thrownHere;
-const lead = !P.choiceDrive && smokeFirst && near && wish === null && sinceExec < P.stageLead && !this.flashOwner && this.waitEntry(obs, exec);
+const leadOk = smokeFirst && near && wish === null && sinceExec < P.stageLead && !this.flashOwner && this.waitEntry(obs, exec);
+this.stageNow = st;
+this.leadNow = leadOk;
+const lead = !P.choiceDrive && leadOk;
 if ((waiting || lead || (smokeFirst && near && wish !== null && sinceExec < 4)) && st !== null) {
 out.goal = { x: st.x, y: st.y };
 out.hold = st;
@@ -6811,8 +6818,8 @@ return [
 { key: 'f6t', types: 't', min: 0, max: 1, fn: (c, a) => this.helper(c, a) },
 { key: 'ftk', types: 't', min: 0, max: 1, fn: (c) => (c.in.follow ? 1 : 0) },
 { key: 'fhp', types: 'h', min: 0, max: 1, fn: (c, a) => { if (a.ref === HERE) return 0; const g = c.in.goal; const h = c.in.hold; const at = ( p) => p !== null && dist(p.x, p.y, a.x, a.y) < UNIT; return at(g) || (at(h) && h !== null && (g === null || dist(g.x, g.y, h.x, h.y) < P.U.holdZone * UNIT)) ? 1 : 0; } },
-{ key: 'f16w', types: 'h', min: 0, max: 1, fn: (c) => c.in.order.awpF },
-{ key: 'f21y', types: 'a', min: 0, max: 1, fn: (c) => c.yieldF },
+{ key: 'f16w', types: 'h', min: 0, max: 1, fn: (c, a) => (c.in.order.awpF && (a.ref === HERE || dist(c.obs.me.x, c.obs.me.y, a.x, a.y) < 4 * UNIT) ? 1 : 0) },
+{ key: 'f21y', types: 'ah', min: 0, max: 1, fn: (c, a) => (a.type === 'a' || (a.ref !== HERE && dist(c.obs.me.x, c.obs.me.y, a.x, a.y) >= 4 * UNIT) ? c.yieldF : 0) },
 { key: 'f21s', types: 'a', min: 0, max: 1, fn: (c) => c.in.order.spawnF },
 { key: 'fw', types: 'ha', min: 0, max: 1, fn: (c) => (c.in.planWait ? 1 : 0) },
 { key: 'f18t', types: 'g', min: 0, max: 1, fn: (_c, a) => a.tg ?? 0 },
@@ -7017,7 +7024,7 @@ return ev;
 step(obs, si) {
 const ev = this.events(obs, si);
 this.peekStep(obs, si);
-const yf = si.stage === 'freeze' || si.flashOwner || (si.flashed && si.role !== AWP) || this.yHeld >= (si.rush ? P.yieldMax : P.yieldMaxSplit) * this.tps ? 0 : this.yieldF(obs, si);
+const yf = si.stage === 'freeze' ? 0 : si.lead ? 1 : si.flashOwner || (si.flashed && si.role !== AWP) || this.yHeld >= (si.rush ? P.yieldMax : P.yieldMaxSplit) * this.tps ? 0 : this.yieldF(obs, si);
 if (yf > 0) this.yHeld += this.data.rules.decisionInterval;
 this.yF = yf;
 if (si.stage === 'freeze') return;
@@ -7713,10 +7720,10 @@ if (!own && act !== null) {
 stop = tac.halt === true;
 const near = ( p) => tac.goal !== null && dist(p.x, p.y, tac.goal.x, tac.goal.y) < UNIT;
 if (act.type === 'h' && act.ref === HERE) stop = true;
-else if (act.src === 'goal' && tac.goal !== null) {
+else if (act.src === 'goal' && tac.goal !== null && dist(act.x, act.y, tac.goal.x, tac.goal.y) < P.U.holdZone * UNIT) {
 goal = tac.goal;
 route = tac.route;
-} else if (act.src === 'hold' && tac.hold !== null) {
+} else if (act.src === 'hold' && tac.hold !== null && dist(act.x, act.y, tac.hold.x, tac.hold.y) < P.U.holdZone * UNIT) {
 goal = { x: tac.hold.x, y: tac.hold.y };
 route = near(tac.hold) ? tac.route : null;
 } else if (act.type === 'h' || act.type === 'a' || act.type === 'f' || act.type === 'r') {
@@ -7772,7 +7779,8 @@ navUsed = true;
 }
 }
 const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
-const mv = { holding: holding && !moving, moving, ahead: next };
+const settle = !own && act !== null && act.type === 'h' && (act.ref === HERE || dist(me.x, me.y, act.x, act.y) < UNIT) && this.tactics.roles.of(me.id) === AWP && me.loadout.primary === 'awp';
+const mv = { holding: (holding || settle) && !moving, moving, ahead: next };
 let head = null;
 if (drive) {
 C.look(obs, this.lookIn(obs, tac, nav, fight.engaged, ev !== null, mv, own ? tac.look : (tlook ?? tac.look), check), obs.round.phase === 'freeze');
@@ -7790,7 +7798,7 @@ const shoot = (fight.fire || (tac.noise && !fight.engaged)) && !tac.objective &&
 out.push({ type: 'fire', on: shoot && this.combat.lineClear(obs, aim === null ? [] : [aim]) });
 out.push(...fight.cmds.filter((c) => !(tac.escape || (tac.commit && !fight.engaged)) || c.type !== 'scope' || !c.on));
 if (tac.commit && me.scoped && !fight.engaged) out.push({ type: 'scope', on: false });
-if (!fight.engaged) out.push(...this.combat.upkeep(obs, holding && !moving));
+if (!fight.engaged) out.push(...this.combat.upkeep(obs, (holding || settle) && !moving));
 const crouch = moving ? false : ev !== null ? ev.crouch : (fight.crouch ?? false);
 if (crouch !== me.crouching) out.push({ type: 'crouch', on: crouch });
 const walk = (tac.walk ?? nav.walk) && !tac.commit && !fight.engaged && ev === null;
@@ -7909,12 +7917,13 @@ const ce = this.g.cellOf(ent.x, ent.y);
 const dS = this.intel.distSite[site0];
 if (ce >= 0 && dS[ce] >= dS[c0] - 10 && T.spawnHeld <= P.spawnStop * T.tps && T.spawnHeld < P.spawnLeadMax * T.tps) spawnF = 1;
 }
-const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && hold !== null && near(hold) < 4 * UNIT ? 1 : 0;
+const st = T.stageNow;
+const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && ((hold !== null && near(hold) < 4 * UNIT) || (st !== null && near(st) < 4 * UNIT)) ? 1 : 0;
 return {
 stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nade, pathless, planWait, order: { spawnF, awpF },
 exec, planGo: plan === null || plan.kind === 'go', entryId: T.roles.who(ENTRY),
 path: this.nav.path, allowPeek: tac.allowPeek && !tac.commit, follow: tac.task === 'execute' || tac.task === 'retake', objOk,
-rush: plan !== null && plan.kind === 'rush', flashed: obs.tick >= T.flashPop && obs.tick < T.flashPop + 2 * T.tps, flashOwner: T.flashOwner,
+rush: plan !== null && plan.kind === 'rush', flashed: obs.tick >= T.flashPop && obs.tick < T.flashPop + 2 * T.tps, flashOwner: T.flashOwner, lead: T.leadNow,
 peekLen: this.nav.peekHold + (this.nav.attrs.aggression * 100 < P.shoulderBelow && this.nav.attrs.movement * 100 >= P.shoulderMove ? 6 : 0),
 site: site0 !== null ? SITE_IDS.indexOf(site0) : this.choice.siteOf(hold ?? tac.goal), soon,
 cover: () => this.nav.findCover(obs, this.perc.threats(me.x, me.y), undefined),

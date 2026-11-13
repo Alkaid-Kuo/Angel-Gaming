@@ -174,11 +174,12 @@ export default class ShooterBaseline {
       stop = tac.halt === true;
       const near = (/** @type {import('./base.js').Pt} */ p) => tac.goal !== null && dist(p.x, p.y, tac.goal.x, tac.goal.y) < UNIT;
       if (act.type === 'h' && act.ref === HERE) stop = true;
-      // 來自 PlanIntent 的目標或守點：跟著指揮層這一步的最新值走（決策之間目標會更新）
-      else if (act.src === 'goal' && tac.goal !== null) {
+      // 來自 PlanIntent 的目標或守點：跟著指揮層這一步的最新值走（決策之間目標會小幅更新）；
+      // 最新值已經換到守的範圍以外（P.U.holdZone），效用層選的是舊的那一點，照候選自己的點走（第 6 步修正 R2：執行開始後守點從待命格搬進包點）
+      else if (act.src === 'goal' && tac.goal !== null && dist(act.x, act.y, tac.goal.x, tac.goal.y) < P.U.holdZone * UNIT) {
         goal = tac.goal;
         route = tac.route;
-      } else if (act.src === 'hold' && tac.hold !== null) {
+      } else if (act.src === 'hold' && tac.hold !== null && dist(act.x, act.y, tac.hold.x, tac.hold.y) < P.U.holdZone * UNIT) {
         goal = { x: tac.hold.x, y: tac.hold.y };
         route = near(tac.hold) ? tac.route : null;
       } else if (act.type === 'h' || act.type === 'a' || act.type === 'f' || act.type === 'r') {
@@ -238,7 +239,9 @@ export default class ShooterBaseline {
     }
     // ── 瞄準 ──
     const next = this.nav.wps[this.nav.wpIdx + 1] ?? this.nav.wps[this.nav.wpIdx] ?? null;
-    const mv = { holding: holding && !moving, moving, ahead: next };
+    // 狙擊手執行效用層的原地守（待命格上的 h）：當成守位交給戰鬥層開鏡（取代 awpSettle 改 out.hold 的效果；第 6 步修正 R2）
+    const settle = !own && act !== null && act.type === 'h' && (act.ref === HERE || dist(me.x, me.y, act.x, act.y) < UNIT) && this.tactics.roles.of(me.id) === AWP && me.loadout.primary === 'awp';
+    const mv = { holding: (holding || settle) && !moving, moving, ahead: next };
     /** 視線頭的看向（切換後；不歸視線頭管的拍是 null） @type {import('./base.js').Pt | null} */
     let head = null;
     if (drive) {
@@ -260,7 +263,7 @@ export default class ShooterBaseline {
     out.push({ type: 'fire', on: shoot && this.combat.lineClear(obs, aim === null ? [] : [aim]) });
     out.push(...fight.cmds.filter((c) => !(tac.escape || (tac.commit && !fight.engaged)) || c.type !== 'scope' || !c.on));
     if (tac.commit && me.scoped && !fight.engaged) out.push({ type: 'scope', on: false });
-    if (!fight.engaged) out.push(...this.combat.upkeep(obs, holding && !moving));
+    if (!fight.engaged) out.push(...this.combat.upkeep(obs, (holding || settle) && !moving));
     // ── 姿勢：移動時不蹲 ──
     const crouch = moving ? false : ev !== null ? ev.crouch : (fight.crouch ?? false);
     if (crouch !== me.crouching) out.push({ type: 'crouch', on: crouch });
@@ -414,12 +417,14 @@ export default class ShooterBaseline {
       // r7l 的時間上限：先停 P.spawnStop 秒（之後慢走，靜步由指揮層的 walk 給），每回合最多 P.spawnLeadMax 秒（計時在 tactics.spawnWait）
       if (ce >= 0 && dS[ce] >= dS[c0] - 10 && T.spawnHeld <= P.spawnStop * T.tps && T.spawnHeld < P.spawnLeadMax * T.tps) spawnF = 1;
     }
-    const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && hold !== null && near(hold) < 4 * UNIT ? 1 : 0;
+    // f16w：狙擊手拿狙擊槍、離守點或這一組的待命格 4 格內（第 6 步修正 R2：執行開始後守點搬進包點，待命格仍算；取代 awpSettle 的條件）
+    const st = T.stageNow;
+    const awpF = T.roles.of(me.id) === AWP && me.loadout.primary === 'awp' && ((hold !== null && near(hold) < 4 * UNIT) || (st !== null && near(st) < 4 * UNIT)) ? 1 : 0;
     return {
       stage, goal: tac.goal, hold, role: T.roles.of(me.id), p, fight: engaged, reflex, actual, inSite, peek, nade, pathless, planWait, order: { spawnF, awpF },
       exec, planGo: plan === null || plan.kind === 'go', entryId: T.roles.who(ENTRY),
       path: this.nav.path, allowPeek: tac.allowPeek && !tac.commit, follow: tac.task === 'execute' || tac.task === 'retake', objOk,
-      rush: plan !== null && plan.kind === 'rush', flashed: obs.tick >= T.flashPop && obs.tick < T.flashPop + 2 * T.tps, flashOwner: T.flashOwner,
+      rush: plan !== null && plan.kind === 'rush', flashed: obs.tick >= T.flashPop && obs.tick < T.flashPop + 2 * T.tps, flashOwner: T.flashOwner, lead: T.leadNow,
       // 探一次停幾個決策：停 peekHold，低積極、高走位的人再側身出去 3、退回 3
       peekLen: this.nav.peekHold + (this.nav.attrs.aggression * 100 < P.shoulderBelow && this.nav.attrs.movement * 100 >= P.shoulderMove ? 6 : 0),
       // 計畫包點（T：這次執行的包點或計畫包點；CT：守點所在包點）：落點找不到所在包點時用
