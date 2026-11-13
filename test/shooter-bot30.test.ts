@@ -160,42 +160,57 @@ function driver(seed: number, pick: (pid: number) => CompiledBot, cb: (pid: numb
 const kindName = (k: string, team: 'T' | 'CT'): string => (k === 'f' ? 'flash' : k === 's' ? 'smoke' : k === 'h' ? 'he' : team === 'T' ? 'molotov' : 'incendiary');
 
 describe('Bot 3.0 資源層：整場', () => {
-  it('購買時序與購買單生效：隊友在聽到 U:b 之後才買，每人買到的道具包含 U:b 指定的', () => {
+  it('購買時序與購買單生效：隊友在聽到 U:b 之後才買，每人買完後持有的道具（原有＋買的）包含 U:b 指定的', () => {
     let checked = 0;
     for (const seed of [3, 4]) {
-      const orders = new Map<number, string>();
-      const saidAt = new Map<string, number>();
-      const buyAt = new Map<number, number>();
-      const bought = new Map<number, string[]>();
-      const { d, m } = driver(seed, () => base, (pid, obs, cmds) => {
-        if (obs.round.number !== 2) return;
-        for (const c of cmds) {
-          if (c.type === 'say' && c.text.startsWith('U:b')) {
-            saidAt.set(obs.me.team, obs.tick);
-            for (const [id, ks] of parseBuyOrders(c.text) ?? []) orders.set(id, ks.join(''));
-          }
-          if (c.type === 'buy' && !buyAt.has(pid)) {
-            buyAt.set(pid, obs.tick);
-            bought.set(pid, [...c.items]);
-          }
-        }
-      });
-      while (!m.over && (m.roundNumber < 2 || m.phase === 'freeze')) d.step();
-      expect(saidAt.size).toBe(2);
-      for (const [pid, at] of buyAt) {
-        const team = m.players[pid].team;
-        const isCmd = Math.min(...m.players.filter((p) => p.team === team).map((p) => p.id)) === pid;
-        if (!isCmd) expect(at).toBeGreaterThan(saidAt.get(team) ?? Infinity);
-      }
-      for (const [id, ks] of orders) {
-        const kinds = ks.split('').map((k) => kindName(k, m.players[id].team));
-        const got = bought.get(id) ?? [];
-        for (const k of new Set(kinds)) expect(got.filter((x) => x === k).length).toBeGreaterThanOrEqual(kinds.filter((x) => x === k).length);
-        checked++;
+      // 從第 2 回合起找第一個有購買單的回合（最多到第 6 回合）：第 2 回合有沒有購買單看第 1 回合的經濟，固定第 2 回合會依賴種子
+      for (let round = 2; round <= 6; round++) {
+        const n = checkRound(seed, round);
+        checked += n;
+        if (n > 0) break;
       }
     }
     expect(checked).toBeGreaterThan(0);
-  }, 120000);
+  }, 240000);
+
+  /** 一個種子的某一回合：檢查購買時序與購買單（持有＝第一次購買時身上原有的＋這次買的），回傳檢查過的購買單筆數（這一回合沒有購買單就是 0） */
+  function checkRound(seed: number, round: number): number {
+    let checked = 0;
+    const orders = new Map<number, string>();
+    const saidAt = new Map<string, number>();
+    const buyAt = new Map<number, number>();
+    const bought = new Map<number, string[]>();
+    /** 第一次購買時身上已經有的道具（上一回合留下的；購買單算的是持有，已經有的不必再買） */
+    const had = new Map<number, string[]>();
+    const { d, m } = driver(seed, () => base, (pid, obs, cmds) => {
+      if (obs.round.number !== round) return;
+      for (const c of cmds) {
+        if (c.type === 'say' && c.text.startsWith('U:b')) {
+          saidAt.set(obs.me.team, obs.tick);
+          for (const [id, ks] of parseBuyOrders(c.text) ?? []) orders.set(id, ks.join(''));
+        }
+        if (c.type === 'buy' && !buyAt.has(pid)) {
+          buyAt.set(pid, obs.tick);
+          bought.set(pid, [...c.items]);
+          had.set(pid, [...obs.me.loadout.grenades]);
+        }
+      }
+    });
+    while (!m.over && (m.roundNumber < round || m.phase === 'freeze')) d.step();
+    expect(saidAt.size).toBe(2);
+    for (const [pid, at] of buyAt) {
+      const team = m.players[pid].team;
+      const isCmd = Math.min(...m.players.filter((p) => p.team === team).map((p) => p.id)) === pid;
+      if (!isCmd) expect(at).toBeGreaterThan(saidAt.get(team) ?? Infinity);
+    }
+    for (const [id, ks] of orders) {
+      const kinds = ks.split('').map((k) => kindName(k, m.players[id].team));
+      const got = [...(had.get(id) ?? []), ...(bought.get(id) ?? [])];
+      for (const k of new Set(kinds)) expect(got.filter((x) => x === k).length).toBeGreaterThanOrEqual(kinds.filter((x) => x === k).length);
+      checked++;
+    }
+    return checked;
+  }
 
   it('沒收到 U:p（陪練 Bot 當指揮者）：資源層不啟用，回合結果和關掉資源層（2.8 道具行為）相同', () => {
     // 0、5 號（兩隊最小 id）是陪練 Bot：不喊 B:、U:b、U:p；其他基準 Bot 收不到計畫
