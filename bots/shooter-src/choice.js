@@ -30,12 +30,13 @@ const CH_SITES = /** @type {const} */ (['A', 'B']);
 /**
  * 丟道具（第 5 步）：res 資源層副本（只讀）、trig 指揮層記的觸發（tactics.trig，只讀）、solve 從我這裡丟得到、fighting 隊友交火中（1.5 秒內開過槍或被記得的敵人看得到）、
  * canHide 隊友 4 步內躲得到、flashR 閃光半徑、smokes／burns 我方丟過的煙與火（指揮層的紀錄）、info 指揮層的「爆點附近有情報」（flashInfo：記得的敵人、聲音、接觸喊話）、
- * used 這一步剛丟出的資源層項目與丟出前的狀態（影子量測用）、awp 記得的敵方狙擊位（聽到或看到狙擊槍的位置）、ent 這次執行我這組走的入口（PlanIntent）、deep 包點的深位（地圖推導）、post 下包後分給我封的回防入口（資源層的隊伍協調，只讀）、taken 這點 8 格內已有隊友的閃光（認領喊話、3 秒內炸開、飛行中）
+ * used 這一步剛丟出的資源層項目與丟出前的狀態（影子量測用）、awp 記得的敵方狙擊位（聽到或看到狙擊槍的位置）、ent 這次執行我這組走的入口（PlanIntent）、deep 包點的深位（地圖推導）、post 下包後分給我封的回防入口（資源層的隊伍協調，只讀）、anchor 指揮層 r7l 規則這一步要丟的閃光固定點（閃進點的 flashPoint、回防閃的近炸彈敵人或炸彈；tactics.lastWish，只讀）、taken 這點 8 格內已有隊友的閃光（認領喊話、3 秒內炸開、飛行中）
  * @typedef {{ res: import('./resources.js').Resources, trig: Map<string, { kind: string, purposes: string[], ent?: import('./analysis.js').Entrance }>, solve: (x: number, y: number) => boolean,
  *   fighting: (id: number) => boolean, canHide: (x: number, y: number, c: import('./base.js').Pt) => boolean, flashR: number,
  *   smokes: import('./base.js').Pt[], burns: { x: number, y: number, until: number }[], info: (p: import('./base.js').Pt, site: 'A' | 'B') => boolean,
  *   deep: (site: 'A' | 'B') => import('./base.js').Pt[], post: import('./analysis.js').Entrance | null, taken: (p: import('./base.js').Pt) => boolean,
- *   ent: import('./analysis.js').Entrance | null, used: { it: import('./resources.js').UtilItem, state: string } | null, awp: { x: number, y: number, tick: number } | null }} NadeIn
+ *   ent: import('./analysis.js').Entrance | null, used: { it: import('./resources.js').UtilItem, state: string } | null, awp: { x: number, y: number, tick: number } | null,
+ *   anchor: import('./base.js').Pt | null }} NadeIn
  */
 /**
  * 決策脈絡（只讀觀察與自己的狀態）
@@ -834,7 +835,7 @@ export class Choice {
       // 佯攻雷（觸發紀錄 fakeUtil）預設不當觸發（P.U.fakeNade；第 6 步修正：r7l 同時機幾乎不丟，新行為沒有證據前收回）
       const keys = hints.filter((h) => h.kind === it.kind && h.purposes.includes(it.pur) && (P.U.fakeNade || h.key !== 'fakeUtil')).map((h) => h.key);
       // 落點先看合不合觸發、再照 f18 由高到低（同分照產生順序：計畫目標在前），試丟不丟得到（閃光最多試 40 個、其他 12 個），取前 3
-      /** @type {{ p: import('./base.js').Pt, v: { v: number, enemy: number, raw: number }, o: number, tg: number, why: string }[]} */
+      /** @type {{ p: import('./base.js').Pt, v: { v: number, enemy: number, raw: number, ng?: number }, o: number, tg: number, why: string }[]} */
       const all18 = [];
       const lp = this.landings(obs, si, it);
       const dr = dgOf(it.kind);
@@ -882,7 +883,10 @@ export class Choice {
         all18.push({ p, v, o, tg: ks.length > 0 ? 1 : 0, why: ks.join('+') || it.pur });
       });
       // 排序用未封頂的原始值（特徵值 f18 夾在 ±1，很多落點會同分）
-      all18.sort((x, y) => y.tg - x.tg || y.v.raw - x.v.raw || x.o - y.o);
+      // 閃光的 r7l 固定點（P.U.flashAnchor）：別的落點贏它只靠推定敵位、推定全落空時（ng）比它差，就排到它後面（不能只押推定）
+      const anc = it.kind === 'flash' && P.U.flashAnchor && si.nade.anchor !== null ? all18.find((q) => q.o === 0 && dist(q.p.x, q.p.y, si.nade.anchor?.x ?? 0, si.nade.anchor?.y ?? 0) < UNIT) : undefined;
+      const key = (/** @type {typeof all18[number]} */ q) => (anc !== undefined && q !== anc && q.tg === anc.tg && (q.v.ng ?? 0) < (anc.v.ng ?? 0) ? Math.min(q.v.raw, anc.v.raw - 1e-6) : q.v.raw);
+      all18.sort((x, y) => y.tg - x.tg || key(y) - key(x) || x.o - y.o);
       /** @type {typeof all18} */
       const ok = [];
       let tries = 0;
@@ -924,6 +928,9 @@ export class Choice {
     };
     const flash = it.kind === 'flash';
     const smoke = it.kind === 'smoke';
+    // r7l 的固定點排第一個（第 6 步修正批二：P.U.flashAnchor）
+    const anc = flash && P.U.flashAnchor ? si.nade.anchor : null;
+    if (anc !== null) push(anc.x, anc.y);
     const toward = (/** @type {import('./base.js').Pt} */ a, /** @type {import('./base.js').Pt} */ b, /** @type {number} */ cells, /** @type {number} */ top) => {
       const f = Math.min(top, (cells * UNIT) / Math.max(dist(a.x, a.y, b.x, b.y), 1));
       push(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
@@ -1034,7 +1041,7 @@ export class Choice {
    * strict：隊友在半徑內看得到爆點就排除（進點閃以外）；已有隊友的閃光（認領、剛炸、飛行中）8 格內排除；T 下包後的煙不罩包（5 格內）
    * @param {import('./base.js').Observation} obs @param {ShadowIn} si @param {import('./memory.js').Threat[]} threats @param {string} kind @param {import('./base.js').Pt} p
    * @param {boolean} strict
-   * @returns {{ v: number, enemy: number, raw: number } | null}
+   * @returns {{ v: number, enemy: number, raw: number, ng?: number } | null} ng：閃光不算推定敵位（架點、深位、聲音）的值，推定全落空時的價值
    */
   f18(obs, si, threats, kind, p, strict) {
     const me = obs.me;
@@ -1089,7 +1096,7 @@ export class Choice {
         }
         cost += worst;
       }
-      return { v: Math.max(-1, Math.min(1, enemy + Math.min(1, guess) - cost)), enemy, raw: enemy + guess - cost };
+      return { v: Math.max(-1, Math.min(1, enemy + Math.min(1, guess) - cost)), enemy, raw: enemy + guess - cost, ng: enemy - cost };
     }
     if (kind === 'smoke') {
       // 我方的煙 smokeGap 格內不再丟（和 r7l 同規則）

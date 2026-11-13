@@ -346,8 +346,12 @@ export default class ShooterBaseline {
     const tn = T.thrownNow;
     const fs = T.flashSpots;
     const lastFs = tn?.kind === 'flash' && fs.length > 0 && fs[fs.length - 1].tick === obs.tick;
+    // r7l 規則這一步要丟的閃光（固定點；tactics.lastWish，已經算好，只讀）
+    const lw = T.lastWish;
+    const anchor = lw !== null && lw.kind === 'flash' && (lw.why === '閃進點' || lw.why === '回防閃') ? { x: lw.x, y: lw.y } : null;
     /** @type {import('./choice.js').NadeIn} */
     const nade = {
+      anchor,
       res: T.res,
       trig: T.trig,
       solve: (x, y) => T.util.solve(me.x, me.y, x, y) !== null,

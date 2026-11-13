@@ -186,6 +186,7 @@ margin: 0.1,
 holdGap: 4,
 holdZone: 3,
 fakeNade: false,
+flashAnchor: true,
 evCool: 0.3,
 L: {
 b: ({ e: 1, s: 0.7, i: 0.5, w: 0.5, c: 0.3, n: 0.2, j: 1 }),
@@ -7354,7 +7355,9 @@ if (v === null) return;
 const ks = keys.length === 0 ? [] : tgOf(p, v);
 all18.push({ p, v, o, tg: ks.length > 0 ? 1 : 0, why: ks.join('+') || it.pur });
 });
-all18.sort((x, y) => y.tg - x.tg || y.v.raw - x.v.raw || x.o - y.o);
+const anc = it.kind === 'flash' && P.U.flashAnchor && si.nade.anchor !== null ? all18.find((q) => q.o === 0 && dist(q.p.x, q.p.y, si.nade.anchor?.x ?? 0, si.nade.anchor?.y ?? 0) < UNIT) : undefined;
+const key = ( q) => (anc !== undefined && q !== anc && q.tg === anc.tg && (q.v.ng ?? 0) < (anc.v.ng ?? 0) ? Math.min(q.v.raw, anc.v.raw - 1e-6) : q.v.raw);
+all18.sort((x, y) => y.tg - x.tg || key(y) - key(x) || x.o - y.o);
 const ok = [];
 let tries = 0;
 for (const q of all18) {
@@ -7386,6 +7389,8 @@ if (pts.length < cap && pts.every((q) => dist(q.x, q.y, x, y) >= 2 * UNIT)) pts.
 };
 const flash = it.kind === 'flash';
 const smoke = it.kind === 'smoke';
+const anc = flash && P.U.flashAnchor ? si.nade.anchor : null;
+if (anc !== null) push(anc.x, anc.y);
 const toward = ( a, b, cells, top) => {
 const f = Math.min(top, (cells * UNIT) / Math.max(dist(a.x, a.y, b.x, b.y), 1));
 push(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
@@ -7524,7 +7529,7 @@ if (d < R && g.los(q.x, q.y, p.x, p.y)) worst = Math.max(worst, (faces ? 1 : 0.1
 }
 cost += worst;
 }
-return { v: Math.max(-1, Math.min(1, enemy + Math.min(1, guess) - cost)), enemy, raw: enemy + guess - cost };
+return { v: Math.max(-1, Math.min(1, enemy + Math.min(1, guess) - cost)), enemy, raw: enemy + guess - cost, ng: enemy - cost };
 }
 if (kind === 'smoke') {
 if (si.nade.smokes.some((m) => dist(m.x, m.y, p.x, p.y) < P.smokeGap * UNIT)) return null;
@@ -7863,7 +7868,10 @@ const g = this.g;
 const tn = T.thrownNow;
 const fs = T.flashSpots;
 const lastFs = tn?.kind === 'flash' && fs.length > 0 && fs[fs.length - 1].tick === obs.tick;
+const lw = T.lastWish;
+const anchor = lw !== null && lw.kind === 'flash' && (lw.why === '閃進點' || lw.why === '回防閃') ? { x: lw.x, y: lw.y } : null;
 const nade = {
+anchor,
 res: T.res,
 trig: T.trig,
 solve: (x, y) => T.util.solve(me.x, me.y, x, y) !== null,
