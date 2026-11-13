@@ -60,12 +60,21 @@ export interface CoachSetup extends WatchSetup {
   readonly coach: CoachInfo;
 }
 
-/** 教練模式的狀態列（剩幾次暫停、暫停已排定、打到第幾回合、是不是已離席） */
+/** 教練模式的狀態列（剩幾次暫停、暫停已排定、打到第幾回合、是不是已離席；往回看的狀態） */
 export interface CoachStatus {
+  /** 畫面上這一回合（回放中是回放的回合） */
   readonly round: number;
   readonly timeoutsLeft: number;
   readonly pending: boolean;
   readonly left: boolean;
+  /** 回放中（往回看已打完的回合，不能下指令） */
+  readonly replay: boolean;
+  /** 即時打到第幾回合 */
+  readonly liveRound: number;
+  /** 能不能往回看（還在當教練、比賽還沒結束、已經開打） */
+  readonly canRewind: boolean;
+  /** 正在重跑（往回看或回到現場） */
+  readonly seeking: boolean;
 }
 
 export type ToShooterWorker =
@@ -77,6 +86,8 @@ export type ToShooterWorker =
   | { readonly type: 'coachResolve'; readonly plan: CoachPlan | null; readonly call: CoachCall | null }
   /** 教練：離席（轉一般觀戰），之後不能再下指令 */
   | { readonly type: 'coachLeave' }
+  /** 教練：回放中回到現場（推回即時打到的地方） */
+  | { readonly type: 'coachLive' }
   | { readonly type: 'start'; readonly setup: ShooterSetup }
   /** 經營層觀戰：重跑一場打完的比賽 */
   | { readonly type: 'watch'; readonly watch: WatchSetup }

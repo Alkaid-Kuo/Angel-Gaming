@@ -29,6 +29,13 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 /** 縮放倍率：短邊的一半是 24 格 ÷ 倍率；預設 1.2（1080p 時 27 px／格），滑鼠推到畫面邊緣剛好看到 30 格視野 */
 const ZOOMS = [0.55, 0.7, 0.85, 1, 1.2, 1.45];
 const ZOOM_PLAY = 4;
+/**
+ * 模擬停著（暫停、教練面板等指令、比賽結束）時，畫面輸入多久沒變就停止重畫（M5 規格 6.8 第 6 條：暫停時 CPU 閒置）。
+ * 停下前要讓還在播的東西播完：最長的是擊殺訊息淡出 6 秒，其次回合橫幅 3.2 秒、鏡頭緩動約 3 秒。
+ */
+const IDLE_SETTLE_MS = 6500;
+/** 這些事件可能改到畫面（拖鏡頭、hover、提示、按鍵、縮放視窗、焦點）：一發生就照常重畫 */
+const WAKE_EVENTS = ['pointermove', 'pointerdown', 'pointerup', 'wheel', 'keydown', 'keyup', 'click', 'resize', 'focus', 'blur'] as const;
 const esc = (t: string): string => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 let worker: Worker | null = null;
@@ -125,6 +132,21 @@ class Game {
   /** 教練模式（M5 第四批 4b）：狀態列與教練面板 */
   private readonly coachUi: CoachUi | null;
   private coachStatus: CoachStatus | null = null;
+  /** 最近一次可能改到畫面的時間（rAF 時間軸）；停著超過 IDLE_SETTLE_MS 沒變就停畫 */
+  private lastWake = performance.now();
+  /** 停畫中：rAF 也不排，等下一次 wake 才重新排（連空的 rAF 回呼都不跑） */
+  private sleeping = false;
+  private disposed = false;
+  /** 除錯：畫了幾幀、停畫過幾次 */
+  private drawn = 0;
+  private sleeps = 0;
+  private readonly wake = (): void => {
+    this.lastWake = performance.now();
+    if (this.sleeping && !this.disposed) {
+      this.sleeping = false;
+      this.raf = requestAnimationFrame((t) => this.frame(t));
+    }
+  };
 
   constructor(meta: ShooterMeta, post: (m: ToShooterWorker) => void) {
     this.meta = meta;
@@ -151,6 +173,9 @@ class Game {
             resolve: (plan, call) => this.post({ type: 'coachResolve', plan, call }),
             leave: () => this.post({ type: 'coachLeave' }),
             speed: (i) => this.setSpeed(i),
+            prev: () => this.prevRound(),
+            next: () => this.skipRound(),
+            live: () => this.post({ type: 'coachLive' }),
           })
         : null;
     this.root.classList.toggle('coach', meta.coach !== undefined);
@@ -246,6 +271,9 @@ class Game {
     const liveSpeed = EMBED ? loadLiveSpeed() : null;
     if (liveSpeed !== null) this.setSpeed(liveSpeed);
     this.raf = requestAnimationFrame((t) => this.frame(t));
+    for (const ev of WAKE_EVENTS) window.addEventListener(ev, this.wake, { capture: true, passive: true });
+    document.addEventListener('visibilitychange', this.wake);
+    document.addEventListener('fullscreenchange', this.wake);
     // 切到別的分頁：玩家模式自動暫停（Worker 不會停，回來時不要已經被打死）
     document.addEventListener('visibilitychange', this.onHidden);
     // 不小心按到 Esc／被瀏覽器踢出全螢幕：玩家模式自動暫停
@@ -253,7 +281,13 @@ class Game {
     // 比賽中關分頁、重新整理、上一頁：瀏覽器先問一次
     window.addEventListener('beforeunload', this.onUnload);
     // 除錯掛勾（瀏覽器驗收用，開發模式或網址帶 ?debug）：只有主執行緒本來就有的畫面資料，沒有引擎
-    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length, allShots: this.allShots.length }), perf: () => ({ drawMs: this.drawMs, frameMs: this.frameMs, bakeMs: this.renderer.baked.ms, bakePx: BAKE_PX }), baked: () => this.renderer.baked, patch: (fn: ((f: ShooterFrame) => ShooterFrame) | null) => (this.patch = fn), bench: (n: number) => this.bench(n), stage: (v: Partial<DrawInput> | null) => (this.staged = v), hud: this.hud, spec: this.spec, buy: this.buy };
+    if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) (window as unknown as Record<string, unknown>).__sg = { meta, frame: () => this.cur, camera: () => this.renderer.camera, fx: () => ({ tracers: this.tracers.length, pops: this.pops.map((p) => p.amount), others: this.others.length, allShots: this.allShots.length }), perf: () => ({ drawMs: this.drawMs, frameMs: this.frameMs, bakeMs: this.renderer.baked.ms, bakePx: BAKE_PX, drawn: this.drawn, sleeps: this.sleeps, sleeping: this.sleeping }), baked: () => this.renderer.baked, patch: (fn: ((f: ShooterFrame) => ShooterFrame) | null) => {
+        this.patch = fn;
+        this.wake();
+      }, bench: (n: number) => this.bench(n), stage: (v: Partial<DrawInput> | null) => {
+        this.staged = v;
+        this.wake();
+      }, hud: this.hud, spec: this.spec, buy: this.buy };
   }
 
   /** 除錯：同步連畫 n 幀量每幀毫秒（最後讀一個像素，逼畫布把指令畫完）；分頁在背景時 rAF 不跑也量得到 */
@@ -319,16 +353,18 @@ class Game {
     this.post({ type: 'speed', speed: SPEEDS[this.speedIdx] });
   }
 
-  /** 觀戰：跳到下一回合（Worker 同步推進，暫停中也可以） */
+  /** 觀戰：跳到下一回合（Worker 同步推進，暫停中也可以）；教練模式只在回放中（不能超過現場） */
   private skipRound(): void {
-    if (!this.meta.spectate || this.over !== null) return;
+    if (this.over !== null) return;
+    if (this.coachUi !== null ? !this.coachUi.replaying || this.coachStatus?.seeking === true : !this.meta.spectate) return;
     this.post({ type: 'skipRound' });
   }
 
-  /** 觀戰：回到第 round 回合開始（Worker 重跑，等它回 frame）；教練模式是即時打的，不能倒帶 */
+  /** 觀戰：回到第 round 回合開始（Worker 重跑，等它回 frame）；教練模式只能回到已打過的回合（規格 6.12），回放中不能下指令 */
   private seek(round: number): void {
     const spec = this.spec;
-    if (spec === null || spec.busy || this.cur === null || this.coachUi !== null) return;
+    if (spec === null || spec.busy || this.cur === null) return;
+    if (this.coachUi !== null && (this.coachStatus?.canRewind !== true || this.coachStatus.seeking)) return;
     spec.seeking(this.cur.view.round.number, round);
     this.post({ type: 'seek', round });
   }
@@ -338,6 +374,7 @@ class Game {
   }
 
   onSeeking(at: number, target: number): void {
+    this.wake();
     this.spec?.seeking(at, target);
   }
 
@@ -366,6 +403,7 @@ class Game {
   }
 
   onFrame(f: ShooterFrame): void {
+    this.wake();
     if (f.rewound === true) this.rewind();
     const now = performance.now();
     const old = this.cur;
@@ -449,11 +487,13 @@ class Game {
   }
 
   onCoachStop(stop: CoachStop): void {
+    this.wake();
     this.coachUi?.showStop(stop);
     this.input.releaseAll();
   }
 
   onCoachStatus(s: CoachStatus): void {
+    this.wake();
     this.coachStatus = s;
     this.coachUi?.setStatus(s);
   }
@@ -466,6 +506,7 @@ class Game {
   }
 
   onOver(summary: ShooterSummary): void {
+    this.wake();
     this.over = summary;
     this.buy.setOpen(false);
     this.input.releaseAll();
@@ -489,9 +530,17 @@ class Game {
   }
 
   private frame(t: number): void {
-    this.raf = requestAnimationFrame((x) => this.frame(x));
     const f = this.patch !== null && this.cur !== null ? this.patch(this.cur) : this.cur;
+    // 有變才畫：模擬停著、畫面輸入一陣子沒變（Worker 不送新 frame、沒有滑鼠鍵盤視窗事件）就停畫，畫布留著上一幀；
+    // rAF 也不再排，下一次 wake（新 frame、輸入事件、教練停點與狀態）才重新排
+    if (f !== null && this.patch === null && this.staged === null && (f.paused || this.over !== null) && t - this.lastWake > IDLE_SETTLE_MS) {
+      this.sleeping = true;
+      this.sleeps += 1;
+      return;
+    }
+    this.raf = requestAnimationFrame((x) => this.frame(x));
     if (f === null) return;
+    this.drawn += 1;
     this.updateCursor(f);
     const start = performance.now();
     const tickMs = 1000 / this.meta.rules.ticksPerSecond / (this.meta.spectate || this.coachUi !== null ? SPEEDS[this.speedIdx] : 1);
@@ -546,7 +595,11 @@ class Game {
     document.removeEventListener('visibilitychange', this.onHidden);
     document.removeEventListener('fullscreenchange', this.onFullscreen);
     window.removeEventListener('beforeunload', this.onUnload);
+    this.disposed = true;
     cancelAnimationFrame(this.raf);
+    for (const ev of WAKE_EVENTS) window.removeEventListener(ev, this.wake, { capture: true });
+    document.removeEventListener('visibilitychange', this.wake);
+    document.removeEventListener('fullscreenchange', this.wake);
     this.input.dispose();
     this.root.innerHTML = '';
   }
